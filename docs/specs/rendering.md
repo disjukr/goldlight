@@ -29,6 +29,8 @@ The initial renderer uses a lightweight pass graph:
 - WGSL only
 - built-in material descriptors for common cases
 - custom material contracts that register shader source and binding expectations
+- renderer capability descriptors gate scene compatibility before pass encoding; see
+  [`renderer-capabilities.md`](./renderer-capabilities.md)
 
 ## Current Execution Surface
 
@@ -43,6 +45,7 @@ The initial renderer uses a lightweight pass graph:
 ## Known Gaps
 
 - Deferred rendering is still at the planning-contract stage.
+- Texture-backed material sampling is not implemented yet.
 - Volume rendering passes are not encoded yet; only their residency/extraction scaffolding exists.
 - SDF execution currently supports sphere primitives only; broader graph/operator coverage is still
   pending.

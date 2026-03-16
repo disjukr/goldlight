@@ -13,8 +13,10 @@ The runtime is split into explicit data and execution stages:
    volume data.
 2. `IR`: serializable spatial declarations defined by BDL and mirrored into TypeScript.
 3. `Evaluated Scene`: CPU-side transform, animation, and inheritance results.
-4. `Runtime Residency`: device-specific GPU resources and caches.
-5. `Render Execution`: forward/deferred/raymarch pass orchestration.
+4. `Renderer Capability Preflight`: renderer support checks against evaluated scene features and
+   material requirements.
+5. `Runtime Residency`: device-specific GPU resources and caches.
+6. `Render Execution`: forward/deferred/raymarch pass orchestration.
 
 ## Packages
 
@@ -24,6 +26,8 @@ The runtime is split into explicit data and execution stages:
 - `packages/core`: pure functions that evaluate IR into renderable CPU state.
 - `packages/gpu`: explicit WebGPU context and residency management helpers.
 - `packages/renderer`: pass contracts, renderer descriptors, and frame planning.
+- renderer descriptors also publish capability contracts for primitive/material compatibility before
+  execution. See [`renderer-capabilities.md`](./renderer-capabilities.md).
 - `packages/loaders`: format parsers that normalize input into Scene IR.
 - `packages/react`: declarative scene authoring that feeds the same IR/core pipeline.
 - `packages/platform`: target descriptors for browser, Deno, and headless execution.

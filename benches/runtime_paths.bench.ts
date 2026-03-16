@@ -1,9 +1,11 @@
 import { evaluateScene } from '@rieul3d/core';
 import {
+  createMaterialUploadPlan,
   createOffscreenContext,
   createRuntimeResidency,
   createTextureUploadPlan,
   createVolumeUploadPlan,
+  ensureMaterialResidency,
   ensureSceneMeshResidency,
   type GpuTextureUploadContext,
   uploadTextureResidency,
@@ -19,6 +21,9 @@ import {
 } from '@rieul3d/ir';
 import { createHeadlessTarget } from '@rieul3d/platform';
 import {
+  assertRendererSceneCapabilities,
+  collectRendererCapabilityIssues,
+  createDeferredRenderer,
   createMaterialRegistry,
   type GpuRenderExecutionContext,
   renderForwardFrame,
@@ -72,6 +77,35 @@ const createBenchScene = () => {
   return scene;
 };
 
+const createCapabilityBenchScene = () => {
+  let scene = createBenchScene();
+  scene = appendMaterial(scene, {
+    id: 'material-custom',
+    kind: 'custom',
+    shaderId: 'shader:flat-red',
+    textures: [],
+    parameters: {
+      color: { x: 1, y: 0.2, z: 0.2, w: 1 },
+    },
+  });
+  scene = appendMesh(scene, {
+    id: 'mesh-custom',
+    materialId: 'material-custom',
+    attributes: [{
+      semantic: 'POSITION',
+      itemSize: 3,
+      values: [0, 0.5, 0, -0.5, -0.5, 0, 0.5, -0.5, 0],
+    }],
+  });
+  scene = {
+    ...scene,
+    sdfPrimitives: [{ id: 'sdf-box', op: 'box', parameters: {} }],
+  };
+  scene = appendNode(scene, createNode('custom-mesh-node', { meshId: 'mesh-custom' }));
+  scene = appendNode(scene, createNode('sdf-box-node', { sdfId: 'sdf-box' }));
+  return scene;
+};
+
 const imageAsset = {
   id: 'image-0',
   mimeType: 'image/raw+rgba8',
@@ -119,15 +153,30 @@ const createTextureBenchContext = (): GpuTextureUploadContext => ({
   },
 });
 
+const createMaterialBenchContext = () => ({
+  device: {
+    createBuffer: (descriptor: GPUBufferDescriptor) => descriptor as unknown as GPUBuffer,
+  },
+  queue: {
+    writeBuffer: () => undefined,
+  },
+});
+
 const createRenderBenchContext = (): GpuRenderExecutionContext & {
   device: GPUDevice;
 } => ({
   device: {
     createShaderModule: () => ({}) as GPUShaderModule,
-    createRenderPipeline: () => ({}) as GPURenderPipeline,
+    createRenderPipeline: () =>
+      ({
+        getBindGroupLayout: () => ({}) as GPUBindGroupLayout,
+      }) as unknown as GPURenderPipeline,
+    createBindGroup: () => ({}) as GPUBindGroup,
+    createBuffer: (descriptor: GPUBufferDescriptor) => descriptor as unknown as GPUBuffer,
     createCommandEncoder: () => ({
       beginRenderPass: () => ({
         setPipeline: () => undefined,
+        setBindGroup: () => undefined,
         setVertexBuffer: () => undefined,
         setIndexBuffer: () => undefined,
         draw: () => undefined,
@@ -145,6 +194,16 @@ const createRenderBenchContext = (): GpuRenderExecutionContext & {
     submit: () => undefined,
   },
 });
+
+const benchMaterial = {
+  id: 'material-bench',
+  kind: 'unlit',
+  textures: [],
+  parameters: {
+    color: { x: 0.8, y: 0.4, z: 0.2, w: 1 },
+    emissive: { x: 0.05, y: 0.1, z: 0.15, w: 0 },
+  },
+} as const;
 
 Deno.bench('mesh residency preparation', () => {
   const scene = createBenchScene();
@@ -170,6 +229,14 @@ Deno.bench('texture upload planning', () => {
     colorSpace: 'srgb',
     sampler: 'linear-repeat',
   }, imageAsset);
+});
+
+Deno.bench('material upload planning', () => {
+  createMaterialUploadPlan(benchMaterial);
+});
+
+Deno.bench('material residency upload', () => {
+  ensureMaterialResidency(createMaterialBenchContext(), createRuntimeResidency(), benchMaterial);
 });
 
 Deno.bench('texture residency upload', () => {
@@ -212,8 +279,41 @@ Deno.bench('scene evaluation', () => {
   evaluateScene(createBenchScene(), { timeMs: 16 });
 });
 
+Deno.bench('renderer capability issue collection', () => {
+  const scene = createCapabilityBenchScene();
+  const issues = collectRendererCapabilityIssues(
+    createDeferredRenderer(),
+    evaluateScene(scene, { timeMs: 0 }),
+  );
+
+  if (issues.length === 0) {
+    throw new Error('expected at least one renderer capability issue');
+  }
+});
+
+Deno.bench('renderer capability assertion', () => {
+  const scene = createCapabilityBenchScene();
+
+  try {
+    assertRendererSceneCapabilities(
+      createDeferredRenderer(),
+      evaluateScene(scene, { timeMs: 0 }),
+    );
+  } catch (error) {
+    if (!(error instanceof Error)) {
+      throw error;
+    }
+  }
+});
+
 Deno.bench('forward frame encoding', () => {
-  const scene = createBenchScene();
+  const baseScene = createBenchScene();
+  const scene = {
+    ...baseScene,
+    nodes: baseScene.nodes.filter((node) => node.id !== 'volume-node'),
+    rootNodeIds: baseScene.rootNodeIds.filter((nodeId) => nodeId !== 'volume-node'),
+    volumePrimitives: [],
+  };
   const evaluatedScene = evaluateScene(scene, { timeMs: 0 });
   const runtimeResidency = createRuntimeResidency();
   runtimeResidency.geometry.set('mesh-0', {

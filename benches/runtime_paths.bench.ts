@@ -293,6 +293,7 @@ Deno.bench('renderer capability issue collection', () => {
 
 Deno.bench('renderer capability assertion', () => {
   const scene = createCapabilityBenchScene();
+  let didThrow = false;
 
   try {
     assertRendererSceneCapabilities(
@@ -303,6 +304,16 @@ Deno.bench('renderer capability assertion', () => {
     if (!(error instanceof Error)) {
       throw error;
     }
+
+    if (!error.message.includes('renderer "deferred" does not support')) {
+      throw error;
+    }
+
+    didThrow = true;
+  }
+
+  if (!didThrow) {
+    throw new Error('expected renderer capability assertion to throw');
   }
 });
 

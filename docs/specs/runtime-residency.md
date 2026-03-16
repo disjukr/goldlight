@@ -39,3 +39,5 @@ from Scene IR so the same IR can run in browsers, Deno, and headless targets.
   `AssetSource + SceneIr + EvaluatedScene`.
 - Pipeline caches are considered disposable and are cleared during rebuild.
 - Device loss is observed explicitly rather than hidden behind global runtime state.
+- Callers still own replacement device creation, target rebinding, and the first rerender after
+  rebuild. See [`device-loss-recovery.md`](./device-loss-recovery.md) for the full sequence.

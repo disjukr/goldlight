@@ -36,6 +36,14 @@ Implemented today:
 - built-in unlit material registration, material parameter uploads, and custom WGSL registration
 - browser canvas example, Windows BYOW triangle example, and PNG snapshot encoding
 - device-loss observation and residency rebuild helpers
+- renderer capability preflight for primitive and material compatibility
+
+## Documentation
+
+- Architecture overview: [`docs/specs/architecture.md`](./docs/specs/architecture.md)
+- Rendering contracts: [`docs/specs/rendering.md`](./docs/specs/rendering.md)
+- Renderer capability model: [`docs/specs/renderer-capabilities.md`](./docs/specs/renderer-capabilities.md)
+- Runtime residency and rebuild rules: [`docs/specs/runtime-residency.md`](./docs/specs/runtime-residency.md)
 
 ## Quick Start
 

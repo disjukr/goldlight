@@ -46,6 +46,8 @@ Implemented today:
 - Rendering contracts: [`docs/specs/rendering.md`](./docs/specs/rendering.md)
 - Renderer capability model:
   [`docs/specs/renderer-capabilities.md`](./docs/specs/renderer-capabilities.md)
+- Device-loss recovery contract:
+  [`docs/specs/device-loss-recovery.md`](./docs/specs/device-loss-recovery.md)
 - Runtime residency and rebuild rules:
   [`docs/specs/runtime-residency.md`](./docs/specs/runtime-residency.md)
 

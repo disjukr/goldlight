@@ -11,6 +11,8 @@ source of truth for package boundaries and feature expectations.
 
 ## Runtime Behavior
 
+- [`device-loss-recovery.md`](./device-loss-recovery.md): explicit device-loss recovery sequence and
+  caller responsibilities
 - [`runtime-residency.md`](./runtime-residency.md): device-local resource ownership and rebuild
   rules
 - [`rendering.md`](./rendering.md): renderer families, pass model, shader model, and current gaps

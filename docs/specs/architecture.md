@@ -31,6 +31,8 @@ The runtime is split into explicit data and execution stages:
 - `packages/loaders`: format parsers that normalize input into Scene IR.
 - `packages/react`: declarative scene authoring that feeds the same IR/core pipeline.
 - `packages/platform`: target descriptors for browser, Deno, and headless execution.
+- device-loss recovery remains a caller-visible workflow rather than an implicit runtime reset. See
+  [`device-loss-recovery.md`](./device-loss-recovery.md).
 
 ## Current Runtime Surface
 
@@ -46,6 +48,7 @@ The current scaffold already includes:
 - browser surface binding and a bundled browser example
 - a Windows BYOW triangle example for native Deno surface presentation
 - device-loss observation and residency rebuild helpers
+- explicit device-loss recovery sequencing for device replacement and target rebinding
 - benchmark coverage for key runtime paths
 
 ## Design Constraints

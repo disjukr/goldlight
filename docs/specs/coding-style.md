@@ -58,3 +58,5 @@ scene.add(node).render();
   comparison.
 - Repository benchmarks are the preferred place to justify `class` usage or mutable hot-path
   optimizations before those patterns spread into the wider codebase.
+- Use `deno task bench` and compare the same benchmark names before and after a change rather than
+  swapping between ad hoc scripts, so regressions stay attributable over time.

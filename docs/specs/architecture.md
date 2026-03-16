@@ -49,7 +49,8 @@ The current scaffold already includes:
 - a Windows BYOW triangle example for native Deno surface presentation
 - device-loss observation and residency rebuild helpers
 - explicit device-loss recovery sequencing for device replacement and target rebinding
-- benchmark coverage for key runtime paths
+- benchmark coverage for key runtime paths, including material binding and renderer capability
+  preflight costs
 
 ## Design Constraints
 

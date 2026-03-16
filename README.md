@@ -40,6 +40,7 @@ Implemented today:
   PNG snapshot encoding
 - fixture-backed golden snapshot regression tests for headless renders
 - device-loss observation and residency rebuild helpers
+- benchmark coverage for residency, material binding, and renderer capability preflight paths
 - renderer capability preflight for primitive and material compatibility
 
 ## Documentation
@@ -85,3 +86,11 @@ Read in this order when onboarding:
 Golden snapshot fixtures live in
 [`tests/fixtures/golden-snapshots`](./tests/fixtures/golden-snapshots). Refresh them intentionally
 with `deno run -A --unstable-raw-imports ./scripts/refresh_golden_snapshots.ts`.
+
+## Benchmarks
+
+- Run `deno task bench` before and after runtime-facing changes.
+- Compare the `runtime_paths` benchmark names directly across runs so residency upload, material
+  binding, capability preflight, and frame encoding regressions stay visible in review.
+- When a style or architecture exception is performance-motivated, include the benchmark delta in
+  the PR summary.

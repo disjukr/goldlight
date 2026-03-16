@@ -35,9 +35,11 @@ The current scaffold already includes:
 - mesh GPU residency upload and caching
 - texture GPU residency upload and caching
 - first volume GPU residency upload and extraction
-- forward frame encoding for mesh draws
+- forward frame encoding for mesh draws plus first SDF raymarch execution
+- material parameter uploads and custom WGSL pipeline registration
 - headless snapshot readback and PNG encoding
 - browser surface binding and a bundled browser example
+- a Windows BYOW triangle example for native Deno surface presentation
 - device-loss observation and residency rebuild helpers
 - benchmark coverage for key runtime paths
 

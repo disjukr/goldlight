@@ -33,13 +33,16 @@ The initial renderer uses a lightweight pass graph:
 ## Current Execution Surface
 
 - Forward rendering is the first concrete execution path and currently draws mesh residency items.
+- Forward rendering also encodes a dedicated SDF raymarch pass for supported sphere primitives.
 - Built-in unlit WGSL is stored as a standalone shader file and imported as text.
+- Material parameter uploads and bind group creation are implemented for built-in unlit shading.
+- Custom WGSL programs can be registered and cached through the material registry.
 - Headless/offscreen rendering supports compact byte readback for snapshot testing.
 - Snapshot bytes can also be encoded into PNG for local inspection and regression workflows.
 
 ## Known Gaps
 
 - Deferred rendering is still at the planning-contract stage.
-- Material bind groups and parameter uploads are not implemented yet.
-- SDF and volume rendering passes are not encoded yet; only their residency/extraction scaffolding
-  exists.
+- Volume rendering passes are not encoded yet; only their residency/extraction scaffolding exists.
+- SDF execution currently supports sphere primitives only; broader graph/operator coverage is still
+  pending.

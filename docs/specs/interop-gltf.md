@@ -17,10 +17,12 @@ Blender interoperability is `glTF-first`. The primary interchange path is:
 
 ## Current Status
 
-- The current glTF path is still a scaffold and normalization layer, not full binary ingestion.
-- Runtime support behind the loader is now broader than the loader itself: mesh, texture, material,
-  forward rendering, headless snapshotting, and first volume residency paths already exist.
-- The next interop milestone is real bufferView, accessor, image, and material ingestion from glTF.
+- The current glTF path ingests JSON scenes, data-URI buffers, bufferViews, accessors, images,
+  textures, materials, meshes, nodes, and animations into Scene IR.
+- Runtime support behind the loader includes mesh, texture, material, forward rendering, headless
+  snapshotting, and first volume residency paths.
+- GLB containers and external file URIs are still out of scope; the loader currently expects inline
+  data for binary payloads.
 
 ## Other Formats
 

@@ -485,3 +485,65 @@ Deno.test('renderForwardFrame binds base-color textures for textured built-in un
     2,
   );
 });
+
+Deno.test('renderForwardFrame does not append texture bindings for shader-selected unlit programs', () => {
+  const mocks = createRenderMocks();
+  const runtimeResidency = createRuntimeResidency();
+  let scene = createSceneIr('scene');
+  scene = appendMaterial(scene, {
+    id: 'material-shader-unlit',
+    kind: 'unlit',
+    shaderId: 'built-in:unlit',
+    textures: [{
+      id: 'texture-0',
+      assetId: 'image-0',
+      semantic: 'baseColor',
+      colorSpace: 'srgb',
+      sampler: 'linear-repeat',
+    }],
+    parameters: {
+      color: { x: 1, y: 1, z: 1, w: 1 },
+    },
+  });
+  scene = appendMesh(scene, {
+    id: 'mesh-shader-unlit',
+    materialId: 'material-shader-unlit',
+    attributes: [
+      { semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0, 0, 1, 0] },
+      { semantic: 'TEXCOORD_0', itemSize: 2, values: [0, 0, 1, 0, 0, 1] },
+    ],
+  });
+  scene = appendNode(scene, createNode('node-shader-unlit', { meshId: 'mesh-shader-unlit' }));
+
+  runtimeResidency.geometry.set('mesh-shader-unlit', {
+    meshId: 'mesh-shader-unlit',
+    attributeBuffers: {
+      POSITION: { id: 0 } as unknown as GPUBuffer,
+      TEXCOORD_0: { id: 1 } as unknown as GPUBuffer,
+    },
+    vertexCount: 3,
+    indexCount: 0,
+  });
+  runtimeResidency.textures.set('texture-0', {
+    textureId: 'texture-0',
+    texture: {} as GPUTexture,
+    view: { textureId: 0 } as unknown as GPUTextureView,
+    sampler: { id: 0 } as unknown as GPUSampler,
+    width: 2,
+    height: 2,
+    format: 'rgba8unorm',
+  });
+
+  renderForwardFrame(
+    mocks as unknown as GpuRenderExecutionContext,
+    createOffscreenContext({
+      device: mocks.device as unknown as GPUDevice,
+      target: createHeadlessTarget(64, 64),
+    }),
+    runtimeResidency,
+    evaluateScene(scene, { timeMs: 0 }),
+  );
+
+  assertEquals(mocks.bindGroupEntries.length, 1);
+  assertEquals(mocks.bindGroupEntries[0].map((entry) => entry.binding), [0]);
+});

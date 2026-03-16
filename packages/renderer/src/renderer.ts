@@ -631,12 +631,17 @@ export const renderForwardFrame = (
 
     const material = node.material ?? createDefaultMaterial();
     const baseColorTexture = getBaseColorTextureResidency(residency, material);
-    const supportsTexturedUnlit = material.kind === 'unlit' &&
+    const resolvedProgram = resolveMaterialProgram(materialRegistry, node.material);
+    const preferTexturedUnlit = resolvedProgram.id === builtInUnlitProgramId &&
       Boolean(baseColorTexture) &&
       Boolean(geometry.attributeBuffers.TEXCOORD_0);
-    const program = resolveMaterialProgram(materialRegistry, node.material, {
-      preferTexturedUnlit: supportsTexturedUnlit,
-    });
+    const program = preferTexturedUnlit
+      ? resolveMaterialProgram(materialRegistry, node.material, {
+        preferTexturedUnlit: true,
+      })
+      : resolvedProgram;
+    const supportsTexturedUnlit = program.id === builtInTexturedUnlitProgramId &&
+      Boolean(baseColorTexture);
     const pipeline = ensureMaterialPipeline(context, residency, program, binding.target.format);
 
     let isDrawable = true;

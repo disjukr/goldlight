@@ -34,5 +34,8 @@ Implemented today:
 - `deno task check`: format, codegen drift check, lint, test, and bench preflight
 - `deno task generate:ir`: regenerate TypeScript from BDL IR
 - `deno task generate:ir:check`: fail when generated IR files are stale
+- `deno task setup:sdl2:windows`: download the official SDL2 Windows runtime for BYOW examples
 - `deno task example:browser:build`: bundle the browser forward-rendering example
 - `deno task example:browser:serve`: serve the repository for local browser testing
+- `deno task example:byow:check`: type-check the BYOW SDL2 triangle example
+- `deno task example:byow:run`: open the Windows BYOW triangle example

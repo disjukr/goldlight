@@ -4,6 +4,7 @@
     "jsr:@disjukr/bdl@*": "0.6.1",
     "jsr:@disjukr/bdl@0.6.1": "0.6.1",
     "jsr:@disjukr/bdl@0.8.3": "0.8.3",
+    "jsr:@divy/sdl2@0.15.0": "0.15.0",
     "jsr:@std/assert@^1.0.14": "1.0.19",
     "jsr:@std/fs@1": "1.0.23",
     "jsr:@std/internal@^1.0.10": "1.0.12",
@@ -30,6 +31,9 @@
         "jsr:@std/path@1",
         "jsr:@std/yaml"
       ]
+    },
+    "@divy/sdl2@0.15.0": {
+      "integrity": "d85d212807604d41a116ce7c86449794168cf8a3a839d74c5083ddd986f679ae"
     },
     "@std/assert@1.0.19": {
       "integrity": "eaada96ee120cb980bc47e040f82814d786fe8162ecc53c91d8df60b8755991e",

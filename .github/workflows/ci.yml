@@ -21,3 +21,6 @@ jobs:
 
       - name: Run project checks
         run: deno task check
+
+      - name: Build browser example bundle
+        run: deno task example:browser:build

@@ -9,6 +9,7 @@ import {
   type RuntimeResidency,
 } from '@rieul3d/gpu';
 import builtInForwardShader from './shaders/built_in_forward_unlit.wgsl' with { type: 'text' };
+import builtInSdfRaymarchShader from './shaders/built_in_sdf_raymarch.wgsl' with { type: 'text' };
 
 export type RendererKind = 'forward' | 'deferred';
 export type PassKind =
@@ -106,6 +107,15 @@ export type VolumePassItem = Readonly<{
   residency: NonNullable<RuntimeResidency['volumes'] extends Map<string, infer T> ? T : never>;
 }>;
 
+export type SdfPassItem = Readonly<{
+  nodeId: string;
+  sdfId: string;
+  op: string;
+  center: readonly [number, number, number];
+  radius: number;
+  color: readonly [number, number, number, number];
+}>;
+
 export type RendererCapabilityIssue = Readonly<{
   nodeId: string;
   feature: 'mesh' | 'sdf' | 'volume' | 'material-kind' | 'custom-shader';
@@ -113,6 +123,12 @@ export type RendererCapabilityIssue = Readonly<{
 }>;
 
 const builtInUnlitProgramId = 'built-in:unlit';
+const builtInSdfRaymarchProgramId = 'built-in:sdf-raymarch';
+const uniformUsage = 0x40;
+const bufferCopyDstUsage = 0x08;
+const maxSdfPassItems = 16;
+const toArrayBuffer = (view: ArrayBufferView): ArrayBuffer =>
+  view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength) as ArrayBuffer;
 
 const countPrimitiveNodes = (evaluatedScene: EvaluatedScene) => ({
   meshNodeCount: evaluatedScene.nodes.filter((node) => Boolean(node.mesh)).length,
@@ -195,7 +211,7 @@ export const createForwardRenderer = (label = 'forward'): Renderer => ({
   label,
   capabilities: {
     mesh: 'supported',
-    sdf: 'unsupported',
+    sdf: 'supported',
     volume: 'unsupported',
     builtInMaterialKinds: ['unlit'],
     customShaders: 'supported',
@@ -260,12 +276,20 @@ export const collectRendererCapabilityIssues = (
       });
     }
 
-    if (node.sdf && renderer.capabilities.sdf !== 'supported') {
-      issues.push({
-        nodeId: node.node.id,
-        feature: 'sdf',
-        message: `renderer "${renderer.label}" does not support sdf execution`,
-      });
+    if (node.sdf) {
+      if (renderer.capabilities.sdf !== 'supported') {
+        issues.push({
+          nodeId: node.node.id,
+          feature: 'sdf',
+          message: `renderer "${renderer.label}" does not support sdf execution`,
+        });
+      } else if (node.sdf.op !== 'sphere') {
+        issues.push({
+          nodeId: node.node.id,
+          feature: 'sdf',
+          message: `renderer "${renderer.label}" only supports sphere sdf primitives right now`,
+        });
+      }
     }
 
     if (node.volume && renderer.capabilities.volume !== 'supported') {
@@ -334,6 +358,44 @@ export const extractVolumePassItems = (
     }];
   });
 
+const getMatrixTranslation = (
+  worldMatrix: readonly number[],
+): readonly [number, number, number] => [
+  worldMatrix[12] ?? 0,
+  worldMatrix[13] ?? 0,
+  worldMatrix[14] ?? 0,
+];
+
+const getMatrixScale = (worldMatrix: readonly number[]): readonly [number, number, number] => {
+  const scaleX = Math.hypot(worldMatrix[0] ?? 0, worldMatrix[1] ?? 0, worldMatrix[2] ?? 0);
+  const scaleY = Math.hypot(worldMatrix[4] ?? 0, worldMatrix[5] ?? 0, worldMatrix[6] ?? 0);
+  const scaleZ = Math.hypot(worldMatrix[8] ?? 0, worldMatrix[9] ?? 0, worldMatrix[10] ?? 0);
+  return [scaleX, scaleY, scaleZ];
+};
+
+export const extractSdfPassItems = (
+  evaluatedScene: EvaluatedScene,
+): readonly SdfPassItem[] =>
+  evaluatedScene.nodes.flatMap((node) => {
+    if (!node.sdf || node.sdf.op !== 'sphere') {
+      return [];
+    }
+
+    const [scaleX, scaleY, scaleZ] = getMatrixScale(node.worldMatrix);
+    const averageScale = (scaleX + scaleY + scaleZ) / 3 || 1;
+    const radius = (node.sdf.parameters.radius?.x ?? 0.5) * averageScale;
+    const color = node.sdf.parameters.color ?? { x: 1, y: 0.55, z: 0.2, w: 1 };
+
+    return [{
+      nodeId: node.node.id,
+      sdfId: node.sdf.id,
+      op: node.sdf.op,
+      center: getMatrixTranslation(node.worldMatrix),
+      radius,
+      color: [color.x, color.y, color.z, color.w],
+    }];
+  });
+
 export const ensureBuiltInForwardPipeline = (
   context: GpuRenderExecutionContext,
   residency: RuntimeResidency,
@@ -378,6 +440,102 @@ export const ensureMaterialPipeline = (
 
   residency.pipelines.set(cacheKey, pipeline);
   return pipeline;
+};
+
+export const ensureSdfRaymarchPipeline = (
+  context: GpuRenderExecutionContext,
+  residency: RuntimeResidency,
+  format: GPUTextureFormat,
+): GPURenderPipeline => {
+  const cacheKey = `${builtInSdfRaymarchProgramId}:${format}`;
+  const cached = residency.pipelines.get(cacheKey);
+  if (cached) {
+    return cached as GPURenderPipeline;
+  }
+
+  const shader = context.device.createShaderModule({
+    label: cacheKey,
+    code: builtInSdfRaymarchShader,
+  });
+  const pipeline = context.device.createRenderPipeline({
+    label: cacheKey,
+    layout: 'auto',
+    vertex: {
+      module: shader,
+      entryPoint: 'vsMain',
+    },
+    fragment: {
+      module: shader,
+      entryPoint: 'fsMain',
+      targets: [{ format }],
+    },
+    primitive: {
+      topology: 'triangle-list',
+    },
+  });
+
+  residency.pipelines.set(cacheKey, pipeline);
+  return pipeline;
+};
+
+const createSdfUniformData = (items: readonly SdfPassItem[]): Float32Array => {
+  const uniformData = new Float32Array(4 + (maxSdfPassItems * 8));
+  uniformData[0] = Math.min(items.length, maxSdfPassItems);
+
+  items.slice(0, maxSdfPassItems).forEach((item, index) => {
+    const offset = 4 + (index * 8);
+    uniformData.set([...item.center, item.radius], offset);
+    uniformData.set(item.color, offset + 4);
+  });
+
+  return uniformData;
+};
+
+export const renderSdfRaymarchPass = (
+  context: GpuRenderExecutionContext,
+  encoder: GPUCommandEncoder,
+  binding: RenderContextBinding,
+  residency: RuntimeResidency,
+  evaluatedScene: EvaluatedScene,
+): number => {
+  const items = extractSdfPassItems(evaluatedScene);
+  if (items.length === 0) {
+    return 0;
+  }
+
+  const pipeline = ensureSdfRaymarchPipeline(context, residency, binding.target.format);
+  const uniformData = createSdfUniformData(items);
+  const uniformBuffer = context.device.createBuffer({
+    label: 'sdf-raymarch-uniforms',
+    size: uniformData.byteLength,
+    usage: uniformUsage | bufferCopyDstUsage,
+  });
+  context.queue.writeBuffer(uniformBuffer, 0, toArrayBuffer(uniformData));
+
+  const bindGroup = context.device.createBindGroup({
+    layout: pipeline.getBindGroupLayout(0),
+    entries: [{
+      binding: 0,
+      resource: {
+        buffer: uniformBuffer,
+      },
+    }],
+  });
+
+  const pass = encoder.beginRenderPass({
+    colorAttachments: [{
+      view: acquireColorAttachmentView(binding),
+      loadOp: 'load',
+      storeOp: 'store',
+    }],
+  });
+
+  pass.setPipeline(pipeline);
+  pass.setBindGroup(0, bindGroup);
+  pass.draw(3, 1, 0, 0);
+  pass.end();
+
+  return 1;
 };
 
 const createDefaultMaterial = (): Material => ({
@@ -474,6 +632,8 @@ export const renderForwardFrame = (
   }
 
   pass.end();
+
+  drawCount += renderSdfRaymarchPass(context, encoder, binding, residency, evaluatedScene);
 
   const commandBuffer = encoder.finish();
   context.queue.submit([commandBuffer]);

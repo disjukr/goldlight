@@ -7,6 +7,7 @@ import {
   collectRendererCapabilityIssues,
   createDeferredRenderer,
   createForwardRenderer,
+  extractSdfPassItems,
   extractVolumePassItems,
   planFrame,
 } from '@rieul3d/renderer';
@@ -78,6 +79,51 @@ Deno.test('extractVolumePassItems returns only evaluated volumes with residency'
   assertEquals(items[0].volumeId, 'volume-0');
 });
 
+Deno.test('extractSdfPassItems returns supported sphere sdf nodes with derived bounds', () => {
+  let scene = createSceneIr('scene');
+  scene = {
+    ...scene,
+    sdfPrimitives: [
+      {
+        id: 'sdf-sphere',
+        op: 'sphere',
+        parameters: {
+          radius: { x: 2, y: 0, z: 0, w: 0 },
+          color: { x: 0.4, y: 0.8, z: 1, w: 1 },
+        },
+      },
+      {
+        id: 'sdf-box',
+        op: 'box',
+        parameters: {},
+      },
+    ],
+  };
+  scene = appendNode(
+    scene,
+    createNode('sphere-node', {
+      sdfId: 'sdf-sphere',
+      transform: {
+        translation: { x: 1, y: 2, z: 3 },
+        rotation: { x: 0, y: 0, z: 0, w: 1 },
+        scale: { x: 2, y: 2, z: 2 },
+      },
+    }),
+  );
+  scene = appendNode(scene, createNode('box-node', { sdfId: 'sdf-box' }));
+
+  const items = extractSdfPassItems(evaluateScene(scene, { timeMs: 0 }));
+
+  assertEquals(items, [{
+    nodeId: 'sphere-node',
+    sdfId: 'sdf-sphere',
+    op: 'sphere',
+    center: [1, 2, 3],
+    radius: 4,
+    color: [0.4, 0.8, 1, 1],
+  }]);
+});
+
 Deno.test('collectRendererCapabilityIssues reports unsupported forward renderer features', () => {
   let scene = createSceneIr('scene');
   scene = appendMaterial(scene, {
@@ -113,15 +159,31 @@ Deno.test('collectRendererCapabilityIssues reports unsupported forward renderer 
 
   assertEquals(
     issues.map((issue) => issue.feature),
-    ['sdf', 'volume'],
+    ['volume'],
   );
 });
 
-Deno.test('assertRendererSceneCapabilities throws when renderer does not support scene content', () => {
+Deno.test('collectRendererCapabilityIssues rejects unsupported sdf ops for execution', () => {
   let scene = createSceneIr('scene');
   scene = {
     ...scene,
-    sdfPrimitives: [{ id: 'sdf-0', op: 'sphere', parameters: {} }],
+    sdfPrimitives: [{ id: 'sdf-0', op: 'box', parameters: {} }],
+  };
+  scene = appendNode(scene, createNode('sdf-node', { sdfId: 'sdf-0' }));
+
+  const issues = collectRendererCapabilityIssues(
+    createForwardRenderer(),
+    evaluateScene(scene, { timeMs: 0 }),
+  );
+
+  assertEquals(issues.map((issue) => issue.feature), ['sdf']);
+});
+
+Deno.test('assertRendererSceneCapabilities throws when renderer sees unsupported sdf ops', () => {
+  let scene = createSceneIr('scene');
+  scene = {
+    ...scene,
+    sdfPrimitives: [{ id: 'sdf-0', op: 'box', parameters: {} }],
   };
   scene = appendNode(scene, createNode('sdf-node', { sdfId: 'sdf-0' }));
 

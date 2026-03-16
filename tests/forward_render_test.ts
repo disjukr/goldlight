@@ -37,6 +37,7 @@ const createRenderMocks = () => {
   const bindGroups: MockBindGroup[] = [];
   const submits: unknown[][] = [];
   const passActions: MockPassAction[] = [];
+  const renderPassCount = { current: 0 };
 
   const device = {
     createShaderModule: ({ code }: GPUShaderModuleDescriptor) => {
@@ -64,41 +65,47 @@ const createRenderMocks = () => {
       return bindGroup as unknown as GPUBindGroup;
     },
     createCommandEncoder: () => ({
-      beginRenderPass: () => ({
-        setPipeline: (pipeline: GPURenderPipeline) => {
-          passActions.push({ type: 'setPipeline', pipeline: pipeline as unknown as MockPipeline });
-        },
-        setBindGroup: (index: number, bindGroup: GPUBindGroup) => {
-          passActions.push({
-            type: 'setBindGroup',
-            index,
-            bindGroup: bindGroup as unknown as MockBindGroup,
-          });
-        },
-        setVertexBuffer: (slot: number, buffer: GPUBuffer) => {
-          passActions.push({
-            type: 'setVertexBuffer',
-            slot,
-            buffer: buffer as unknown as MockBuffer,
-          });
-        },
-        setIndexBuffer: (buffer: GPUBuffer, format: GPUIndexFormat) => {
-          passActions.push({
-            type: 'setIndexBuffer',
-            buffer: buffer as unknown as MockBuffer,
-            format,
-          });
-        },
-        draw: (vertexCount: number) => {
-          passActions.push({ type: 'draw', vertexCount });
-        },
-        drawIndexed: (indexCount: number) => {
-          passActions.push({ type: 'drawIndexed', indexCount });
-        },
-        end: () => {
-          passActions.push({ type: 'end' });
-        },
-      }),
+      beginRenderPass: () => {
+        renderPassCount.current += 1;
+        return ({
+          setPipeline: (pipeline: GPURenderPipeline) => {
+            passActions.push({
+              type: 'setPipeline',
+              pipeline: pipeline as unknown as MockPipeline,
+            });
+          },
+          setBindGroup: (index: number, bindGroup: GPUBindGroup) => {
+            passActions.push({
+              type: 'setBindGroup',
+              index,
+              bindGroup: bindGroup as unknown as MockBindGroup,
+            });
+          },
+          setVertexBuffer: (slot: number, buffer: GPUBuffer) => {
+            passActions.push({
+              type: 'setVertexBuffer',
+              slot,
+              buffer: buffer as unknown as MockBuffer,
+            });
+          },
+          setIndexBuffer: (buffer: GPUBuffer, format: GPUIndexFormat) => {
+            passActions.push({
+              type: 'setIndexBuffer',
+              buffer: buffer as unknown as MockBuffer,
+              format,
+            });
+          },
+          draw: (vertexCount: number) => {
+            passActions.push({ type: 'draw', vertexCount });
+          },
+          drawIndexed: (indexCount: number) => {
+            passActions.push({ type: 'drawIndexed', indexCount });
+          },
+          end: () => {
+            passActions.push({ type: 'end' });
+          },
+        });
+      },
       finish: () => ({}) as GPUCommandBuffer,
     }),
     createTexture: () => ({
@@ -113,7 +120,17 @@ const createRenderMocks = () => {
     },
   };
 
-  return { device, queue, pipelines, shaders, buffers, bindGroups, submits, passActions };
+  return {
+    device,
+    queue,
+    pipelines,
+    shaders,
+    buffers,
+    bindGroups,
+    submits,
+    passActions,
+    renderPassCount,
+  };
 };
 
 Deno.test('ensureBuiltInForwardPipeline caches the generated pipeline', () => {
@@ -192,6 +209,47 @@ Deno.test('renderForwardFrame encodes indexed and non-indexed draws from mesh re
   assertEquals(
     mocks.passActions.filter((action) => action.type === 'setBindGroup').length,
     2,
+  );
+});
+
+Deno.test('renderForwardFrame encodes a dedicated sdf raymarch pass for supported sphere nodes', () => {
+  const mocks = createRenderMocks();
+  const runtimeResidency = createRuntimeResidency();
+  let scene = createSceneIr('scene');
+  scene = {
+    ...scene,
+    sdfPrimitives: [{
+      id: 'sdf-sphere',
+      op: 'sphere',
+      parameters: {
+        radius: { x: 0.75, y: 0, z: 0, w: 0 },
+      },
+    }],
+  };
+  scene = appendNode(scene, createNode('sdf-node', { sdfId: 'sdf-sphere' }));
+
+  const binding = createOffscreenContext({
+    device: mocks.device as unknown as GPUDevice,
+    target: createHeadlessTarget(64, 64),
+  });
+
+  const result = renderForwardFrame(
+    mocks as unknown as GpuRenderExecutionContext,
+    binding,
+    runtimeResidency,
+    evaluateScene(scene, { timeMs: 0 }),
+  );
+
+  assertEquals(result.drawCount, 1);
+  assertEquals(result.submittedCommandBufferCount, 1);
+  assertEquals(mocks.renderPassCount.current, 2);
+  assertEquals(
+    mocks.passActions.filter((action) => action.type === 'draw').length,
+    1,
+  );
+  assertEquals(
+    mocks.passActions.filter((action) => action.type === 'setBindGroup').length,
+    1,
   );
 });
 

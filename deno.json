@@ -22,9 +22,9 @@
   },
   "tasks": {
     "generate:ir": "deno run -A ./scripts/generate_bdl_ts.ts",
-    "check": "deno fmt --check && deno lint && deno test && deno bench --no-run",
-    "test": "deno test",
-    "bench": "deno bench",
+    "check": "deno fmt --check && deno lint && deno test --unstable-raw-imports && deno bench --unstable-raw-imports --no-run",
+    "test": "deno test --unstable-raw-imports",
+    "bench": "deno bench --unstable-raw-imports",
     "docs:check": "deno fmt --check docs packages tests benches"
   },
   "fmt": {

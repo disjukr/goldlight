@@ -1,5 +1,6 @@
 import type {
   AnimationChannel,
+  Material,
   MeshPrimitive,
   Node,
   SceneIr,
@@ -13,6 +14,7 @@ export type EvaluatedNode = Readonly<{
   node: Node;
   worldMatrix: Mat4;
   mesh?: MeshPrimitive;
+  material?: Material;
   sdf?: SdfPrimitive;
   volume?: VolumePrimitive;
 }>;
@@ -172,6 +174,14 @@ export const evaluateScene = (scene: SceneIr, options: EvaluateSceneOptions): Ev
       node,
       worldMatrix: getWorldMatrix(node),
       mesh: node.meshId ? scene.meshes.find((mesh) => mesh.id === node.meshId) : undefined,
+      material: node.meshId
+        ? (() => {
+          const mesh = scene.meshes.find((candidate) => candidate.id === node.meshId);
+          return mesh?.materialId
+            ? scene.materials.find((material) => material.id === mesh.materialId)
+            : undefined;
+        })()
+        : undefined,
       sdf: node.sdfId
         ? scene.sdfPrimitives.find((primitive) => primitive.id === node.sdfId)
         : undefined,

@@ -1,5 +1,6 @@
 import type {
   AnimationClip,
+  Material,
   MeshPrimitive,
   Node,
   SceneIr,
@@ -52,6 +53,11 @@ export const appendMesh = (scene: SceneIr, mesh: MeshPrimitive): SceneIr => ({
 export const appendTexture = (scene: SceneIr, texture: TextureRef): SceneIr => ({
   ...scene,
   textures: [...scene.textures, texture],
+});
+
+export const appendMaterial = (scene: SceneIr, material: Material): SceneIr => ({
+  ...scene,
+  materials: [...scene.materials, material],
 });
 
 export const appendAnimationClip = (scene: SceneIr, clip: AnimationClip): SceneIr => ({

@@ -2,7 +2,12 @@ import { assertEquals } from 'jsr:@std/assert@^1.0.14';
 import { evaluateScene } from '@rieul3d/core';
 import { createRuntimeResidency } from '@rieul3d/gpu';
 import { appendNode, createNode, createSceneIr } from '@rieul3d/ir';
-import { createDeferredRenderer, createForwardRenderer, planFrame } from '@rieul3d/renderer';
+import {
+  createDeferredRenderer,
+  createForwardRenderer,
+  extractVolumePassItems,
+  planFrame,
+} from '@rieul3d/renderer';
 
 Deno.test('forward renderer omits raymarch pass when scene has no sdf or volume nodes', () => {
   let scene = createSceneIr('scene');
@@ -37,4 +42,36 @@ Deno.test('deferred renderer keeps raymarch pass when scene has an sdf node', ()
     'raymarch',
     'present',
   ]);
+});
+
+Deno.test('extractVolumePassItems returns only evaluated volumes with residency', () => {
+  let scene = createSceneIr('scene');
+  scene = {
+    ...scene,
+    volumePrimitives: [{
+      id: 'volume-0',
+      assetId: 'volume-asset-0',
+      dimensions: { x: 4, y: 4, z: 4 },
+      format: 'density:r8unorm',
+    }],
+  };
+  scene = appendNode(scene, createNode('node-0', { volumeId: 'volume-0' }));
+  const evaluatedScene = evaluateScene(scene, { timeMs: 0 });
+  const residency = createRuntimeResidency();
+  residency.volumes.set('volume-0', {
+    volumeId: 'volume-0',
+    texture: {} as GPUTexture,
+    view: {} as GPUTextureView,
+    sampler: {} as GPUSampler,
+    width: 4,
+    height: 4,
+    depth: 4,
+    format: 'r8unorm',
+  });
+
+  const items = extractVolumePassItems(evaluatedScene, residency);
+
+  assertEquals(items.length, 1);
+  assertEquals(items[0].nodeId, 'node-0');
+  assertEquals(items[0].volumeId, 'volume-0');
 });

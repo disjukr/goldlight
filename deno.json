@@ -22,10 +22,13 @@
   },
   "tasks": {
     "generate:ir": "deno run -A ./scripts/generate_bdl_ts.ts",
-    "check": "deno fmt --check && deno lint && deno test --unstable-raw-imports && deno bench --unstable-raw-imports --no-run",
+    "generate:ir:check": "deno run -A ./scripts/generate_bdl_ts.ts --check",
+    "check": "deno fmt --check && deno task generate:ir:check && deno lint && deno test --unstable-raw-imports && deno bench --unstable-raw-imports --no-run",
     "test": "deno test --unstable-raw-imports",
     "bench": "deno bench --unstable-raw-imports",
-    "docs:check": "deno fmt --check docs packages tests benches"
+    "docs:check": "deno fmt --check docs packages tests benches examples",
+    "example:browser:build": "deno bundle --platform browser --unstable-raw-imports -o ./examples/browser_forward/dist/main.js ./examples/browser_forward/main.ts",
+    "example:browser:serve": "deno run -A jsr:@std/http@1/file-server ."
   },
   "fmt": {
     "lineWidth": 100,

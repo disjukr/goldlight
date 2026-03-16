@@ -103,6 +103,8 @@ export type GpuTextureUploadContext = Readonly<{
   queue: Pick<GPUQueue, 'writeTexture'>;
 }>;
 
+export type RuntimeResidencyRebuildContext = GpuUploadContext & GpuTextureUploadContext;
+
 export type MeshBufferLayout = Readonly<{
   semantic: string;
   itemSize: number;
@@ -494,5 +496,19 @@ export const ensureSceneVolumeResidency = (
     ensureVolumeResidency(context, residency, assetSource, volumePrimitive);
   }
 
+  return residency;
+};
+
+export const rebuildRuntimeResidency = (
+  context: RuntimeResidencyRebuildContext,
+  residency: RuntimeResidency,
+  scene: SceneIr,
+  evaluatedScene: EvaluatedScene,
+  assetSource: AssetSource,
+): RuntimeResidency => {
+  invalidateResidency(residency);
+  ensureSceneMeshResidency(context, residency, scene, evaluatedScene);
+  ensureSceneTextureResidency(context, residency, scene, assetSource);
+  ensureSceneVolumeResidency(context, residency, scene, assetSource);
   return residency;
 };

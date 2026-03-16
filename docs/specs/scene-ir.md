@@ -7,6 +7,13 @@ The serializable scene model is defined in BDL at
 `packages/ir/src/generated` is treated as generated output. The schema uses the BDL `conventional`
 standard and declares that explicitly with `# standard - conventional`.
 
+## Codegen Guardrails
+
+- Regenerate IR mirrors with `deno task generate:ir`.
+- Verify generated files are current with `deno task generate:ir:check`.
+- Generated files in `packages/ir/src/generated` must be a pure function of the BDL schema.
+- Stale generated files and schema/output drift are treated as check failures in CI.
+
 ## Core Concepts
 
 - Assets describe external source data such as images, geometry files, or volume grids.

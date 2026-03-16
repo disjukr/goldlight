@@ -59,6 +59,11 @@ export type GpuContextOptions = Readonly<{
   gpu?: GPU;
 }>;
 
+export type GpuLostInfo = Readonly<{
+  reason: GPUDeviceLostReason;
+  message: string;
+}>;
+
 export const isWebGPUAvailable = (gpu: GPU | undefined = globalThis.navigator?.gpu) => Boolean(gpu);
 
 export const requestGpuContext = async (
@@ -87,6 +92,20 @@ export const requestGpuContext = async (
     queue: device.queue,
     target: options.target,
   };
+};
+
+export const observeDeviceLoss = async (
+  device: Pick<GPUDevice, 'lost'>,
+  onLost?: (info: GpuLostInfo) => void | Promise<void>,
+): Promise<GpuLostInfo> => {
+  const lost = await device.lost;
+  const info: GpuLostInfo = {
+    reason: lost.reason,
+    message: lost.message,
+  };
+
+  await onLost?.(info);
+  return info;
 };
 
 const textureBindingUsage = 0x04;

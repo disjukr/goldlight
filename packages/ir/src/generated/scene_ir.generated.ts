@@ -1,7 +1,6 @@
 // This file is generated from BDL IR.
 // Run `deno task generate:ir` to regenerate it.
 
-
 export type Id = string;
 
 export type Scalar = number;

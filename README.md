@@ -33,7 +33,8 @@ Implemented today:
 - BDL-driven `SceneIr` generation with drift checks in CI
 - mesh, texture, and first volume residency upload paths
 - forward rendering, first SDF raymarch execution, and headless snapshot readback
-- built-in unlit material registration, material parameter uploads, and custom WGSL registration
+- built-in unlit material registration, base-color texture sampling, material parameter uploads, and
+  custom WGSL registration
 - browser canvas example, Windows BYOW triangle example, and PNG snapshot encoding
 - device-loss observation and residency rebuild helpers
 - renderer capability preflight for primitive and material compatibility

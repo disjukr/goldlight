@@ -7,8 +7,12 @@ import {
   readOffscreenSnapshot,
   type RenderContextBinding,
   type RuntimeResidency,
+  type TextureResidency,
 } from '@rieul3d/gpu';
 import builtInForwardShader from './shaders/built_in_forward_unlit.wgsl' with { type: 'text' };
+import builtInForwardTexturedShader from './shaders/built_in_forward_unlit_textured.wgsl' with {
+  type: 'text',
+};
 import builtInSdfRaymarchShader from './shaders/built_in_sdf_raymarch.wgsl' with { type: 'text' };
 
 export type RendererKind = 'forward' | 'deferred';
@@ -123,6 +127,7 @@ export type RendererCapabilityIssue = Readonly<{
 }>;
 
 const builtInUnlitProgramId = 'built-in:unlit';
+const builtInTexturedUnlitProgramId = 'built-in:unlit-textured';
 const builtInSdfRaymarchProgramId = 'built-in:sdf-raymarch';
 const uniformUsage = 0x40;
 const bufferCopyDstUsage = 0x08;
@@ -152,6 +157,31 @@ const builtInUnlitProgram: MaterialProgram = {
   }],
 };
 
+const builtInTexturedUnlitProgram: MaterialProgram = {
+  id: builtInTexturedUnlitProgramId,
+  label: 'Built-in Unlit (Textured)',
+  wgsl: builtInForwardTexturedShader,
+  vertexEntryPoint: 'vsMain',
+  fragmentEntryPoint: 'fsMain',
+  usesMaterialBindings: true,
+  vertexAttributes: [
+    {
+      semantic: 'POSITION',
+      shaderLocation: 0,
+      format: 'float32x3',
+      offset: 0,
+      arrayStride: 12,
+    },
+    {
+      semantic: 'TEXCOORD_0',
+      shaderLocation: 1,
+      format: 'float32x2',
+      offset: 0,
+      arrayStride: 8,
+    },
+  ],
+};
+
 const createVertexBufferLayouts = (
   attributes: readonly MaterialVertexAttribute[],
 ): GPUVertexBufferLayout[] => {
@@ -172,8 +202,15 @@ const createVertexBufferLayouts = (
 };
 
 export const createMaterialRegistry = (): MaterialRegistry => ({
-  programs: new Map([[builtInUnlitProgramId, builtInUnlitProgram]]),
+  programs: new Map([
+    [builtInUnlitProgramId, builtInUnlitProgram],
+    [builtInTexturedUnlitProgramId, builtInTexturedUnlitProgram],
+  ]),
 });
+
+export type ResolveMaterialProgramOptions = Readonly<{
+  preferTexturedUnlit?: boolean;
+}>;
 
 export const registerWgslMaterial = (
   registry: MaterialRegistry,
@@ -186,6 +223,7 @@ export const registerWgslMaterial = (
 export const resolveMaterialProgram = (
   registry: MaterialRegistry,
   material?: Material,
+  options: ResolveMaterialProgramOptions = {},
 ): MaterialProgram => {
   if (!material) {
     return registry.programs.get(builtInUnlitProgramId) ?? builtInUnlitProgram;
@@ -200,10 +238,21 @@ export const resolveMaterialProgram = (
   }
 
   if (material.kind === 'unlit') {
+    if (options.preferTexturedUnlit) {
+      return registry.programs.get(builtInTexturedUnlitProgramId) ?? builtInTexturedUnlitProgram;
+    }
     return registry.programs.get(builtInUnlitProgramId) ?? builtInUnlitProgram;
   }
 
   throw new Error(`material "${material.id}" uses unsupported kind "${material.kind}"`);
+};
+
+const getBaseColorTextureResidency = (
+  residency: RuntimeResidency,
+  material: Material,
+): TextureResidency | undefined => {
+  const textureRef = material.textures.find((texture) => texture.semantic === 'baseColor');
+  return textureRef ? residency.textures.get(textureRef.id) : undefined;
 };
 
 export const createForwardRenderer = (label = 'forward'): Renderer => ({
@@ -581,7 +630,13 @@ export const renderForwardFrame = (
     }
 
     const material = node.material ?? createDefaultMaterial();
-    const program = resolveMaterialProgram(materialRegistry, node.material);
+    const baseColorTexture = getBaseColorTextureResidency(residency, material);
+    const supportsTexturedUnlit = material.kind === 'unlit' &&
+      Boolean(baseColorTexture) &&
+      Boolean(geometry.attributeBuffers.TEXCOORD_0);
+    const program = resolveMaterialProgram(materialRegistry, node.material, {
+      preferTexturedUnlit: supportsTexturedUnlit,
+    });
     const pipeline = ensureMaterialPipeline(context, residency, program, binding.target.format);
 
     let isDrawable = true;
@@ -611,12 +666,26 @@ export const renderForwardFrame = (
       const materialResidency = ensureMaterialResidency(context, residency, material);
       const bindGroup = context.device.createBindGroup({
         layout: pipeline.getBindGroupLayout(0),
-        entries: [{
-          binding: 0,
-          resource: {
-            buffer: materialResidency.uniformBuffer,
+        entries: [
+          {
+            binding: 0,
+            resource: {
+              buffer: materialResidency.uniformBuffer,
+            },
           },
-        }],
+          ...(supportsTexturedUnlit && baseColorTexture
+            ? [
+              {
+                binding: 1,
+                resource: baseColorTexture.view,
+              },
+              {
+                binding: 2,
+                resource: baseColorTexture.sampler,
+              },
+            ]
+            : []),
+        ],
       });
       pass.setBindGroup(0, bindGroup);
     }

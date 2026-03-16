@@ -1,0 +1,127 @@
+# standard - conventional
+# description
+| Serializable scene schema for rieul3d.
+| This module contains only IR data and excludes runtime residency state.
+
+custom Id = string
+custom Scalar = float64
+
+struct Vec2 {
+  x: Scalar,
+  y: Scalar,
+}
+
+struct Vec3 {
+  x: Scalar,
+  y: Scalar,
+  z: Scalar,
+}
+
+struct Vec4 {
+  x: Scalar,
+  y: Scalar,
+  z: Scalar,
+  w: Scalar,
+}
+
+struct Quat {
+  x: Scalar,
+  y: Scalar,
+  z: Scalar,
+  w: Scalar,
+}
+
+struct Transform {
+  translation: Vec3,
+  rotation: Quat,
+  scale: Vec3,
+}
+
+struct AssetRef {
+  id: Id,
+  uri?: string,
+  mimeType?: string,
+}
+
+struct TextureRef {
+  id: Id,
+  assetId?: Id,
+  semantic: string,
+  colorSpace: string,
+  sampler: string,
+}
+
+struct Material {
+  id: Id,
+  kind: string,
+  shaderId?: Id,
+  textures: TextureRef[],
+  parameters: Vec4[string],
+}
+
+struct MeshAttribute {
+  semantic: string,
+  itemSize: int32,
+  values: Scalar[],
+}
+
+struct MeshPrimitive {
+  id: Id,
+  attributes: MeshAttribute[],
+  indices?: int32[],
+  materialId?: Id,
+}
+
+struct SdfPrimitive {
+  id: Id,
+  op: string,
+  parameters: Vec4[string],
+}
+
+struct VolumePrimitive {
+  id: Id,
+  assetId?: Id,
+  dimensions: Vec3,
+  format: string,
+}
+
+struct Node {
+  id: Id,
+  name?: string,
+  parentId?: Id,
+  transform: Transform,
+  meshId?: Id,
+  sdfId?: Id,
+  volumeId?: Id,
+}
+
+struct AnimationKeyframe {
+  timeMs: Scalar,
+  value: Vec4,
+}
+
+struct AnimationChannel {
+  nodeId: Id,
+  property: string,
+  keyframes: AnimationKeyframe[],
+}
+
+struct AnimationClip {
+  id: Id,
+  name?: string,
+  durationMs: Scalar,
+  channels: AnimationChannel[],
+}
+
+struct SceneIr {
+  id: Id,
+  assets: AssetRef[],
+  textures: TextureRef[],
+  materials: Material[],
+  meshes: MeshPrimitive[],
+  sdfPrimitives: SdfPrimitive[],
+  volumePrimitives: VolumePrimitive[],
+  nodes: Node[],
+  rootNodeIds: Id[],
+  animationClips: AnimationClip[],
+}

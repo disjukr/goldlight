@@ -1,0 +1,43 @@
+{
+  "workspace": [
+    "./packages/ir",
+    "./packages/core",
+    "./packages/gpu",
+    "./packages/renderer",
+    "./packages/loaders",
+    "./packages/react",
+    "./packages/platform"
+  ],
+  "imports": {
+    "@std/fs": "jsr:@std/fs@1",
+    "@std/path": "jsr:@std/path@1",
+    "@std/yaml": "jsr:@std/yaml@1",
+    "@rieul3d/ir": "./packages/ir/mod.ts",
+    "@rieul3d/core": "./packages/core/mod.ts",
+    "@rieul3d/gpu": "./packages/gpu/mod.ts",
+    "@rieul3d/renderer": "./packages/renderer/mod.ts",
+    "@rieul3d/loaders": "./packages/loaders/mod.ts",
+    "@rieul3d/react": "./packages/react/mod.ts",
+    "@rieul3d/platform": "./packages/platform/mod.ts"
+  },
+  "tasks": {
+    "generate:ir": "deno run -A ./scripts/generate_bdl_ts.ts",
+    "check": "deno fmt --check && deno lint && deno test && deno bench --no-run",
+    "test": "deno test",
+    "bench": "deno bench",
+    "docs:check": "deno fmt --check docs packages tests benches"
+  },
+  "fmt": {
+    "lineWidth": 100,
+    "indentWidth": 2,
+    "semiColons": true,
+    "singleQuote": true
+  },
+  "lint": {
+    "rules": {
+      "tags": [
+        "recommended"
+      ]
+    }
+  }
+}

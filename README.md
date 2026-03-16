@@ -14,6 +14,14 @@ The repository is organized as a Deno workspace with packages for:
 
 The design source of truth lives in [`docs/specs`](./docs/specs) and [`docs/adr`](./docs/adr).
 
+## Documentation Map
+
+- Start at [`docs/README.md`](./docs/README.md) for a guided index across architecture, runtime,
+  schema, and contributor references.
+- Browse [`docs/specs/README.md`](./docs/specs/README.md) for design and behavior specifications.
+- Browse [`docs/adr/README.md`](./docs/adr/README.md) for accepted architectural decisions.
+- Browse [`examples/README.md`](./examples/README.md) for runnable example entry points.
+
 ## Status
 
 This is an initial scaffold that establishes package boundaries, Scene IR, residency separation,
@@ -29,9 +37,20 @@ Implemented today:
 - browser canvas example, Windows BYOW triangle example, and PNG snapshot encoding
 - device-loss observation and residency rebuild helpers
 
+## Quick Start
+
+Read in this order when onboarding:
+
+1. [`docs/specs/architecture.md`](./docs/specs/architecture.md)
+2. [`docs/specs/scene-ir.md`](./docs/specs/scene-ir.md)
+3. [`docs/specs/runtime-residency.md`](./docs/specs/runtime-residency.md)
+4. [`docs/specs/rendering.md`](./docs/specs/rendering.md)
+5. [`examples/browser_forward/README.md`](./examples/browser_forward/README.md)
+
 ## Tasks
 
 - `deno task check`: format, codegen drift check, lint, test, and bench preflight
+- `deno task docs:check`: format-check docs, packages, tests, benches, and examples content
 - `deno task generate:ir`: regenerate TypeScript from BDL IR
 - `deno task generate:ir:check`: fail when generated IR files are stale
 - `deno task setup:sdl2:windows`: download the official SDL2 Windows runtime for BYOW examples

@@ -25,3 +25,17 @@ from Scene IR so the same IR can run in browsers, Deno, and headless targets.
 - Scene evaluation is CPU and IR facing.
 - Residency preparation is device facing.
 - Render execution consumes residency and evaluated scene extracts.
+
+## Current Residency Coverage
+
+- Mesh residency is uploaded into per-attribute vertex buffers plus an optional index buffer.
+- Texture residency is uploaded into `GPUTexture`/view/sampler triples from image assets.
+- Volume residency is uploaded into 3D textures from volume assets.
+- Residency caches are keyed by IR object IDs.
+
+## Recovery
+
+- Device-local residency is invalidatable and rebuildable from
+  `AssetSource + SceneIr + EvaluatedScene`.
+- Pipeline caches are considered disposable and are cleared during rebuild.
+- Device loss is observed explicitly rather than hidden behind global runtime state.

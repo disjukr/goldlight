@@ -51,3 +51,10 @@ Avoid:
 const scene = new Scene();
 scene.add(node).render();
 ```
+
+## Performance Validation
+
+- Performance-motivated style exceptions should be backed by a benchmark or an explicit measured
+  comparison.
+- Repository benchmarks are the preferred place to justify `class` usage or mutable hot-path
+  optimizations before those patterns spread into the wider codebase.

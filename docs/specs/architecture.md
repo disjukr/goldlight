@@ -28,6 +28,19 @@ The runtime is split into explicit data and execution stages:
 - `packages/react`: declarative scene authoring that feeds the same IR/core pipeline.
 - `packages/platform`: target descriptors for browser, Deno, and headless execution.
 
+## Current Runtime Surface
+
+The current scaffold already includes:
+
+- mesh GPU residency upload and caching
+- texture GPU residency upload and caching
+- first volume GPU residency upload and extraction
+- forward frame encoding for mesh draws
+- headless snapshot readback and PNG encoding
+- browser surface binding and a bundled browser example
+- device-loss observation and residency rebuild helpers
+- benchmark coverage for key runtime paths
+
 ## Design Constraints
 
 - Public APIs are plain data + functions first.

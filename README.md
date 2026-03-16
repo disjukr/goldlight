@@ -42,8 +42,10 @@ Implemented today:
 
 - Architecture overview: [`docs/specs/architecture.md`](./docs/specs/architecture.md)
 - Rendering contracts: [`docs/specs/rendering.md`](./docs/specs/rendering.md)
-- Renderer capability model: [`docs/specs/renderer-capabilities.md`](./docs/specs/renderer-capabilities.md)
-- Runtime residency and rebuild rules: [`docs/specs/runtime-residency.md`](./docs/specs/runtime-residency.md)
+- Renderer capability model:
+  [`docs/specs/renderer-capabilities.md`](./docs/specs/renderer-capabilities.md)
+- Runtime residency and rebuild rules:
+  [`docs/specs/runtime-residency.md`](./docs/specs/runtime-residency.md)
 
 ## Quick Start
 

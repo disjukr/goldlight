@@ -23,14 +23,20 @@ const createSnapshotMocks = () => {
     createShaderModule: ({ code }: GPUShaderModuleDescriptor) =>
       ({ code }) as unknown as GPUShaderModule,
     createRenderPipeline: (descriptor: GPURenderPipelineDescriptor) =>
-      ({ descriptor }) as unknown as GPURenderPipeline,
+      ({
+        descriptor,
+        getBindGroupLayout: () => ({}) as GPUBindGroupLayout,
+      }) as unknown as GPURenderPipeline,
+    createBindGroup: () => ({}) as GPUBindGroup,
     createTexture: () => ({
       createView: () => ({ textureId: 0 } as unknown as GPUTextureView),
     } as GPUTexture),
-    createBuffer: ({ size }: GPUBufferDescriptor) => {
+    createBuffer: ({ label, size }: GPUBufferDescriptor) => {
       const bytes = new Uint8Array(size);
-      bytes.set([1, 2, 3, 4, 5, 6, 7, 8], 0);
-      bytes.set([9, 10, 11, 12, 13, 14, 15, 16], 256);
+      if (label === 'offscreen-readback-buffer') {
+        bytes.set([1, 2, 3, 4, 5, 6, 7, 8], 0);
+        bytes.set([9, 10, 11, 12, 13, 14, 15, 16], 256);
+      }
 
       return {
         mapAsync: () => Promise.resolve(),
@@ -60,6 +66,7 @@ const createSnapshotMocks = () => {
 
       return {
         beginRenderPass: () => ({
+          setBindGroup: () => undefined,
           setPipeline: () => undefined,
           setVertexBuffer: () => undefined,
           setIndexBuffer: () => undefined,
@@ -73,6 +80,7 @@ const createSnapshotMocks = () => {
   };
 
   const queue = {
+    writeBuffer: () => undefined,
     submit: (buffers: readonly GPUCommandBuffer[]) => {
       submits.push([...buffers]);
     },

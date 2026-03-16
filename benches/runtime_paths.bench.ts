@@ -141,6 +141,7 @@ const createRenderBenchContext = (): GpuRenderExecutionContext & {
     } as GPUTexture),
   } as unknown as GPUDevice,
   queue: {
+    writeBuffer: () => undefined,
     submit: () => undefined,
   },
 });

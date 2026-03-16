@@ -1,6 +1,12 @@
+struct MaterialUniforms {
+  values: array<vec4<f32>, 16>,
+};
+
 struct VsOut {
   @builtin(position) position: vec4<f32>,
 };
+
+@group(0) @binding(0) var<uniform> material: MaterialUniforms;
 
 @vertex
 fn vsMain(@location(0) position: vec3<f32>) -> VsOut {
@@ -11,5 +17,5 @@ fn vsMain(@location(0) position: vec3<f32>) -> VsOut {
 
 @fragment
 fn fsMain() -> @location(0) vec4<f32> {
-  return vec4<f32>(0.95, 0.95, 0.95, 1.0);
+  return material.values[0];
 }

@@ -2,6 +2,7 @@ import type { EvaluatedScene } from '@rieul3d/core';
 import type { Material } from '@rieul3d/ir';
 import {
   acquireColorAttachmentView,
+  ensureMaterialResidency,
   type GpuReadbackContext,
   readOffscreenSnapshot,
   type RenderContextBinding,
@@ -25,9 +26,20 @@ export type RenderPassPlan = Readonly<{
   writes: readonly string[];
 }>;
 
+export type CapabilityState = 'supported' | 'planned' | 'unsupported';
+
+export type RendererCapabilities = Readonly<{
+  mesh: CapabilityState;
+  sdf: CapabilityState;
+  volume: CapabilityState;
+  builtInMaterialKinds: readonly string[];
+  customShaders: CapabilityState;
+}>;
+
 export type Renderer = Readonly<{
   kind: RendererKind;
   label: string;
+  capabilities: RendererCapabilities;
   passes: readonly RenderPassPlan[];
 }>;
 
@@ -41,8 +53,15 @@ export type FramePlan = Readonly<{
 }>;
 
 export type GpuRenderExecutionContext = Readonly<{
-  device: Pick<GPUDevice, 'createCommandEncoder' | 'createRenderPipeline' | 'createShaderModule'>;
-  queue: Pick<GPUQueue, 'submit'>;
+  device: Pick<
+    GPUDevice,
+    | 'createBindGroup'
+    | 'createBuffer'
+    | 'createCommandEncoder'
+    | 'createRenderPipeline'
+    | 'createShaderModule'
+  >;
+  queue: Pick<GPUQueue, 'submit' | 'writeBuffer'>;
 }>;
 
 export type ForwardRenderResult = Readonly<{
@@ -73,6 +92,7 @@ export type MaterialProgram = Readonly<{
   vertexEntryPoint: string;
   fragmentEntryPoint: string;
   vertexAttributes: readonly MaterialVertexAttribute[];
+  usesMaterialBindings?: boolean;
 }>;
 
 export type MaterialRegistry = Readonly<{
@@ -84,6 +104,12 @@ export type VolumePassItem = Readonly<{
   volumeId: string;
   worldMatrix: readonly number[];
   residency: NonNullable<RuntimeResidency['volumes'] extends Map<string, infer T> ? T : never>;
+}>;
+
+export type RendererCapabilityIssue = Readonly<{
+  nodeId: string;
+  feature: 'mesh' | 'sdf' | 'volume' | 'material-kind' | 'custom-shader';
+  message: string;
 }>;
 
 const builtInUnlitProgramId = 'built-in:unlit';
@@ -100,6 +126,7 @@ const builtInUnlitProgram: MaterialProgram = {
   wgsl: builtInForwardShader,
   vertexEntryPoint: 'vsMain',
   fragmentEntryPoint: 'fsMain',
+  usesMaterialBindings: true,
   vertexAttributes: [{
     semantic: 'POSITION',
     shaderLocation: 0,
@@ -166,6 +193,13 @@ export const resolveMaterialProgram = (
 export const createForwardRenderer = (label = 'forward'): Renderer => ({
   kind: 'forward',
   label,
+  capabilities: {
+    mesh: 'supported',
+    sdf: 'unsupported',
+    volume: 'unsupported',
+    builtInMaterialKinds: ['unlit'],
+    customShaders: 'supported',
+  },
   passes: [
     { id: 'mesh', kind: 'mesh', reads: ['scene'], writes: ['color', 'depth'] },
     { id: 'raymarch', kind: 'raymarch', reads: ['scene', 'depth'], writes: ['color'] },
@@ -176,6 +210,13 @@ export const createForwardRenderer = (label = 'forward'): Renderer => ({
 export const createDeferredRenderer = (label = 'deferred'): Renderer => ({
   kind: 'deferred',
   label,
+  capabilities: {
+    mesh: 'planned',
+    sdf: 'planned',
+    volume: 'planned',
+    builtInMaterialKinds: ['unlit'],
+    customShaders: 'planned',
+  },
   passes: [
     { id: 'depth-prepass', kind: 'depth-prepass', reads: ['scene'], writes: ['depth'] },
     { id: 'gbuffer', kind: 'gbuffer', reads: ['scene', 'depth'], writes: ['gbuffer'] },
@@ -202,6 +243,73 @@ export const planFrame = (
       pass.kind === 'raymarch' ? counts.sdfNodeCount > 0 || counts.volumeNodeCount > 0 : true
     ),
   };
+};
+
+export const collectRendererCapabilityIssues = (
+  renderer: Renderer,
+  evaluatedScene: EvaluatedScene,
+): readonly RendererCapabilityIssue[] =>
+  evaluatedScene.nodes.flatMap((node) => {
+    const issues: RendererCapabilityIssue[] = [];
+
+    if (node.mesh && renderer.capabilities.mesh !== 'supported') {
+      issues.push({
+        nodeId: node.node.id,
+        feature: 'mesh',
+        message: `renderer "${renderer.label}" does not support mesh execution`,
+      });
+    }
+
+    if (node.sdf && renderer.capabilities.sdf !== 'supported') {
+      issues.push({
+        nodeId: node.node.id,
+        feature: 'sdf',
+        message: `renderer "${renderer.label}" does not support sdf execution`,
+      });
+    }
+
+    if (node.volume && renderer.capabilities.volume !== 'supported') {
+      issues.push({
+        nodeId: node.node.id,
+        feature: 'volume',
+        message: `renderer "${renderer.label}" does not support volume execution`,
+      });
+    }
+
+    if (
+      node.material &&
+      !node.material.shaderId &&
+      !renderer.capabilities.builtInMaterialKinds.includes(node.material.kind)
+    ) {
+      issues.push({
+        nodeId: node.node.id,
+        feature: 'material-kind',
+        message:
+          `renderer "${renderer.label}" does not support built-in material kind "${node.material.kind}"`,
+      });
+    }
+
+    if (node.material?.shaderId && renderer.capabilities.customShaders !== 'supported') {
+      issues.push({
+        nodeId: node.node.id,
+        feature: 'custom-shader',
+        message: `renderer "${renderer.label}" does not support custom shader materials`,
+      });
+    }
+
+    return issues;
+  });
+
+export const assertRendererSceneCapabilities = (
+  renderer: Renderer,
+  evaluatedScene: EvaluatedScene,
+): void => {
+  const issues = collectRendererCapabilityIssues(renderer, evaluatedScene);
+  if (issues.length === 0) {
+    return;
+  }
+
+  throw new Error(issues.map((issue) => `[${issue.nodeId}] ${issue.message}`).join('\n'));
 };
 
 export const extractVolumePassItems = (
@@ -272,6 +380,15 @@ export const ensureMaterialPipeline = (
   return pipeline;
 };
 
+const createDefaultMaterial = (): Material => ({
+  id: 'built-in:default-unlit-material',
+  kind: 'unlit',
+  textures: [],
+  parameters: {
+    color: { x: 0.95, y: 0.95, z: 0.95, w: 1 },
+  },
+});
+
 export const renderForwardFrame = (
   context: GpuRenderExecutionContext,
   binding: RenderContextBinding,
@@ -279,6 +396,7 @@ export const renderForwardFrame = (
   evaluatedScene: EvaluatedScene,
   materialRegistry = createMaterialRegistry(),
 ): ForwardRenderResult => {
+  assertRendererSceneCapabilities(createForwardRenderer(), evaluatedScene);
   const view = acquireColorAttachmentView(binding);
   const encoder = context.device.createCommandEncoder({
     label: 'forward-frame',
@@ -304,6 +422,7 @@ export const renderForwardFrame = (
       continue;
     }
 
+    const material = node.material ?? createDefaultMaterial();
     const program = resolveMaterialProgram(materialRegistry, node.material);
     const pipeline = ensureMaterialPipeline(context, residency, program, binding.target.format);
 
@@ -329,6 +448,20 @@ export const renderForwardFrame = (
     }
 
     pass.setPipeline(pipeline);
+
+    if (program.usesMaterialBindings) {
+      const materialResidency = ensureMaterialResidency(context, residency, material);
+      const bindGroup = context.device.createBindGroup({
+        layout: pipeline.getBindGroupLayout(0),
+        entries: [{
+          binding: 0,
+          resource: {
+            buffer: materialResidency.uniformBuffer,
+          },
+        }],
+      });
+      pass.setBindGroup(0, bindGroup);
+    }
 
     if (geometry.indexBuffer && geometry.indexCount > 0) {
       pass.setIndexBuffer(geometry.indexBuffer, 'uint32');

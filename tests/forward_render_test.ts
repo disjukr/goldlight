@@ -14,10 +14,16 @@ import {
 import { createHeadlessTarget } from '@rieul3d/platform';
 
 type MockBuffer = Readonly<{ id: number }>;
-type MockPipeline = Readonly<{ id: number; descriptor: GPURenderPipelineDescriptor }>;
+type MockBindGroup = Readonly<{ id: number }>;
+type MockPipeline = Readonly<{
+  id: number;
+  descriptor: GPURenderPipelineDescriptor;
+  getBindGroupLayout: (index: number) => GPUBindGroupLayout;
+}>;
 type MockShader = Readonly<{ code: string }>;
 type MockPassAction =
   | Readonly<{ type: 'setPipeline'; pipeline: MockPipeline }>
+  | Readonly<{ type: 'setBindGroup'; index: number; bindGroup: MockBindGroup }>
   | Readonly<{ type: 'setVertexBuffer'; slot: number; buffer: MockBuffer }>
   | Readonly<{ type: 'setIndexBuffer'; buffer: MockBuffer; format: GPUIndexFormat }>
   | Readonly<{ type: 'draw'; vertexCount: number }>
@@ -27,6 +33,8 @@ type MockPassAction =
 const createRenderMocks = () => {
   const pipelines: MockPipeline[] = [];
   const shaders: MockShader[] = [];
+  const buffers: MockBuffer[] = [];
+  const bindGroups: MockBindGroup[] = [];
   const submits: unknown[][] = [];
   const passActions: MockPassAction[] = [];
 
@@ -37,14 +45,35 @@ const createRenderMocks = () => {
       return shader as unknown as GPUShaderModule;
     },
     createRenderPipeline: (descriptor: GPURenderPipelineDescriptor) => {
-      const pipeline = { id: pipelines.length, descriptor };
+      const pipeline: MockPipeline = {
+        id: pipelines.length,
+        descriptor,
+        getBindGroupLayout: () => ({}) as GPUBindGroupLayout,
+      };
       pipelines.push(pipeline);
       return pipeline as unknown as GPURenderPipeline;
+    },
+    createBuffer: () => {
+      const buffer = { id: buffers.length };
+      buffers.push(buffer);
+      return buffer as unknown as GPUBuffer;
+    },
+    createBindGroup: () => {
+      const bindGroup = { id: bindGroups.length };
+      bindGroups.push(bindGroup);
+      return bindGroup as unknown as GPUBindGroup;
     },
     createCommandEncoder: () => ({
       beginRenderPass: () => ({
         setPipeline: (pipeline: GPURenderPipeline) => {
           passActions.push({ type: 'setPipeline', pipeline: pipeline as unknown as MockPipeline });
+        },
+        setBindGroup: (index: number, bindGroup: GPUBindGroup) => {
+          passActions.push({
+            type: 'setBindGroup',
+            index,
+            bindGroup: bindGroup as unknown as MockBindGroup,
+          });
         },
         setVertexBuffer: (slot: number, buffer: GPUBuffer) => {
           passActions.push({
@@ -78,12 +107,13 @@ const createRenderMocks = () => {
   };
 
   const queue = {
+    writeBuffer: () => undefined,
     submit: (buffers: readonly GPUCommandBuffer[]) => {
       submits.push([...buffers]);
     },
   };
 
-  return { device, queue, pipelines, shaders, submits, passActions };
+  return { device, queue, pipelines, shaders, buffers, bindGroups, submits, passActions };
 };
 
 Deno.test('ensureBuiltInForwardPipeline caches the generated pipeline', () => {
@@ -158,6 +188,10 @@ Deno.test('renderForwardFrame encodes indexed and non-indexed draws from mesh re
   assertEquals(
     mocks.passActions.filter((action) => action.type === 'draw').length,
     1,
+  );
+  assertEquals(
+    mocks.passActions.filter((action) => action.type === 'setBindGroup').length,
+    2,
   );
 });
 

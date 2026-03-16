@@ -1,5 +1,5 @@
 import type { EvaluatedScene } from '@rieul3d/core';
-import type { MeshAttribute, MeshPrimitive, SceneIr } from '@rieul3d/ir';
+import type { Material, MeshAttribute, MeshPrimitive, SceneIr } from '@rieul3d/ir';
 
 export type ImageAsset = Readonly<{
   id: string;
@@ -47,6 +47,13 @@ export type GeometryResidency = Readonly<{
   indexCount: number;
 }>;
 
+export type MaterialResidency = Readonly<{
+  materialId: string;
+  parameterNames: readonly string[];
+  uniformData: Float32Array;
+  uniformBuffer: GPUBuffer;
+}>;
+
 export type VolumeResidency = Readonly<{
   volumeId: string;
   texture: GPUTexture;
@@ -61,6 +68,7 @@ export type VolumeResidency = Readonly<{
 export type RuntimeResidency = {
   readonly textures: Map<string, TextureResidency>;
   readonly geometry: Map<string, GeometryResidency>;
+  readonly materials: Map<string, MaterialResidency>;
   readonly volumes: Map<string, VolumeResidency>;
   readonly pipelines: Map<string, GPURenderPipeline | GPUComputePipeline>;
 };
@@ -68,6 +76,7 @@ export type RuntimeResidency = {
 export const createRuntimeResidency = (): RuntimeResidency => ({
   textures: new Map(),
   geometry: new Map(),
+  materials: new Map(),
   volumes: new Map(),
   pipelines: new Map(),
 });
@@ -88,6 +97,7 @@ export const describeResidencyInputs = (
 export const invalidateResidency = (residency: RuntimeResidency): RuntimeResidency => {
   residency.textures.clear();
   residency.geometry.clear();
+  residency.materials.clear();
   residency.volumes.clear();
   residency.pipelines.clear();
   return residency;
@@ -105,6 +115,13 @@ export type GpuTextureUploadContext = Readonly<{
 
 export type RuntimeResidencyRebuildContext = GpuUploadContext & GpuTextureUploadContext;
 
+export type MaterialUploadPlan = Readonly<{
+  materialId: string;
+  parameterNames: readonly string[];
+  uniformData: Float32Array;
+  byteLength: number;
+}>;
+
 export type MeshBufferLayout = Readonly<{
   semantic: string;
   itemSize: number;
@@ -121,9 +138,13 @@ export type MeshUploadPlan = Readonly<{
 
 const vertexUsage = 0x20;
 const indexUsage = 0x10;
+const uniformUsage = 0x40;
 const textureBindingUsage = 0x04;
 const bufferCopyDstUsage = 0x08;
 const textureCopyDstUsage = 0x02;
+const materialParameterSlots = 16;
+const floatsPerVec4 = 4;
+const defaultMaterialColor = [0.95, 0.95, 0.95, 1] as const;
 
 const createAttributeArray = (attribute: MeshAttribute): Float32Array =>
   Float32Array.from(attribute.values);
@@ -218,6 +239,83 @@ export const ensureSceneMeshResidency = (
     }
 
     ensureMeshResidency(context, residency, mesh);
+  }
+
+  return residency;
+};
+
+const getMaterialParameterNames = (material: Material): readonly string[] => {
+  const names = Object.keys(material.parameters).filter((name) => name !== 'color').sort();
+  return material.parameters.color ? ['color', ...names] : names;
+};
+
+export const createMaterialUploadPlan = (material: Material): MaterialUploadPlan => {
+  const parameterNames = getMaterialParameterNames(material).slice(0, materialParameterSlots);
+  const uniformData = new Float32Array(materialParameterSlots * floatsPerVec4);
+
+  if (parameterNames.length === 0) {
+    uniformData.set(defaultMaterialColor, 0);
+  }
+
+  for (let index = 0; index < parameterNames.length; index += 1) {
+    const value = material.parameters[parameterNames[index]];
+    uniformData.set([value.x, value.y, value.z, value.w], index * floatsPerVec4);
+  }
+
+  return {
+    materialId: material.id,
+    parameterNames,
+    uniformData,
+    byteLength: uniformData.byteLength,
+  };
+};
+
+export const uploadMaterialResidency = (
+  context: GpuUploadContext,
+  material: Material,
+): MaterialResidency => {
+  const plan = createMaterialUploadPlan(material);
+  const uniformBuffer = context.device.createBuffer({
+    label: `${material.id}:uniforms`,
+    size: plan.byteLength,
+    usage: uniformUsage | bufferCopyDstUsage,
+  });
+  context.queue.writeBuffer(uniformBuffer, 0, toArrayBuffer(plan.uniformData));
+
+  return {
+    materialId: material.id,
+    parameterNames: plan.parameterNames,
+    uniformData: plan.uniformData,
+    uniformBuffer,
+  };
+};
+
+export const ensureMaterialResidency = (
+  context: GpuUploadContext,
+  residency: RuntimeResidency,
+  material: Material,
+): MaterialResidency => {
+  const cached = residency.materials.get(material.id);
+  if (cached) {
+    return cached;
+  }
+
+  const uploaded = uploadMaterialResidency(context, material);
+  residency.materials.set(material.id, uploaded);
+  return uploaded;
+};
+
+export const ensureSceneMaterialResidency = (
+  context: GpuUploadContext,
+  residency: RuntimeResidency,
+  evaluatedScene: EvaluatedScene,
+): RuntimeResidency => {
+  for (const node of evaluatedScene.nodes) {
+    if (!node.material) {
+      continue;
+    }
+
+    ensureMaterialResidency(context, residency, node.material);
   }
 
   return residency;
@@ -508,6 +606,7 @@ export const rebuildRuntimeResidency = (
 ): RuntimeResidency => {
   invalidateResidency(residency);
   ensureSceneMeshResidency(context, residency, scene, evaluatedScene);
+  ensureSceneMaterialResidency(context, residency, evaluatedScene);
   ensureSceneTextureResidency(context, residency, scene, assetSource);
   ensureSceneVolumeResidency(context, residency, scene, assetSource);
   return residency;

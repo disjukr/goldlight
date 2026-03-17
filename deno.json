@@ -28,8 +28,8 @@
     "bench": "deno bench --unstable-raw-imports",
     "docs:check": "deno fmt --check docs packages tests benches examples",
     "setup:sdl2:windows": "powershell -ExecutionPolicy Bypass -File ./scripts/install_sdl2_windows.ps1",
-    "example:byow:check": "deno check --unstable-ffi --unstable-webgpu --unstable-raw-imports ./examples/byow_triangle/main.ts",
-    "example:byow:run": "deno run -A --unstable-ffi --unstable-webgpu --unstable-raw-imports ./scripts/run_byow_triangle.ts",
+    "example:byow:check": "deno check --unstable-ffi --unstable-webgpu --unstable-raw-imports ./examples/byow_native_demo/main.ts",
+    "example:byow:run": "deno run -A --unstable-ffi --unstable-webgpu --unstable-raw-imports ./scripts/run_byow_native_demo.ts",
     "example:browser:build": "deno bundle --platform browser --unstable-raw-imports -o ./examples/browser_forward/dist/main.js ./examples/browser_forward/main.ts",
     "example:browser:serve": "deno run -A jsr:@std/http@1/file-server ."
   },

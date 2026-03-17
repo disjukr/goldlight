@@ -7,7 +7,11 @@ import {
   getRenderTargetByteSize,
   getRenderTargetSize,
 } from '@rieul3d/gpu';
-import { createBrowserSurfaceTarget, createHeadlessTarget } from '@rieul3d/platform';
+import {
+  createBrowserSurfaceTarget,
+  createDenoSurfaceTarget,
+  createHeadlessTarget,
+} from '@rieul3d/platform';
 
 type MockTexture = Readonly<{
   id: number;
@@ -136,6 +140,12 @@ Deno.test('surface/offscreen helpers reject mismatched target kinds and expose t
     )
   );
 
+  assertEquals(createDenoSurfaceTarget(12, 6), {
+    kind: 'surface',
+    width: 12,
+    height: 6,
+    format: 'bgra8unorm',
+  });
   assertEquals(getRenderTargetSize(createHeadlessTarget(8, 4)), { width: 8, height: 4 });
   assertEquals(getRenderTargetByteSize(createHeadlessTarget(8, 4)), 128);
 });

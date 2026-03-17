@@ -1,6 +1,10 @@
 struct SdfItem {
-  centerRadius: vec4<f32>,
+  centerOp: vec4<f32>,
+  halfExtentsRadius: vec4<f32>,
   color: vec4<f32>,
+  worldToLocalRow0: vec4<f32>,
+  worldToLocalRow1: vec4<f32>,
+  worldToLocalRow2: vec4<f32>,
 };
 
 struct SdfUniforms {
@@ -41,7 +45,19 @@ fn sceneSdf(point: vec3<f32>) -> vec4<f32> {
 
   for (var index: u32 = 0u; index < itemCount; index = index + 1u) {
     let item = sdf.items[index];
-    let distance = length(point - item.centerRadius.xyz) - item.centerRadius.w;
+    let centeredPoint = point - item.centerOp.xyz;
+    var distance = length(centeredPoint) - item.halfExtentsRadius.w;
+
+    if (item.centerOp.w > 0.5) {
+      let localPoint = vec3<f32>(
+        dot(item.worldToLocalRow0.xyz, centeredPoint),
+        dot(item.worldToLocalRow1.xyz, centeredPoint),
+        dot(item.worldToLocalRow2.xyz, centeredPoint),
+      );
+      let q = abs(localPoint) - item.halfExtentsRadius.xyz;
+      distance = length(max(q, vec3<f32>(0.0))) + min(max(q.x, max(q.y, q.z)), 0.0);
+    }
+
     if (distance < minDistance) {
       minDistance = distance;
       color = item.color;

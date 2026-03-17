@@ -240,21 +240,41 @@ Deno.test('renderForwardFrame encodes indexed and non-indexed draws from mesh re
   );
 });
 
-Deno.test('renderForwardFrame encodes a dedicated sdf raymarch pass for supported sphere nodes', () => {
+Deno.test('renderForwardFrame encodes a dedicated sdf raymarch pass for supported sphere and box nodes', () => {
   const mocks = createRenderMocks();
   const runtimeResidency = createRuntimeResidency();
   let scene = createSceneIr('scene');
   scene = {
     ...scene,
-    sdfPrimitives: [{
-      id: 'sdf-sphere',
-      op: 'sphere',
-      parameters: {
-        radius: { x: 0.75, y: 0, z: 0, w: 0 },
+    sdfPrimitives: [
+      {
+        id: 'sdf-sphere',
+        op: 'sphere',
+        parameters: {
+          radius: { x: 0.75, y: 0, z: 0, w: 0 },
+        },
       },
-    }],
+      {
+        id: 'sdf-box',
+        op: 'box',
+        parameters: {
+          size: { x: 0.3, y: 0.4, z: 0.5, w: 0 },
+        },
+      },
+    ],
   };
   scene = appendNode(scene, createNode('sdf-node', { sdfId: 'sdf-sphere' }));
+  scene = appendNode(
+    scene,
+    createNode('box-node', {
+      sdfId: 'sdf-box',
+      transform: {
+        translation: { x: 0.5, y: 0.25, z: -0.5 },
+        rotation: { x: 0, y: 0, z: 0.70710678, w: 0.70710678 },
+        scale: { x: 2, y: 1.5, z: 1 },
+      },
+    }),
+  );
 
   const binding = createOffscreenContext({
     device: mocks.device as unknown as GPUDevice,

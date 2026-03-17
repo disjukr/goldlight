@@ -33,6 +33,7 @@ Implemented today:
 - BDL-driven `SceneIr` generation with drift checks in CI
 - mesh, texture, first volume residency upload paths, and first volume raymarch execution
 - forward rendering, first SDF raymarch execution, and headless snapshot readback
+- forward SDF sphere and box raymarch execution with capability preflight alignment
 - built-in unlit material registration, evaluated mesh transform uploads, base-color texture
   sampling, material parameter uploads, custom WGSL registration, declared material texture
   bindings, and residency-aware custom texture binding validation

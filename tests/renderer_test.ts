@@ -1,4 +1,4 @@
-import { assertEquals, assertThrows } from 'jsr:@std/assert@^1.0.14';
+import { assertAlmostEquals, assertEquals, assertThrows } from 'jsr:@std/assert@^1.0.14';
 import { evaluateScene } from '@rieul3d/core';
 import { createRuntimeResidency } from '@rieul3d/gpu';
 import { appendMaterial, appendMesh, appendNode, createNode, createSceneIr } from '@rieul3d/ir';
@@ -165,7 +165,7 @@ Deno.test('extractVolumePassItems returns only evaluated volumes with residency'
   assertEquals(items[0].volumeId, 'volume-0');
 });
 
-Deno.test('extractSdfPassItems returns supported sphere sdf nodes with derived bounds', () => {
+Deno.test('extractSdfPassItems returns supported sphere and box sdf nodes with derived bounds', () => {
   let scene = createSceneIr('scene');
   scene = {
     ...scene,
@@ -181,7 +181,10 @@ Deno.test('extractSdfPassItems returns supported sphere sdf nodes with derived b
       {
         id: 'sdf-box',
         op: 'box',
-        parameters: {},
+        parameters: {
+          size: { x: 1, y: 2, z: 3, w: 0 },
+          color: { x: 1, y: 0.2, z: 0.1, w: 1 },
+        },
       },
     ],
   };
@@ -196,18 +199,48 @@ Deno.test('extractSdfPassItems returns supported sphere sdf nodes with derived b
       },
     }),
   );
-  scene = appendNode(scene, createNode('box-node', { sdfId: 'sdf-box' }));
+  scene = appendNode(
+    scene,
+    createNode('box-node', {
+      sdfId: 'sdf-box',
+      transform: {
+        translation: { x: -2, y: 0, z: 1 },
+        rotation: { x: 0, y: 0, z: 0.70710678, w: 0.70710678 },
+        scale: { x: 4, y: 5, z: 6 },
+      },
+    }),
+  );
 
   const items = extractSdfPassItems(evaluateScene(scene, { timeMs: 0 }));
 
-  assertEquals(items, [{
+  assertEquals(items[0], {
     nodeId: 'sphere-node',
     sdfId: 'sdf-sphere',
     op: 'sphere',
     center: [1, 2, 3],
     radius: 4,
+    halfExtents: [1, 1, 1],
     color: [0.4, 0.8, 1, 1],
-  }]);
+    worldToLocalRotation: [1, 0, 0, 0, 1, 0, 0, 0, 1],
+  });
+  assertEquals(items[1].nodeId, 'box-node');
+  assertEquals(items[1].sdfId, 'sdf-box');
+  assertEquals(items[1].op, 'box');
+  assertEquals(items[1].center, [-2, 0, 1]);
+  assertEquals(items[1].color, [1, 0.2, 0.1, 1]);
+  assertAlmostEquals(items[1].radius, 2.5, 1e-6);
+  assertAlmostEquals(items[1].halfExtents[0], 4, 1e-6);
+  assertAlmostEquals(items[1].halfExtents[1], 10, 1e-6);
+  assertAlmostEquals(items[1].halfExtents[2], 18, 1e-6);
+  assertAlmostEquals(items[1].worldToLocalRotation[0], 0, 1e-6);
+  assertAlmostEquals(items[1].worldToLocalRotation[1], 1, 1e-6);
+  assertAlmostEquals(items[1].worldToLocalRotation[2], 0, 1e-6);
+  assertAlmostEquals(items[1].worldToLocalRotation[3], -1, 1e-6);
+  assertAlmostEquals(items[1].worldToLocalRotation[4], 0, 1e-6);
+  assertAlmostEquals(items[1].worldToLocalRotation[5], 0, 1e-6);
+  assertAlmostEquals(items[1].worldToLocalRotation[6], 0, 1e-6);
+  assertAlmostEquals(items[1].worldToLocalRotation[7], 0, 1e-6);
+  assertAlmostEquals(items[1].worldToLocalRotation[8], 1, 1e-6);
 });
 
 Deno.test('collectRendererCapabilityIssues accepts the current forward primitive mix', () => {
@@ -249,7 +282,7 @@ Deno.test('collectRendererCapabilityIssues accepts the current forward primitive
   assertEquals(issues, []);
 });
 
-Deno.test('collectRendererCapabilityIssues rejects unsupported sdf ops for execution', () => {
+Deno.test('collectRendererCapabilityIssues accepts supported box sdf ops for execution', () => {
   let scene = createSceneIr('scene');
   scene = {
     ...scene,
@@ -262,13 +295,7 @@ Deno.test('collectRendererCapabilityIssues rejects unsupported sdf ops for execu
     evaluateScene(scene, { timeMs: 0 }),
   );
 
-  assertEquals(issues, [{
-    nodeId: 'sdf-node',
-    feature: 'sdf',
-    requirement: 'sdf-op:box',
-    message:
-      'renderer "forward" only supports sphere sdf primitives right now; node "sdf-node" requested "box"',
-  }]);
+  assertEquals(issues, []);
 });
 
 Deno.test('collectRendererCapabilityIssues reports binding-specific failures in one pass', () => {
@@ -277,7 +304,7 @@ Deno.test('collectRendererCapabilityIssues reports binding-specific failures in 
   let scene = createSceneIr('scene');
   scene = {
     ...scene,
-    sdfPrimitives: [{ id: 'sdf-0', op: 'box', parameters: {} }],
+    sdfPrimitives: [{ id: 'sdf-0', op: 'torus', parameters: {} }],
   };
   scene = appendMaterial(scene, {
     id: 'material-custom',
@@ -324,9 +351,9 @@ Deno.test('collectRendererCapabilityIssues reports binding-specific failures in 
     {
       nodeId: 'sdf-node',
       feature: 'sdf',
-      requirement: 'sdf-op:box',
+      requirement: 'sdf-op:torus',
       message:
-        'renderer "forward" only supports sphere sdf primitives right now; node "sdf-node" requested "box"',
+        'renderer "forward" only supports sphere and box sdf primitives right now; node "sdf-node" requested "torus"',
     },
   ]);
 });

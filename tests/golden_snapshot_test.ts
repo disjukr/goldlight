@@ -15,6 +15,9 @@ import clearOnlyFrameFixture from './fixtures/golden-snapshots/clear-only-frame.
 import recoveryVolumeFrameFixture from './fixtures/golden-snapshots/recovery-volume-frame.png' with {
   type: 'bytes',
 };
+import sdfBoxFrameFixture from './fixtures/golden-snapshots/sdf-box-frame.png' with {
+  type: 'bytes',
+};
 import sdfSphereFrameFixture from './fixtures/golden-snapshots/sdf-sphere-frame.png' with {
   type: 'bytes',
 };
@@ -26,6 +29,7 @@ import volumeFrameFixture from './fixtures/golden-snapshots/volume-frame.png' wi
 };
 import {
   createClearScene,
+  createSdfBoxScene,
   createSdfSphereScene,
   createSolidQuadScene,
   createVolumeScene,
@@ -264,6 +268,13 @@ Deno.test('golden snapshot fixture matches the solid quad frame', async () => {
 Deno.test('golden snapshot fixture matches the sdf sphere frame', async () => {
   const clearSnapshotBytes = await requestClearSnapshotBytes();
   await assertGoldenSnapshot('sdf-sphere-frame', createSdfSphereScene, sdfSphereFrameFixture, {
+    clearSnapshotBytes,
+  });
+});
+
+Deno.test('golden snapshot fixture matches the sdf box frame', async () => {
+  const clearSnapshotBytes = await requestClearSnapshotBytes();
+  await assertGoldenSnapshot('sdf-box-frame', createSdfBoxScene, sdfBoxFrameFixture, {
     clearSnapshotBytes,
   });
 });

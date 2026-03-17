@@ -43,8 +43,9 @@ Implemented today:
 - browser canvas examples, Windows BYOW native textured demo, headless PNG snapshot workflow, and
   PNG snapshot encoding
 - a browser React authoring example that lowers declarative nodes into Scene IR before rendering
-- fixture-backed golden snapshot regression tests for clear, mesh, SDF, volume, and recovery rebuild
-  renders, including guards against raymarch fixtures collapsing back to clear-only output
+- fixture-backed golden snapshot regression tests for clear, mesh, sphere/box SDF, volume, and
+  recovery rebuild renders, including guards against raymarch fixtures collapsing back to clear-only
+  output
 - device-loss observation and residency rebuild helpers plus end-to-end offscreen recovery coverage
 - benchmark coverage for residency, material binding, and renderer capability preflight paths
 - renderer capability preflight for primitive and material compatibility

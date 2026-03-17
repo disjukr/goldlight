@@ -17,6 +17,11 @@ submitted on the new device.
 These helpers are intentionally small. They do not hide adapter/device negotiation or surface
 reconfiguration behind a global runtime singleton.
 
+Separately from device loss, surface-backed contexts may lose presentation configuration because of
+window-system events. In that narrower case `acquireColorAttachmentView(...)` retries once after
+reconfiguring the existing surface binding; callers do not need to rebuild residency when the device
+itself is still valid.
+
 ## Ownership Rules
 
 - `SceneIr`, source assets, and evaluated scene results remain the source of truth.

@@ -117,6 +117,9 @@ const mapReadUsage = 0x0001;
 const bufferCopyDstUsage = 0x0008;
 const bytesPerRowAlignment = 256;
 
+const isDroppedSurfacePresentationError = (error: unknown): error is DOMException =>
+  error instanceof DOMException && error.name === 'InvalidStateError';
+
 export const configureSurfaceContext = (
   context: Pick<GpuContext, 'device' | 'target'>,
   canvasContext: GPUCanvasContext,
@@ -184,10 +187,7 @@ export const acquireColorAttachmentView = (binding: RenderContextBinding): GPUTe
     try {
       return binding.canvasContext.getCurrentTexture().createView();
     } catch (error) {
-      if (
-        error instanceof Error &&
-        error.message.includes('Surface is not configured for presentation')
-      ) {
+      if (isDroppedSurfacePresentationError(error)) {
         binding.canvasContext.configure({
           device: binding.device,
           format: binding.target.format,

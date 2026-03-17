@@ -281,7 +281,7 @@ Deno.test('renderForwardFrame encodes a dedicated sdf raymarch pass for supporte
   );
 });
 
-Deno.test('renderForwardFrame encodes a dedicated volume raymarch pass for volume nodes with residency', () => {
+Deno.test('renderForwardFrame keeps rotated volume nodes in local raymarch space', () => {
   const mocks = createRenderMocks();
   const runtimeResidency = createRuntimeResidency();
   let scene = createSceneIr('scene');
@@ -294,7 +294,17 @@ Deno.test('renderForwardFrame encodes a dedicated volume raymarch pass for volum
       format: 'density:r8unorm',
     }],
   };
-  scene = appendNode(scene, createNode('volume-node', { volumeId: 'volume-0' }));
+  scene = appendNode(
+    scene,
+    createNode('volume-node', {
+      volumeId: 'volume-0',
+      transform: {
+        translation: { x: 1, y: 2, z: 3 },
+        rotation: { x: 0, y: 0, z: 0.70710678, w: 0.70710678 },
+        scale: { x: 2, y: 4, z: 6 },
+      },
+    }),
+  );
 
   runtimeResidency.volumes.set('volume-0', {
     volumeId: 'volume-0',
@@ -328,6 +338,31 @@ Deno.test('renderForwardFrame encodes a dedicated volume raymarch pass for volum
   );
   assertEquals(mocks.bindGroupEntries.length, 1);
   assertEquals(mocks.bindGroupEntries[0].map((entry) => entry.binding), [0, 1, 2]);
+  const volumeUniformData = mocks.writeBufferCalls
+    .filter((call) => call.bytes.byteLength === 64)
+    .map((call) => new Float32Array(call.bytes.buffer.slice(0)));
+  assertEquals(volumeUniformData.length, 1);
+  const expected = [
+    0,
+    -0.25,
+    0,
+    0,
+    0.5,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1 / 6,
+    0,
+    -1,
+    0.25,
+    -0.5,
+    1,
+  ];
+  volumeUniformData[0].forEach((value, index) => {
+    assertAlmostEquals(value, expected[index], 1e-5);
+  });
 });
 
 Deno.test('material registry resolves built-in and custom WGSL programs', () => {

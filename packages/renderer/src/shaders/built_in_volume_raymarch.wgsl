@@ -1,6 +1,5 @@
 struct VolumeUniforms {
-  center: vec4<f32>,
-  halfExtent: vec4<f32>,
+  worldToLocal: mat4x4<f32>,
 };
 
 struct VsOut {
@@ -43,13 +42,23 @@ fn intersectBox(
   return vec2<f32>(enter, exit);
 }
 
+fn transformPoint(matrix: mat4x4<f32>, point: vec3<f32>) -> vec3<f32> {
+  return (matrix * vec4<f32>(point, 1.0)).xyz;
+}
+
+fn transformVector(matrix: mat4x4<f32>, vector: vec3<f32>) -> vec3<f32> {
+  return (matrix * vec4<f32>(vector, 0.0)).xyz;
+}
+
 @fragment
 fn fsMain(in: VsOut) -> @location(0) vec4<f32> {
   let cameraOrigin = vec3<f32>(0.0, 0.0, 2.5);
   let rayDirection = normalize(vec3<f32>(in.uv.x, -in.uv.y, -1.75));
-  let boxMin = volume.center.xyz - volume.halfExtent.xyz;
-  let boxMax = volume.center.xyz + volume.halfExtent.xyz;
-  let hit = intersectBox(cameraOrigin, rayDirection, boxMin, boxMax);
+  let localOrigin = transformPoint(volume.worldToLocal, cameraOrigin);
+  let localDirection = transformVector(volume.worldToLocal, rayDirection);
+  let boxMin = vec3<f32>(-0.5, -0.5, -0.5);
+  let boxMax = vec3<f32>(0.5, 0.5, 0.5);
+  let hit = intersectBox(localOrigin, localDirection, boxMin, boxMax);
 
   if (hit.x >= hit.y) {
     return vec4<f32>(0.0);
@@ -61,8 +70,8 @@ fn fsMain(in: VsOut) -> @location(0) vec4<f32> {
 
   for (var step: u32 = 0u; step < 24u; step = step + 1u) {
     let travel = hit.x + (stepSize * (f32(step) + 0.5));
-    let point = cameraOrigin + (rayDirection * travel);
-    let uvw = ((point - boxMin) / (boxMax - boxMin));
+    let point = localOrigin + (localDirection * travel);
+    let uvw = point + vec3<f32>(0.5, 0.5, 0.5);
     let density = textureSampleLevel(volumeTexture, volumeSampler, uvw, 0.0).r;
     let opacity = density * 0.2;
     let color = vec3<f32>(density * 0.35, density * 0.75, density);

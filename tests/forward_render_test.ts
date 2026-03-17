@@ -1496,3 +1496,76 @@ Deno.test('renderForwardFrame uploads parented mesh transforms after scene evalu
   assertAlmostEquals(uploadedMatrix[28] ?? 0, 0, 1e-5);
   assertAlmostEquals(uploadedMatrix[31] ?? 0, 1, 1e-5);
 });
+
+Deno.test('renderDeferredFrame composites sdf and volume raymarch passes after deferred lighting', () => {
+  const mocks = createRenderMocks();
+  const runtimeResidency = createRuntimeResidency();
+  let scene = createSceneIr('scene');
+  scene = appendMesh(scene, {
+    id: 'mesh-deferred',
+    attributes: [
+      { semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0, 0, 1, 0] },
+      { semantic: 'NORMAL', itemSize: 3, values: [0, 0, 1, 0, 0, 1, 0, 0, 1] },
+    ],
+  });
+  scene = appendNode(scene, createNode('mesh-node', { meshId: 'mesh-deferred' }));
+  scene = {
+    ...scene,
+    sdfPrimitives: [{
+      id: 'sdf-0',
+      op: 'sphere',
+      parameters: {
+        radius: { x: 0.5, y: 0, z: 0, w: 0 },
+      },
+    }],
+    volumePrimitives: [{
+      id: 'volume-0',
+      assetId: 'volume-asset-0',
+      dimensions: { x: 4, y: 4, z: 4 },
+      format: 'density:r8unorm',
+    }],
+  };
+  scene = appendNode(scene, createNode('sdf-node', { sdfId: 'sdf-0' }));
+  scene = appendNode(scene, createNode('volume-node', { volumeId: 'volume-0' }));
+
+  runtimeResidency.geometry.set('mesh-deferred', {
+    meshId: 'mesh-deferred',
+    attributeBuffers: {
+      POSITION: { id: 0 } as unknown as GPUBuffer,
+      NORMAL: { id: 1 } as unknown as GPUBuffer,
+    },
+    vertexCount: 3,
+    indexCount: 0,
+  });
+  runtimeResidency.volumes.set('volume-0', {
+    volumeId: 'volume-0',
+    texture: { id: 0 } as unknown as GPUTexture,
+    view: { id: 1 } as unknown as GPUTextureView,
+    sampler: { id: 2 } as unknown as GPUSampler,
+    width: 4,
+    height: 4,
+    depth: 4,
+    format: 'r8unorm',
+  });
+
+  const binding = createOffscreenContext({
+    device: mocks.device as unknown as GPUDevice,
+    target: createHeadlessTarget(64, 64),
+  });
+
+  const result = renderDeferredFrame(
+    mocks as unknown as GpuRenderExecutionContext,
+    binding,
+    runtimeResidency,
+    evaluateScene(scene, { timeMs: 0 }),
+  );
+
+  assertEquals(result.drawCount, 5);
+  assertEquals(result.submittedCommandBufferCount, 1);
+  assertEquals(mocks.renderPassCount.current, 5);
+  assertEquals(mocks.pipelines.length, 5);
+  assertEquals(
+    mocks.passActions.filter((action) => action.type === 'draw').length,
+    5,
+  );
+});

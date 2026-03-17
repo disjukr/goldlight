@@ -100,8 +100,8 @@ volume raymarch passes are encoded in the forward renderer.
 The deferred renderer declares:
 
 - `mesh: supported`
-- `sdf: unsupported`
-- `volume: unsupported`
+- `sdf: supported`
+- `volume: supported`
 - `light: unsupported`
 - `builtInMaterialKinds: ['unlit']`
 - `customShaders: supported`
@@ -115,8 +115,10 @@ This now matches the implemented minimal deferred path:
   `TEXCOORD_0`
 - registered custom WGSL materials may also execute in the G-buffer pass when they provide
   compatible transform bindings, fragment outputs, and declared material bindings
-- SDF and volume primitives remain outside the deferred execution surface and fail preflight with
-  explicit diagnostics
+- SDF sphere/box primitives and resident volumes are composited afterward through the existing
+  raymarch passes, so deferred frames can execute hybrid mesh-plus-raymarch scenes
+- scene lights and built-in `lit` materials still remain outside the deferred execution surface and
+  fail preflight with explicit diagnostics
 
 ## Relationship To Other Specs
 

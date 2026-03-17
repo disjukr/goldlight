@@ -228,6 +228,42 @@ Deno.test('deferred renderer plans only the implemented mesh passes', () => {
   ]);
 });
 
+Deno.test('deferred renderer plans a hybrid raymarch pass when sdf or volume nodes are present', () => {
+  let scene = createSceneIr('scene');
+  scene = {
+    ...scene,
+    sdfPrimitives: [{
+      id: 'sdf-0',
+      op: 'sphere',
+      parameters: {
+        radius: { x: 0.5, y: 0, z: 0, w: 0 },
+      },
+    }],
+    volumePrimitives: [{
+      id: 'volume-0',
+      assetId: 'volume-asset-0',
+      dimensions: { x: 4, y: 4, z: 4 },
+      format: 'density:r8unorm',
+    }],
+  };
+  scene = appendNode(scene, createNode('sdf-node', { sdfId: 'sdf-0' }));
+  scene = appendNode(scene, createNode('volume-node', { volumeId: 'volume-0' }));
+
+  const frame = planFrame(
+    createDeferredRenderer(),
+    evaluateScene(scene, { timeMs: 0 }),
+    createRuntimeResidency(),
+  );
+
+  assertEquals(frame.passes.map((pass) => pass.id), [
+    'depth-prepass',
+    'gbuffer',
+    'lighting',
+    'raymarch',
+    'present',
+  ]);
+});
+
 Deno.test('extractVolumePassItems returns only evaluated volumes with residency', () => {
   let scene = createSceneIr('scene');
   scene = {
@@ -497,6 +533,49 @@ Deno.test('collectRendererCapabilityIssues accepts supported box sdf ops for exe
   const issues = collectRendererCapabilityIssues(
     createForwardRenderer(),
     evaluateScene(scene, { timeMs: 0 }),
+  );
+
+  assertEquals(issues, []);
+});
+
+Deno.test('collectRendererCapabilityIssues accepts deferred hybrid sdf and volume scenes', () => {
+  const renderer = createDeferredRenderer();
+  const residency = createRuntimeResidency();
+  let scene = createSceneIr('scene');
+  scene = {
+    ...scene,
+    sdfPrimitives: [{
+      id: 'sdf-0',
+      op: 'sphere',
+      parameters: {
+        radius: { x: 0.5, y: 0, z: 0, w: 0 },
+      },
+    }],
+    volumePrimitives: [{
+      id: 'volume-0',
+      assetId: 'volume-asset-0',
+      dimensions: { x: 4, y: 4, z: 4 },
+      format: 'density:r8unorm',
+    }],
+  };
+  scene = appendNode(scene, createNode('sdf-node', { sdfId: 'sdf-0' }));
+  scene = appendNode(scene, createNode('volume-node', { volumeId: 'volume-0' }));
+  residency.volumes.set('volume-0', {
+    volumeId: 'volume-0',
+    texture: {} as GPUTexture,
+    view: {} as GPUTextureView,
+    sampler: {} as GPUSampler,
+    width: 4,
+    height: 4,
+    depth: 4,
+    format: 'r8unorm',
+  });
+
+  const issues = collectRendererCapabilityIssues(
+    renderer,
+    evaluateScene(scene, { timeMs: 0 }),
+    createMaterialRegistry(),
+    residency,
   );
 
   assertEquals(issues, []);

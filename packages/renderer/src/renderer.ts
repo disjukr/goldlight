@@ -672,8 +672,8 @@ export const createDeferredRenderer = (label = 'deferred'): Renderer => ({
   label,
   capabilities: {
     mesh: 'supported',
-    sdf: 'unsupported',
-    volume: 'unsupported',
+    sdf: 'supported',
+    volume: 'supported',
     light: 'unsupported',
     builtInMaterialKinds: ['unlit'],
     customShaders: 'supported',
@@ -682,6 +682,7 @@ export const createDeferredRenderer = (label = 'deferred'): Renderer => ({
     { id: 'depth-prepass', kind: 'depth-prepass', reads: ['scene'], writes: ['depth'] },
     { id: 'gbuffer', kind: 'gbuffer', reads: ['scene', 'depth'], writes: ['gbuffer'] },
     { id: 'lighting', kind: 'lighting', reads: ['gbuffer', 'depth'], writes: ['color'] },
+    { id: 'raymarch', kind: 'raymarch', reads: ['scene', 'color'], writes: ['color'] },
     { id: 'present', kind: 'present', reads: ['color'], writes: ['target'] },
   ],
 });
@@ -2088,6 +2089,9 @@ export const renderDeferredFrame = (
   lightingPass.draw(3, 1, 0, 0);
   lightingPass.end();
   drawCount += 1;
+
+  drawCount += renderSdfRaymarchPass(context, encoder, binding, residency, evaluatedScene);
+  drawCount += renderVolumeRaymarchPass(context, encoder, binding, residency, evaluatedScene);
 
   const commandBuffer = encoder.finish();
   context.queue.submit([commandBuffer]);

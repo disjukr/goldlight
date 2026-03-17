@@ -311,6 +311,7 @@ fn fsMain() -> @location(0) vec4<f32> {
 `,
     vertexEntryPoint: 'vsMain',
     fragmentEntryPoint: 'fsMain',
+    usesTransformBindings: true,
     vertexAttributes: [{
       semantic: 'POSITION',
       shaderLocation: 0,
@@ -386,6 +387,7 @@ fn fsMain() -> @location(0) vec4<f32> {
 `,
     vertexEntryPoint: 'vsMain',
     fragmentEntryPoint: 'fsMain',
+    usesTransformBindings: true,
     vertexAttributes: [{
       semantic: 'POSITION',
       shaderLocation: 0,
@@ -447,7 +449,8 @@ fn fsMain() -> @location(0) vec4<f32> {
 
   assertEquals(mocks.pipelines.length, 1);
   assertEquals(mocks.shaders.length, 1);
-  assertEquals(mocks.bindGroupEntries.length, 0);
+  assertEquals(mocks.bindGroupEntries.length, 1);
+  assertEquals(mocks.bindGroupEntries[0].map((entry) => entry.binding), [0]);
 });
 
 Deno.test('renderForwardFrame binds base-color textures for textured built-in unlit materials', () => {
@@ -585,6 +588,134 @@ Deno.test('renderForwardFrame does not append texture bindings for shader-select
   assertEquals(mocks.bindGroupEntries.length, 2);
   assertEquals(mocks.bindGroupEntries[0].map((entry) => entry.binding), [0]);
   assertEquals(mocks.bindGroupEntries[1].map((entry) => entry.binding), [0]);
+});
+
+Deno.test('renderForwardFrame assembles declared texture and sampler bindings for custom programs', () => {
+  const mocks = createRenderMocks();
+  const runtimeResidency = createRuntimeResidency();
+  const registry = createMaterialRegistry();
+  const customProgram = {
+    id: 'shader:textured-flat-red',
+    label: 'Textured Flat Red',
+    wgsl: `
+struct VsOut {
+  @builtin(position) position: vec4<f32>,
+  @location(0) uv: vec2<f32>,
+};
+
+struct MeshTransform {
+  world: mat4x4<f32>,
+};
+
+struct MaterialUniforms {
+  color: vec4<f32>,
+};
+
+@group(0) @binding(0) var<uniform> meshTransform: MeshTransform;
+@group(1) @binding(0) var<uniform> material: MaterialUniforms;
+@group(1) @binding(1) var baseColorTexture: texture_2d<f32>;
+@group(1) @binding(2) var baseColorSampler: sampler;
+
+@vertex
+fn vsMain(@location(0) position: vec3<f32>, @location(1) uv: vec2<f32>) -> VsOut {
+  var out: VsOut;
+  out.position = meshTransform.world * vec4<f32>(position, 1.0);
+  out.uv = uv;
+  return out;
+}
+
+@fragment
+fn fsMain(input: VsOut) -> @location(0) vec4<f32> {
+  return textureSample(baseColorTexture, baseColorSampler, input.uv) * material.color;
+}
+`,
+    vertexEntryPoint: 'vsMain',
+    fragmentEntryPoint: 'fsMain',
+    usesTransformBindings: true,
+    materialBindings: [
+      { kind: 'uniform' as const, binding: 0 },
+      { kind: 'texture' as const, binding: 1, textureSemantic: 'baseColor' },
+      { kind: 'sampler' as const, binding: 2, textureSemantic: 'baseColor' },
+    ],
+    vertexAttributes: [
+      {
+        semantic: 'POSITION',
+        shaderLocation: 0,
+        format: 'float32x3' as GPUVertexFormat,
+        offset: 0,
+        arrayStride: 12,
+      },
+      {
+        semantic: 'TEXCOORD_0',
+        shaderLocation: 1,
+        format: 'float32x2' as GPUVertexFormat,
+        offset: 0,
+        arrayStride: 8,
+      },
+    ],
+  };
+  registerWgslMaterial(registry, customProgram);
+
+  let scene = createSceneIr('scene');
+  scene = appendMaterial(scene, {
+    id: 'material-custom-textured',
+    kind: 'custom',
+    shaderId: 'shader:textured-flat-red',
+    textures: [{
+      id: 'texture-0',
+      assetId: 'image-0',
+      semantic: 'baseColor',
+      colorSpace: 'srgb',
+      sampler: 'linear-repeat',
+    }],
+    parameters: {
+      color: { x: 1, y: 0.5, z: 0.5, w: 1 },
+    },
+  });
+  scene = appendMesh(scene, {
+    id: 'mesh-custom-textured',
+    materialId: 'material-custom-textured',
+    attributes: [
+      { semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0, 0, 1, 0] },
+      { semantic: 'TEXCOORD_0', itemSize: 2, values: [0, 0, 1, 0, 0, 1] },
+    ],
+  });
+  scene = appendNode(scene, createNode('node-custom-textured', { meshId: 'mesh-custom-textured' }));
+
+  runtimeResidency.geometry.set('mesh-custom-textured', {
+    meshId: 'mesh-custom-textured',
+    attributeBuffers: {
+      POSITION: { id: 0 } as unknown as GPUBuffer,
+      TEXCOORD_0: { id: 1 } as unknown as GPUBuffer,
+    },
+    vertexCount: 3,
+    indexCount: 0,
+  });
+  runtimeResidency.textures.set('texture-0', {
+    textureId: 'texture-0',
+    texture: {} as GPUTexture,
+    view: { textureId: 0 } as unknown as GPUTextureView,
+    sampler: { id: 0 } as unknown as GPUSampler,
+    width: 2,
+    height: 2,
+    format: 'rgba8unorm',
+  });
+
+  const result = renderForwardFrame(
+    mocks as unknown as GpuRenderExecutionContext,
+    createOffscreenContext({
+      device: mocks.device as unknown as GPUDevice,
+      target: createHeadlessTarget(64, 64),
+    }),
+    runtimeResidency,
+    evaluateScene(scene, { timeMs: 0 }),
+    registry,
+  );
+
+  assertEquals(result.drawCount, 1);
+  assertEquals(mocks.bindGroupEntries.length, 2);
+  assertEquals(mocks.bindGroupEntries[0].map((entry) => entry.binding), [0]);
+  assertEquals(mocks.bindGroupEntries[1].map((entry) => entry.binding), [0, 1, 2]);
 });
 
 Deno.test('renderForwardFrame uploads evaluated mesh transforms for built-in unlit draws', () => {

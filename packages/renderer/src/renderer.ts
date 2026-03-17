@@ -99,7 +99,25 @@ export type MaterialProgram = Readonly<{
   vertexAttributes: readonly MaterialVertexAttribute[];
   usesMaterialBindings?: boolean;
   usesTransformBindings?: boolean;
+  materialBindings?: readonly MaterialBindingDescriptor[];
 }>;
+
+export type MaterialBindingDescriptor = Readonly<
+  | {
+    kind: 'uniform';
+    binding: number;
+  }
+  | {
+    kind: 'texture';
+    binding: number;
+    textureSemantic: string;
+  }
+  | {
+    kind: 'sampler';
+    binding: number;
+    textureSemantic: string;
+  }
+>;
 
 export type MaterialRegistry = Readonly<{
   programs: Map<string, MaterialProgram>;
@@ -155,6 +173,10 @@ const builtInUnlitProgram: MaterialProgram = {
   fragmentEntryPoint: 'fsMain',
   usesMaterialBindings: true,
   usesTransformBindings: true,
+  materialBindings: [{
+    kind: 'uniform',
+    binding: 0,
+  }],
   vertexAttributes: [{
     semantic: 'POSITION',
     shaderLocation: 0,
@@ -172,6 +194,22 @@ const builtInTexturedUnlitProgram: MaterialProgram = {
   fragmentEntryPoint: 'fsMain',
   usesMaterialBindings: true,
   usesTransformBindings: true,
+  materialBindings: [
+    {
+      kind: 'uniform',
+      binding: 0,
+    },
+    {
+      kind: 'texture',
+      binding: 1,
+      textureSemantic: 'baseColor',
+    },
+    {
+      kind: 'sampler',
+      binding: 2,
+      textureSemantic: 'baseColor',
+    },
+  ],
   vertexAttributes: [
     {
       semantic: 'POSITION',
@@ -261,6 +299,77 @@ const getBaseColorTextureResidency = (
 ): TextureResidency | undefined => {
   const textureRef = material.textures.find((texture) => texture.semantic === 'baseColor');
   return textureRef ? residency.textures.get(textureRef.id) : undefined;
+};
+
+const getMaterialTextureResidency = (
+  residency: RuntimeResidency,
+  material: Material,
+  textureSemantic: string,
+): TextureResidency | undefined => {
+  const textureRef = material.textures.find((texture) => texture.semantic === textureSemantic);
+  return textureRef ? residency.textures.get(textureRef.id) : undefined;
+};
+
+const defaultMaterialBindings = [{
+  kind: 'uniform',
+  binding: 0,
+}] as const satisfies readonly MaterialBindingDescriptor[];
+
+const getMaterialBindingDescriptors = (
+  program: MaterialProgram,
+): readonly MaterialBindingDescriptor[] =>
+  program.materialBindings ?? (program.usesMaterialBindings ? defaultMaterialBindings : []);
+
+const resolveMaterialBindingResource = (
+  context: GpuRenderExecutionContext,
+  residency: RuntimeResidency,
+  material: Material,
+  descriptor: MaterialBindingDescriptor,
+  materialResidency: { current?: ReturnType<typeof ensureMaterialResidency> },
+): GPUBindGroupEntry => {
+  switch (descriptor.kind) {
+    case 'uniform': {
+      materialResidency.current ??= ensureMaterialResidency(context, residency, material);
+      return {
+        binding: descriptor.binding,
+        resource: {
+          buffer: materialResidency.current.uniformBuffer,
+        },
+      };
+    }
+    case 'texture': {
+      const textureResidency = getMaterialTextureResidency(
+        residency,
+        material,
+        descriptor.textureSemantic,
+      );
+      if (!textureResidency) {
+        throw new Error(
+          `material "${material.id}" is missing residency for "${descriptor.textureSemantic}" texture binding`,
+        );
+      }
+      return {
+        binding: descriptor.binding,
+        resource: textureResidency.view,
+      };
+    }
+    case 'sampler': {
+      const textureResidency = getMaterialTextureResidency(
+        residency,
+        material,
+        descriptor.textureSemantic,
+      );
+      if (!textureResidency) {
+        throw new Error(
+          `material "${material.id}" is missing residency for "${descriptor.textureSemantic}" sampler binding`,
+        );
+      }
+      return {
+        binding: descriptor.binding,
+        resource: textureResidency.sampler,
+      };
+    }
+  }
 };
 
 export const createForwardRenderer = (label = 'forward'): Renderer => ({
@@ -651,8 +760,6 @@ export const renderForwardFrame = (
         preferTexturedUnlit: true,
       })
       : resolvedProgram;
-    const supportsTexturedUnlit = program.id === builtInTexturedUnlitProgramId &&
-      Boolean(baseColorTexture);
     const pipeline = ensureMaterialPipeline(context, residency, program, binding.target.format);
 
     let isDrawable = true;
@@ -698,31 +805,23 @@ export const renderForwardFrame = (
       pass.setBindGroup(0, transformBindGroup);
     }
 
-    if (program.usesMaterialBindings) {
-      const materialResidency = ensureMaterialResidency(context, residency, material);
+    const materialBindings = getMaterialBindingDescriptors(program);
+    if (materialBindings.length > 0) {
       const materialBindGroupIndex = program.usesTransformBindings ? 1 : 0;
+      const materialResidency = {
+        current: undefined as ReturnType<typeof ensureMaterialResidency> | undefined,
+      };
       const bindGroup = context.device.createBindGroup({
         layout: pipeline.getBindGroupLayout(materialBindGroupIndex),
-        entries: [
-          {
-            binding: 0,
-            resource: {
-              buffer: materialResidency.uniformBuffer,
-            },
-          },
-          ...(supportsTexturedUnlit && baseColorTexture
-            ? [
-              {
-                binding: 1,
-                resource: baseColorTexture.view,
-              },
-              {
-                binding: 2,
-                resource: baseColorTexture.sampler,
-              },
-            ]
-            : []),
-        ],
+        entries: materialBindings.map((descriptor) =>
+          resolveMaterialBindingResource(
+            context,
+            residency,
+            material,
+            descriptor,
+            materialResidency,
+          )
+        ),
       });
       pass.setBindGroup(materialBindGroupIndex, bindGroup);
     }

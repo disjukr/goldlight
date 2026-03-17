@@ -3,6 +3,7 @@ export type SurfaceTarget = Readonly<{
   width: number;
   height: number;
   format: GPUTextureFormat;
+  alphaMode?: GPUCanvasAlphaMode;
 }>;
 
 export type OffscreenTarget = Readonly<{
@@ -25,6 +26,7 @@ export type GpuContext = Readonly<{
 export type SurfaceContext = Readonly<{
   kind: 'surface';
   target: SurfaceTarget;
+  device: GPUDevice;
   canvasContext: GPUCanvasContext;
 }>;
 
@@ -126,12 +128,13 @@ export const configureSurfaceContext = (
   canvasContext.configure({
     device: context.device,
     format: context.target.format,
-    alphaMode: 'premultiplied',
+    alphaMode: context.target.alphaMode ?? 'premultiplied',
   });
 
   return {
     kind: 'surface',
     target: context.target,
+    device: context.device,
     canvasContext,
   };
 };
@@ -178,7 +181,22 @@ export const bindRenderTarget = (
 
 export const acquireColorAttachmentView = (binding: RenderContextBinding): GPUTextureView => {
   if (binding.kind === 'surface') {
-    return binding.canvasContext.getCurrentTexture().createView();
+    try {
+      return binding.canvasContext.getCurrentTexture().createView();
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message.includes('Surface is not configured for presentation')
+      ) {
+        binding.canvasContext.configure({
+          device: binding.device,
+          format: binding.target.format,
+          alphaMode: binding.target.alphaMode ?? 'premultiplied',
+        });
+        return binding.canvasContext.getCurrentTexture().createView();
+      }
+      throw error;
+    }
   }
 
   return binding.view;

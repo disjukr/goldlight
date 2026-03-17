@@ -217,7 +217,12 @@ const assetSource: AssetSource = {
 };
 
 const window = new WindowBuilder('rieul3d byow native demo', width, height).build();
-const target = createDenoSurfaceTarget(width, height);
+const target = createDenoSurfaceTarget(
+  width,
+  height,
+  navigator.gpu.getPreferredCanvasFormat(),
+  'opaque',
+);
 const gpuContext = await requestGpuContext({ target });
 const windowSurface = window.windowSurface(width, height);
 const canvasContext = windowSurface.getContext('webgpu');

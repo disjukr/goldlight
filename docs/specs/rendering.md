@@ -38,7 +38,8 @@ The initial renderer uses a lightweight pass graph:
 - Forward rendering now also consumes first-class directional light nodes for built-in Lambert mesh
   shading.
 - Deferred rendering now executes a minimal mesh-only path with a depth prepass, an unlit
-  albedo/normal G-buffer pass, and a fullscreen lighting resolve.
+  albedo/normal G-buffer pass, registered custom WGSL G-buffer programs, and a fullscreen lighting
+  resolve.
 - Forward rendering also encodes a dedicated SDF raymarch pass for supported sphere and box
   primitives.
 - Forward rendering also encodes a first volume raymarch pass for volume primitives with residency.
@@ -55,6 +56,8 @@ The initial renderer uses a lightweight pass graph:
   at least one directional light.
 - Built-in deferred unlit shading supports the same optional base-color texture sampling when
   `NORMAL` and `TEXCOORD_0` data plus texture residency are available.
+- Deferred custom WGSL programs may also target the G-buffer path when they write the same two
+  render targets and match the deferred transform/material binding contract.
 - Built-in forward lit mesh draws also upload an inverse-transpose normal matrix plus a compact
   directional-light uniform block.
 - Material parameter uploads and bind group creation are implemented for built-in unlit shading.
@@ -91,6 +94,9 @@ The initial renderer uses a lightweight pass graph:
   `@group(1) @binding(1)` and `@group(1) @binding(2)`.
 - Built-in deferred textured unlit shading uses the same `@group(1)` base-color texture/sampler
   contract during G-buffer writes.
+- Deferred custom WGSL programs that register with `usesTransformBindings: true` should match the
+  deferred `@group(0)` transform contract: evaluated node world matrix plus inverse-transpose normal
+  matrix.
 - Custom WGSL programs that want the same evaluated mesh transform upload should register with
   `usesTransformBindings: true` and match the same `@group(0)` transform contract.
 - Custom WGSL programs that need sampled textures should declare matching texture/sampler bindings
@@ -108,7 +114,7 @@ The initial renderer uses a lightweight pass graph:
 
 ## Known Gaps
 
-- Deferred rendering does not yet cover custom WGSL materials, SDF primitives, or volume primitives.
+- Deferred rendering does not yet cover SDF primitives or volume primitives.
 - Deferred rendering does not yet consume Scene IR light nodes or built-in lit materials.
 - SDF execution currently supports sphere and box primitives only; broader graph/operator coverage
   is still pending.

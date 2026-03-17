@@ -676,7 +676,7 @@ export const createDeferredRenderer = (label = 'deferred'): Renderer => ({
     volume: 'unsupported',
     light: 'unsupported',
     builtInMaterialKinds: ['unlit'],
-    customShaders: 'unsupported',
+    customShaders: 'supported',
   },
   passes: [
     { id: 'depth-prepass', kind: 'depth-prepass', reads: ['scene'], writes: ['depth'] },
@@ -1627,6 +1627,22 @@ const createDefaultMaterial = (): Material => ({
   },
 });
 
+const resolveDeferredGbufferProgram = (
+  materialRegistry: MaterialRegistry,
+  material: Material,
+  geometry: NonNullable<RuntimeResidency['geometry'] extends Map<string, infer T> ? T : never>,
+  residency: RuntimeResidency,
+): MaterialProgram => {
+  if (material.shaderId) {
+    return resolveMaterialProgram(materialRegistry, material);
+  }
+
+  const baseColorTexture = getBaseColorTextureResidency(residency, material);
+  return baseColorTexture && geometry.attributeBuffers.TEXCOORD_0
+    ? builtInDeferredGbufferTexturedUnlitProgram
+    : builtInDeferredGbufferUnlitProgram;
+};
+
 export const renderForwardFrame = (
   context: GpuRenderExecutionContext,
   binding: RenderContextBinding,
@@ -1951,10 +1967,12 @@ export const renderDeferredFrame = (
     }
 
     const material = node.material ?? createDefaultMaterial();
-    const baseColorTexture = getBaseColorTextureResidency(residency, material);
-    const gbufferProgram = baseColorTexture && geometry.attributeBuffers.TEXCOORD_0
-      ? builtInDeferredGbufferTexturedUnlitProgram
-      : builtInDeferredGbufferUnlitProgram;
+    const gbufferProgram = resolveDeferredGbufferProgram(
+      materialRegistry,
+      material,
+      geometry,
+      residency,
+    );
     const gbufferPipeline = ensureDeferredGbufferPipeline(
       context,
       residency,

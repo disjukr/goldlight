@@ -35,9 +35,9 @@ Implemented today:
 - BDL-driven `SceneIr` generation with drift checks in CI
 - camera declarations in Scene IR plus evaluated active-camera view/projection support
 - mesh, texture, first volume residency upload paths, and first volume raymarch execution
-- forward rendering, minimal deferred mesh/unlit execution with optional baseColor texture sampling,
-  first-class directional light nodes with built-in forward Lambert shading, first SDF raymarch
-  execution, and headless snapshot readback
+- forward rendering, minimal deferred mesh execution with built-in unlit plus custom WGSL G-buffer
+  paths, optional baseColor texture sampling, first-class directional light nodes with built-in
+  forward Lambert shading, first SDF raymarch execution, and headless snapshot readback
 - forward SDF sphere and box raymarch execution with capability preflight alignment
 - built-in unlit material registration, evaluated mesh transform uploads, base-color texture
   sampling, material parameter uploads, custom WGSL registration, declared material texture

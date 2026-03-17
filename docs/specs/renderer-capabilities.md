@@ -64,7 +64,12 @@ Each issue should include:
 
 - the evaluated node ID
 - the failing feature category
+- a machine-friendly requirement key for the exact unsupported shape, binding, or capability
 - a human-readable message that names the renderer and unsupported requirement
+
+Current requirement keys include renderer execution gates such as `mesh-execution`, shape-specific
+keys such as `sdf-op:box`, and binding-specific keys such as `shader:shader:missing`,
+`texture-semantic:normal`, or `vertex-attribute:TEXCOORD_0`.
 
 Fatal render entry points should throw with the aggregated issue list when any incompatibility is
 present. Non-fatal tooling may inspect the issue list directly for UI, tests, or diagnostics.

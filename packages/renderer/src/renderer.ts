@@ -144,7 +144,8 @@ export type SdfPassItem = Readonly<{
 
 export type RendererCapabilityIssue = Readonly<{
   nodeId: string;
-  feature: 'mesh' | 'sdf' | 'volume' | 'material-kind' | 'custom-shader';
+  feature: 'mesh' | 'sdf' | 'volume' | 'material-kind' | 'custom-shader' | 'material-binding';
+  requirement: string;
   message: string;
 }>;
 
@@ -434,61 +435,130 @@ export const planFrame = (
 export const collectRendererCapabilityIssues = (
   renderer: Renderer,
   evaluatedScene: EvaluatedScene,
+  materialRegistry = createMaterialRegistry(),
 ): readonly RendererCapabilityIssue[] =>
   evaluatedScene.nodes.flatMap((node) => {
     const issues: RendererCapabilityIssue[] = [];
+    const hasTexcoord0 = Boolean(
+      node.mesh?.attributes.some((attribute) => attribute.semantic === 'TEXCOORD_0'),
+    );
+    const material = node.material;
+    const materialTextures = material?.textures ?? [];
+    const issueKeys = new Set<string>();
+    const pushIssue = (
+      feature: RendererCapabilityIssue['feature'],
+      requirement: string,
+      message: string,
+    ) => {
+      const key = `${feature}:${requirement}`;
+      if (issueKeys.has(key)) {
+        return;
+      }
 
-    if (node.mesh && renderer.capabilities.mesh !== 'supported') {
+      issueKeys.add(key);
       issues.push({
         nodeId: node.node.id,
-        feature: 'mesh',
-        message: `renderer "${renderer.label}" does not support mesh execution`,
+        feature,
+        requirement,
+        message,
       });
+    };
+
+    if (node.mesh && renderer.capabilities.mesh !== 'supported') {
+      pushIssue(
+        'mesh',
+        'mesh-execution',
+        `renderer "${renderer.label}" does not support mesh execution`,
+      );
     }
 
     if (node.sdf) {
       if (renderer.capabilities.sdf !== 'supported') {
-        issues.push({
-          nodeId: node.node.id,
-          feature: 'sdf',
-          message: `renderer "${renderer.label}" does not support sdf execution`,
-        });
+        pushIssue(
+          'sdf',
+          'sdf-execution',
+          `renderer "${renderer.label}" does not support sdf execution`,
+        );
       } else if (node.sdf.op !== 'sphere') {
-        issues.push({
-          nodeId: node.node.id,
-          feature: 'sdf',
-          message: `renderer "${renderer.label}" only supports sphere sdf primitives right now`,
-        });
+        pushIssue(
+          'sdf',
+          `sdf-op:${node.sdf.op}`,
+          `renderer "${renderer.label}" only supports sphere sdf primitives right now; node "${node.node.id}" requested "${node.sdf.op}"`,
+        );
       }
     }
 
     if (node.volume && renderer.capabilities.volume !== 'supported') {
-      issues.push({
-        nodeId: node.node.id,
-        feature: 'volume',
-        message: `renderer "${renderer.label}" does not support volume execution`,
-      });
+      pushIssue(
+        'volume',
+        'volume-execution',
+        `renderer "${renderer.label}" does not support volume execution`,
+      );
     }
 
     if (
-      node.material &&
-      !node.material.shaderId &&
-      !renderer.capabilities.builtInMaterialKinds.includes(node.material.kind)
+      material &&
+      !material.shaderId &&
+      !renderer.capabilities.builtInMaterialKinds.includes(material.kind)
     ) {
-      issues.push({
-        nodeId: node.node.id,
-        feature: 'material-kind',
-        message:
-          `renderer "${renderer.label}" does not support built-in material kind "${node.material.kind}"`,
-      });
+      pushIssue(
+        'material-kind',
+        `material-kind:${material.kind}`,
+        `renderer "${renderer.label}" does not support built-in material kind "${material.kind}"`,
+      );
     }
 
-    if (node.material?.shaderId && renderer.capabilities.customShaders !== 'supported') {
-      issues.push({
-        nodeId: node.node.id,
-        feature: 'custom-shader',
-        message: `renderer "${renderer.label}" does not support custom shader materials`,
-      });
+    if (material?.shaderId) {
+      if (renderer.capabilities.customShaders !== 'supported') {
+        pushIssue(
+          'custom-shader',
+          `shader:${material.shaderId}`,
+          `renderer "${renderer.label}" does not support custom shader materials`,
+        );
+      } else {
+        const program = materialRegistry.programs.get(material.shaderId);
+        if (!program) {
+          pushIssue(
+            'material-binding',
+            `shader:${material.shaderId}`,
+            `renderer "${renderer.label}" cannot resolve custom shader "${material.shaderId}" for material "${material.id}"`,
+          );
+        } else {
+          for (const descriptor of getMaterialBindingDescriptors(program)) {
+            if (descriptor.kind === 'uniform') {
+              continue;
+            }
+
+            const semantic = descriptor.textureSemantic;
+            if (!materialTextures.some((texture) => texture.semantic === semantic)) {
+              pushIssue(
+                'material-binding',
+                `texture-semantic:${semantic}`,
+                `renderer "${renderer.label}" cannot satisfy "${semantic}" ${descriptor.kind} binding for material "${material.id}"`,
+              );
+            }
+
+            if (node.mesh && !hasTexcoord0) {
+              pushIssue(
+                'material-binding',
+                'vertex-attribute:TEXCOORD_0',
+                `renderer "${renderer.label}" cannot sample material "${material.id}" on node "${node.node.id}" because mesh "${node.mesh.id}" is missing TEXCOORD_0`,
+              );
+            }
+          }
+        }
+      }
+    } else if (
+      material?.kind === 'unlit' &&
+      materialTextures.some((texture) => texture.semantic === 'baseColor') &&
+      node.mesh &&
+      !hasTexcoord0
+    ) {
+      pushIssue(
+        'material-binding',
+        'vertex-attribute:TEXCOORD_0',
+        `renderer "${renderer.label}" cannot sample baseColor textures on node "${node.node.id}" because mesh "${node.mesh.id}" is missing TEXCOORD_0`,
+      );
     }
 
     return issues;
@@ -497,13 +567,19 @@ export const collectRendererCapabilityIssues = (
 export const assertRendererSceneCapabilities = (
   renderer: Renderer,
   evaluatedScene: EvaluatedScene,
+  materialRegistry = createMaterialRegistry(),
 ): void => {
-  const issues = collectRendererCapabilityIssues(renderer, evaluatedScene);
+  const issues = collectRendererCapabilityIssues(renderer, evaluatedScene, materialRegistry);
   if (issues.length === 0) {
     return;
   }
 
-  throw new Error(issues.map((issue) => `[${issue.nodeId}] ${issue.message}`).join('\n'));
+  throw new Error(
+    issues.map((issue) =>
+      `[${issue.nodeId}] (${issue.feature}:${issue.requirement}) ${issue.message}`
+    )
+      .join('\n'),
+  );
 };
 
 export const extractVolumePassItems = (
@@ -931,7 +1007,7 @@ export const renderForwardFrame = (
   evaluatedScene: EvaluatedScene,
   materialRegistry = createMaterialRegistry(),
 ): ForwardRenderResult => {
-  assertRendererSceneCapabilities(createForwardRenderer(), evaluatedScene);
+  assertRendererSceneCapabilities(createForwardRenderer(), evaluatedScene, materialRegistry);
   const view = acquireColorAttachmentView(binding);
   const encoder = context.device.createCommandEncoder({
     label: 'forward-frame',

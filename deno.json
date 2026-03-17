@@ -26,7 +26,7 @@
     "check": "deno fmt --check && deno task generate:ir:check && deno lint && deno test --unstable-raw-imports && deno bench --unstable-raw-imports --no-run",
     "test": "deno test --unstable-raw-imports",
     "bench": "deno bench --unstable-raw-imports",
-    "docs:check": "deno fmt --check --ignore=examples/browser_forward/dist,examples/browser_textured_forward/dist,examples/browser_react_authoring/dist docs packages tests benches examples",
+    "docs:check": "deno fmt --check --ignore=examples/browser_forward/dist,examples/browser_textured_forward/dist,examples/browser_react_authoring/dist,examples/browser_custom_textured_forward/dist docs packages tests benches examples",
     "setup:sdl2:windows": "powershell -ExecutionPolicy Bypass -File ./scripts/install_sdl2_windows.ps1",
     "example:headless:check": "deno check --unstable-webgpu --unstable-raw-imports ./scripts/render_headless_snapshot.ts",
     "example:headless:png": "deno run -A --unstable-webgpu --unstable-raw-imports ./scripts/render_headless_snapshot.ts",
@@ -35,6 +35,7 @@
     "example:browser:build": "deno bundle --platform browser --unstable-raw-imports -o ./examples/browser_forward/dist/main.js ./examples/browser_forward/main.ts",
     "example:browser:react:build": "deno bundle --platform browser --unstable-raw-imports -o ./examples/browser_react_authoring/dist/main.js ./examples/browser_react_authoring/main.ts",
     "example:browser:textured:build": "deno bundle --platform browser --unstable-raw-imports -o ./examples/browser_textured_forward/dist/main.js ./examples/browser_textured_forward/main.ts",
+    "example:browser:custom-textured:build": "deno bundle --platform browser --unstable-raw-imports -o ./examples/browser_custom_textured_forward/dist/main.js ./examples/browser_custom_textured_forward/main.ts",
     "example:browser:serve": "deno run -A jsr:@std/http@1/file-server ."
   },
   "fmt": {

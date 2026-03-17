@@ -34,8 +34,8 @@ Implemented today:
 - mesh, texture, first volume residency upload paths, and first volume raymarch execution
 - forward rendering, first SDF raymarch execution, and headless snapshot readback
 - built-in unlit material registration, evaluated mesh transform uploads, base-color texture
-  sampling, material parameter uploads, custom WGSL registration, and declared material texture
-  bindings
+  sampling, material parameter uploads, custom WGSL registration, declared material texture
+  bindings, and residency-aware custom texture binding validation
 - glTF JSON, GLB, data-URI buffers, and caller-provided external glTF resource ingestion
 - browser/Deno helpers for resolving external glTF buffers and images into the existing loader
   contract
@@ -86,6 +86,7 @@ Read in this order when onboarding:
 - `deno task example:browser:build`: bundle the browser forward-rendering example
 - `deno task example:browser:react:build`: bundle the React authoring browser example
 - `deno task example:browser:textured:build`: bundle the textured browser forward example
+- `deno task example:browser:custom-textured:build`: bundle the custom textured browser example
 - `deno task example:browser:serve`: serve the repository for local browser testing
 - `deno task example:byow:check`: type-check the Windows BYOW native demo
 - `deno task example:byow:run`: open the Windows BYOW native demo

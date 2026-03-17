@@ -331,6 +331,66 @@ Deno.test('collectRendererCapabilityIssues reports binding-specific failures in 
   ]);
 });
 
+Deno.test('collectRendererCapabilityIssues reports missing resident textures for custom bindings', () => {
+  const materialRegistry = createMaterialRegistry();
+  const residency = createRuntimeResidency();
+  registerWgslMaterial(materialRegistry, createTexturedCustomProgram());
+  let scene = createSceneIr('scene');
+  scene = appendMaterial(scene, {
+    id: 'material-custom',
+    kind: 'custom',
+    shaderId: 'shader:textured-custom',
+    textures: [{
+      id: 'texture-0',
+      assetId: 'image-0',
+      semantic: 'baseColor',
+      colorSpace: 'srgb',
+      sampler: 'linear-repeat',
+    }],
+    parameters: {},
+  });
+  scene = appendMesh(scene, {
+    id: 'mesh-0',
+    materialId: 'material-custom',
+    attributes: [
+      { semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0, 0, 1, 0] },
+      { semantic: 'TEXCOORD_0', itemSize: 2, values: [0, 0, 1, 0, 0, 1] },
+    ],
+  });
+  scene = appendNode(scene, createNode('mesh-node', { meshId: 'mesh-0' }));
+
+  const issues = collectRendererCapabilityIssues(
+    createForwardRenderer(),
+    evaluateScene(scene, { timeMs: 0 }),
+    materialRegistry,
+    residency,
+  );
+
+  assertEquals(issues, [
+    {
+      nodeId: 'mesh-node',
+      feature: 'material-binding',
+      requirement: 'texture-residency:baseColor:texture',
+      message:
+        'renderer "forward" cannot satisfy "baseColor" texture binding for material "material-custom" because texture "texture-0" is not resident',
+    },
+    {
+      nodeId: 'mesh-node',
+      feature: 'material-binding',
+      requirement: 'texture-residency:baseColor:sampler',
+      message:
+        'renderer "forward" cannot satisfy "baseColor" sampler binding for material "material-custom" because texture "texture-0" is not resident',
+    },
+    {
+      nodeId: 'mesh-node',
+      feature: 'material-binding',
+      requirement: 'texture-semantic:normal',
+      message:
+        'renderer "forward" cannot satisfy "normal" texture binding for material "material-custom"',
+    },
+  ]);
+});
+
 Deno.test('assertRendererSceneCapabilities surfaces aggregated binding diagnostics cleanly', () => {
   let scene = createSceneIr('scene');
   scene = appendMaterial(scene, {
@@ -355,6 +415,45 @@ Deno.test('assertRendererSceneCapabilities surfaces aggregated binding diagnosti
       ),
     Error,
     '(material-binding:shader:shader:missing)',
+  );
+});
+
+Deno.test('assertRendererSceneCapabilities fails early for non-resident built-in texture bindings', () => {
+  let scene = createSceneIr('scene');
+  scene = appendMaterial(scene, {
+    id: 'material-textured',
+    kind: 'unlit',
+    textures: [{
+      id: 'texture-0',
+      assetId: 'image-0',
+      semantic: 'baseColor',
+      colorSpace: 'srgb',
+      sampler: 'linear-repeat',
+    }],
+    parameters: {
+      color: { x: 1, y: 1, z: 1, w: 1 },
+    },
+  });
+  scene = appendMesh(scene, {
+    id: 'mesh-0',
+    materialId: 'material-textured',
+    attributes: [
+      { semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0, 0, 1, 0] },
+      { semantic: 'TEXCOORD_0', itemSize: 2, values: [0, 0, 1, 0, 0, 1] },
+    ],
+  });
+  scene = appendNode(scene, createNode('mesh-node', { meshId: 'mesh-0' }));
+
+  assertThrows(
+    () =>
+      assertRendererSceneCapabilities(
+        createForwardRenderer(),
+        evaluateScene(scene, { timeMs: 0 }),
+        createMaterialRegistry(),
+        createRuntimeResidency(),
+      ),
+    Error,
+    '(material-binding:texture-residency:baseColor:texture)',
   );
 });
 

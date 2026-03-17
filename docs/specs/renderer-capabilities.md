@@ -69,7 +69,7 @@ Each issue should include:
 
 Current requirement keys include renderer execution gates such as `mesh-execution`, shape-specific
 keys such as `sdf-op:box`, and binding-specific keys such as `shader:shader:missing`,
-`texture-semantic:normal`, or `vertex-attribute:TEXCOORD_0`.
+`texture-semantic:normal`, `texture-residency:baseColor:texture`, or `vertex-attribute:TEXCOORD_0`.
 
 Fatal render entry points should throw with the aggregated issue list when any incompatibility is
 present. Non-fatal tooling may inspect the issue list directly for UI, tests, or diagnostics.

@@ -46,7 +46,8 @@ The initial renderer uses a lightweight pass graph:
 - Custom WGSL programs can be registered and cached through the material registry.
 - Headless/offscreen rendering supports compact byte readback for snapshot testing.
 - Snapshot bytes can also be encoded into PNG for local inspection and regression workflows.
-- Browser examples cover both the minimal mesh-only path and a texture-backed unlit material path.
+- Browser examples cover the minimal mesh-only path, a texture-backed built-in unlit path, and a
+  custom WGSL path that samples texture residency through declared material bindings.
 - The native BYOW demo uses the same forward renderer/runtime residency path on an SDL2-backed
   surface target instead of a browser canvas.
 - Fixture-backed golden snapshot tests cover clear-only, mesh, SDF, volume, and recovery-rebuild
@@ -69,6 +70,8 @@ The initial renderer uses a lightweight pass graph:
   `usesTransformBindings: true` and match the same `@group(0)` transform contract.
 - Custom WGSL programs that need sampled textures should declare matching texture/sampler bindings
   plus the texture semantic they expect from `Material.textures`.
+- Capability preflight validates declared texture semantics, mesh UV requirements, and texture
+  residency before the renderer starts encoding bind groups.
 
 ## Headless PNG Workflow
 
@@ -81,6 +84,5 @@ The initial renderer uses a lightweight pass graph:
 ## Known Gaps
 
 - Deferred rendering is still at the planning-contract stage.
-- Generalized texture-backed material binding for arbitrary custom programs is not implemented yet.
 - SDF execution currently supports sphere primitives only; broader graph/operator coverage is still
   pending.

@@ -436,6 +436,7 @@ export const collectRendererCapabilityIssues = (
   renderer: Renderer,
   evaluatedScene: EvaluatedScene,
   materialRegistry = createMaterialRegistry(),
+  residency?: RuntimeResidency,
 ): readonly RendererCapabilityIssue[] =>
   evaluatedScene.nodes.flatMap((node) => {
     const issues: RendererCapabilityIssue[] = [];
@@ -530,11 +531,18 @@ export const collectRendererCapabilityIssues = (
             }
 
             const semantic = descriptor.textureSemantic;
-            if (!materialTextures.some((texture) => texture.semantic === semantic)) {
+            const textureRef = materialTextures.find((texture) => texture.semantic === semantic);
+            if (!textureRef) {
               pushIssue(
                 'material-binding',
                 `texture-semantic:${semantic}`,
                 `renderer "${renderer.label}" cannot satisfy "${semantic}" ${descriptor.kind} binding for material "${material.id}"`,
+              );
+            } else if (residency && !residency.textures.get(textureRef.id)) {
+              pushIssue(
+                'material-binding',
+                `texture-residency:${semantic}:${descriptor.kind}`,
+                `renderer "${renderer.label}" cannot satisfy "${semantic}" ${descriptor.kind} binding for material "${material.id}" because texture "${textureRef.id}" is not resident`,
               );
             }
 
@@ -559,6 +567,15 @@ export const collectRendererCapabilityIssues = (
         'vertex-attribute:TEXCOORD_0',
         `renderer "${renderer.label}" cannot sample baseColor textures on node "${node.node.id}" because mesh "${node.mesh.id}" is missing TEXCOORD_0`,
       );
+    } else if (material?.kind === 'unlit') {
+      const baseColorTexture = materialTextures.find((texture) => texture.semantic === 'baseColor');
+      if (baseColorTexture && residency && !residency.textures.get(baseColorTexture.id)) {
+        pushIssue(
+          'material-binding',
+          'texture-residency:baseColor:texture',
+          `renderer "${renderer.label}" cannot sample baseColor textures for material "${material.id}" because texture "${baseColorTexture.id}" is not resident`,
+        );
+      }
     }
 
     return issues;
@@ -568,8 +585,14 @@ export const assertRendererSceneCapabilities = (
   renderer: Renderer,
   evaluatedScene: EvaluatedScene,
   materialRegistry = createMaterialRegistry(),
+  residency?: RuntimeResidency,
 ): void => {
-  const issues = collectRendererCapabilityIssues(renderer, evaluatedScene, materialRegistry);
+  const issues = collectRendererCapabilityIssues(
+    renderer,
+    evaluatedScene,
+    materialRegistry,
+    residency,
+  );
   if (issues.length === 0) {
     return;
   }
@@ -1007,7 +1030,12 @@ export const renderForwardFrame = (
   evaluatedScene: EvaluatedScene,
   materialRegistry = createMaterialRegistry(),
 ): ForwardRenderResult => {
-  assertRendererSceneCapabilities(createForwardRenderer(), evaluatedScene, materialRegistry);
+  assertRendererSceneCapabilities(
+    createForwardRenderer(),
+    evaluatedScene,
+    materialRegistry,
+    residency,
+  );
   const view = acquireColorAttachmentView(binding);
   const encoder = context.device.createCommandEncoder({
     label: 'forward-frame',

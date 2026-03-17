@@ -15,7 +15,7 @@ Use this page as the main navigation hub.
 - Understand loader and interchange direction: [`specs/interop-gltf.md`](./specs/interop-gltf.md)
 - Understand authoring boundaries: [`specs/react-authoring.md`](./specs/react-authoring.md)
 - Review accepted architecture constraints: [`adr/README.md`](./adr/README.md)
-- Run the browser and native examples, including the textured browser workflow:
+- Run the browser and native examples, including the textured and custom-material browser workflows:
   [`../examples/README.md`](../examples/README.md)
 - Review the React authoring browser example:
   [`../examples/browser_react_authoring/README.md`](../examples/browser_react_authoring/README.md)

@@ -1,4 +1,4 @@
-import { assertEquals, assertNotStrictEquals, assertRejects } from 'jsr:@std/assert@^1.0.14';
+import { assertEquals, assertNotStrictEquals, assertThrows } from 'jsr:@std/assert@^1.0.14';
 import { evaluateScene } from '@rieul3d/core';
 import {
   createOffscreenContext,
@@ -428,7 +428,7 @@ Deno.test('device-loss recovery rebinds the target, rebuilds residency, and subm
   assertEquals(recoveredContext.submits.length, 2);
 });
 
-Deno.test('failed recovery leaves the caller in a non-rendering state until rebuild succeeds', async () => {
+Deno.test('failed recovery leaves the caller in a non-rendering state until rebuild succeeds', () => {
   const scene = createRecoveryScene();
   const evaluatedScene = evaluateScene(scene, { timeMs: 0 });
   const target = createHeadlessTarget(2, 2);
@@ -437,14 +437,13 @@ Deno.test('failed recovery leaves the caller in a non-rendering state until rebu
     [59, 60, 61, 62, 63, 64, 65, 66],
   ]);
   const residency = createRuntimeResidency();
-  let binding: ReturnType<typeof createOffscreenContext> | undefined;
+  const binding = createOffscreenContext({
+    device: context.device as unknown as GPUDevice,
+    target,
+  });
 
-  await assertRejects(
-    async () => {
-      binding = createOffscreenContext({
-        device: context.device as unknown as GPUDevice,
-        target,
-      });
+  assertThrows(
+    () => {
       rebuildRuntimeResidency(
         context,
         residency,
@@ -455,20 +454,13 @@ Deno.test('failed recovery leaves the caller in a non-rendering state until rebu
           volumes: new Map(),
         },
       );
-      await renderForwardSnapshot(
-        context as unknown as Parameters<typeof renderForwardSnapshot>[0],
-        binding,
-        residency,
-        evaluatedScene,
-      );
     },
     Error,
     'texture "texture-0" references missing asset "image-0"',
   );
 
-  binding = undefined;
-  assertEquals(binding, undefined);
-  assertEquals(context.submits.length, 0);
+  assertEquals(binding.target.kind, 'offscreen');
   assertEquals([...residency.textures.keys()], []);
   assertEquals([...residency.geometry.keys()], ['mesh-0']);
+  assertEquals(context.submits.length, 0);
 });

@@ -651,3 +651,60 @@ Deno.test('renderForwardFrame uploads evaluated mesh transforms for built-in unl
     assertAlmostEquals(value, expectedMatrix[index], 1e-6);
   });
 });
+
+Deno.test('renderForwardFrame uploads parented mesh transforms after scene evaluation', () => {
+  const mocks = createRenderMocks();
+  const runtimeResidency = createRuntimeResidency();
+  let scene = createSceneIr('scene');
+  scene = appendMesh(scene, {
+    id: 'mesh-parented',
+    attributes: [{ semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0, 0, 1, 0] }],
+  });
+  scene = appendNode(
+    scene,
+    createNode('parent', {
+      transform: {
+        translation: { x: 1, y: 0, z: 0 },
+        rotation: { x: 0, y: 0, z: 0.70710678, w: 0.70710678 },
+        scale: { x: 1, y: 1, z: 1 },
+      },
+    }),
+  );
+  scene = appendNode(
+    scene,
+    createNode('child', {
+      parentId: 'parent',
+      meshId: 'mesh-parented',
+      transform: {
+        translation: { x: 0, y: 2, z: 0 },
+        rotation: { x: 0, y: 0, z: 0, w: 1 },
+        scale: { x: 1, y: 1, z: 1 },
+      },
+    }),
+  );
+
+  runtimeResidency.geometry.set('mesh-parented', {
+    meshId: 'mesh-parented',
+    attributeBuffers: { POSITION: { id: 5 } as unknown as GPUBuffer },
+    vertexCount: 3,
+    indexCount: 0,
+  });
+
+  renderForwardFrame(
+    mocks as unknown as GpuRenderExecutionContext,
+    createOffscreenContext({
+      device: mocks.device as unknown as GPUDevice,
+      target: createHeadlessTarget(32, 32),
+    }),
+    runtimeResidency,
+    evaluateScene(scene, { timeMs: 0 }),
+  );
+
+  const transformUpload = mocks.writeBufferCalls.find((call) => call.bytes.byteLength === 64);
+  const uploadedMatrix = transformUpload
+    ? Array.from(new Float32Array(transformUpload.bytes.buffer.slice(0)))
+    : [];
+
+  assertAlmostEquals(uploadedMatrix[12] ?? 0, -1, 1e-5);
+  assertAlmostEquals(uploadedMatrix[13] ?? 0, 0, 1e-5);
+});

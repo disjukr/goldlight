@@ -36,8 +36,8 @@ Implemented today:
 - built-in unlit material registration, evaluated mesh transform uploads, base-color texture
   sampling, material parameter uploads, and custom WGSL registration
 - glTF JSON, GLB, data-URI buffers, and caller-provided external glTF resource ingestion
-- browser canvas example, Windows BYOW native textured demo, headless PNG snapshot workflow, and
-  PNG snapshot encoding
+- browser canvas example, Windows BYOW native textured demo, headless PNG snapshot workflow, and PNG
+  snapshot encoding
 - device-loss observation and residency rebuild helpers
 - renderer capability preflight for primitive and material compatibility
 
@@ -62,7 +62,7 @@ Read in this order when onboarding:
 4. [`docs/specs/rendering.md`](./docs/specs/rendering.md)
 5. [`examples/browser_forward/README.md`](./examples/browser_forward/README.md)
 6. [`examples/byow_native_demo/README.md`](./examples/byow_native_demo/README.md)
-6. [`examples/headless_snapshot/README.md`](./examples/headless_snapshot/README.md)
+7. [`examples/headless_snapshot/README.md`](./examples/headless_snapshot/README.md)
 
 ## Tasks
 

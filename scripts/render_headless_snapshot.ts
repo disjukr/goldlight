@@ -30,9 +30,7 @@ const parseSize = (value: string | undefined, fallback: number): number => {
 };
 
 export const resolveOutputPath = (value: string | undefined): string =>
-  value
-    ? resolve(Deno.cwd(), value)
-    : resolve(scriptDirectory, defaultOutputPath);
+  value ? resolve(Deno.cwd(), value) : resolve(scriptDirectory, defaultOutputPath);
 
 const createSnapshotScene = () => {
   let scene = createSceneIr('headless-snapshot');

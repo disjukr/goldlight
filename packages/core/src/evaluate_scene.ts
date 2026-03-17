@@ -35,10 +35,11 @@ const multiplyMat4 = (a: Mat4, b: Mat4): Mat4 => {
 
   for (let row = 0; row < 4; row += 1) {
     for (let col = 0; col < 4; col += 1) {
-      out[row * 4 + col] = a[row * 4 + 0] * b[col] +
-        a[row * 4 + 1] * b[4 + col] +
-        a[row * 4 + 2] * b[8 + col] +
-        a[row * 4 + 3] * b[12 + col];
+      const index = (col * 4) + row;
+      out[index] = a[row] * b[col * 4] +
+        a[4 + row] * b[(col * 4) + 1] +
+        a[8 + row] * b[(col * 4) + 2] +
+        a[12 + row] * b[(col * 4) + 3];
     }
   }
 

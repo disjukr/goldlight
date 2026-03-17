@@ -1,4 +1,4 @@
-import { assertEquals } from 'jsr:@std/assert@^1.0.14';
+import { assertAlmostEquals, assertEquals } from 'jsr:@std/assert@^1.0.14';
 import { evaluateScene } from '@rieul3d/core';
 import {
   appendAnimationClip,
@@ -42,6 +42,37 @@ Deno.test('evaluateScene computes world transforms across parent-child nodes', (
 
   assertEquals(child?.worldMatrix[12], 2);
   assertEquals(child?.worldMatrix[13], 3);
+});
+
+Deno.test('evaluateScene composes rotated parent transforms in GPU column-major order', () => {
+  let scene = createSceneIr('scene');
+  scene = appendNode(
+    scene,
+    createNode('root', {
+      transform: {
+        translation: { x: 1, y: 0, z: 0 },
+        rotation: { x: 0, y: 0, z: 0.70710678, w: 0.70710678 },
+        scale: { x: 1, y: 1, z: 1 },
+      },
+    }),
+  );
+  scene = appendNode(
+    scene,
+    createNode('child', {
+      parentId: 'root',
+      transform: {
+        translation: { x: 0, y: 2, z: 0 },
+        rotation: { x: 0, y: 0, z: 0, w: 1 },
+        scale: { x: 1, y: 1, z: 1 },
+      },
+    }),
+  );
+
+  const evaluated = evaluateScene(scene, { timeMs: 0 });
+  const child = evaluated.nodes.find((node) => node.node.id === 'child');
+
+  assertAlmostEquals(child?.worldMatrix[12] ?? 0, -1, 1e-5);
+  assertAlmostEquals(child?.worldMatrix[13] ?? 0, 0, 1e-5);
 });
 
 Deno.test('evaluateScene samples animation channels', () => {

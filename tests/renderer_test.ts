@@ -7,10 +7,96 @@ import {
   collectRendererCapabilityIssues,
   createDeferredRenderer,
   createForwardRenderer,
+  createMaterialRegistry,
   extractSdfPassItems,
   extractVolumePassItems,
+  type MaterialProgram,
   planFrame,
+  registerWgslMaterial,
 } from '@rieul3d/renderer';
+
+const createFlatRedProgram = (): MaterialProgram => ({
+  id: 'shader:flat-red',
+  label: 'Flat Red',
+  wgsl: `
+struct VsOut {
+  @builtin(position) position: vec4<f32>,
+};
+
+@vertex
+fn vsMain(@location(0) position: vec3<f32>) -> VsOut {
+  var out: VsOut;
+  out.position = vec4<f32>(position, 1.0);
+  return out;
+}
+
+@fragment
+fn fsMain() -> @location(0) vec4<f32> {
+  return vec4<f32>(1.0, 0.0, 0.0, 1.0);
+}
+`,
+  vertexEntryPoint: 'vsMain',
+  fragmentEntryPoint: 'fsMain',
+  vertexAttributes: [{
+    semantic: 'POSITION',
+    shaderLocation: 0,
+    format: 'float32x3',
+    offset: 0,
+    arrayStride: 12,
+  }],
+});
+
+const createTexturedCustomProgram = (): MaterialProgram => ({
+  id: 'shader:textured-custom',
+  label: 'Textured Custom',
+  wgsl: `
+struct VsOut {
+  @builtin(position) position: vec4<f32>,
+};
+
+@vertex
+fn vsMain(@location(0) position: vec3<f32>) -> VsOut {
+  var out: VsOut;
+  out.position = vec4<f32>(position, 1.0);
+  return out;
+}
+
+@group(1) @binding(0) var customTexture: texture_2d<f32>;
+@group(1) @binding(1) var customSampler: sampler;
+
+@fragment
+fn fsMain() -> @location(0) vec4<f32> {
+  return textureSample(customTexture, customSampler, vec2<f32>(0.5, 0.5));
+}
+`,
+  vertexEntryPoint: 'vsMain',
+  fragmentEntryPoint: 'fsMain',
+  vertexAttributes: [{
+    semantic: 'POSITION',
+    shaderLocation: 0,
+    format: 'float32x3',
+    offset: 0,
+    arrayStride: 12,
+  }],
+  usesTransformBindings: true,
+  materialBindings: [
+    {
+      kind: 'texture' as const,
+      binding: 0,
+      textureSemantic: 'baseColor',
+    },
+    {
+      kind: 'sampler' as const,
+      binding: 1,
+      textureSemantic: 'baseColor',
+    },
+    {
+      kind: 'texture' as const,
+      binding: 2,
+      textureSemantic: 'normal',
+    },
+  ],
+});
 
 Deno.test('forward renderer omits raymarch pass when scene has no sdf or volume nodes', () => {
   let scene = createSceneIr('scene');
@@ -125,6 +211,8 @@ Deno.test('extractSdfPassItems returns supported sphere sdf nodes with derived b
 });
 
 Deno.test('collectRendererCapabilityIssues accepts the current forward primitive mix', () => {
+  const materialRegistry = createMaterialRegistry();
+  registerWgslMaterial(materialRegistry, createFlatRedProgram());
   let scene = createSceneIr('scene');
   scene = appendMaterial(scene, {
     id: 'material-custom',
@@ -155,6 +243,7 @@ Deno.test('collectRendererCapabilityIssues accepts the current forward primitive
   const issues = collectRendererCapabilityIssues(
     createForwardRenderer(),
     evaluateScene(scene, { timeMs: 0 }),
+    materialRegistry,
   );
 
   assertEquals(issues, []);
@@ -173,22 +262,99 @@ Deno.test('collectRendererCapabilityIssues rejects unsupported sdf ops for execu
     evaluateScene(scene, { timeMs: 0 }),
   );
 
-  assertEquals(issues.map((issue) => issue.feature), ['sdf']);
+  assertEquals(issues, [{
+    nodeId: 'sdf-node',
+    feature: 'sdf',
+    requirement: 'sdf-op:box',
+    message:
+      'renderer "forward" only supports sphere sdf primitives right now; node "sdf-node" requested "box"',
+  }]);
 });
 
-Deno.test('assertRendererSceneCapabilities throws when renderer sees unsupported sdf ops', () => {
+Deno.test('collectRendererCapabilityIssues reports binding-specific failures in one pass', () => {
+  const materialRegistry = createMaterialRegistry();
+  registerWgslMaterial(materialRegistry, createTexturedCustomProgram());
   let scene = createSceneIr('scene');
   scene = {
     ...scene,
     sdfPrimitives: [{ id: 'sdf-0', op: 'box', parameters: {} }],
   };
+  scene = appendMaterial(scene, {
+    id: 'material-custom',
+    kind: 'custom',
+    shaderId: 'shader:textured-custom',
+    textures: [{
+      id: 'texture-0',
+      assetId: 'image-0',
+      semantic: 'baseColor',
+      colorSpace: 'srgb',
+      sampler: 'linear-repeat',
+    }],
+    parameters: {},
+  });
+  scene = appendMesh(scene, {
+    id: 'mesh-0',
+    materialId: 'material-custom',
+    attributes: [{ semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0, 0, 1, 0] }],
+  });
+  scene = appendNode(scene, createNode('mesh-node', { meshId: 'mesh-0' }));
   scene = appendNode(scene, createNode('sdf-node', { sdfId: 'sdf-0' }));
 
-  assertThrows(() =>
-    assertRendererSceneCapabilities(
-      createForwardRenderer(),
-      evaluateScene(scene, { timeMs: 0 }),
-    )
+  const issues = collectRendererCapabilityIssues(
+    createForwardRenderer(),
+    evaluateScene(scene, { timeMs: 0 }),
+    materialRegistry,
+  );
+
+  assertEquals(issues, [
+    {
+      nodeId: 'mesh-node',
+      feature: 'material-binding',
+      requirement: 'vertex-attribute:TEXCOORD_0',
+      message:
+        'renderer "forward" cannot sample material "material-custom" on node "mesh-node" because mesh "mesh-0" is missing TEXCOORD_0',
+    },
+    {
+      nodeId: 'mesh-node',
+      feature: 'material-binding',
+      requirement: 'texture-semantic:normal',
+      message:
+        'renderer "forward" cannot satisfy "normal" texture binding for material "material-custom"',
+    },
+    {
+      nodeId: 'sdf-node',
+      feature: 'sdf',
+      requirement: 'sdf-op:box',
+      message:
+        'renderer "forward" only supports sphere sdf primitives right now; node "sdf-node" requested "box"',
+    },
+  ]);
+});
+
+Deno.test('assertRendererSceneCapabilities surfaces aggregated binding diagnostics cleanly', () => {
+  let scene = createSceneIr('scene');
+  scene = appendMaterial(scene, {
+    id: 'material-custom',
+    kind: 'custom',
+    shaderId: 'shader:missing',
+    textures: [],
+    parameters: {},
+  });
+  scene = appendMesh(scene, {
+    id: 'mesh-0',
+    materialId: 'material-custom',
+    attributes: [{ semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0, 0, 1, 0] }],
+  });
+  scene = appendNode(scene, createNode('mesh-node', { meshId: 'mesh-0' }));
+
+  assertThrows(
+    () =>
+      assertRendererSceneCapabilities(
+        createForwardRenderer(),
+        evaluateScene(scene, { timeMs: 0 }),
+      ),
+    Error,
+    '(material-binding:shader:shader:missing)',
   );
 });
 
@@ -210,5 +376,10 @@ Deno.test('planned deferred renderer features are rejected for execution preflig
     evaluateScene(scene, { timeMs: 0 }),
   );
 
-  assertEquals(issues.map((issue) => issue.feature), ['mesh']);
+  assertEquals(issues, [{
+    nodeId: 'mesh-node',
+    feature: 'mesh',
+    requirement: 'mesh-execution',
+    message: 'renderer "deferred" does not support mesh execution',
+  }]);
 });

@@ -105,8 +105,10 @@ This now matches the implemented minimal deferred path:
 - mesh nodes are accepted when they provide `POSITION` and `NORMAL`
 - built-in `unlit` material uniforms are written into a small G-buffer and resolved through a
   fullscreen lighting pass
-- SDF, volume, custom WGSL materials, and textured `baseColor` sampling remain outside the deferred
-  execution surface and fail preflight with explicit diagnostics
+- built-in `unlit` materials may also sample resident `baseColor` textures when meshes provide
+  `TEXCOORD_0`
+- SDF, volume, and custom WGSL materials remain outside the deferred execution surface and fail
+  preflight with explicit diagnostics
 
 ## Relationship To Other Specs
 

@@ -32,8 +32,8 @@ Implemented today:
 
 - BDL-driven `SceneIr` generation with drift checks in CI
 - mesh, texture, first volume residency upload paths, and first volume raymarch execution
-- forward rendering, minimal deferred mesh/unlit execution, first SDF raymarch execution, and
-  headless snapshot readback
+- forward rendering, minimal deferred mesh/unlit execution with optional baseColor texture sampling,
+  first SDF raymarch execution, and headless snapshot readback
 - forward SDF sphere and box raymarch execution with capability preflight alignment
 - built-in unlit material registration, evaluated mesh transform uploads, base-color texture
   sampling, material parameter uploads, custom WGSL registration, declared material texture
@@ -50,7 +50,7 @@ Implemented today:
 - device-loss observation and residency rebuild helpers plus end-to-end offscreen recovery coverage
 - benchmark coverage for residency, material binding, and renderer capability preflight paths
 - renderer capability preflight for primitive and material compatibility, including deferred-path
-  NORMAL/baseColor texture gating
+  NORMAL, TEXCOORD_0, and baseColor residency gating
 
 ## Documentation
 

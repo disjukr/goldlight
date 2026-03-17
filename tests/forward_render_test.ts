@@ -303,7 +303,11 @@ Deno.test('renderDeferredFrame encodes depth, gbuffer, and lighting passes for m
   );
   assertEquals(mocks.bindGroupEntries.length, 4);
   assertEquals(mocks.samplers.length, 1);
-  const deferredVertexBuffers = mocks.pipelines[1].descriptor.vertex?.buffers ?? [];
+  const deferredGbufferPipeline = mocks.pipelines.find((pipeline) =>
+    pipeline.descriptor.fragment?.targets?.length === 2
+  );
+  assertEquals(deferredGbufferPipeline?.descriptor.fragment?.targets?.length, 2);
+  const deferredVertexBuffers = deferredGbufferPipeline?.descriptor.vertex?.buffers ?? [];
   assertEquals(deferredVertexBuffers.length, 2);
   assertEquals(
     deferredVertexBuffers.map((buffer) => buffer?.attributes.length ?? 0),
@@ -357,6 +361,86 @@ Deno.test('renderDeferredFrame encodes depth, gbuffer, and lighting passes for m
     ),
     Array.from(expectedDeferredTransform),
   );
+});
+
+Deno.test('renderDeferredFrame binds base-color textures for textured deferred unlit materials', () => {
+  const mocks = createRenderMocks();
+  const runtimeResidency = createRuntimeResidency();
+  let scene = createSceneIr('scene');
+  scene = appendMaterial(scene, {
+    id: 'material-textured',
+    kind: 'unlit',
+    textures: [{
+      id: 'texture-0',
+      assetId: 'image-0',
+      semantic: 'baseColor',
+      colorSpace: 'srgb',
+      sampler: 'linear-repeat',
+    }],
+    parameters: {
+      color: { x: 1, y: 1, z: 1, w: 1 },
+    },
+  });
+  scene = appendMesh(scene, {
+    id: 'mesh-textured-deferred',
+    materialId: 'material-textured',
+    attributes: [
+      { semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0, 0, 1, 0] },
+      { semantic: 'NORMAL', itemSize: 3, values: [0, 0, 1, 0, 0, 1, 0, 0, 1] },
+      { semantic: 'TEXCOORD_0', itemSize: 2, values: [0, 0, 1, 0, 0, 1] },
+    ],
+  });
+  scene = appendNode(
+    scene,
+    createNode('node-textured-deferred', { meshId: 'mesh-textured-deferred' }),
+  );
+
+  runtimeResidency.geometry.set('mesh-textured-deferred', {
+    meshId: 'mesh-textured-deferred',
+    attributeBuffers: {
+      POSITION: { id: 0 } as unknown as GPUBuffer,
+      NORMAL: { id: 1 } as unknown as GPUBuffer,
+      TEXCOORD_0: { id: 2 } as unknown as GPUBuffer,
+    },
+    vertexCount: 3,
+    indexCount: 0,
+  });
+  runtimeResidency.textures.set('texture-0', {
+    textureId: 'texture-0',
+    texture: { id: 0 } as unknown as GPUTexture,
+    view: { id: 0 } as unknown as GPUTextureView,
+    sampler: { id: 0 } as unknown as GPUSampler,
+    width: 2,
+    height: 2,
+    format: 'rgba8unorm-srgb',
+  });
+
+  const binding = createOffscreenContext({
+    device: mocks.device as unknown as GPUDevice,
+    target: createHeadlessTarget(64, 64),
+  });
+
+  const result = renderDeferredFrame(
+    mocks as unknown as GpuRenderExecutionContext,
+    binding,
+    runtimeResidency,
+    evaluateScene(scene, { timeMs: 0 }),
+  );
+
+  assertEquals(result.drawCount, 3);
+  assertEquals(mocks.pipelines.length, 3);
+  const deferredGbufferPipeline = mocks.pipelines.find((pipeline) =>
+    pipeline.descriptor.fragment?.targets?.length === 2
+  );
+  assertEquals(deferredGbufferPipeline?.descriptor.fragment?.targets?.length, 2);
+  const deferredVertexBuffers = deferredGbufferPipeline?.descriptor.vertex?.buffers ?? [];
+  assertEquals(deferredVertexBuffers.length, 3);
+  assertEquals(
+    deferredVertexBuffers.map((buffer) => buffer?.attributes[0]?.shaderLocation ?? -1),
+    [0, 1, 2],
+  );
+  assertEquals(mocks.bindGroupEntries.length, 4);
+  assertEquals(mocks.bindGroupEntries[2].map((entry) => entry.binding), [0, 1, 2]);
 });
 
 Deno.test('renderForwardFrame encodes a dedicated sdf raymarch pass for supported sphere and box nodes', () => {

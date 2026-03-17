@@ -47,6 +47,9 @@ The initial renderer uses a lightweight pass graph:
 - Snapshot bytes can also be encoded into PNG for local inspection and regression workflows.
 - The native BYOW demo uses the same forward renderer/runtime residency path on an SDL2-backed
   surface target instead of a browser canvas.
+- Fixture-backed golden snapshot tests cover a clear-only frame and a full-frame unlit mesh draw.
+- Golden fixtures can be refreshed intentionally with
+  `deno run -A --unstable-raw-imports scripts/refresh_golden_snapshots.ts`.
 
 ## Built-in Binding Contract
 

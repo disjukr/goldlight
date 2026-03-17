@@ -543,6 +543,83 @@ const getMatrixScale = (worldMatrix: readonly number[]): readonly [number, numbe
   return [scaleX, scaleY, scaleZ];
 };
 
+const invertAffineMatrix = (worldMatrix: readonly number[]): readonly number[] => {
+  const m00 = worldMatrix[0] ?? 0;
+  const m01 = worldMatrix[1] ?? 0;
+  const m02 = worldMatrix[2] ?? 0;
+  const m10 = worldMatrix[4] ?? 0;
+  const m11 = worldMatrix[5] ?? 0;
+  const m12 = worldMatrix[6] ?? 0;
+  const m20 = worldMatrix[8] ?? 0;
+  const m21 = worldMatrix[9] ?? 0;
+  const m22 = worldMatrix[10] ?? 0;
+  const tx = worldMatrix[12] ?? 0;
+  const ty = worldMatrix[13] ?? 0;
+  const tz = worldMatrix[14] ?? 0;
+
+  const c00 = (m11 * m22) - (m12 * m21);
+  const c01 = -((m10 * m22) - (m12 * m20));
+  const c02 = (m10 * m21) - (m11 * m20);
+  const c10 = -((m01 * m22) - (m02 * m21));
+  const c11 = (m00 * m22) - (m02 * m20);
+  const c12 = -((m00 * m21) - (m01 * m20));
+  const c20 = (m01 * m12) - (m02 * m11);
+  const c21 = -((m00 * m12) - (m02 * m10));
+  const c22 = (m00 * m11) - (m01 * m10);
+  const determinant = (m00 * c00) + (m01 * c01) + (m02 * c02);
+
+  if (Math.abs(determinant) < 1e-8) {
+    return [
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+    ];
+  }
+
+  const inverseDeterminant = 1 / determinant;
+  const i00 = c00 * inverseDeterminant;
+  const i01 = c10 * inverseDeterminant;
+  const i02 = c20 * inverseDeterminant;
+  const i10 = c01 * inverseDeterminant;
+  const i11 = c11 * inverseDeterminant;
+  const i12 = c21 * inverseDeterminant;
+  const i20 = c02 * inverseDeterminant;
+  const i21 = c12 * inverseDeterminant;
+  const i22 = c22 * inverseDeterminant;
+
+  return [
+    i00,
+    i01,
+    i02,
+    0,
+    i10,
+    i11,
+    i12,
+    0,
+    i20,
+    i21,
+    i22,
+    0,
+    -((i00 * tx) + (i10 * ty) + (i20 * tz)),
+    -((i01 * tx) + (i11 * ty) + (i21 * tz)),
+    -((i02 * tx) + (i12 * ty) + (i22 * tz)),
+    1,
+  ];
+};
+
 export const extractSdfPassItems = (
   evaluatedScene: EvaluatedScene,
 ): readonly SdfPassItem[] =>
@@ -726,24 +803,7 @@ const createSdfUniformData = (items: readonly SdfPassItem[]): Float32Array => {
 };
 
 const createVolumeUniformData = (item: VolumePassItem): Float32Array => {
-  const center = getMatrixTranslation(item.worldMatrix);
-  const [scaleX, scaleY, scaleZ] = getMatrixScale(item.worldMatrix);
-  const halfExtent = [
-    Math.max(scaleX * 0.5, 0.001),
-    Math.max(scaleY * 0.5, 0.001),
-    Math.max(scaleZ * 0.5, 0.001),
-  ] as const;
-
-  return Float32Array.from([
-    center[0],
-    center[1],
-    center[2],
-    0,
-    halfExtent[0],
-    halfExtent[1],
-    halfExtent[2],
-    0,
-  ]);
+  return Float32Array.from(invertAffineMatrix(item.worldMatrix));
 };
 
 const createMeshTransformUniformData = (worldMatrix: readonly number[]): Float32Array =>

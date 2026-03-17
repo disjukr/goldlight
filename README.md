@@ -37,8 +37,7 @@ Implemented today:
   sampling, material parameter uploads, and custom WGSL registration
 - glTF JSON, GLB, data-URI buffers, and caller-provided external glTF resource ingestion
 - browser canvas examples, Windows BYOW native textured demo, headless PNG snapshot workflow, and
-  PNG
-  snapshot encoding
+  PNG snapshot encoding
 - fixture-backed golden snapshot regression tests for headless renders
 - device-loss observation and residency rebuild helpers
 - renderer capability preflight for primitive and material compatibility
@@ -84,5 +83,5 @@ Read in this order when onboarding:
 - `deno task example:byow:run`: open the Windows BYOW native demo
 
 Golden snapshot fixtures live in
-  [`tests/fixtures/golden-snapshots`](./tests/fixtures/golden-snapshots). Refresh them intentionally
-  with `deno run -A --unstable-raw-imports ./scripts/refresh_golden_snapshots.ts`.
+[`tests/fixtures/golden-snapshots`](./tests/fixtures/golden-snapshots). Refresh them intentionally
+with `deno run -A --unstable-raw-imports ./scripts/refresh_golden_snapshots.ts`.

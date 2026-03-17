@@ -34,7 +34,8 @@ Implemented today:
 - mesh, texture, and first volume residency upload paths
 - forward rendering, first SDF raymarch execution, and headless snapshot readback
 - built-in unlit material registration, evaluated mesh transform uploads, base-color texture
-  sampling, material parameter uploads, and custom WGSL registration
+  sampling, material parameter uploads, custom WGSL registration, and declared material texture
+  bindings
 - glTF JSON, GLB, data-URI buffers, and caller-provided external glTF resource ingestion
 - browser canvas examples, Windows BYOW native textured demo, headless PNG snapshot workflow, and
   PNG snapshot encoding

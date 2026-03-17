@@ -56,11 +56,15 @@ The initial renderer uses a lightweight pass graph:
 
 - Built-in forward mesh shaders reserve `@group(0) @binding(0)` for a `mat4x4<f32>` mesh transform
   uniform derived from the evaluated node world matrix.
+- Material programs can declare `materialBindings` entries for uniform buffers, texture views, and
+  samplers that are assembled into a single material bind group.
 - Built-in unlit material uniforms live at `@group(1) @binding(0)`.
 - Built-in textured unlit shading also binds base-color texture/view pairs at
   `@group(1) @binding(1)` and `@group(1) @binding(2)`.
 - Custom WGSL programs that want the same evaluated mesh transform upload should register with
   `usesTransformBindings: true` and match the same `@group(0)` transform contract.
+- Custom WGSL programs that need sampled textures should declare matching texture/sampler bindings
+  plus the texture semantic they expect from `Material.textures`.
 
 ## Headless PNG Workflow
 
@@ -73,7 +77,6 @@ The initial renderer uses a lightweight pass graph:
 ## Known Gaps
 
 - Deferred rendering is still at the planning-contract stage.
-- Generalized texture-backed material binding for arbitrary custom programs is not implemented yet.
 - Volume rendering passes are not encoded yet; only their residency/extraction scaffolding exists.
 - SDF execution currently supports sphere primitives only; broader graph/operator coverage is still
   pending.

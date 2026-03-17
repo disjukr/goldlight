@@ -1,4 +1,4 @@
-import { assertEquals, assertStrictEquals } from 'jsr:@std/assert@^1.0.14';
+import { assertAlmostEquals, assertEquals, assertStrictEquals } from 'jsr:@std/assert@^1.0.14';
 import { evaluateScene } from '@rieul3d/core';
 import { createOffscreenContext, createRuntimeResidency } from '@rieul3d/gpu';
 import { appendMaterial, appendMesh, appendNode, createNode, createSceneIr } from '@rieul3d/ir';
@@ -16,6 +16,10 @@ import { createHeadlessTarget } from '@rieul3d/platform';
 type MockBuffer = Readonly<{ id: number }>;
 type MockBindGroup = Readonly<{ id: number }>;
 type MockBindGroupEntry = GPUBindGroupEntry;
+type MockWriteBufferCall = Readonly<{
+  buffer: MockBuffer;
+  bytes: Uint8Array;
+}>;
 type MockPipeline = Readonly<{
   id: number;
   descriptor: GPURenderPipelineDescriptor;
@@ -37,6 +41,7 @@ const createRenderMocks = () => {
   const buffers: MockBuffer[] = [];
   const bindGroups: MockBindGroup[] = [];
   const bindGroupEntries: MockBindGroupEntry[][] = [];
+  const writeBufferCalls: MockWriteBufferCall[] = [];
   const submits: unknown[][] = [];
   const passActions: MockPassAction[] = [];
   const renderPassCount = { current: 0 };
@@ -117,7 +122,15 @@ const createRenderMocks = () => {
   };
 
   const queue = {
-    writeBuffer: () => undefined,
+    writeBuffer: (buffer: GPUBuffer, _offset: number, data: BufferSource) => {
+      const bytes = data instanceof ArrayBuffer
+        ? new Uint8Array(data.slice(0))
+        : new Uint8Array(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength));
+      writeBufferCalls.push({
+        buffer: buffer as unknown as MockBuffer,
+        bytes,
+      });
+    },
     submit: (buffers: readonly GPUCommandBuffer[]) => {
       submits.push([...buffers]);
     },
@@ -131,6 +144,7 @@ const createRenderMocks = () => {
     buffers,
     bindGroups,
     bindGroupEntries,
+    writeBufferCalls,
     submits,
     passActions,
     renderPassCount,
@@ -212,7 +226,17 @@ Deno.test('renderForwardFrame encodes indexed and non-indexed draws from mesh re
   );
   assertEquals(
     mocks.passActions.filter((action) => action.type === 'setBindGroup').length,
-    2,
+    4,
+  );
+  assertEquals(mocks.bindGroupEntries.length, 4);
+  assertEquals(
+    mocks.writeBufferCalls
+      .filter((call) => call.bytes.byteLength === 64)
+      .map((call) => Array.from(new Float32Array(call.bytes.buffer.slice(0)))),
+    [
+      [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+      [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+    ],
   );
 });
 
@@ -267,10 +291,16 @@ struct VsOut {
   @builtin(position) position: vec4<f32>,
 };
 
+struct MeshTransform {
+  world: mat4x4<f32>,
+};
+
+@group(0) @binding(0) var<uniform> meshTransform: MeshTransform;
+
 @vertex
 fn vsMain(@location(0) position: vec3<f32>) -> VsOut {
   var out: VsOut;
-  out.position = vec4<f32>(position, 1.0);
+  out.position = meshTransform.world * vec4<f32>(position, 1.0);
   return out;
 }
 
@@ -336,10 +366,16 @@ struct VsOut {
   @builtin(position) position: vec4<f32>,
 };
 
+struct MeshTransform {
+  world: mat4x4<f32>,
+};
+
+@group(0) @binding(0) var<uniform> meshTransform: MeshTransform;
+
 @vertex
 fn vsMain(@location(0) position: vec3<f32>) -> VsOut {
   var out: VsOut;
-  out.position = vec4<f32>(position, 1.0);
+  out.position = meshTransform.world * vec4<f32>(position, 1.0);
   return out;
 }
 
@@ -411,6 +447,7 @@ fn fsMain() -> @location(0) vec4<f32> {
 
   assertEquals(mocks.pipelines.length, 1);
   assertEquals(mocks.shaders.length, 1);
+  assertEquals(mocks.bindGroupEntries.length, 0);
 });
 
 Deno.test('renderForwardFrame binds base-color textures for textured built-in unlit materials', () => {
@@ -473,8 +510,9 @@ Deno.test('renderForwardFrame binds base-color textures for textured built-in un
   );
 
   assertEquals(result.drawCount, 1);
-  assertEquals(mocks.bindGroupEntries.length, 1);
-  assertEquals(mocks.bindGroupEntries[0].map((entry) => entry.binding), [0, 1, 2]);
+  assertEquals(mocks.bindGroupEntries.length, 2);
+  assertEquals(mocks.bindGroupEntries[0].map((entry) => entry.binding), [0]);
+  assertEquals(mocks.bindGroupEntries[1].map((entry) => entry.binding), [0, 1, 2]);
   const vertexBufferLayouts = mocks.pipelines[0].descriptor.vertex?.buffers ?? [];
   assertEquals(
     vertexBufferLayouts.map((buffer) => buffer?.arrayStride ?? 0),
@@ -544,6 +582,72 @@ Deno.test('renderForwardFrame does not append texture bindings for shader-select
     evaluateScene(scene, { timeMs: 0 }),
   );
 
-  assertEquals(mocks.bindGroupEntries.length, 1);
+  assertEquals(mocks.bindGroupEntries.length, 2);
   assertEquals(mocks.bindGroupEntries[0].map((entry) => entry.binding), [0]);
+  assertEquals(mocks.bindGroupEntries[1].map((entry) => entry.binding), [0]);
+});
+
+Deno.test('renderForwardFrame uploads evaluated mesh transforms for built-in unlit draws', () => {
+  const mocks = createRenderMocks();
+  const runtimeResidency = createRuntimeResidency();
+  let scene = createSceneIr('scene');
+  scene = appendMesh(scene, {
+    id: 'mesh-transformed',
+    attributes: [{ semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0, 0, 1, 0] }],
+  });
+  scene = appendNode(
+    scene,
+    createNode('node-transformed', {
+      meshId: 'mesh-transformed',
+      transform: {
+        translation: { x: 0.5, y: -0.25, z: 0 },
+        rotation: { x: 0, y: 0, z: 0.70710678, w: 0.70710678 },
+        scale: { x: 2, y: 1, z: 1 },
+      },
+    }),
+  );
+
+  runtimeResidency.geometry.set('mesh-transformed', {
+    meshId: 'mesh-transformed',
+    attributeBuffers: { POSITION: { id: 4 } as unknown as GPUBuffer },
+    vertexCount: 3,
+    indexCount: 0,
+  });
+
+  renderForwardFrame(
+    mocks as unknown as GpuRenderExecutionContext,
+    createOffscreenContext({
+      device: mocks.device as unknown as GPUDevice,
+      target: createHeadlessTarget(32, 32),
+    }),
+    runtimeResidency,
+    evaluateScene(scene, { timeMs: 0 }),
+  );
+
+  const transformUpload = mocks.writeBufferCalls.find((call) => call.bytes.byteLength === 64);
+  const uploadedMatrix = transformUpload
+    ? Array.from(new Float32Array(transformUpload.bytes.buffer.slice(0)))
+    : [];
+  const expectedMatrix = [
+    0,
+    2,
+    0,
+    0,
+    -1,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+    0.5,
+    -0.25,
+    0,
+    1,
+  ];
+  assertEquals(uploadedMatrix.length, expectedMatrix.length);
+  uploadedMatrix.forEach((value, index) => {
+    assertAlmostEquals(value, expectedMatrix[index], 1e-6);
+  });
 });

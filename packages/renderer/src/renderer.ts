@@ -19,6 +19,9 @@ import builtInDeferredDepthPrepassShader from './shaders/built_in_deferred_depth
 import builtInDeferredGbufferUnlitShader from './shaders/built_in_deferred_gbuffer_unlit.wgsl' with {
   type: 'text',
 };
+import builtInDeferredGbufferTexturedUnlitShader from './shaders/built_in_deferred_gbuffer_unlit_textured.wgsl' with {
+  type: 'text',
+};
 import builtInDeferredLightingShader from './shaders/built_in_deferred_lighting.wgsl' with {
   type: 'text',
 };
@@ -179,6 +182,7 @@ const builtInUnlitProgramId = 'built-in:unlit';
 const builtInTexturedUnlitProgramId = 'built-in:unlit-textured';
 const builtInDeferredDepthPrepassProgramId = 'built-in:deferred-depth-prepass';
 const builtInDeferredGbufferUnlitProgramId = 'built-in:deferred-gbuffer-unlit';
+const builtInDeferredGbufferTexturedUnlitProgramId = 'built-in:deferred-gbuffer-unlit-textured';
 const builtInDeferredLightingProgramId = 'built-in:deferred-lighting';
 const builtInSdfRaymarchProgramId = 'built-in:sdf-raymarch';
 const builtInVolumeRaymarchProgramId = 'built-in:volume-raymarch';
@@ -291,6 +295,55 @@ const builtInDeferredGbufferUnlitProgram: MaterialProgram = {
       format: 'float32x3',
       offset: 0,
       arrayStride: 12,
+    },
+  ],
+};
+
+const builtInDeferredGbufferTexturedUnlitProgram: MaterialProgram = {
+  id: builtInDeferredGbufferTexturedUnlitProgramId,
+  label: 'Built-in Deferred G-buffer Unlit (Textured)',
+  wgsl: builtInDeferredGbufferTexturedUnlitShader,
+  vertexEntryPoint: 'vsMain',
+  fragmentEntryPoint: 'fsMain',
+  usesMaterialBindings: true,
+  usesTransformBindings: true,
+  materialBindings: [
+    {
+      kind: 'uniform',
+      binding: 0,
+    },
+    {
+      kind: 'texture',
+      binding: 1,
+      textureSemantic: 'baseColor',
+    },
+    {
+      kind: 'sampler',
+      binding: 2,
+      textureSemantic: 'baseColor',
+    },
+  ],
+  vertexAttributes: [
+    {
+      semantic: 'POSITION',
+      shaderLocation: 0,
+      format: 'float32x3',
+      offset: 0,
+      arrayStride: 12,
+    },
+    {
+      semantic: 'NORMAL',
+      shaderLocation: 1,
+      format: 'float32x3',
+      offset: 0,
+      arrayStride: 12,
+    },
+    {
+      semantic: 'TEXCOORD_0',
+      shaderLocation: 2,
+      format: 'float32x2',
+      offset: 0,
+      arrayStride: 8,
     },
   ],
 };
@@ -534,19 +587,6 @@ export const collectRendererCapabilityIssues = (
           'mesh',
           'vertex-attribute:NORMAL',
           `renderer "${renderer.label}" requires NORMAL vertex data on node "${node.node.id}" for deferred lighting`,
-        );
-      }
-
-      const unsupportedTexture = materialTextures.find((texture) =>
-        texture.semantic === 'baseColor'
-      );
-      if (unsupportedTexture) {
-        pushIssue(
-          'material-binding',
-          'texture-semantic:baseColor',
-          `renderer "${renderer.label}" does not support baseColor textures in the minimal deferred path for material "${
-            material?.id ?? createDefaultMaterial().id
-          }"`,
         );
       }
     }
@@ -926,8 +966,9 @@ export const ensureDeferredGbufferPipeline = (
   context: GpuRenderExecutionContext,
   residency: RuntimeResidency,
   format: GPUTextureFormat,
+  program: MaterialProgram = builtInDeferredGbufferUnlitProgram,
 ): GPURenderPipeline => {
-  const cacheKey = `${builtInDeferredGbufferUnlitProgramId}:${format}`;
+  const cacheKey = `${program.id}:${format}`;
   const cached = residency.pipelines.get(cacheKey);
   if (cached) {
     return cached as GPURenderPipeline;
@@ -935,19 +976,19 @@ export const ensureDeferredGbufferPipeline = (
 
   const shader = context.device.createShaderModule({
     label: cacheKey,
-    code: builtInDeferredGbufferUnlitShader,
+    code: program.wgsl,
   });
   const pipeline = context.device.createRenderPipeline({
     label: cacheKey,
     layout: 'auto',
     vertex: {
       module: shader,
-      entryPoint: 'vsMain',
-      buffers: createVertexBufferLayouts(builtInDeferredGbufferUnlitProgram.vertexAttributes),
+      entryPoint: program.vertexEntryPoint,
+      buffers: createVertexBufferLayouts(program.vertexAttributes),
     },
     fragment: {
       module: shader,
-      entryPoint: 'fsMain',
+      entryPoint: program.fragmentEntryPoint,
       targets: [{ format }, { format }],
     },
     primitive: {
@@ -1505,7 +1546,6 @@ export const renderDeferredFrame = (
     label: 'deferred-frame',
   });
   const depthPipeline = ensureDeferredDepthPrepassPipeline(context, residency);
-  const gbufferPipeline = ensureDeferredGbufferPipeline(context, residency, binding.target.format);
   const lightingPipeline = ensureDeferredLightingPipeline(
     context,
     residency,
@@ -1588,7 +1628,6 @@ export const renderDeferredFrame = (
       depthStoreOp: 'store',
     },
   });
-  gbufferPass.setPipeline(gbufferPipeline);
   for (const node of evaluatedScene.nodes) {
     const mesh = node.mesh;
     if (!mesh) {
@@ -1596,14 +1635,43 @@ export const renderDeferredFrame = (
     }
 
     const geometry = residency.geometry.get(mesh.id);
-    const positionBuffer = geometry?.attributeBuffers.POSITION;
-    const normalBuffer = geometry?.attributeBuffers.NORMAL;
-    if (!geometry || !positionBuffer || !normalBuffer) {
+    if (!geometry) {
       continue;
     }
 
-    gbufferPass.setVertexBuffer(0, positionBuffer);
-    gbufferPass.setVertexBuffer(1, normalBuffer);
+    const material = node.material ?? createDefaultMaterial();
+    const baseColorTexture = getBaseColorTextureResidency(residency, material);
+    const gbufferProgram = baseColorTexture && geometry.attributeBuffers.TEXCOORD_0
+      ? builtInDeferredGbufferTexturedUnlitProgram
+      : builtInDeferredGbufferUnlitProgram;
+    const gbufferPipeline = ensureDeferredGbufferPipeline(
+      context,
+      residency,
+      binding.target.format,
+      gbufferProgram,
+    );
+
+    let isDrawable = true;
+    for (let index = 0; index < gbufferProgram.vertexAttributes.length; index += 1) {
+      const attribute = gbufferProgram.vertexAttributes[index];
+      if (attribute.offset !== 0) {
+        isDrawable = false;
+        break;
+      }
+
+      const buffer = geometry.attributeBuffers[attribute.semantic];
+      if (!buffer) {
+        isDrawable = false;
+        break;
+      }
+
+      gbufferPass.setVertexBuffer(index, buffer);
+    }
+    if (!isDrawable) {
+      continue;
+    }
+
+    gbufferPass.setPipeline(gbufferPipeline);
 
     const transformData = createDeferredMeshTransformUniformData(node.worldMatrix);
     const transformBuffer = context.device.createBuffer({
@@ -1625,18 +1693,23 @@ export const renderDeferredFrame = (
       }),
     );
 
-    const material = node.material ?? createDefaultMaterial();
-    const materialResidency = ensureMaterialResidency(context, residency, material);
+    const materialBindings = getMaterialBindingDescriptors(gbufferProgram);
+    const materialResidency = {
+      current: undefined as ReturnType<typeof ensureMaterialResidency> | undefined,
+    };
     gbufferPass.setBindGroup(
       1,
       context.device.createBindGroup({
         layout: gbufferPipeline.getBindGroupLayout(1),
-        entries: [{
-          binding: 0,
-          resource: {
-            buffer: materialResidency.uniformBuffer,
-          },
-        }],
+        entries: materialBindings.map((descriptor) =>
+          resolveMaterialBindingResource(
+            context,
+            residency,
+            material,
+            descriptor,
+            materialResidency,
+          )
+        ),
       }),
     );
 

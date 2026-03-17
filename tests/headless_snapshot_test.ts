@@ -6,7 +6,7 @@ import {
   createOffscreenReadbackPlan,
   createRuntimeResidency,
 } from '@rieul3d/gpu';
-import { appendMesh, appendNode, createNode, createSceneIr } from '@rieul3d/ir';
+import { appendMaterial, appendMesh, appendNode, createNode, createSceneIr } from '@rieul3d/ir';
 import { renderDeferredSnapshot, renderForwardSnapshot } from '@rieul3d/renderer';
 import { createHeadlessTarget } from '@rieul3d/platform';
 
@@ -256,4 +256,76 @@ Deno.test('renderDeferredSnapshot returns compact offscreen bytes for minimal de
     width: 2,
     height: 2,
   }]);
+});
+
+Deno.test('renderDeferredSnapshot also accepts textured deferred scenes with resident baseColor data', async () => {
+  const mocks = createSnapshotMocks();
+  const runtimeResidency = createRuntimeResidency();
+  let scene = createSceneIr('scene');
+  scene = appendMaterial(scene, {
+    id: 'material-textured',
+    kind: 'unlit',
+    textures: [{
+      id: 'texture-0',
+      assetId: 'image-0',
+      semantic: 'baseColor',
+      colorSpace: 'srgb',
+      sampler: 'linear-repeat',
+    }],
+    parameters: {
+      color: { x: 1, y: 1, z: 1, w: 1 },
+    },
+  });
+  scene = appendMesh(scene, {
+    id: 'mesh',
+    materialId: 'material-textured',
+    attributes: [
+      { semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0, 0, 1, 0] },
+      { semantic: 'NORMAL', itemSize: 3, values: [0, 0, 1, 0, 0, 1, 0, 0, 1] },
+      { semantic: 'TEXCOORD_0', itemSize: 2, values: [0, 0, 1, 0, 0, 1] },
+    ],
+  });
+  scene = appendNode(scene, createNode('node', { meshId: 'mesh' }));
+
+  runtimeResidency.geometry.set('mesh', {
+    meshId: 'mesh',
+    attributeBuffers: {
+      POSITION: { id: 0 } as unknown as GPUBuffer,
+      NORMAL: { id: 1 } as unknown as GPUBuffer,
+      TEXCOORD_0: { id: 2 } as unknown as GPUBuffer,
+    },
+    vertexCount: 3,
+    indexCount: 0,
+  });
+  runtimeResidency.textures.set('texture-0', {
+    textureId: 'texture-0',
+    texture: {} as GPUTexture,
+    view: {} as GPUTextureView,
+    sampler: {} as GPUSampler,
+    width: 2,
+    height: 2,
+    format: 'rgba8unorm-srgb',
+  });
+
+  const binding = createOffscreenContext({
+    device: mocks.device as unknown as GPUDevice,
+    target: createHeadlessTarget(2, 2),
+  });
+
+  const snapshot = await renderDeferredSnapshot(
+    mocks as unknown as Parameters<typeof renderDeferredSnapshot>[0],
+    binding,
+    runtimeResidency,
+    evaluateScene(scene, { timeMs: 0 }),
+  );
+
+  assertEquals(snapshot.drawCount, 3);
+  assertEquals(snapshot.submittedCommandBufferCount, 1);
+  assertEquals(snapshot.width, 2);
+  assertEquals(snapshot.height, 2);
+  assertEquals(
+    [...snapshot.bytes],
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
+  );
+  assertEquals(mocks.submits.length, 2);
 });

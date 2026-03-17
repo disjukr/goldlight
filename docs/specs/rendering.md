@@ -43,11 +43,13 @@ The initial renderer uses a lightweight pass graph:
 - Built-in unlit WGSL is stored as a standalone shader file and imported as text.
 - Built-in unlit shading supports color-only meshes plus optional base-color texture sampling when
   UVs and texture residency are available.
+- Built-in deferred unlit shading supports the same optional base-color texture sampling when
+  `NORMAL` and `TEXCOORD_0` data plus texture residency are available.
 - Built-in forward mesh draws upload each evaluated node `worldMatrix` and apply it in the vertex
   stage before rasterization.
 - Material parameter uploads and bind group creation are implemented for built-in unlit shading.
-- The minimal deferred path currently requires `NORMAL` vertex data and only accepts color-only
-  built-in `unlit` materials.
+- The minimal deferred path currently requires `NORMAL` vertex data and still limits materials to
+  built-in `unlit`, with optional base-color textures.
 - Custom WGSL programs can be registered and cached through the material registry.
 - Headless/offscreen rendering supports compact byte readback for snapshot testing.
 - Snapshot bytes can also be encoded into PNG for local inspection and regression workflows.
@@ -66,11 +68,15 @@ The initial renderer uses a lightweight pass graph:
 
 - Built-in forward mesh shaders reserve `@group(0) @binding(0)` for a `mat4x4<f32>` mesh transform
   uniform derived from the evaluated node world matrix.
+- Built-in deferred G-buffer mesh shaders reserve `@group(0) @binding(0)` for a transform uniform
+  containing the evaluated node world matrix plus an inverse-transpose normal matrix.
 - Material programs can declare `materialBindings` entries for uniform buffers, texture views, and
   samplers that are assembled into a single material bind group.
 - Built-in unlit material uniforms live at `@group(1) @binding(0)`.
 - Built-in textured unlit shading also binds base-color texture/view pairs at
   `@group(1) @binding(1)` and `@group(1) @binding(2)`.
+- Built-in deferred textured unlit shading uses the same `@group(1)` base-color texture/sampler
+  contract during G-buffer writes.
 - Custom WGSL programs that want the same evaluated mesh transform upload should register with
   `usesTransformBindings: true` and match the same `@group(0)` transform contract.
 - Custom WGSL programs that need sampled textures should declare matching texture/sampler bindings
@@ -88,7 +94,6 @@ The initial renderer uses a lightweight pass graph:
 
 ## Known Gaps
 
-- Deferred rendering does not yet cover textured materials, custom WGSL materials, SDF primitives,
-  or volume primitives.
+- Deferred rendering does not yet cover custom WGSL materials, SDF primitives, or volume primitives.
 - SDF execution currently supports sphere and box primitives only; broader graph/operator coverage
   is still pending.

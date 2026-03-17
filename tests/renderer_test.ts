@@ -505,7 +505,54 @@ Deno.test('deferred renderer accepts minimal mesh/unlit scenes with normals', ()
   assertEquals(issues, []);
 });
 
-Deno.test('deferred renderer rejects missing normals and textured unlit materials during preflight', () => {
+Deno.test('deferred renderer accepts textured unlit scenes with normals, uvs, and resident textures', () => {
+  const residency = createRuntimeResidency();
+  let scene = createSceneIr('scene');
+  scene = appendMaterial(scene, {
+    id: 'material-textured',
+    kind: 'unlit',
+    textures: [{
+      id: 'texture-0',
+      assetId: 'image-0',
+      semantic: 'baseColor',
+      colorSpace: 'srgb',
+      sampler: 'linear-repeat',
+    }],
+    parameters: {
+      color: { x: 1, y: 1, z: 1, w: 1 },
+    },
+  });
+  residency.textures.set('texture-0', {
+    textureId: 'texture-0',
+    texture: {} as GPUTexture,
+    view: {} as GPUTextureView,
+    sampler: {} as GPUSampler,
+    width: 2,
+    height: 2,
+    format: 'rgba8unorm-srgb',
+  });
+  scene = appendMesh(scene, {
+    id: 'mesh-0',
+    materialId: 'material-textured',
+    attributes: [
+      { semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0, 0, 1, 0] },
+      { semantic: 'NORMAL', itemSize: 3, values: [0, 0, 1, 0, 0, 1, 0, 0, 1] },
+      { semantic: 'TEXCOORD_0', itemSize: 2, values: [0, 0, 1, 0, 0, 1] },
+    ],
+  });
+  scene = appendNode(scene, createNode('mesh-node', { meshId: 'mesh-0' }));
+
+  const issues = collectRendererCapabilityIssues(
+    createDeferredRenderer(),
+    evaluateScene(scene, { timeMs: 0 }),
+    createMaterialRegistry(),
+    residency,
+  );
+
+  assertEquals(issues, []);
+});
+
+Deno.test('deferred renderer rejects textured unlit scenes that omit normals or uvs during preflight', () => {
   let scene = createSceneIr('scene');
   scene = appendMaterial(scene, {
     id: 'material-textured',
@@ -526,7 +573,6 @@ Deno.test('deferred renderer rejects missing normals and textured unlit material
     materialId: 'material-textured',
     attributes: [
       { semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0, 0, 1, 0] },
-      { semantic: 'TEXCOORD_0', itemSize: 2, values: [0, 0, 1, 0, 0, 1] },
     ],
   });
   scene = appendNode(scene, createNode('mesh-node', { meshId: 'mesh-0' }));
@@ -547,9 +593,9 @@ Deno.test('deferred renderer rejects missing normals and textured unlit material
     {
       nodeId: 'mesh-node',
       feature: 'material-binding',
-      requirement: 'texture-semantic:baseColor',
+      requirement: 'vertex-attribute:TEXCOORD_0',
       message:
-        'renderer "deferred" does not support baseColor textures in the minimal deferred path for material "material-textured"',
+        'renderer "deferred" cannot sample baseColor textures on node "mesh-node" because mesh "mesh-0" is missing TEXCOORD_0',
     },
   ]);
 });

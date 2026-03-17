@@ -39,12 +39,24 @@ The initial renderer uses a lightweight pass graph:
 - Built-in unlit WGSL is stored as a standalone shader file and imported as text.
 - Built-in unlit shading supports color-only meshes plus optional base-color texture sampling when
   UVs and texture residency are available.
+- Built-in forward mesh draws upload each evaluated node `worldMatrix` and apply it in the vertex
+  stage before rasterization.
 - Material parameter uploads and bind group creation are implemented for built-in unlit shading.
 - Custom WGSL programs can be registered and cached through the material registry.
 - Headless/offscreen rendering supports compact byte readback for snapshot testing.
 - Snapshot bytes can also be encoded into PNG for local inspection and regression workflows.
 - The native BYOW demo uses the same forward renderer/runtime residency path on an SDL2-backed
   surface target instead of a browser canvas.
+
+## Built-in Binding Contract
+
+- Built-in forward mesh shaders reserve `@group(0) @binding(0)` for a `mat4x4<f32>` mesh transform
+  uniform derived from the evaluated node world matrix.
+- Built-in unlit material uniforms live at `@group(1) @binding(0)`.
+- Built-in textured unlit shading also binds base-color texture/view pairs at
+  `@group(1) @binding(1)` and `@group(1) @binding(2)`.
+- Custom WGSL programs that want the same evaluated mesh transform upload should register with
+  `usesTransformBindings: true` and match the same `@group(0)` transform contract.
 
 ## Known Gaps
 

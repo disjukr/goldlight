@@ -98,6 +98,7 @@ export type MaterialProgram = Readonly<{
   fragmentEntryPoint: string;
   vertexAttributes: readonly MaterialVertexAttribute[];
   usesMaterialBindings?: boolean;
+  usesTransformBindings?: boolean;
 }>;
 
 export type MaterialRegistry = Readonly<{
@@ -148,6 +149,7 @@ const builtInUnlitProgram: MaterialProgram = {
   vertexEntryPoint: 'vsMain',
   fragmentEntryPoint: 'fsMain',
   usesMaterialBindings: true,
+  usesTransformBindings: true,
   vertexAttributes: [{
     semantic: 'POSITION',
     shaderLocation: 0,
@@ -164,6 +166,7 @@ const builtInTexturedUnlitProgram: MaterialProgram = {
   vertexEntryPoint: 'vsMain',
   fragmentEntryPoint: 'fsMain',
   usesMaterialBindings: true,
+  usesTransformBindings: true,
   vertexAttributes: [
     {
       semantic: 'POSITION',
@@ -540,6 +543,9 @@ const createSdfUniformData = (items: readonly SdfPassItem[]): Float32Array => {
   return uniformData;
 };
 
+const createMeshTransformUniformData = (worldMatrix: readonly number[]): Float32Array =>
+  Float32Array.from(worldMatrix.slice(0, 16));
+
 export const renderSdfRaymarchPass = (
   context: GpuRenderExecutionContext,
   encoder: GPUCommandEncoder,
@@ -667,10 +673,31 @@ export const renderForwardFrame = (
 
     pass.setPipeline(pipeline);
 
+    if (program.usesTransformBindings) {
+      const transformData = createMeshTransformUniformData(node.worldMatrix);
+      const transformBuffer = context.device.createBuffer({
+        label: `${node.node.id}:mesh-transform`,
+        size: transformData.byteLength,
+        usage: uniformUsage | bufferCopyDstUsage,
+      });
+      context.queue.writeBuffer(transformBuffer, 0, toArrayBuffer(transformData));
+      const transformBindGroup = context.device.createBindGroup({
+        layout: pipeline.getBindGroupLayout(0),
+        entries: [{
+          binding: 0,
+          resource: {
+            buffer: transformBuffer,
+          },
+        }],
+      });
+      pass.setBindGroup(0, transformBindGroup);
+    }
+
     if (program.usesMaterialBindings) {
       const materialResidency = ensureMaterialResidency(context, residency, material);
+      const materialBindGroupIndex = program.usesTransformBindings ? 1 : 0;
       const bindGroup = context.device.createBindGroup({
-        layout: pipeline.getBindGroupLayout(0),
+        layout: pipeline.getBindGroupLayout(materialBindGroupIndex),
         entries: [
           {
             binding: 0,
@@ -692,7 +719,7 @@ export const renderForwardFrame = (
             : []),
         ],
       });
-      pass.setBindGroup(0, bindGroup);
+      pass.setBindGroup(materialBindGroupIndex, bindGroup);
     }
 
     if (geometry.indexBuffer && geometry.indexCount > 0) {

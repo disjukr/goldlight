@@ -33,8 +33,8 @@ Implemented today:
 - BDL-driven `SceneIr` generation with drift checks in CI
 - mesh, texture, and first volume residency upload paths
 - forward rendering, first SDF raymarch execution, and headless snapshot readback
-- built-in unlit material registration, base-color texture sampling, material parameter uploads, and
-  custom WGSL registration
+- built-in unlit material registration, evaluated mesh transform uploads, base-color texture
+  sampling, material parameter uploads, and custom WGSL registration
 - glTF JSON, GLB, data-URI buffers, and caller-provided external glTF resource ingestion
 - browser canvas example, Windows BYOW native textured demo, and PNG snapshot encoding
 - device-loss observation and residency rebuild helpers

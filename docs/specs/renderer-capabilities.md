@@ -104,7 +104,7 @@ The deferred renderer declares:
 - `volume: unsupported`
 - `light: unsupported`
 - `builtInMaterialKinds: ['unlit']`
-- `customShaders: unsupported`
+- `customShaders: supported`
 
 This now matches the implemented minimal deferred path:
 
@@ -113,8 +113,10 @@ This now matches the implemented minimal deferred path:
   fullscreen lighting pass
 - built-in `unlit` materials may also sample resident `baseColor` textures when meshes provide
   `TEXCOORD_0`
-- SDF, volume, and custom WGSL materials remain outside the deferred execution surface and fail
-  preflight with explicit diagnostics
+- registered custom WGSL materials may also execute in the G-buffer pass when they provide
+  compatible transform bindings, fragment outputs, and declared material bindings
+- SDF and volume primitives remain outside the deferred execution surface and fail preflight with
+  explicit diagnostics
 
 ## Relationship To Other Specs
 

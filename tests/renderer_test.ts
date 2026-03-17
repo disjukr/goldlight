@@ -106,6 +106,91 @@ fn fsMain() -> @location(0) vec4<f32> {
   ],
 });
 
+const createDeferredTexturedCustomProgram = (): MaterialProgram => ({
+  id: 'shader:deferred-textured-custom',
+  label: 'Deferred Textured Custom',
+  wgsl: `
+struct MeshTransform {
+  world: mat4x4<f32>,
+  normal: mat4x4<f32>,
+};
+
+struct VsOut {
+  @builtin(position) position: vec4<f32>,
+  @location(0) normal: vec3<f32>,
+  @location(1) uv: vec2<f32>,
+};
+
+struct FsOut {
+  @location(0) albedo: vec4<f32>,
+  @location(1) encodedNormal: vec4<f32>,
+};
+
+@group(0) @binding(0) var<uniform> meshTransform: MeshTransform;
+@group(1) @binding(0) var customTexture: texture_2d<f32>;
+@group(1) @binding(1) var customSampler: sampler;
+
+@vertex
+fn vsMain(
+  @location(0) position: vec3<f32>,
+  @location(1) normal: vec3<f32>,
+  @location(2) uv: vec2<f32>,
+) -> VsOut {
+  var out: VsOut;
+  out.position = meshTransform.world * vec4<f32>(position, 1.0);
+  out.normal = normalize((meshTransform.normal * vec4<f32>(normal, 0.0)).xyz);
+  out.uv = uv;
+  return out;
+}
+
+@fragment
+fn fsMain(in: VsOut) -> FsOut {
+  var out: FsOut;
+  out.albedo = textureSample(customTexture, customSampler, in.uv);
+  out.encodedNormal = vec4<f32>((normalize(in.normal) * 0.5) + vec3<f32>(0.5), 1.0);
+  return out;
+}
+`,
+  vertexEntryPoint: 'vsMain',
+  fragmentEntryPoint: 'fsMain',
+  vertexAttributes: [
+    {
+      semantic: 'POSITION',
+      shaderLocation: 0,
+      format: 'float32x3',
+      offset: 0,
+      arrayStride: 12,
+    },
+    {
+      semantic: 'NORMAL',
+      shaderLocation: 1,
+      format: 'float32x3',
+      offset: 0,
+      arrayStride: 12,
+    },
+    {
+      semantic: 'TEXCOORD_0',
+      shaderLocation: 2,
+      format: 'float32x2',
+      offset: 0,
+      arrayStride: 8,
+    },
+  ],
+  usesTransformBindings: true,
+  materialBindings: [
+    {
+      kind: 'texture' as const,
+      binding: 0,
+      textureSemantic: 'baseColor',
+    },
+    {
+      kind: 'sampler' as const,
+      binding: 1,
+      textureSemantic: 'baseColor',
+    },
+  ],
+});
+
 Deno.test('forward renderer omits raymarch pass when scene has no sdf or volume nodes', () => {
   let scene = createSceneIr('scene');
   scene = appendNode(scene, createNode('node-0'));
@@ -663,6 +748,54 @@ Deno.test('deferred renderer accepts textured unlit scenes with normals, uvs, an
     createDeferredRenderer(),
     evaluateScene(scene, { timeMs: 0 }),
     createMaterialRegistry(),
+    residency,
+  );
+
+  assertEquals(issues, []);
+});
+
+Deno.test('deferred renderer accepts custom WGSL materials that satisfy deferred gbuffer bindings', () => {
+  const materialRegistry = createMaterialRegistry();
+  const residency = createRuntimeResidency();
+  registerWgslMaterial(materialRegistry, createDeferredTexturedCustomProgram());
+  let scene = createSceneIr('scene');
+  scene = appendMaterial(scene, {
+    id: 'material-custom',
+    kind: 'custom',
+    shaderId: 'shader:deferred-textured-custom',
+    textures: [{
+      id: 'texture-0',
+      assetId: 'image-0',
+      semantic: 'baseColor',
+      colorSpace: 'srgb',
+      sampler: 'linear-repeat',
+    }],
+    parameters: {},
+  });
+  scene = appendMesh(scene, {
+    id: 'mesh-0',
+    materialId: 'material-custom',
+    attributes: [
+      { semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0, 0, 1, 0] },
+      { semantic: 'NORMAL', itemSize: 3, values: [0, 0, 1, 0, 0, 1, 0, 0, 1] },
+      { semantic: 'TEXCOORD_0', itemSize: 2, values: [0, 0, 1, 0, 0, 1] },
+    ],
+  });
+  scene = appendNode(scene, createNode('mesh-node', { meshId: 'mesh-0' }));
+  residency.textures.set('texture-0', {
+    textureId: 'texture-0',
+    texture: {} as GPUTexture,
+    view: {} as GPUTextureView,
+    sampler: {} as GPUSampler,
+    width: 1,
+    height: 1,
+    format: 'rgba8unorm',
+  });
+
+  const issues = collectRendererCapabilityIssues(
+    createDeferredRenderer(),
+    evaluateScene(scene, { timeMs: 0 }),
+    materialRegistry,
     residency,
   );
 

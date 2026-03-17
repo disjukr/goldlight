@@ -43,6 +43,92 @@ type MockPassAction =
   | Readonly<{ type: 'drawIndexed'; indexCount: number }>
   | Readonly<{ type: 'end' }>;
 
+const createDeferredTexturedCustomProgram = () => ({
+  id: 'shader:deferred-textured-custom',
+  label: 'Deferred Textured Custom',
+  wgsl: `
+// Deferred Textured Custom
+struct MeshTransform {
+  world: mat4x4<f32>,
+  normal: mat4x4<f32>,
+};
+
+struct VsOut {
+  @builtin(position) position: vec4<f32>,
+  @location(0) normal: vec3<f32>,
+  @location(1) uv: vec2<f32>,
+};
+
+struct FsOut {
+  @location(0) albedo: vec4<f32>,
+  @location(1) encodedNormal: vec4<f32>,
+};
+
+@group(0) @binding(0) var<uniform> meshTransform: MeshTransform;
+@group(1) @binding(0) var customTexture: texture_2d<f32>;
+@group(1) @binding(1) var customSampler: sampler;
+
+@vertex
+fn vsMain(
+  @location(0) position: vec3<f32>,
+  @location(1) normal: vec3<f32>,
+  @location(2) uv: vec2<f32>,
+) -> VsOut {
+  var out: VsOut;
+  out.position = meshTransform.world * vec4<f32>(position, 1.0);
+  out.normal = normalize((meshTransform.normal * vec4<f32>(normal, 0.0)).xyz);
+  out.uv = uv;
+  return out;
+}
+
+@fragment
+fn fsMain(in: VsOut) -> FsOut {
+  var out: FsOut;
+  out.albedo = textureSample(customTexture, customSampler, in.uv);
+  out.encodedNormal = vec4<f32>((normalize(in.normal) * 0.5) + vec3<f32>(0.5), 1.0);
+  return out;
+}
+`,
+  vertexEntryPoint: 'vsMain',
+  fragmentEntryPoint: 'fsMain',
+  vertexAttributes: [
+    {
+      semantic: 'POSITION',
+      shaderLocation: 0,
+      format: 'float32x3' as const,
+      offset: 0,
+      arrayStride: 12,
+    },
+    {
+      semantic: 'NORMAL',
+      shaderLocation: 1,
+      format: 'float32x3' as const,
+      offset: 0,
+      arrayStride: 12,
+    },
+    {
+      semantic: 'TEXCOORD_0',
+      shaderLocation: 2,
+      format: 'float32x2' as const,
+      offset: 0,
+      arrayStride: 8,
+    },
+  ],
+  usesTransformBindings: true,
+  materialBindings: [
+    {
+      kind: 'texture' as const,
+      binding: 0,
+      textureSemantic: 'baseColor',
+    },
+    {
+      kind: 'sampler' as const,
+      binding: 1,
+      textureSemantic: 'baseColor',
+    },
+  ],
+});
+
 const createRenderMocks = () => {
   const pipelines: MockPipeline[] = [];
   const shaders: MockShader[] = [];
@@ -514,6 +600,82 @@ Deno.test('renderDeferredFrame binds base-color textures for textured deferred u
   );
   assertEquals(mocks.bindGroupEntries.length, 4);
   assertEquals(mocks.bindGroupEntries[2].map((entry) => entry.binding), [0, 1, 2]);
+});
+
+Deno.test('renderDeferredFrame uses registered custom WGSL gbuffer programs', () => {
+  const mocks = createRenderMocks();
+  const runtimeResidency = createRuntimeResidency();
+  const registry = createMaterialRegistry();
+  registerWgslMaterial(registry, createDeferredTexturedCustomProgram());
+  let scene = createSceneIr('scene');
+  scene = appendMaterial(scene, {
+    id: 'material-custom',
+    kind: 'custom',
+    shaderId: 'shader:deferred-textured-custom',
+    textures: [{
+      id: 'texture-0',
+      assetId: 'image-0',
+      semantic: 'baseColor',
+      colorSpace: 'srgb',
+      sampler: 'linear-repeat',
+    }],
+    parameters: {},
+  });
+  scene = appendMesh(scene, {
+    id: 'mesh-custom-deferred',
+    materialId: 'material-custom',
+    attributes: [
+      { semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0, 0, 1, 0] },
+      { semantic: 'NORMAL', itemSize: 3, values: [0, 0, 1, 0, 0, 1, 0, 0, 1] },
+      { semantic: 'TEXCOORD_0', itemSize: 2, values: [0, 0, 1, 0, 0, 1] },
+    ],
+  });
+  scene = appendNode(scene, createNode('node-custom-deferred', { meshId: 'mesh-custom-deferred' }));
+
+  runtimeResidency.geometry.set('mesh-custom-deferred', {
+    meshId: 'mesh-custom-deferred',
+    attributeBuffers: {
+      POSITION: { id: 0 } as unknown as GPUBuffer,
+      NORMAL: { id: 1 } as unknown as GPUBuffer,
+      TEXCOORD_0: { id: 2 } as unknown as GPUBuffer,
+    },
+    vertexCount: 3,
+    indexCount: 0,
+  });
+  runtimeResidency.textures.set('texture-0', {
+    textureId: 'texture-0',
+    texture: { id: 0 } as unknown as GPUTexture,
+    view: { id: 1 } as unknown as GPUTextureView,
+    sampler: { id: 2 } as unknown as GPUSampler,
+    width: 1,
+    height: 1,
+    format: 'rgba8unorm',
+  });
+
+  const binding = createOffscreenContext({
+    device: mocks.device as unknown as GPUDevice,
+    target: createHeadlessTarget(64, 64),
+  });
+
+  const result = renderDeferredFrame(
+    mocks as unknown as GpuRenderExecutionContext,
+    binding,
+    runtimeResidency,
+    evaluateScene(scene, { timeMs: 0 }),
+    registry,
+  );
+
+  assertEquals(result.drawCount, 3);
+  assertEquals(
+    mocks.shaders.some((shader) => shader.code.includes('Deferred Textured Custom')),
+    true,
+  );
+  const deferredGbufferPipeline = mocks.pipelines.find((pipeline) =>
+    pipeline.descriptor.fragment?.targets?.length === 2 &&
+    (pipeline.descriptor.vertex?.buffers?.length ?? 0) === 3
+  );
+  assertEquals(deferredGbufferPipeline?.descriptor.fragment?.targets?.length, 2);
+  assertEquals(mocks.bindGroupEntries[2].map((entry) => entry.binding), [0, 1]);
 });
 
 Deno.test('renderForwardFrame encodes a dedicated sdf raymarch pass for supported sphere and box nodes', () => {

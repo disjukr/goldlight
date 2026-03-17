@@ -14,6 +14,9 @@ import builtInForwardTexturedShader from './shaders/built_in_forward_unlit_textu
   type: 'text',
 };
 import builtInSdfRaymarchShader from './shaders/built_in_sdf_raymarch.wgsl' with { type: 'text' };
+import builtInVolumeRaymarchShader from './shaders/built_in_volume_raymarch.wgsl' with {
+  type: 'text',
+};
 
 export type RendererKind = 'forward' | 'deferred';
 export type PassKind =
@@ -148,6 +151,7 @@ export type RendererCapabilityIssue = Readonly<{
 const builtInUnlitProgramId = 'built-in:unlit';
 const builtInTexturedUnlitProgramId = 'built-in:unlit-textured';
 const builtInSdfRaymarchProgramId = 'built-in:sdf-raymarch';
+const builtInVolumeRaymarchProgramId = 'built-in:volume-raymarch';
 const uniformUsage = 0x40;
 const bufferCopyDstUsage = 0x08;
 const maxSdfPassItems = 16;
@@ -378,7 +382,7 @@ export const createForwardRenderer = (label = 'forward'): Renderer => ({
   capabilities: {
     mesh: 'supported',
     sdf: 'supported',
-    volume: 'unsupported',
+    volume: 'supported',
     builtInMaterialKinds: ['unlit'],
     customShaders: 'supported',
   },
@@ -633,7 +637,71 @@ export const ensureSdfRaymarchPipeline = (
     fragment: {
       module: shader,
       entryPoint: 'fsMain',
-      targets: [{ format }],
+      targets: [{
+        format,
+        blend: {
+          color: {
+            srcFactor: 'src-alpha',
+            dstFactor: 'one-minus-src-alpha',
+            operation: 'add',
+          },
+          alpha: {
+            srcFactor: 'one',
+            dstFactor: 'one-minus-src-alpha',
+            operation: 'add',
+          },
+        },
+      }],
+    },
+    primitive: {
+      topology: 'triangle-list',
+    },
+  });
+
+  residency.pipelines.set(cacheKey, pipeline);
+  return pipeline;
+};
+
+export const ensureVolumeRaymarchPipeline = (
+  context: GpuRenderExecutionContext,
+  residency: RuntimeResidency,
+  format: GPUTextureFormat,
+): GPURenderPipeline => {
+  const cacheKey = `${builtInVolumeRaymarchProgramId}:${format}`;
+  const cached = residency.pipelines.get(cacheKey);
+  if (cached) {
+    return cached as GPURenderPipeline;
+  }
+
+  const shader = context.device.createShaderModule({
+    label: cacheKey,
+    code: builtInVolumeRaymarchShader,
+  });
+  const pipeline = context.device.createRenderPipeline({
+    label: cacheKey,
+    layout: 'auto',
+    vertex: {
+      module: shader,
+      entryPoint: 'vsMain',
+    },
+    fragment: {
+      module: shader,
+      entryPoint: 'fsMain',
+      targets: [{
+        format,
+        blend: {
+          color: {
+            srcFactor: 'src-alpha',
+            dstFactor: 'one-minus-src-alpha',
+            operation: 'add',
+          },
+          alpha: {
+            srcFactor: 'one',
+            dstFactor: 'one-minus-src-alpha',
+            operation: 'add',
+          },
+        },
+      }],
     },
     primitive: {
       topology: 'triangle-list',
@@ -655,6 +723,27 @@ const createSdfUniformData = (items: readonly SdfPassItem[]): Float32Array => {
   });
 
   return uniformData;
+};
+
+const createVolumeUniformData = (item: VolumePassItem): Float32Array => {
+  const center = getMatrixTranslation(item.worldMatrix);
+  const [scaleX, scaleY, scaleZ] = getMatrixScale(item.worldMatrix);
+  const halfExtent = [
+    Math.max(scaleX * 0.5, 0.001),
+    Math.max(scaleY * 0.5, 0.001),
+    Math.max(scaleZ * 0.5, 0.001),
+  ] as const;
+
+  return Float32Array.from([
+    center[0],
+    center[1],
+    center[2],
+    0,
+    halfExtent[0],
+    halfExtent[1],
+    halfExtent[2],
+    0,
+  ]);
 };
 
 const createMeshTransformUniformData = (worldMatrix: readonly number[]): Float32Array =>
@@ -705,6 +794,65 @@ export const renderSdfRaymarchPass = (
   pass.end();
 
   return 1;
+};
+
+export const renderVolumeRaymarchPass = (
+  context: GpuRenderExecutionContext,
+  encoder: GPUCommandEncoder,
+  binding: RenderContextBinding,
+  residency: RuntimeResidency,
+  evaluatedScene: EvaluatedScene,
+): number => {
+  const items = extractVolumePassItems(evaluatedScene, residency);
+  if (items.length === 0) {
+    return 0;
+  }
+
+  const pipeline = ensureVolumeRaymarchPipeline(context, residency, binding.target.format);
+  const pass = encoder.beginRenderPass({
+    colorAttachments: [{
+      view: acquireColorAttachmentView(binding),
+      loadOp: 'load',
+      storeOp: 'store',
+    }],
+  });
+
+  pass.setPipeline(pipeline);
+  for (const item of items) {
+    const uniformData = createVolumeUniformData(item);
+    const uniformBuffer = context.device.createBuffer({
+      label: `${item.nodeId}:volume-raymarch-uniforms`,
+      size: uniformData.byteLength,
+      usage: uniformUsage | bufferCopyDstUsage,
+    });
+    context.queue.writeBuffer(uniformBuffer, 0, toBufferSource(uniformData));
+
+    const bindGroup = context.device.createBindGroup({
+      layout: pipeline.getBindGroupLayout(0),
+      entries: [
+        {
+          binding: 0,
+          resource: {
+            buffer: uniformBuffer,
+          },
+        },
+        {
+          binding: 1,
+          resource: item.residency.view,
+        },
+        {
+          binding: 2,
+          resource: item.residency.sampler,
+        },
+      ],
+    });
+
+    pass.setBindGroup(0, bindGroup);
+    pass.draw(3, 1, 0, 0);
+  }
+  pass.end();
+
+  return items.length;
 };
 
 const createDefaultMaterial = (): Material => ({
@@ -839,6 +987,7 @@ export const renderForwardFrame = (
   pass.end();
 
   drawCount += renderSdfRaymarchPass(context, encoder, binding, residency, evaluatedScene);
+  drawCount += renderVolumeRaymarchPass(context, encoder, binding, residency, evaluatedScene);
 
   const commandBuffer = encoder.finish();
   context.queue.submit([commandBuffer]);

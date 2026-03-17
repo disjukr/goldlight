@@ -36,6 +36,7 @@ The initial renderer uses a lightweight pass graph:
 
 - Forward rendering is the first concrete execution path and currently draws mesh residency items.
 - Forward rendering also encodes a dedicated SDF raymarch pass for supported sphere primitives.
+- Forward rendering also encodes a first volume raymarch pass for volume primitives with residency.
 - Built-in unlit WGSL is stored as a standalone shader file and imported as text.
 - Built-in unlit shading supports color-only meshes plus optional base-color texture sampling when
   UVs and texture residency are available.
@@ -77,6 +78,6 @@ The initial renderer uses a lightweight pass graph:
 ## Known Gaps
 
 - Deferred rendering is still at the planning-contract stage.
-- Volume rendering passes are not encoded yet; only their residency/extraction scaffolding exists.
+- Generalized texture-backed material binding for arbitrary custom programs is not implemented yet.
 - SDF execution currently supports sphere primitives only; broader graph/operator coverage is still
   pending.

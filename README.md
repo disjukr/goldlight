@@ -31,7 +31,7 @@ object-oriented API design.
 Implemented today:
 
 - BDL-driven `SceneIr` generation with drift checks in CI
-- mesh, texture, and first volume residency upload paths
+- mesh, texture, first volume residency upload paths, and first volume raymarch execution
 - forward rendering, first SDF raymarch execution, and headless snapshot readback
 - built-in unlit material registration, evaluated mesh transform uploads, base-color texture
   sampling, material parameter uploads, custom WGSL registration, and declared material texture

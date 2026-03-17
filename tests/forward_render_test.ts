@@ -281,6 +281,55 @@ Deno.test('renderForwardFrame encodes a dedicated sdf raymarch pass for supporte
   );
 });
 
+Deno.test('renderForwardFrame encodes a dedicated volume raymarch pass for volume nodes with residency', () => {
+  const mocks = createRenderMocks();
+  const runtimeResidency = createRuntimeResidency();
+  let scene = createSceneIr('scene');
+  scene = {
+    ...scene,
+    volumePrimitives: [{
+      id: 'volume-0',
+      assetId: 'volume-asset-0',
+      dimensions: { x: 4, y: 4, z: 4 },
+      format: 'density:r8unorm',
+    }],
+  };
+  scene = appendNode(scene, createNode('volume-node', { volumeId: 'volume-0' }));
+
+  runtimeResidency.volumes.set('volume-0', {
+    volumeId: 'volume-0',
+    texture: {} as GPUTexture,
+    view: { textureId: 0 } as unknown as GPUTextureView,
+    sampler: { id: 0 } as unknown as GPUSampler,
+    width: 4,
+    height: 4,
+    depth: 4,
+    format: 'r8unorm',
+  });
+
+  const binding = createOffscreenContext({
+    device: mocks.device as unknown as GPUDevice,
+    target: createHeadlessTarget(64, 64),
+  });
+
+  const result = renderForwardFrame(
+    mocks as unknown as GpuRenderExecutionContext,
+    binding,
+    runtimeResidency,
+    evaluateScene(scene, { timeMs: 0 }),
+  );
+
+  assertEquals(result.drawCount, 1);
+  assertEquals(result.submittedCommandBufferCount, 1);
+  assertEquals(mocks.renderPassCount.current, 2);
+  assertEquals(
+    mocks.passActions.filter((action) => action.type === 'draw').length,
+    1,
+  );
+  assertEquals(mocks.bindGroupEntries.length, 1);
+  assertEquals(mocks.bindGroupEntries[0].map((entry) => entry.binding), [0, 1, 2]);
+});
+
 Deno.test('material registry resolves built-in and custom WGSL programs', () => {
   const registry = createMaterialRegistry();
   const customProgram = {

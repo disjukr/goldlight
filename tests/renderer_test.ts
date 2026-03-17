@@ -124,7 +124,7 @@ Deno.test('extractSdfPassItems returns supported sphere sdf nodes with derived b
   }]);
 });
 
-Deno.test('collectRendererCapabilityIssues reports unsupported forward renderer features', () => {
+Deno.test('collectRendererCapabilityIssues accepts the current forward primitive mix', () => {
   let scene = createSceneIr('scene');
   scene = appendMaterial(scene, {
     id: 'material-custom',
@@ -157,10 +157,7 @@ Deno.test('collectRendererCapabilityIssues reports unsupported forward renderer 
     evaluateScene(scene, { timeMs: 0 }),
   );
 
-  assertEquals(
-    issues.map((issue) => issue.feature),
-    ['volume'],
-  );
+  assertEquals(issues, []);
 });
 
 Deno.test('collectRendererCapabilityIssues rejects unsupported sdf ops for execution', () => {

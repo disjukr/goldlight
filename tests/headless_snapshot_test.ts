@@ -155,3 +155,52 @@ Deno.test('renderForwardSnapshot returns compact offscreen bytes for headless sn
     height: 2,
   }]);
 });
+
+Deno.test('renderForwardSnapshot also captures volume-only scenes with seeded residency', async () => {
+  const mocks = createSnapshotMocks();
+  const runtimeResidency = createRuntimeResidency();
+  let scene = createSceneIr('scene');
+  scene = {
+    ...scene,
+    volumePrimitives: [{
+      id: 'volume-0',
+      assetId: 'volume-asset-0',
+      dimensions: { x: 4, y: 4, z: 4 },
+      format: 'density:r8unorm',
+    }],
+  };
+  scene = appendNode(scene, createNode('volume-node', { volumeId: 'volume-0' }));
+
+  runtimeResidency.volumes.set('volume-0', {
+    volumeId: 'volume-0',
+    texture: {} as GPUTexture,
+    view: { textureId: 0 } as unknown as GPUTextureView,
+    sampler: { id: 0 } as unknown as GPUSampler,
+    width: 4,
+    height: 4,
+    depth: 4,
+    format: 'r8unorm',
+  });
+
+  const binding = createOffscreenContext({
+    device: mocks.device as unknown as GPUDevice,
+    target: createHeadlessTarget(2, 2),
+  });
+
+  const snapshot = await renderForwardSnapshot(
+    mocks as unknown as Parameters<typeof renderForwardSnapshot>[0],
+    binding,
+    runtimeResidency,
+    evaluateScene(scene, { timeMs: 0 }),
+  );
+
+  assertEquals(snapshot.drawCount, 1);
+  assertEquals(snapshot.submittedCommandBufferCount, 1);
+  assertEquals(snapshot.width, 2);
+  assertEquals(snapshot.height, 2);
+  assertEquals(
+    [...snapshot.bytes],
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
+  );
+  assertEquals(mocks.submits.length, 2);
+});

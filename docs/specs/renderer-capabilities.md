@@ -77,12 +77,12 @@ The current forward renderer declares:
 
 - `mesh: supported`
 - `sdf: supported`
-- `volume: unsupported`
+- `volume: supported`
 - `builtInMaterialKinds: ['unlit']`
 - `customShaders: supported`
 
-This matches the implemented path: mesh draws and a first SDF raymarch pass are encoded, while
-volume rendering is still blocked at capability preflight.
+This matches the implemented path: mesh draws plus first SDF and volume raymarch passes are encoded
+in the forward renderer.
 
 ### Deferred
 

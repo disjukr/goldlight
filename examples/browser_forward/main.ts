@@ -7,7 +7,14 @@ import {
   ensureSceneMeshResidency,
   requestGpuContext,
 } from '../../packages/gpu/mod.ts';
-import { appendMesh, appendNode, createNode, createSceneIr } from '../../packages/ir/mod.ts';
+import {
+  appendLight,
+  appendMaterial,
+  appendMesh,
+  appendNode,
+  createNode,
+  createSceneIr,
+} from '../../packages/ir/mod.ts';
 import { createBrowserSurfaceTarget } from '../../packages/platform/mod.ts';
 import { createMaterialRegistry, renderForwardFrame } from '../../packages/renderer/mod.ts';
 
@@ -20,24 +27,65 @@ canvas.width = 640;
 canvas.height = 480;
 
 const scene = appendNode(
-  appendMesh(createSceneIr('browser-forward'), {
-    id: 'triangle',
-    attributes: [{
-      semantic: 'POSITION',
-      itemSize: 3,
-      values: [
-        0,
-        0.7,
-        0,
-        -0.7,
-        -0.7,
-        0,
-        0.7,
-        -0.7,
-        0,
-      ],
-    }],
-  }),
+  appendNode(
+    appendMesh(
+      appendMaterial(
+        appendLight(createSceneIr('browser-forward'), {
+          id: 'key-light',
+          kind: 'directional',
+          color: { x: 1, y: 0.95, z: 0.9 },
+          intensity: 1.4,
+        }),
+        {
+          id: 'triangle-material',
+          kind: 'lit',
+          textures: [],
+          parameters: {
+            color: { x: 0.92, y: 0.42, z: 0.22, w: 1 },
+          },
+        },
+      ),
+      {
+        id: 'triangle',
+        materialId: 'triangle-material',
+        attributes: [
+          {
+            semantic: 'POSITION',
+            itemSize: 3,
+            values: [
+              0,
+              0.7,
+              0,
+              -0.7,
+              -0.7,
+              0,
+              0.7,
+              -0.7,
+              0,
+            ],
+          },
+          {
+            semantic: 'NORMAL',
+            itemSize: 3,
+            values: [
+              0,
+              0,
+              1,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1,
+            ],
+          },
+        ],
+      },
+    ),
+    createNode('light-node', {
+      lightId: 'key-light',
+    }),
+  ),
   createNode('triangle-node', {
     meshId: 'triangle',
   }),

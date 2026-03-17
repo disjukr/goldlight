@@ -15,6 +15,7 @@ The capability model exists to answer two questions early:
 Each renderer advertises a `capabilities` object with:
 
 - primitive support states for `mesh`, `sdf`, and `volume`
+- scene-light support state for evaluated light nodes
 - the list of built-in material kinds it accepts
 - a support state for custom WGSL shader programs
 
@@ -24,6 +25,7 @@ The current TypeScript surface is:
 - `RendererCapabilities.mesh`
 - `RendererCapabilities.sdf`
 - `RendererCapabilities.volume`
+- `RendererCapabilities.light`
 - `RendererCapabilities.builtInMaterialKinds`
 - `RendererCapabilities.customShaders`
 
@@ -47,9 +49,11 @@ The current preflight rules are:
 - mesh nodes require `capabilities.mesh === 'supported'`
 - SDF nodes require `capabilities.sdf === 'supported'`
 - volume nodes require `capabilities.volume === 'supported'`
+- light nodes require `capabilities.light === 'supported'`
 - built-in materials without `shaderId` must have `material.kind` listed in
   `capabilities.builtInMaterialKinds`
 - materials with `shaderId` require `capabilities.customShaders === 'supported'`
+- built-in `lit` materials also require at least one directional light plus `NORMAL` mesh data
 
 Renderers may apply narrower execution limits after the top-level capability gate. For example, the
 forward renderer currently advertises SDF support but only encodes sphere and box SDF primitives;
@@ -84,11 +88,12 @@ The current forward renderer declares:
 - `mesh: supported`
 - `sdf: supported`
 - `volume: supported`
-- `builtInMaterialKinds: ['unlit']`
+- `light: supported`
+- `builtInMaterialKinds: ['unlit', 'lit']`
 - `customShaders: supported`
 
-This matches the implemented path: mesh draws plus first SDF and volume raymarch passes are encoded
-in the forward renderer.
+This matches the implemented path: mesh draws, directional-light Lambert shading, plus first SDF and
+volume raymarch passes are encoded in the forward renderer.
 
 ### Deferred
 
@@ -97,6 +102,7 @@ The deferred renderer declares:
 - `mesh: supported`
 - `sdf: unsupported`
 - `volume: unsupported`
+- `light: unsupported`
 - `builtInMaterialKinds: ['unlit']`
 - `customShaders: unsupported`
 

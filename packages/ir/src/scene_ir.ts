@@ -1,5 +1,6 @@
 import type {
   AnimationClip,
+  Light,
   Material,
   MeshPrimitive,
   Node,
@@ -22,6 +23,7 @@ export const createSceneIr = (id = 'scene'): SceneIr => ({
   assets: [],
   textures: [],
   materials: [],
+  lights: [],
   meshes: [],
   sdfPrimitives: [],
   volumePrimitives: [],
@@ -60,6 +62,11 @@ export const appendMaterial = (scene: SceneIr, material: Material): SceneIr => (
   materials: [...scene.materials, material],
 });
 
+export const appendLight = (scene: SceneIr, light: Light): SceneIr => ({
+  ...scene,
+  lights: [...scene.lights, light],
+});
+
 export const appendAnimationClip = (scene: SceneIr, clip: AnimationClip): SceneIr => ({
   ...scene,
   animationClips: [...scene.animationClips, clip],
@@ -70,6 +77,7 @@ export const validateSceneIr = (
 ): { ok: true } | { ok: false; issues: string[] } => {
   const issues: string[] = [];
   const nodeIds = new Set(scene.nodes.map((node) => node.id));
+  const lightIds = new Set(scene.lights.map((light) => light.id));
 
   for (const rootNodeId of scene.rootNodeIds) {
     if (!nodeIds.has(rootNodeId)) {
@@ -80,6 +88,9 @@ export const validateSceneIr = (
   for (const node of scene.nodes) {
     if (node.parentId && !nodeIds.has(node.parentId)) {
       issues.push(`node "${node.id}" references missing parent "${node.parentId}"`);
+    }
+    if (node.lightId && !lightIds.has(node.lightId)) {
+      issues.push(`node "${node.id}" references missing light "${node.lightId}"`);
     }
   }
 

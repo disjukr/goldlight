@@ -1,7 +1,14 @@
 import { assertAlmostEquals, assertEquals, assertStrictEquals } from 'jsr:@std/assert@^1.0.14';
 import { evaluateScene } from '@rieul3d/core';
 import { createOffscreenContext, createRuntimeResidency } from '@rieul3d/gpu';
-import { appendMaterial, appendMesh, appendNode, createNode, createSceneIr } from '@rieul3d/ir';
+import {
+  appendLight,
+  appendMaterial,
+  appendMesh,
+  appendNode,
+  createNode,
+  createSceneIr,
+} from '@rieul3d/ir';
 import {
   createMaterialRegistry,
   ensureBuiltInForwardPipeline,
@@ -632,6 +639,15 @@ fn fsMain() -> @location(0) vec4<f32> {
 
   assertEquals(resolveMaterialProgram(registry).id, 'built-in:unlit');
   assertEquals(
+    resolveMaterialProgram(registry, {
+      id: 'material-lit',
+      kind: 'lit',
+      textures: [],
+      parameters: {},
+    }).id,
+    'built-in:lit',
+  );
+  assertEquals(
     resolveMaterialProgram(
       registry,
       {
@@ -832,6 +848,86 @@ Deno.test('renderForwardFrame binds base-color textures for textured built-in un
     mocks.passActions.filter((action) => action.type === 'setVertexBuffer').length,
     2,
   );
+});
+
+Deno.test('renderForwardFrame binds lighting uniforms for built-in lit materials', () => {
+  const mocks = createRenderMocks();
+  const runtimeResidency = createRuntimeResidency();
+  let scene = createSceneIr('scene');
+  scene = appendLight(scene, {
+    id: 'light-directional',
+    kind: 'directional',
+    color: { x: 1, y: 0.95, z: 0.9 },
+    intensity: 1.5,
+  });
+  scene = appendMaterial(scene, {
+    id: 'material-lit',
+    kind: 'lit',
+    textures: [],
+    parameters: {
+      color: { x: 0.7, y: 0.5, z: 0.3, w: 1 },
+    },
+  });
+  scene = appendMesh(scene, {
+    id: 'mesh-lit',
+    materialId: 'material-lit',
+    attributes: [
+      { semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0, 0, 1, 0] },
+      { semantic: 'NORMAL', itemSize: 3, values: [0, 0, 1, 0, 0, 1, 0, 0, 1] },
+    ],
+  });
+  scene = appendNode(scene, createNode('light-node', { lightId: 'light-directional' }));
+  scene = appendNode(scene, createNode('mesh-lit-node', { meshId: 'mesh-lit' }));
+
+  runtimeResidency.geometry.set('mesh-lit', {
+    meshId: 'mesh-lit',
+    attributeBuffers: {
+      POSITION: { id: 0 } as unknown as GPUBuffer,
+      NORMAL: { id: 1 } as unknown as GPUBuffer,
+    },
+    vertexCount: 3,
+    indexCount: 0,
+  });
+
+  const binding = createOffscreenContext({
+    device: mocks.device as unknown as GPUDevice,
+    target: createHeadlessTarget(64, 64),
+  });
+
+  const result = renderForwardFrame(
+    mocks as unknown as GpuRenderExecutionContext,
+    binding,
+    runtimeResidency,
+    evaluateScene(scene, { timeMs: 0 }),
+  );
+
+  assertEquals(result.drawCount, 1);
+  assertEquals(mocks.bindGroupEntries.length, 3);
+  assertEquals(mocks.bindGroupEntries[0].map((entry) => entry.binding), [0]);
+  assertEquals(mocks.bindGroupEntries[1].map((entry) => entry.binding), [0]);
+  assertEquals(mocks.bindGroupEntries[2].map((entry) => entry.binding), [0]);
+  const litVertexBuffers = mocks.pipelines[0].descriptor.vertex?.buffers ?? [];
+  assertEquals(litVertexBuffers.length, 2);
+  assertEquals(
+    litVertexBuffers.map((buffer) => buffer?.arrayStride ?? 0),
+    [12, 12],
+  );
+  const litTransformWrite = mocks.writeBufferCalls.find((call) => call.bytes.byteLength === 128);
+  const lightingWrite = mocks.writeBufferCalls.find((call) => call.bytes.byteLength === 144);
+  assertEquals(Boolean(litTransformWrite), true);
+  assertEquals(
+    Array.from(new Float32Array(lightingWrite?.bytes.buffer.slice(0, 16) ?? new ArrayBuffer(0))),
+    [0, 0, -1, 0],
+  );
+  const lightingColor = Array.from(
+    new Float32Array(
+      lightingWrite?.bytes.buffer.slice(64, 80) ?? new ArrayBuffer(0),
+    ),
+  );
+  assertAlmostEquals(lightingColor[0], 1, 1e-6);
+  assertAlmostEquals(lightingColor[1], 0.95, 1e-6);
+  assertAlmostEquals(lightingColor[2], 0.9, 1e-6);
+  assertAlmostEquals(lightingColor[3], 1.5, 1e-6);
 });
 
 Deno.test('renderForwardFrame does not append texture bindings for shader-selected unlit programs', () => {

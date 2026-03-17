@@ -7,6 +7,8 @@ Use this page as the main navigation hub.
 
 - Understand the system shape: [`specs/architecture.md`](./specs/architecture.md)
 - Understand the scene data model: [`specs/scene-ir.md`](./specs/scene-ir.md)
+- Understand the renderer light and material support surface:
+  [`specs/rendering.md`](./specs/rendering.md)
 - Understand runtime GPU ownership and recovery:
   [`specs/runtime-residency.md`](./specs/runtime-residency.md)
 - Understand device-loss handling and caller recovery steps:

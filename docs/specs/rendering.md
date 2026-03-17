@@ -47,12 +47,14 @@ The initial renderer uses a lightweight pass graph:
   uniform data extracted from evaluated light nodes.
 - Built-in unlit shading supports color-only meshes plus optional base-color texture sampling when
   UVs and texture residency are available.
+- Built-in forward mesh draws upload each evaluated node `worldMatrix` plus the active camera
+  `viewProjection` matrix and apply both in the vertex stage before rasterization.
+- Forward mesh draws now allocate a depth attachment per render target and use depth-tested
+  triangle-list rasterization with back-face culling.
 - Built-in lit shading currently supports color-only Lambert materials that require mesh normals and
   at least one directional light.
 - Built-in deferred unlit shading supports the same optional base-color texture sampling when
   `NORMAL` and `TEXCOORD_0` data plus texture residency are available.
-- Built-in forward mesh draws upload each evaluated node `worldMatrix` and apply it in the vertex
-  stage before rasterization.
 - Built-in forward lit mesh draws also upload an inverse-transpose normal matrix plus a compact
   directional-light uniform block.
 - Material parameter uploads and bind group creation are implemented for built-in unlit shading.
@@ -74,10 +76,14 @@ The initial renderer uses a lightweight pass graph:
 
 ## Built-in Binding Contract
 
-- Built-in forward mesh shaders reserve `@group(0) @binding(0)` for a `mat4x4<f32>` mesh transform
-  uniform derived from the evaluated node world matrix.
+- Built-in forward mesh shaders reserve `@group(0) @binding(0)` for a `MeshTransform` uniform with
+  two matrices:
+  - `model`: the evaluated node world matrix
+  - `viewProjection`: the active camera projection multiplied by the evaluated camera view matrix
 - Built-in deferred G-buffer mesh shaders reserve `@group(0) @binding(0)` for a transform uniform
   containing the evaluated node world matrix plus an inverse-transpose normal matrix.
+- Built-in forward lit mesh shaders extend the same transform bind group with an inverse-transpose
+  normal matrix for Lambert shading.
 - Material programs can declare `materialBindings` entries for uniform buffers, texture views, and
   samplers that are assembled into a single material bind group.
 - Built-in unlit material uniforms live at `@group(1) @binding(0)`.

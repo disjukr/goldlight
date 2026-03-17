@@ -28,6 +28,10 @@ export type SurfaceContext = Readonly<{
   target: SurfaceTarget;
   device: GPUDevice;
   canvasContext: GPUCanvasContext;
+  depthTexture: GPUTexture;
+  depthView: GPUTextureView;
+  depthWidth: number;
+  depthHeight: number;
 }>;
 
 export type OffscreenContext = Readonly<{
@@ -35,6 +39,8 @@ export type OffscreenContext = Readonly<{
   target: OffscreenTarget;
   texture: GPUTexture;
   view: GPUTextureView;
+  depthTexture: GPUTexture;
+  depthView: GPUTextureView;
 }>;
 
 export type RenderContextBinding = SurfaceContext | OffscreenContext;
@@ -116,9 +122,51 @@ const renderAttachmentUsage = 0x10;
 const mapReadUsage = 0x0001;
 const bufferCopyDstUsage = 0x0008;
 const bytesPerRowAlignment = 256;
+const depthTextureFormat = 'depth24plus';
 
 const isDroppedSurfacePresentationError = (error: unknown): error is DOMException =>
   error instanceof DOMException && error.name === 'InvalidStateError';
+
+const createDepthTexture = (
+  device: Pick<GPUDevice, 'createTexture'>,
+  width: number,
+  height: number,
+  sampleCount = 1,
+): GPUTexture =>
+  device.createTexture({
+    label: 'render-depth',
+    size: {
+      width,
+      height,
+      depthOrArrayLayers: 1,
+    },
+    format: depthTextureFormat,
+    sampleCount,
+    usage: renderAttachmentUsage,
+  });
+
+type MutableSurfaceContext = {
+  -readonly [Key in keyof SurfaceContext]: SurfaceContext[Key];
+};
+
+const syncSurfaceDepthAttachment = (
+  binding: SurfaceContext,
+  colorTexture: GPUTexture,
+): void => {
+  const width = (colorTexture as GPUTexture & { width?: number }).width ?? binding.target.width;
+  const height = (colorTexture as GPUTexture & { height?: number }).height ?? binding.target.height;
+
+  if (width === binding.depthWidth && height === binding.depthHeight) {
+    return;
+  }
+
+  const depthTexture = createDepthTexture(binding.device, width, height);
+  const mutableBinding = binding as MutableSurfaceContext;
+  mutableBinding.depthTexture = depthTexture;
+  mutableBinding.depthView = depthTexture.createView();
+  mutableBinding.depthWidth = width;
+  mutableBinding.depthHeight = height;
+};
 
 export const configureSurfaceContext = (
   context: Pick<GpuContext, 'device' | 'target'>,
@@ -134,11 +182,21 @@ export const configureSurfaceContext = (
     alphaMode: context.target.alphaMode ?? 'premultiplied',
   });
 
+  const depthTexture = createDepthTexture(
+    context.device,
+    context.target.width,
+    context.target.height,
+  );
+
   return {
     kind: 'surface',
     target: context.target,
     device: context.device,
     canvasContext,
+    depthTexture,
+    depthView: depthTexture.createView(),
+    depthWidth: context.target.width,
+    depthHeight: context.target.height,
   };
 };
 
@@ -160,12 +218,20 @@ export const createOffscreenContext = (
     sampleCount: context.target.sampleCount,
     usage: renderAttachmentUsage | textureBindingUsage | textureCopySrcUsage,
   });
+  const depthTexture = createDepthTexture(
+    context.device,
+    context.target.width,
+    context.target.height,
+    context.target.sampleCount,
+  );
 
   return {
     kind: 'offscreen',
     target: context.target,
     texture,
     view: texture.createView(),
+    depthTexture,
+    depthView: depthTexture.createView(),
   };
 };
 
@@ -185,7 +251,9 @@ export const bindRenderTarget = (
 export const acquireColorAttachmentView = (binding: RenderContextBinding): GPUTextureView => {
   if (binding.kind === 'surface') {
     try {
-      return binding.canvasContext.getCurrentTexture().createView();
+      const colorTexture = binding.canvasContext.getCurrentTexture();
+      syncSurfaceDepthAttachment(binding, colorTexture);
+      return colorTexture.createView();
     } catch (error) {
       if (isDroppedSurfacePresentationError(error)) {
         binding.canvasContext.configure({
@@ -193,7 +261,9 @@ export const acquireColorAttachmentView = (binding: RenderContextBinding): GPUTe
           format: binding.target.format,
           alphaMode: binding.target.alphaMode ?? 'premultiplied',
         });
-        return binding.canvasContext.getCurrentTexture().createView();
+        const colorTexture = binding.canvasContext.getCurrentTexture();
+        syncSurfaceDepthAttachment(binding, colorTexture);
+        return colorTexture.createView();
       }
       throw error;
     }
@@ -201,6 +271,9 @@ export const acquireColorAttachmentView = (binding: RenderContextBinding): GPUTe
 
   return binding.view;
 };
+
+export const acquireDepthAttachmentView = (binding: RenderContextBinding): GPUTextureView =>
+  binding.depthView;
 
 export const getRenderTargetSize = (target: RenderTarget): Readonly<{
   width: number;

@@ -79,6 +79,22 @@ struct MeshPrimitive {
   materialId?: Id,
 }
 
+union Camera {
+  perspective(
+    id: Id,
+    yfov?: Scalar,
+    znear: Scalar,
+    zfar: Scalar,
+  ),
+  orthographic(
+    id: Id,
+    xmag?: Scalar,
+    ymag?: Scalar,
+    znear: Scalar,
+    zfar: Scalar,
+  ),
+}
+
 struct SdfPrimitive {
   id: Id,
   op: string,
@@ -98,6 +114,7 @@ struct Node {
   parentId?: Id,
   transform: Transform,
   meshId?: Id,
+  cameraId?: Id,
   sdfId?: Id,
   volumeId?: Id,
   lightId?: Id,
@@ -128,6 +145,8 @@ struct SceneIr {
   materials: Material[],
   lights: Light[],
   meshes: MeshPrimitive[],
+  cameras: Camera[],
+  activeCameraId?: Id,
   sdfPrimitives: SdfPrimitive[],
   volumePrimitives: VolumePrimitive[],
   nodes: Node[],

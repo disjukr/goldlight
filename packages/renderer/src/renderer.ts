@@ -1,7 +1,8 @@
-import type { EvaluatedScene } from '@rieul3d/core';
+import type { EvaluatedCamera, EvaluatedScene } from '@rieul3d/core';
 import type { Material } from '@rieul3d/ir';
 import {
   acquireColorAttachmentView,
+  acquireDepthAttachmentView,
   ensureMaterialResidency,
   type GpuReadbackContext,
   readOffscreenSnapshot,
@@ -210,6 +211,7 @@ const uniformUsage = 0x40;
 const bufferCopyDstUsage = 0x08;
 const deferredDepthFormat = 'depth24plus';
 const maxSdfPassItems = 16;
+const depthTextureFormat = 'depth24plus';
 const maxDirectionalLights = 4;
 const defaultAmbientLight = 0.2;
 const toBufferSource = (view: ArrayBufferView): Uint8Array<ArrayBuffer> => {
@@ -225,6 +227,112 @@ const countPrimitiveNodes = (evaluatedScene: EvaluatedScene) => ({
   sdfNodeCount: evaluatedScene.nodes.filter((node) => Boolean(node.sdf)).length,
   volumeNodeCount: evaluatedScene.nodes.filter((node) => Boolean(node.volume)).length,
 });
+
+const identityMat4 = (): readonly number[] => [
+  1,
+  0,
+  0,
+  0,
+  0,
+  1,
+  0,
+  0,
+  0,
+  0,
+  1,
+  0,
+  0,
+  0,
+  0,
+  1,
+];
+
+const multiplyMat4 = (a: readonly number[], b: readonly number[]): readonly number[] => {
+  const out = new Array<number>(16).fill(0);
+
+  for (let row = 0; row < 4; row += 1) {
+    for (let col = 0; col < 4; col += 1) {
+      const index = (col * 4) + row;
+      out[index] = a[row] * b[col * 4] +
+        a[4 + row] * b[(col * 4) + 1] +
+        a[8 + row] * b[(col * 4) + 2] +
+        a[12 + row] * b[(col * 4) + 3];
+    }
+  }
+
+  return out;
+};
+
+const createPerspectiveProjection = (
+  camera: EvaluatedCamera['camera'] & { type: 'perspective' },
+  aspect: number,
+): readonly number[] => {
+  const yfov = camera.yfov ?? Math.PI / 3;
+  const f = 1 / Math.tan(yfov / 2);
+  const rangeInv = 1 / (camera.znear - camera.zfar);
+
+  return [
+    f / aspect,
+    0,
+    0,
+    0,
+    0,
+    f,
+    0,
+    0,
+    0,
+    0,
+    camera.zfar * rangeInv,
+    -1,
+    0,
+    0,
+    camera.znear * camera.zfar * rangeInv,
+    0,
+  ];
+};
+
+const createOrthographicProjection = (
+  camera: EvaluatedCamera['camera'] & { type: 'orthographic' },
+): readonly number[] => {
+  const xmag = camera.xmag ?? 1;
+  const ymag = camera.ymag ?? 1;
+  const rangeInv = 1 / (camera.znear - camera.zfar);
+
+  return [
+    1 / xmag,
+    0,
+    0,
+    0,
+    0,
+    1 / ymag,
+    0,
+    0,
+    0,
+    0,
+    rangeInv,
+    0,
+    0,
+    0,
+    camera.znear * rangeInv,
+    1,
+  ];
+};
+
+const createViewProjectionMatrix = (
+  binding: RenderContextBinding,
+  activeCamera?: EvaluatedCamera,
+): readonly number[] => {
+  if (!activeCamera) {
+    return identityMat4();
+  }
+
+  const aspect = binding.target.width / binding.target.height;
+  const projection = activeCamera.camera.type === 'perspective'
+    ? createPerspectiveProjection(activeCamera.camera, aspect)
+    : createOrthographicProjection(activeCamera.camera);
+
+  return multiplyMat4(projection, activeCamera.viewMatrix);
+};
 
 const builtInUnlitProgram: MaterialProgram = {
   id: builtInUnlitProgramId,
@@ -1218,6 +1326,12 @@ export const ensureMaterialPipeline = (
     },
     primitive: {
       topology: 'triangle-list',
+      cullMode: 'back',
+    },
+    depthStencil: {
+      format: depthTextureFormat,
+      depthWriteEnabled: true,
+      depthCompare: 'less',
     },
   });
 
@@ -1348,7 +1462,26 @@ const createVolumeUniformData = (item: VolumePassItem): Float32Array => {
   return Float32Array.from(invertAffineMatrix(item.worldMatrix));
 };
 
-const createMeshTransformUniformData = (worldMatrix: readonly number[]): Float32Array =>
+const createForwardMeshTransformUniformData = (
+  worldMatrix: readonly number[],
+  viewProjectionMatrix: readonly number[],
+): Float32Array =>
+  Float32Array.from([
+    ...worldMatrix.slice(0, 16),
+    ...viewProjectionMatrix.slice(0, 16),
+  ]);
+
+const createForwardLitMeshTransformUniformData = (
+  worldMatrix: readonly number[],
+  viewProjectionMatrix: readonly number[],
+): Float32Array =>
+  Float32Array.from([
+    ...worldMatrix.slice(0, 16),
+    ...viewProjectionMatrix.slice(0, 16),
+    ...createDeferredNormalMatrix(worldMatrix),
+  ]);
+
+const createWorldTransformUniformData = (worldMatrix: readonly number[]): Float32Array =>
   Float32Array.from(worldMatrix.slice(0, 16));
 
 const createDeferredNormalMatrix = (worldMatrix: readonly number[]): readonly number[] => {
@@ -1508,6 +1641,7 @@ export const renderForwardFrame = (
     residency,
   );
   const view = acquireColorAttachmentView(binding);
+  const viewProjectionMatrix = createViewProjectionMatrix(binding, evaluatedScene.activeCamera);
   const encoder = context.device.createCommandEncoder({
     label: 'forward-frame',
   });
@@ -1518,6 +1652,12 @@ export const renderForwardFrame = (
       loadOp: 'clear',
       storeOp: 'store',
     }],
+    depthStencilAttachment: {
+      view: acquireDepthAttachmentView(binding),
+      depthClearValue: 1,
+      depthLoadOp: 'clear',
+      depthStoreOp: 'store',
+    },
   });
 
   let drawCount = 0;
@@ -1571,8 +1711,8 @@ export const renderForwardFrame = (
 
     if (program.usesTransformBindings) {
       const transformData = usesLitMaterialProgram(program)
-        ? createDeferredMeshTransformUniformData(node.worldMatrix)
-        : createMeshTransformUniformData(node.worldMatrix);
+        ? createForwardLitMeshTransformUniformData(node.worldMatrix, viewProjectionMatrix)
+        : createForwardMeshTransformUniformData(node.worldMatrix, viewProjectionMatrix);
       const transformBuffer = context.device.createBuffer({
         label: `${node.node.id}:mesh-transform`,
         size: transformData.byteLength,
@@ -1748,7 +1888,7 @@ export const renderDeferredFrame = (
     }
 
     depthPass.setVertexBuffer(0, positionBuffer);
-    const transformData = createMeshTransformUniformData(node.worldMatrix);
+    const transformData = createWorldTransformUniformData(node.worldMatrix);
     const transformBuffer = context.device.createBuffer({
       label: `${node.node.id}:deferred-depth-transform`,
       size: transformData.byteLength,

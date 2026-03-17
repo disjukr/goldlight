@@ -78,6 +78,27 @@ export type MeshPrimitive = Readonly<{
   materialId?: Id;
 }>;
 
+export type CameraPerspective = Readonly<{
+  'type': 'perspective';
+  id: Id;
+  yfov?: Scalar;
+  znear: Scalar;
+  zfar: Scalar;
+}>;
+
+export type CameraOrthographic = Readonly<{
+  'type': 'orthographic';
+  id: Id;
+  xmag?: Scalar;
+  ymag?: Scalar;
+  znear: Scalar;
+  zfar: Scalar;
+}>;
+
+export type Camera =
+  | CameraPerspective
+  | CameraOrthographic;
+
 export type SdfPrimitive = Readonly<{
   id: Id;
   op: string;
@@ -97,6 +118,7 @@ export type Node = Readonly<{
   parentId?: Id;
   transform: Transform;
   meshId?: Id;
+  cameraId?: Id;
   sdfId?: Id;
   volumeId?: Id;
   lightId?: Id;
@@ -127,6 +149,8 @@ export type SceneIr = Readonly<{
   materials: readonly Material[];
   lights: readonly Light[];
   meshes: readonly MeshPrimitive[];
+  cameras: readonly Camera[];
+  activeCameraId?: Id;
   sdfPrimitives: readonly SdfPrimitive[];
   volumePrimitives: readonly VolumePrimitive[];
   nodes: readonly Node[];

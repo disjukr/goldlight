@@ -246,11 +246,77 @@ Deno.test('renderForwardFrame encodes indexed and non-indexed draws from mesh re
   assertEquals(mocks.bindGroupEntries.length, 4);
   assertEquals(
     mocks.writeBufferCalls
-      .filter((call) => call.bytes.byteLength === 64)
+      .filter((call) => call.bytes.byteLength === 128)
       .map((call) => Array.from(new Float32Array(call.bytes.buffer.slice(0)))),
     [
-      [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
-      [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+      [
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+      ],
+      [
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+      ],
     ],
   );
 });
@@ -606,7 +672,8 @@ struct VsOut {
 };
 
 struct MeshTransform {
-  world: mat4x4<f32>,
+  model: mat4x4<f32>,
+  viewProjection: mat4x4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> meshTransform: MeshTransform;
@@ -614,7 +681,7 @@ struct MeshTransform {
 @vertex
 fn vsMain(@location(0) position: vec3<f32>) -> VsOut {
   var out: VsOut;
-  out.position = meshTransform.world * vec4<f32>(position, 1.0);
+  out.position = meshTransform.viewProjection * meshTransform.model * vec4<f32>(position, 1.0);
   return out;
 }
 
@@ -691,7 +758,8 @@ struct VsOut {
 };
 
 struct MeshTransform {
-  world: mat4x4<f32>,
+  model: mat4x4<f32>,
+  viewProjection: mat4x4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> meshTransform: MeshTransform;
@@ -699,7 +767,7 @@ struct MeshTransform {
 @vertex
 fn vsMain(@location(0) position: vec3<f32>) -> VsOut {
   var out: VsOut;
-  out.position = meshTransform.world * vec4<f32>(position, 1.0);
+  out.position = meshTransform.viewProjection * meshTransform.model * vec4<f32>(position, 1.0);
   return out;
 }
 
@@ -912,7 +980,7 @@ Deno.test('renderForwardFrame binds lighting uniforms for built-in lit materials
     litVertexBuffers.map((buffer) => buffer?.arrayStride ?? 0),
     [12, 12],
   );
-  const litTransformWrite = mocks.writeBufferCalls.find((call) => call.bytes.byteLength === 128);
+  const litTransformWrite = mocks.writeBufferCalls.find((call) => call.bytes.byteLength === 192);
   const lightingWrite = mocks.writeBufferCalls.find((call) => call.bytes.byteLength === 144);
   assertEquals(Boolean(litTransformWrite), true);
   assertEquals(
@@ -1007,7 +1075,8 @@ struct VsOut {
 };
 
 struct MeshTransform {
-  world: mat4x4<f32>,
+  model: mat4x4<f32>,
+  viewProjection: mat4x4<f32>,
 };
 
 struct MaterialUniforms {
@@ -1022,7 +1091,7 @@ struct MaterialUniforms {
 @vertex
 fn vsMain(@location(0) position: vec3<f32>, @location(1) uv: vec2<f32>) -> VsOut {
   var out: VsOut;
-  out.position = meshTransform.world * vec4<f32>(position, 1.0);
+  out.position = meshTransform.viewProjection * meshTransform.model * vec4<f32>(position, 1.0);
   out.uv = uv;
   return out;
 }
@@ -1158,11 +1227,11 @@ Deno.test('renderForwardFrame uploads evaluated mesh transforms for built-in unl
     evaluateScene(scene, { timeMs: 0 }),
   );
 
-  const transformUpload = mocks.writeBufferCalls.find((call) => call.bytes.byteLength === 64);
+  const transformUpload = mocks.writeBufferCalls.find((call) => call.bytes.byteLength === 128);
   const uploadedMatrix = transformUpload
     ? Array.from(new Float32Array(transformUpload.bytes.buffer.slice(0)))
     : [];
-  const expectedMatrix = [
+  const expectedModelMatrix = [
     0,
     2,
     0,
@@ -1180,9 +1249,30 @@ Deno.test('renderForwardFrame uploads evaluated mesh transforms for built-in unl
     0,
     1,
   ];
-  assertEquals(uploadedMatrix.length, expectedMatrix.length);
-  uploadedMatrix.forEach((value, index) => {
-    assertAlmostEquals(value, expectedMatrix[index], 1e-6);
+  const expectedViewProjection = [
+    1,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    0,
+    1,
+  ];
+  assertEquals(uploadedMatrix.length, expectedModelMatrix.length + expectedViewProjection.length);
+  uploadedMatrix.slice(0, 16).forEach((value, index) => {
+    assertAlmostEquals(value, expectedModelMatrix[index], 1e-6);
+  });
+  uploadedMatrix.slice(16).forEach((value, index) => {
+    assertAlmostEquals(value, expectedViewProjection[index], 1e-6);
   });
 });
 
@@ -1234,11 +1324,13 @@ Deno.test('renderForwardFrame uploads parented mesh transforms after scene evalu
     evaluateScene(scene, { timeMs: 0 }),
   );
 
-  const transformUpload = mocks.writeBufferCalls.find((call) => call.bytes.byteLength === 64);
+  const transformUpload = mocks.writeBufferCalls.find((call) => call.bytes.byteLength === 128);
   const uploadedMatrix = transformUpload
     ? Array.from(new Float32Array(transformUpload.bytes.buffer.slice(0)))
     : [];
 
   assertAlmostEquals(uploadedMatrix[12] ?? 0, -1, 1e-5);
   assertAlmostEquals(uploadedMatrix[13] ?? 0, 0, 1e-5);
+  assertAlmostEquals(uploadedMatrix[28] ?? 0, 0, 1e-5);
+  assertAlmostEquals(uploadedMatrix[31] ?? 0, 1, 1e-5);
 });

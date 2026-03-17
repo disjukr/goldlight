@@ -2,10 +2,13 @@ import { assertAlmostEquals, assertEquals } from 'jsr:@std/assert@^1.0.14';
 import { evaluateScene } from '@rieul3d/core';
 import {
   appendAnimationClip,
+  appendCamera,
   appendMesh,
   appendNode,
   createNode,
+  createPerspectiveCamera,
   createSceneIr,
+  setActiveCamera,
 } from '@rieul3d/ir';
 
 Deno.test('evaluateScene computes world transforms across parent-child nodes', () => {
@@ -93,4 +96,36 @@ Deno.test('evaluateScene samples animation channels', () => {
 
   const evaluated = evaluateScene(scene, { timeMs: 500, clipId: 'clip-0' });
   assertEquals(evaluated.nodes[0].node.transform.translation.x, 5);
+});
+
+Deno.test('evaluateScene resolves the active camera and its view matrix', () => {
+  let scene = createSceneIr('scene');
+  scene = setActiveCamera(
+    appendCamera(
+      scene,
+      createPerspectiveCamera('camera-0', {
+        yfov: Math.PI / 3,
+        znear: 0.1,
+        zfar: 10,
+      }),
+    ),
+    'camera-0',
+  );
+  scene = appendNode(
+    scene,
+    createNode('camera-node', {
+      cameraId: 'camera-0',
+      transform: {
+        translation: { x: 0, y: 0, z: 3 },
+        rotation: { x: 0, y: 0, z: 0, w: 1 },
+        scale: { x: 1, y: 1, z: 1 },
+      },
+    }),
+  );
+
+  const evaluated = evaluateScene(scene, { timeMs: 0 });
+
+  assertEquals(evaluated.activeCamera?.camera.type, 'perspective');
+  assertEquals(evaluated.activeCamera?.worldMatrix[14], 3);
+  assertAlmostEquals(evaluated.activeCamera?.viewMatrix[14] ?? 0, -3, 1e-6);
 });

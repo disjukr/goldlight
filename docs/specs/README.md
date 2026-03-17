@@ -8,6 +8,7 @@ source of truth for package boundaries and feature expectations.
 - [`architecture.md`](./architecture.md): top-level runtime layers and package responsibilities
 - [`scene-ir.md`](./scene-ir.md): serializable scene schema and lowering expectations
 - [`interop-gltf.md`](./interop-gltf.md): interchange strategy for Blender, glTF, OBJ, and STL
+- [`react-authoring.md`](./react-authoring.md): React package role and lowering boundaries
 
 ## Runtime Behavior
 
@@ -16,7 +17,6 @@ source of truth for package boundaries and feature expectations.
 - [`runtime-residency.md`](./runtime-residency.md): device-local resource ownership and rebuild
   rules
 - [`rendering.md`](./rendering.md): renderer families, pass model, shader model, and current gaps
-- [`react-authoring.md`](./react-authoring.md): React package role and lowering boundaries
 
 ## Contributor Reference
 

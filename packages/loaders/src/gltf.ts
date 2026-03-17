@@ -1,3 +1,4 @@
+import { dirname, isAbsolute, resolve as resolvePath } from '@std/path';
 import {
   appendAnimationClip,
   appendMaterial,
@@ -125,10 +126,30 @@ type GltfJson = Readonly<{
   animations?: readonly GltfAnimation[];
 }>;
 
+export type GltfExternalResourceMap = Readonly<Record<string, Uint8Array>>;
+
 export type GltfLoadOptions = Readonly<{
   baseUri?: string;
-  resources?: Readonly<Record<string, Uint8Array>>;
+  resources?: GltfExternalResourceMap;
 }>;
+
+export type GltfExternalResourceOptions = Readonly<{
+  baseUri?: string;
+}>;
+
+export type GltfFetchExternalResourceOptions =
+  & GltfExternalResourceOptions
+  & Readonly<{
+    fetch?: typeof globalThis.fetch;
+  }>;
+
+export type GltfDenoExternalResourceOptions =
+  & GltfExternalResourceOptions
+  & Readonly<{
+    cwd?: string;
+    fetch?: typeof globalThis.fetch;
+    readFile?: (path: string | URL) => Promise<Uint8Array>;
+  }>;
 
 type ResolvedResource = Readonly<{
   uri: string;
@@ -219,16 +240,30 @@ const inferMimeTypeFromUri = (uri: string): string | undefined => {
   }
 };
 
+const tryParseUrl = (value: string, baseUri?: string): URL | undefined => {
+  try {
+    return baseUri ? new URL(value, baseUri) : new URL(value);
+  } catch {
+    return undefined;
+  }
+};
+
 const resolveUri = (uri: string, baseUri?: string): string => {
   if (!baseUri) {
     return uri;
   }
 
-  try {
-    return new URL(uri, baseUri).toString();
-  } catch {
-    return uri;
+  const resolvedUrl = tryParseUrl(uri, baseUri);
+  if (resolvedUrl) {
+    return resolvedUrl.toString();
   }
+
+  if (isAbsolute(uri)) {
+    return resolvePath(uri);
+  }
+
+  const resolvedBaseUri = isAbsolute(baseUri) ? baseUri : resolvePath(baseUri);
+  return resolvePath(dirname(resolvedBaseUri), uri);
 };
 
 const resolveResource = (
@@ -238,6 +273,67 @@ const resolveResource = (
   const resolvedUri = resolveUri(uri, options.baseUri);
   const bytes = options.resources?.[resolvedUri] ?? options.resources?.[uri];
   return { uri: resolvedUri, bytes };
+};
+
+const isExternalUri = (uri: string | undefined): uri is string =>
+  typeof uri === 'string' && uri.length > 0 && !uri.startsWith('data:');
+
+const collectExternalResourceUris = (
+  json: GltfJson,
+  options: GltfExternalResourceOptions = {},
+): string[] => {
+  const uris = new Set<string>();
+
+  json.buffers?.forEach((buffer) => {
+    if (isExternalUri(buffer.uri)) {
+      uris.add(resolveUri(buffer.uri, options.baseUri));
+    }
+  });
+
+  json.images?.forEach((image) => {
+    if (isExternalUri(image.uri)) {
+      uris.add(resolveUri(image.uri, options.baseUri));
+    }
+  });
+
+  return [...uris];
+};
+
+const toUint8Array = async (response: Response): Promise<Uint8Array> =>
+  new Uint8Array(await response.arrayBuffer());
+
+const fetchExternalResource = async (
+  uri: string,
+  fetchFn: typeof globalThis.fetch,
+): Promise<Uint8Array> => {
+  const response = await fetchFn(uri);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch glTF external resource "${uri}" (${response.status})`);
+  }
+
+  return toUint8Array(response);
+};
+
+const resolveDenoReadTarget = (
+  uri: string,
+  options: GltfDenoExternalResourceOptions,
+): string | URL => {
+  const resolvedUri = resolveUri(uri, options.baseUri);
+  const parsedUrl = tryParseUrl(resolvedUri);
+
+  if (parsedUrl?.protocol === 'file:') {
+    return parsedUrl;
+  }
+
+  if (parsedUrl) {
+    return resolvedUri;
+  }
+
+  if (isAbsolute(resolvedUri)) {
+    return resolvedUri;
+  }
+
+  return resolvePath(options.cwd ?? Deno.cwd(), resolvedUri);
 };
 
 const sliceBufferView = (
@@ -737,6 +833,53 @@ export const loadGltfFromJson = (
   sceneId = 'gltf-scene',
   options: GltfLoadOptions = {},
 ): SceneIr => loadGltfScene(json, sceneId, options);
+
+export const listExternalGltfResourceUris = (
+  json: GltfJson,
+  options: GltfExternalResourceOptions = {},
+): string[] => collectExternalResourceUris(json, options);
+
+export const fetchGltfExternalResources = async (
+  json: GltfJson,
+  options: GltfFetchExternalResourceOptions = {},
+): Promise<Record<string, Uint8Array>> => {
+  const fetchFn = options.fetch ?? globalThis.fetch;
+  if (!fetchFn) {
+    throw new Error('fetchGltfExternalResources requires a fetch implementation');
+  }
+
+  const resources = await Promise.all(
+    collectExternalResourceUris(json, options).map(async (uri) =>
+      [uri, await fetchExternalResource(uri, fetchFn)] as const
+    ),
+  );
+
+  return Object.fromEntries(resources);
+};
+
+export const readDenoGltfExternalResources = async (
+  json: GltfJson,
+  options: GltfDenoExternalResourceOptions = {},
+): Promise<Record<string, Uint8Array>> => {
+  const readFile = options.readFile ?? Deno.readFile;
+  const fetchFn = options.fetch ?? globalThis.fetch;
+  const resources = await Promise.all(
+    collectExternalResourceUris(json, options).map(async (uri) => {
+      const parsedUrl = tryParseUrl(uri);
+      if (parsedUrl?.protocol === 'http:' || parsedUrl?.protocol === 'https:') {
+        if (!fetchFn) {
+          throw new Error(`readDenoGltfExternalResources requires fetch for "${uri}"`);
+        }
+
+        return [uri, await fetchExternalResource(uri, fetchFn)] as const;
+      }
+
+      return [uri, await readFile(resolveDenoReadTarget(uri, options))] as const;
+    }),
+  );
+
+  return Object.fromEntries(resources);
+};
 
 export const loadGltfFromGlb = (
   glbBytes: Uint8Array,

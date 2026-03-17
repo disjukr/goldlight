@@ -37,6 +37,8 @@ Implemented today:
   sampling, material parameter uploads, custom WGSL registration, and declared material texture
   bindings
 - glTF JSON, GLB, data-URI buffers, and caller-provided external glTF resource ingestion
+- browser/Deno helpers for resolving external glTF buffers and images into the existing loader
+  contract
 - browser canvas examples, Windows BYOW native textured demo, headless PNG snapshot workflow, and
   PNG snapshot encoding
 - fixture-backed golden snapshot regression tests for clear, mesh, SDF, volume, and recovery rebuild

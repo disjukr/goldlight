@@ -23,14 +23,46 @@ Blender interoperability is `glTF-first`. The primary interchange path is:
   snapshotting, and first volume residency paths.
 - External buffer and image URIs are supported when callers provide the referenced bytes through
   `loadGltfFromJson(..., { baseUri, resources })`.
+- `fetchGltfExternalResources` and `readDenoGltfExternalResources` provide supported helper paths
+  for collecting those bytes in browser and Deno workflows without changing loader purity.
 
 ## Loader Notes
 
 - `loadGltfFromJson` remains synchronous. External binary payloads must be resolved by the caller
   ahead of time and passed through `resources`.
+- `listExternalGltfResourceUris` exposes the normalized external URI set when callers want to
+  inspect or cache resource fetch plans themselves.
 - `loadGltfFromGlb` parses glTF 2.0 GLB containers and uses the embedded BIN chunk for buffer data.
 - External image URIs are normalized against `baseUri` and preserved on emitted `SceneIr.assets`
   entries so runtime-side asset loading can still occur later.
+
+## Helper Usage
+
+Browser or remote-first workflows can prefetch resources with:
+
+```ts
+const resources = await fetchGltfExternalResources(json, {
+  baseUri: 'https://example.test/models/scene.gltf',
+});
+
+const scene = loadGltfFromJson(json, 'scene', {
+  baseUri: 'https://example.test/models/scene.gltf',
+  resources,
+});
+```
+
+Deno workflows can resolve either local relative files or remote URLs with:
+
+```ts
+const resources = await readDenoGltfExternalResources(json, {
+  baseUri: '/workspace/assets/scene.gltf',
+});
+
+const scene = loadGltfFromJson(json, 'scene', {
+  baseUri: '/workspace/assets/scene.gltf',
+  resources,
+});
+```
 
 ## Other Formats
 

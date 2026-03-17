@@ -1,9 +1,13 @@
 import { assertEquals } from 'jsr:@std/assert@^1.0.14';
+import { join, resolve as resolvePath } from '@std/path';
 import {
+  fetchGltfExternalResources,
+  listExternalGltfResourceUris,
   loadGltfFromGlb,
   loadGltfFromJson,
   loadObjFromText,
   loadStlFromText,
+  readDenoGltfExternalResources,
 } from '@rieul3d/loaders';
 
 const textEncoder = new TextEncoder();
@@ -299,6 +303,100 @@ Deno.test('loadGltfFromJson resolves external buffer and image URIs from provide
     uri: 'https://example.test/models/textures/albedo.png',
     mimeType: 'image/png',
   }]);
+});
+
+Deno.test('listExternalGltfResourceUris normalizes relative URIs against URL and file bases', () => {
+  const json = {
+    buffers: [{ uri: 'geometry.bin', byteLength: 4 }],
+    images: [{ uri: 'textures/albedo.png' }],
+  };
+
+  assertEquals(
+    listExternalGltfResourceUris(json, {
+      baseUri: 'https://example.test/models/scene.gltf',
+    }),
+    [
+      'https://example.test/models/geometry.bin',
+      'https://example.test/models/textures/albedo.png',
+    ],
+  );
+
+  assertEquals(
+    listExternalGltfResourceUris(json, {
+      baseUri: join(Deno.cwd(), 'fixtures', 'scene.gltf'),
+    }),
+    [
+      join(Deno.cwd(), 'fixtures', 'geometry.bin'),
+      join(Deno.cwd(), 'fixtures', 'textures', 'albedo.png'),
+    ],
+  );
+});
+
+Deno.test('fetchGltfExternalResources loads every external buffer and image once', async () => {
+  const requests: string[] = [];
+  const payloads = new Map<string, Uint8Array>([
+    ['https://example.test/models/geometry.bin', new Uint8Array([1, 2, 3])],
+    ['https://example.test/models/textures/albedo.png', new Uint8Array([4, 5, 6])],
+  ]);
+
+  const resources = await fetchGltfExternalResources({
+    buffers: [{ uri: 'geometry.bin', byteLength: 3 }],
+    images: [{ uri: 'textures/albedo.png' }, { uri: 'textures/albedo.png' }],
+  }, {
+    baseUri: 'https://example.test/models/scene.gltf',
+    fetch: (input) => {
+      const uri = String(input);
+      requests.push(uri);
+      const body = payloads.get(uri);
+      if (!body) {
+        return Promise.resolve(new Response(null, { status: 404 }));
+      }
+
+      return Promise.resolve(new Response(new Blob([body.slice()]), { status: 200 }));
+    },
+  });
+
+  assertEquals(requests, [
+    'https://example.test/models/geometry.bin',
+    'https://example.test/models/textures/albedo.png',
+  ]);
+  assertEquals(resources, Object.fromEntries(payloads));
+});
+
+Deno.test('readDenoGltfExternalResources reads relative files and remote URLs', async () => {
+  const tempDir = join(Deno.cwd(), 'fixtures');
+  const baseUri = resolvePath(join(tempDir, 'scene.gltf'));
+  const geometryPath = resolvePath(join(tempDir, 'geometry.bin'));
+  const albedoPath = resolvePath(join(tempDir, 'textures', 'albedo.png'));
+  const reads = new Map<string, Uint8Array>([
+    [geometryPath.toLowerCase(), new Uint8Array([9, 8, 7])],
+    [albedoPath.toLowerCase(), new Uint8Array([6, 5, 4])],
+  ]);
+
+  const resources = await readDenoGltfExternalResources({
+    buffers: [
+      { uri: 'geometry.bin', byteLength: 3 },
+      { uri: 'https://example.test/shared.bin', byteLength: 2 },
+    ],
+    images: [{ uri: 'textures/albedo.png' }],
+  }, {
+    baseUri,
+    fetch: () => Promise.resolve(new Response(new Blob([new Uint8Array([1, 2])]), { status: 200 })),
+    readFile: (path) => {
+      const value = reads.get(String(path).toLowerCase());
+      if (!value) {
+        throw new Error(`unexpected read: ${path}`);
+      }
+
+      return Promise.resolve(value);
+    },
+  });
+
+  assertEquals(resources, {
+    [geometryPath]: new Uint8Array([9, 8, 7]),
+    'https://example.test/shared.bin': new Uint8Array([1, 2]),
+    [albedoPath]: new Uint8Array([6, 5, 4]),
+  });
 });
 
 Deno.test('loadGltfFromGlb ingests binary buffers and bufferView-backed images', () => {

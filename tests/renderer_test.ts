@@ -469,6 +469,41 @@ Deno.test('collectRendererCapabilityIssues accepts lit materials when a directio
   assertEquals(issues, []);
 });
 
+Deno.test('collectRendererCapabilityIssues accepts deferred lit materials when a directional light is present', () => {
+  let scene = createSceneIr('scene');
+  scene = appendLight(scene, {
+    id: 'light-directional',
+    kind: 'directional',
+    color: { x: 1, y: 0.95, z: 0.9 },
+    intensity: 1.5,
+  });
+  scene = appendMaterial(scene, {
+    id: 'material-lit',
+    kind: 'lit',
+    textures: [],
+    parameters: {
+      color: { x: 0.8, y: 0.4, z: 0.2, w: 1 },
+    },
+  });
+  scene = appendMesh(scene, {
+    id: 'mesh-0',
+    materialId: 'material-lit',
+    attributes: [
+      { semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0, 0, 1, 0] },
+      { semantic: 'NORMAL', itemSize: 3, values: [0, 0, 1, 0, 0, 1, 0, 0, 1] },
+    ],
+  });
+  scene = appendNode(scene, createNode('light-node', { lightId: 'light-directional' }));
+  scene = appendNode(scene, createNode('mesh-node', { meshId: 'mesh-0' }));
+
+  const issues = collectRendererCapabilityIssues(
+    createDeferredRenderer(),
+    evaluateScene(scene, { timeMs: 0 }),
+  );
+
+  assertEquals(issues, []);
+});
+
 Deno.test('collectRendererCapabilityIssues rejects lit materials without lights or normals', () => {
   let scene = createSceneIr('scene');
   scene = appendMaterial(scene, {
@@ -518,6 +553,66 @@ Deno.test('collectRendererCapabilityIssues rejects lit materials without lights 
       requirement: 'vertex-attribute:NORMAL',
       message:
         'renderer "forward" cannot light node "mesh-node" because mesh "mesh-0" is missing NORMAL',
+    },
+  ]);
+});
+
+Deno.test('collectRendererCapabilityIssues rejects deferred lit materials without lights or normals', () => {
+  let scene = createSceneIr('scene');
+  scene = appendMaterial(scene, {
+    id: 'material-lit',
+    kind: 'lit',
+    textures: [{
+      id: 'texture-0',
+      assetId: 'image-0',
+      semantic: 'baseColor',
+      colorSpace: 'srgb',
+      sampler: 'linear-repeat',
+    }],
+    parameters: {
+      color: { x: 0.6, y: 0.7, z: 0.9, w: 1 },
+    },
+  });
+  scene = appendMesh(scene, {
+    id: 'mesh-0',
+    materialId: 'material-lit',
+    attributes: [{ semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0, 0, 1, 0] }],
+  });
+  scene = appendNode(scene, createNode('mesh-node', { meshId: 'mesh-0' }));
+
+  const issues = collectRendererCapabilityIssues(
+    createDeferredRenderer(),
+    evaluateScene(scene, { timeMs: 0 }),
+  );
+
+  assertEquals(issues, [
+    {
+      nodeId: 'mesh-node',
+      feature: 'mesh',
+      requirement: 'vertex-attribute:NORMAL',
+      message:
+        'renderer "deferred" requires NORMAL vertex data on node "mesh-node" for deferred lighting',
+    },
+    {
+      nodeId: 'mesh-node',
+      feature: 'light',
+      requirement: 'light-source:directional',
+      message:
+        'renderer "deferred" requires at least one directional light for material "material-lit"',
+    },
+    {
+      nodeId: 'mesh-node',
+      feature: 'material-binding',
+      requirement: 'light-material:textures-unsupported',
+      message:
+        'renderer "deferred" does not yet support textures on built-in lit material "material-lit"',
+    },
+    {
+      nodeId: 'mesh-node',
+      feature: 'material-binding',
+      requirement: 'vertex-attribute:NORMAL',
+      message:
+        'renderer "deferred" cannot light node "mesh-node" because mesh "mesh-0" is missing NORMAL',
     },
   ]);
 });

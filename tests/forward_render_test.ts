@@ -460,7 +460,7 @@ Deno.test('renderDeferredFrame encodes depth, gbuffer, and lighting passes for m
     mocks.passActions.filter((action) => action.type === 'draw').length,
     3,
   );
-  assertEquals(mocks.bindGroupEntries.length, 4);
+  assertEquals(mocks.bindGroupEntries.length, 5);
   assertEquals(mocks.samplers.length, 1);
   const deferredGbufferPipeline = mocks.pipelines.find((pipeline) =>
     pipeline.descriptor.fragment?.targets?.length === 2
@@ -598,8 +598,9 @@ Deno.test('renderDeferredFrame binds base-color textures for textured deferred u
     deferredVertexBuffers.map((buffer) => buffer?.attributes[0]?.shaderLocation ?? -1),
     [0, 1, 2],
   );
-  assertEquals(mocks.bindGroupEntries.length, 4);
+  assertEquals(mocks.bindGroupEntries.length, 5);
   assertEquals(mocks.bindGroupEntries[2].map((entry) => entry.binding), [0, 1, 2]);
+  assertEquals(mocks.bindGroupEntries[4].map((entry) => entry.binding), [0]);
 });
 
 Deno.test('renderDeferredFrame uses registered custom WGSL gbuffer programs', () => {
@@ -676,6 +677,78 @@ Deno.test('renderDeferredFrame uses registered custom WGSL gbuffer programs', ()
   );
   assertEquals(deferredGbufferPipeline?.descriptor.fragment?.targets?.length, 2);
   assertEquals(mocks.bindGroupEntries[2].map((entry) => entry.binding), [0, 1]);
+  assertEquals(mocks.bindGroupEntries[4].map((entry) => entry.binding), [0]);
+});
+
+Deno.test('renderDeferredFrame binds scene lighting uniforms for built-in lit materials', () => {
+  const mocks = createRenderMocks();
+  const runtimeResidency = createRuntimeResidency();
+  let scene = createSceneIr('scene');
+  scene = appendLight(scene, {
+    id: 'light-directional',
+    kind: 'directional',
+    color: { x: 1, y: 0.95, z: 0.9 },
+    intensity: 1.5,
+  });
+  scene = appendMaterial(scene, {
+    id: 'material-lit',
+    kind: 'lit',
+    textures: [],
+    parameters: {
+      color: { x: 0.7, y: 0.5, z: 0.3, w: 1 },
+    },
+  });
+  scene = appendMesh(scene, {
+    id: 'mesh-lit-deferred',
+    materialId: 'material-lit',
+    attributes: [
+      { semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0, 0, 1, 0] },
+      { semantic: 'NORMAL', itemSize: 3, values: [0, 0, 1, 0, 0, 1, 0, 0, 1] },
+    ],
+  });
+  scene = appendNode(scene, createNode('light-node', { lightId: 'light-directional' }));
+  scene = appendNode(scene, createNode('mesh-lit-node', { meshId: 'mesh-lit-deferred' }));
+
+  runtimeResidency.geometry.set('mesh-lit-deferred', {
+    meshId: 'mesh-lit-deferred',
+    attributeBuffers: {
+      POSITION: { id: 0 } as unknown as GPUBuffer,
+      NORMAL: { id: 1 } as unknown as GPUBuffer,
+    },
+    vertexCount: 3,
+    indexCount: 0,
+  });
+
+  const binding = createOffscreenContext({
+    device: mocks.device as unknown as GPUDevice,
+    target: createHeadlessTarget(64, 64),
+  });
+
+  const result = renderDeferredFrame(
+    mocks as unknown as GpuRenderExecutionContext,
+    binding,
+    runtimeResidency,
+    evaluateScene(scene, { timeMs: 0 }),
+  );
+
+  assertEquals(result.drawCount, 3);
+  assertEquals(mocks.bindGroupEntries.length, 5);
+  assertEquals(mocks.bindGroupEntries[4].map((entry) => entry.binding), [0]);
+  const lightingWrite = mocks.writeBufferCalls.find((call) => call.bytes.byteLength === 144);
+  assertEquals(Boolean(lightingWrite), true);
+  assertEquals(
+    Array.from(new Float32Array(lightingWrite?.bytes.buffer.slice(0, 16) ?? new ArrayBuffer(0))),
+    [0, 0, -1, 0],
+  );
+  const lightingColor = Array.from(
+    new Float32Array(
+      lightingWrite?.bytes.buffer.slice(64, 80) ?? new ArrayBuffer(0),
+    ),
+  );
+  assertAlmostEquals(lightingColor[0], 1, 1e-6);
+  assertAlmostEquals(lightingColor[1], 0.95, 1e-6);
+  assertAlmostEquals(lightingColor[2], 0.9, 1e-6);
+  assertAlmostEquals(lightingColor[3], 1.5, 1e-6);
 });
 
 Deno.test('renderForwardFrame encodes a dedicated sdf raymarch pass for supported sphere and box nodes', () => {

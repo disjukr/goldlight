@@ -37,9 +37,9 @@ The initial renderer uses a lightweight pass graph:
 - Forward rendering is the first concrete execution path and currently draws mesh residency items.
 - Forward rendering now also consumes first-class directional light nodes for built-in Lambert mesh
   shading.
-- Deferred rendering now executes a minimal mesh-only path with a depth prepass, an unlit
-  albedo/normal G-buffer pass, registered custom WGSL G-buffer programs, a fullscreen lighting
-  resolve, and post-lighting SDF/volume raymarch composition.
+- Deferred rendering now executes a minimal mesh-only path with a depth prepass, built-in unlit/lit
+  albedo-normal G-buffer passes, registered custom WGSL G-buffer programs, a fullscreen
+  directional-light lighting resolve, and post-lighting SDF/volume raymarch composition.
 - Forward rendering also encodes a dedicated SDF raymarch pass for supported sphere and box
   primitives.
 - Forward rendering also encodes a first volume raymarch pass for volume primitives with residency.
@@ -55,7 +55,10 @@ The initial renderer uses a lightweight pass graph:
 - Built-in lit shading currently supports color-only Lambert materials that require mesh normals and
   at least one directional light.
 - Built-in deferred unlit shading supports the same optional base-color texture sampling when
-  `NORMAL` and `TEXCOORD_0` data plus texture residency are available.
+  `NORMAL` and `TEXCOORD_0` data plus texture residency are available, and bypasses the lighting
+  resolve so color-only materials stay unlit.
+- Built-in deferred lit shading consumes the same material color uniform plus first-class
+  directional light nodes during the fullscreen lighting resolve.
 - Deferred custom WGSL programs may also target the G-buffer path when they write the same two
   render targets and match the deferred transform/material binding contract.
 - Deferred frames now reuse the existing SDF sphere/box and volume raymarch passes after lighting,
@@ -64,8 +67,8 @@ The initial renderer uses a lightweight pass graph:
 - Built-in forward lit mesh draws also upload an inverse-transpose normal matrix plus a compact
   directional-light uniform block.
 - Material parameter uploads and bind group creation are implemented for built-in unlit shading.
-- The minimal deferred path currently requires `NORMAL` vertex data and still limits materials to
-  built-in `unlit`, with optional base-color textures.
+- The minimal deferred path currently requires `NORMAL` vertex data and supports built-in `unlit`
+  plus non-textured built-in `lit` materials, with optional base-color textures on `unlit`.
 - Custom WGSL programs can be registered and cached through the material registry.
 - Headless/offscreen rendering supports compact byte readback for snapshot testing.
 - Snapshot bytes can also be encoded into PNG for local inspection and regression workflows.
@@ -117,6 +120,6 @@ The initial renderer uses a lightweight pass graph:
 
 ## Known Gaps
 
-- Deferred rendering does not yet consume Scene IR light nodes or built-in lit materials.
+- Deferred rendering does not yet support textures on built-in lit materials.
 - SDF execution currently supports sphere and box primitives only; broader graph/operator coverage
   is still pending.

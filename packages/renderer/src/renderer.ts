@@ -139,7 +139,19 @@ export type SdfPassItem = Readonly<{
   op: string;
   center: readonly [number, number, number];
   radius: number;
+  halfExtents: readonly [number, number, number];
   color: readonly [number, number, number, number];
+  worldToLocalRotation: readonly [
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+  ];
 }>;
 
 export type RendererCapabilityIssue = Readonly<{
@@ -480,11 +492,11 @@ export const collectRendererCapabilityIssues = (
           'sdf-execution',
           `renderer "${renderer.label}" does not support sdf execution`,
         );
-      } else if (node.sdf.op !== 'sphere') {
+      } else if (!['sphere', 'box'].includes(node.sdf.op)) {
         pushIssue(
           'sdf',
           `sdf-op:${node.sdf.op}`,
-          `renderer "${renderer.label}" only supports sphere sdf primitives right now; node "${node.node.id}" requested "${node.sdf.op}"`,
+          `renderer "${renderer.label}" only supports sphere and box sdf primitives right now; node "${node.node.id}" requested "${node.sdf.op}"`,
         );
       }
     }
@@ -642,6 +654,51 @@ const getMatrixScale = (worldMatrix: readonly number[]): readonly [number, numbe
   return [scaleX, scaleY, scaleZ];
 };
 
+const normalizeVector3 = (
+  x: number,
+  y: number,
+  z: number,
+): readonly [number, number, number] => {
+  const length = Math.hypot(x, y, z);
+  if (length < 1e-8) {
+    return [0, 0, 0];
+  }
+
+  return [x / length, y / length, z / length];
+};
+
+const getWorldToLocalRotation = (
+  worldMatrix: readonly number[],
+): readonly [number, number, number, number, number, number, number, number, number] => {
+  const [axisXx, axisXy, axisXz] = normalizeVector3(
+    worldMatrix[0] ?? 0,
+    worldMatrix[1] ?? 0,
+    worldMatrix[2] ?? 0,
+  );
+  const [axisYx, axisYy, axisYz] = normalizeVector3(
+    worldMatrix[4] ?? 0,
+    worldMatrix[5] ?? 0,
+    worldMatrix[6] ?? 0,
+  );
+  const [axisZx, axisZy, axisZz] = normalizeVector3(
+    worldMatrix[8] ?? 0,
+    worldMatrix[9] ?? 0,
+    worldMatrix[10] ?? 0,
+  );
+
+  return [
+    axisXx,
+    axisXy,
+    axisXz,
+    axisYx,
+    axisYy,
+    axisYz,
+    axisZx,
+    axisZy,
+    axisZz,
+  ];
+};
+
 const invertAffineMatrix = (worldMatrix: readonly number[]): readonly number[] => {
   const m00 = worldMatrix[0] ?? 0;
   const m01 = worldMatrix[1] ?? 0;
@@ -723,13 +780,18 @@ export const extractSdfPassItems = (
   evaluatedScene: EvaluatedScene,
 ): readonly SdfPassItem[] =>
   evaluatedScene.nodes.flatMap((node) => {
-    if (!node.sdf || node.sdf.op !== 'sphere') {
+    if (!node.sdf || !['sphere', 'box'].includes(node.sdf.op)) {
       return [];
     }
 
     const [scaleX, scaleY, scaleZ] = getMatrixScale(node.worldMatrix);
     const averageScale = (scaleX + scaleY + scaleZ) / 3 || 1;
     const radius = (node.sdf.parameters.radius?.x ?? 0.5) * averageScale;
+    const halfExtents: readonly [number, number, number] = [
+      (node.sdf.parameters.size?.x ?? 0.5) * (scaleX || 1),
+      (node.sdf.parameters.size?.y ?? 0.5) * (scaleY || 1),
+      (node.sdf.parameters.size?.z ?? 0.5) * (scaleZ || 1),
+    ];
     const color = node.sdf.parameters.color ?? { x: 1, y: 0.55, z: 0.2, w: 1 };
 
     return [{
@@ -738,7 +800,9 @@ export const extractSdfPassItems = (
       op: node.sdf.op,
       center: getMatrixTranslation(node.worldMatrix),
       radius,
+      halfExtents,
       color: [color.x, color.y, color.z, color.w],
+      worldToLocalRotation: getWorldToLocalRotation(node.worldMatrix),
     }];
   });
 
@@ -889,13 +953,19 @@ export const ensureVolumeRaymarchPipeline = (
 };
 
 const createSdfUniformData = (items: readonly SdfPassItem[]): Float32Array => {
-  const uniformData = new Float32Array(8 + (maxSdfPassItems * 8));
+  const floatsPerItem = 24;
+  const uniformData = new Float32Array(8 + (maxSdfPassItems * floatsPerItem));
   uniformData[0] = Math.min(items.length, maxSdfPassItems);
 
   items.slice(0, maxSdfPassItems).forEach((item, index) => {
-    const offset = 8 + (index * 8);
-    uniformData.set([...item.center, item.radius], offset);
-    uniformData.set(item.color, offset + 4);
+    const offset = 8 + (index * floatsPerItem);
+    const opCode = item.op === 'box' ? 1 : 0;
+    uniformData.set([...item.center, opCode], offset);
+    uniformData.set([...item.halfExtents, item.radius], offset + 4);
+    uniformData.set(item.color, offset + 8);
+    uniformData.set([...item.worldToLocalRotation.slice(0, 3), 0], offset + 12);
+    uniformData.set([...item.worldToLocalRotation.slice(3, 6), 0], offset + 16);
+    uniformData.set([...item.worldToLocalRotation.slice(6, 9), 0], offset + 20);
   });
 
   return uniformData;

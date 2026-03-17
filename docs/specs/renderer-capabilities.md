@@ -52,8 +52,8 @@ The current preflight rules are:
 - materials with `shaderId` require `capabilities.customShaders === 'supported'`
 
 Renderers may apply narrower execution limits after the top-level capability gate. For example, the
-forward renderer currently advertises SDF support but only encodes sphere SDF primitives; that
-shape-specific restriction is reported as a validation issue during the same preflight step.
+forward renderer currently advertises SDF support but only encodes sphere and box SDF primitives;
+that shape-specific restriction is reported as a validation issue during the same preflight step.
 
 ## Failure Reporting
 

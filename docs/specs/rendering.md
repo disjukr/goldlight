@@ -38,8 +38,8 @@ The initial renderer uses a lightweight pass graph:
 - Forward rendering now also consumes first-class directional light nodes for built-in Lambert mesh
   shading.
 - Deferred rendering now executes a minimal mesh-only path with a depth prepass, an unlit
-  albedo/normal G-buffer pass, registered custom WGSL G-buffer programs, and a fullscreen lighting
-  resolve.
+  albedo/normal G-buffer pass, registered custom WGSL G-buffer programs, a fullscreen lighting
+  resolve, and post-lighting SDF/volume raymarch composition.
 - Forward rendering also encodes a dedicated SDF raymarch pass for supported sphere and box
   primitives.
 - Forward rendering also encodes a first volume raymarch pass for volume primitives with residency.
@@ -58,6 +58,9 @@ The initial renderer uses a lightweight pass graph:
   `NORMAL` and `TEXCOORD_0` data plus texture residency are available.
 - Deferred custom WGSL programs may also target the G-buffer path when they write the same two
   render targets and match the deferred transform/material binding contract.
+- Deferred frames now reuse the existing SDF sphere/box and volume raymarch passes after lighting,
+  so hybrid scenes can keep mesh shading in deferred while compositing raymarched primitives into
+  the same output target.
 - Built-in forward lit mesh draws also upload an inverse-transpose normal matrix plus a compact
   directional-light uniform block.
 - Material parameter uploads and bind group creation are implemented for built-in unlit shading.
@@ -114,7 +117,6 @@ The initial renderer uses a lightweight pass graph:
 
 ## Known Gaps
 
-- Deferred rendering does not yet cover SDF primitives or volume primitives.
 - Deferred rendering does not yet consume Scene IR light nodes or built-in lit materials.
 - SDF execution currently supports sphere and box primitives only; broader graph/operator coverage
   is still pending.

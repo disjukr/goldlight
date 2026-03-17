@@ -49,7 +49,8 @@ The initial renderer uses a lightweight pass graph:
 - Browser examples cover both the minimal mesh-only path and a texture-backed unlit material path.
 - The native BYOW demo uses the same forward renderer/runtime residency path on an SDL2-backed
   surface target instead of a browser canvas.
-- Fixture-backed golden snapshot tests cover a clear-only frame and a full-frame unlit mesh draw.
+- Fixture-backed golden snapshot tests cover clear-only, mesh, SDF, volume, and recovery-rebuild
+  headless frames.
 - Golden fixtures can be refreshed intentionally with
   `deno run -A --unstable-raw-imports scripts/refresh_golden_snapshots.ts`.
 

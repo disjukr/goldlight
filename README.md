@@ -39,7 +39,8 @@ Implemented today:
 - glTF JSON, GLB, data-URI buffers, and caller-provided external glTF resource ingestion
 - browser canvas examples, Windows BYOW native textured demo, headless PNG snapshot workflow, and
   PNG snapshot encoding
-- fixture-backed golden snapshot regression tests for headless renders
+- fixture-backed golden snapshot regression tests for clear, mesh, SDF, volume, and recovery rebuild
+  renders
 - device-loss observation and residency rebuild helpers plus end-to-end offscreen recovery coverage
 - benchmark coverage for residency, material binding, and renderer capability preflight paths
 - renderer capability preflight for primitive and material compatibility

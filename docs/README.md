@@ -16,6 +16,8 @@ Use this page as the main navigation hub.
 - Understand authoring boundaries: [`specs/react-authoring.md`](./specs/react-authoring.md)
 - Review accepted architecture constraints: [`adr/README.md`](./adr/README.md)
 - Run the browser and native examples: [`../examples/README.md`](../examples/README.md)
+- Run the headless snapshot PNG workflow:
+  [`../examples/headless_snapshot/README.md`](../examples/headless_snapshot/README.md)
 
 ## Contributor Workflows
 

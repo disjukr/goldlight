@@ -133,8 +133,13 @@ const builtInSdfRaymarchProgramId = 'built-in:sdf-raymarch';
 const uniformUsage = 0x40;
 const bufferCopyDstUsage = 0x08;
 const maxSdfPassItems = 16;
-const toArrayBuffer = (view: ArrayBufferView): ArrayBuffer =>
-  view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength) as ArrayBuffer;
+const toBufferSource = (view: ArrayBufferView): Uint8Array<ArrayBuffer> => {
+  const buffer = view.buffer.slice(
+    view.byteOffset,
+    view.byteOffset + view.byteLength,
+  ) as ArrayBuffer;
+  return new Uint8Array(buffer);
+};
 
 const countPrimitiveNodes = (evaluatedScene: EvaluatedScene) => ({
   meshNodeCount: evaluatedScene.nodes.filter((node) => Boolean(node.mesh)).length,
@@ -565,7 +570,7 @@ export const renderSdfRaymarchPass = (
     size: uniformData.byteLength,
     usage: uniformUsage | bufferCopyDstUsage,
   });
-  context.queue.writeBuffer(uniformBuffer, 0, toArrayBuffer(uniformData));
+  context.queue.writeBuffer(uniformBuffer, 0, toBufferSource(uniformData));
 
   const bindGroup = context.device.createBindGroup({
     layout: pipeline.getBindGroupLayout(0),
@@ -680,7 +685,7 @@ export const renderForwardFrame = (
         size: transformData.byteLength,
         usage: uniformUsage | bufferCopyDstUsage,
       });
-      context.queue.writeBuffer(transformBuffer, 0, toArrayBuffer(transformData));
+      context.queue.writeBuffer(transformBuffer, 0, toBufferSource(transformData));
       const transformBindGroup = context.device.createBindGroup({
         layout: pipeline.getBindGroupLayout(0),
         entries: [{

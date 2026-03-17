@@ -129,7 +129,8 @@ struct VsOut {
 };
 
 struct MeshTransform {
-  world: mat4x4<f32>,
+  model: mat4x4<f32>,
+  viewProjection: mat4x4<f32>,
 };
 
 struct MaterialUniforms {
@@ -144,7 +145,7 @@ struct MaterialUniforms {
 @vertex
 fn vsMain(@location(0) position: vec3<f32>, @location(1) uv: vec2<f32>) -> VsOut {
   var out: VsOut;
-  out.position = meshTransform.world * vec4<f32>(position, 1.0);
+  out.position = meshTransform.viewProjection * meshTransform.model * vec4<f32>(position, 1.0);
   out.uv = uv;
   return out;
 }

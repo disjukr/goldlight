@@ -1,5 +1,6 @@
 import type {
   AnimationChannel,
+  Camera,
   Light,
   Material,
   MeshPrimitive,
@@ -21,10 +22,18 @@ export type EvaluatedNode = Readonly<{
   light?: Light;
 }>;
 
+export type EvaluatedCamera = Readonly<{
+  camera: Camera;
+  node?: Node;
+  worldMatrix: Mat4;
+  viewMatrix: Mat4;
+}>;
+
 export type EvaluatedScene = Readonly<{
   sceneId: string;
   timeMs: number;
   nodes: readonly EvaluatedNode[];
+  activeCamera?: EvaluatedCamera;
 }>;
 
 export type EvaluateSceneOptions = Readonly<{
@@ -47,6 +56,25 @@ const multiplyMat4 = (a: Mat4, b: Mat4): Mat4 => {
 
   return out;
 };
+
+const identityMat4 = (): Mat4 => [
+  1,
+  0,
+  0,
+  0,
+  0,
+  1,
+  0,
+  0,
+  0,
+  0,
+  1,
+  0,
+  0,
+  0,
+  0,
+  1,
+];
 
 const transformToMatrix = (node: Node): Mat4 => {
   const { translation, rotation, scale } = node.transform;
@@ -77,6 +105,66 @@ const transformToMatrix = (node: Node): Mat4 => {
     translation.x,
     translation.y,
     translation.z,
+    1,
+  ];
+};
+
+const invertAffineMatrix = (worldMatrix: readonly number[]): Mat4 => {
+  const m00 = worldMatrix[0] ?? 0;
+  const m01 = worldMatrix[1] ?? 0;
+  const m02 = worldMatrix[2] ?? 0;
+  const m10 = worldMatrix[4] ?? 0;
+  const m11 = worldMatrix[5] ?? 0;
+  const m12 = worldMatrix[6] ?? 0;
+  const m20 = worldMatrix[8] ?? 0;
+  const m21 = worldMatrix[9] ?? 0;
+  const m22 = worldMatrix[10] ?? 0;
+  const tx = worldMatrix[12] ?? 0;
+  const ty = worldMatrix[13] ?? 0;
+  const tz = worldMatrix[14] ?? 0;
+
+  const c00 = (m11 * m22) - (m12 * m21);
+  const c01 = -((m10 * m22) - (m12 * m20));
+  const c02 = (m10 * m21) - (m11 * m20);
+  const c10 = -((m01 * m22) - (m02 * m21));
+  const c11 = (m00 * m22) - (m02 * m20);
+  const c12 = -((m00 * m21) - (m01 * m20));
+  const c20 = (m01 * m12) - (m02 * m11);
+  const c21 = -((m00 * m12) - (m02 * m10));
+  const c22 = (m00 * m11) - (m01 * m10);
+  const determinant = (m00 * c00) + (m01 * c01) + (m02 * c02);
+
+  if (Math.abs(determinant) < 1e-8) {
+    return identityMat4();
+  }
+
+  const inverseDeterminant = 1 / determinant;
+  const i00 = c00 * inverseDeterminant;
+  const i01 = c10 * inverseDeterminant;
+  const i02 = c20 * inverseDeterminant;
+  const i10 = c01 * inverseDeterminant;
+  const i11 = c11 * inverseDeterminant;
+  const i12 = c21 * inverseDeterminant;
+  const i20 = c02 * inverseDeterminant;
+  const i21 = c12 * inverseDeterminant;
+  const i22 = c22 * inverseDeterminant;
+
+  return [
+    i00,
+    i01,
+    i02,
+    0,
+    i10,
+    i11,
+    i12,
+    0,
+    i20,
+    i21,
+    i22,
+    0,
+    -((i00 * tx) + (i10 * ty) + (i20 * tz)),
+    -((i01 * tx) + (i11 * ty) + (i21 * tz)),
+    -((i02 * tx) + (i12 * ty) + (i22 * tz)),
     1,
   ];
 };
@@ -175,9 +263,29 @@ export const evaluateScene = (scene: SceneIr, options: EvaluateSceneOptions): Ev
     return world;
   };
 
+  const activeCamera = (() => {
+    const camera = scene.activeCameraId
+      ? scene.cameras.find((candidate) => candidate.id === scene.activeCameraId)
+      : undefined;
+    if (!camera) {
+      return undefined;
+    }
+
+    const cameraNode = nodes.find((node) => node.cameraId === camera.id);
+    const worldMatrix = cameraNode ? getWorldMatrix(cameraNode) : identityMat4();
+
+    return {
+      camera,
+      node: cameraNode,
+      worldMatrix,
+      viewMatrix: invertAffineMatrix(worldMatrix),
+    };
+  })();
+
   return {
     sceneId: scene.id,
     timeMs: options.timeMs,
+    activeCamera,
     nodes: nodes.map((node) => {
       const mesh = node.meshId ? meshById.get(node.meshId) : undefined;
       return {

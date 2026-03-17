@@ -1,5 +1,8 @@
 import type {
   AnimationClip,
+  Camera,
+  CameraOrthographic,
+  CameraPerspective,
   Light,
   Material,
   MeshPrimitive,
@@ -25,6 +28,7 @@ export const createSceneIr = (id = 'scene'): SceneIr => ({
   materials: [],
   lights: [],
   meshes: [],
+  cameras: [],
   sdfPrimitives: [],
   volumePrimitives: [],
   nodes: [],
@@ -50,6 +54,49 @@ export const appendNode = (scene: SceneIr, node: Node): SceneIr => ({
 export const appendMesh = (scene: SceneIr, mesh: MeshPrimitive): SceneIr => ({
   ...scene,
   meshes: [...scene.meshes, mesh],
+});
+
+export const appendCamera = (scene: SceneIr, camera: Camera): SceneIr => ({
+  ...scene,
+  cameras: [...scene.cameras, camera],
+});
+
+export const setActiveCamera = (scene: SceneIr, cameraId: string): SceneIr => ({
+  ...scene,
+  activeCameraId: cameraId,
+});
+
+export const createPerspectiveCamera = (
+  id: string,
+  partial: Partial<Omit<CameraPerspective, 'type' | 'id' | 'znear' | 'zfar'>> & {
+    znear?: number;
+    zfar?: number;
+  } = {},
+): Camera => ({
+  type: 'perspective',
+  id,
+  yfov: partial.yfov ?? Math.PI / 3,
+  znear: partial.znear ?? 0.1,
+  zfar: partial.zfar ?? 100,
+});
+
+export const createOrthographicCamera = (
+  id: string,
+  partial:
+    & Partial<Omit<CameraOrthographic, 'type' | 'id' | 'xmag' | 'ymag' | 'znear' | 'zfar'>>
+    & {
+      xmag?: number;
+      ymag?: number;
+      znear?: number;
+      zfar?: number;
+    } = {},
+): Camera => ({
+  type: 'orthographic',
+  id,
+  xmag: partial.xmag ?? 1,
+  ymag: partial.ymag ?? 1,
+  znear: partial.znear ?? 0,
+  zfar: partial.zfar ?? 100,
 });
 
 export const appendTexture = (scene: SceneIr, texture: TextureRef): SceneIr => ({

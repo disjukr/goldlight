@@ -169,10 +169,13 @@ function renderDef(def: bdlIr.Def, module: bdlIr.Module): string {
     case 'Custom':
       return `export type ${def.name} = ${renderType(def.originalType, module)};\n`;
     case 'Enum':
+      if (def.items.length === 0) {
+        return `export type ${def.name} = never;\n`;
+      }
       return [
         `export type ${def.name} =`,
-        ...def.items.map((item) => `  | ${JSON.stringify(item.name)}`),
-        '  ;',
+        ...def.items.slice(0, -1).map((item) => `  | ${renderStringLiteral(item.name)}`),
+        `  | ${renderStringLiteral(def.items.at(-1)!.name)};`,
         '',
       ].join('\n');
     case 'Struct':
@@ -185,37 +188,53 @@ function renderDef(def: bdlIr.Def, module: bdlIr.Module): string {
         '',
       ].join('\n');
     case 'Oneof':
+      if (def.items.length === 0) {
+        return `export type ${def.name} = never;\n`;
+      }
       return [
         `export type ${def.name} =`,
-        ...def.items.map((item) => `  | ${renderType(item.itemType, module)}`),
-        '  ;',
+        ...def.items.slice(0, -1).map((item) => `  | ${renderType(item.itemType, module)}`),
+        `  | ${renderType(def.items.at(-1)!.itemType, module)};`,
         '',
       ].join('\n');
     case 'Union': {
-      const discriminator = JSON.stringify(def.attributes.discriminator || 'type');
-      const namespaceLines = def.items.flatMap((item) => [
-        `  export type ${item.name} = Readonly<{`,
-        `    ${discriminator}: ${JSON.stringify(item.name)};`,
+      const discriminator = renderStringLiteral(def.attributes.discriminator || 'type');
+      const variantNames = def.items.map((item) => `${def.name}${toPascalCase(item.name)}`);
+      const variantLines = def.items.flatMap((item, index) => [
+        `export type ${variantNames[index]} = Readonly<{`,
+        `  ${discriminator}: ${renderStringLiteral(item.name)};`,
         ...item.fields.map((field) =>
-          `    ${field.name}${field.optional ? '?' : ''}: ${renderType(field.fieldType, module)};`
+          `  ${field.name}${field.optional ? '?' : ''}: ${renderType(field.fieldType, module)};`
         ),
-        '  }>;',
+        '}>;',
         '',
       ]);
+      if (variantNames.length === 0) {
+        return `${variantLines.join('\n')}export type ${def.name} = never;\n`;
+      }
       return [
+        ...variantLines,
         `export type ${def.name} =`,
-        ...def.items.map((item) => `  | ${def.name}.${item.name}`),
-        '  ;',
-        '',
-        `export namespace ${def.name} {`,
-        ...namespaceLines,
-        '}',
+        ...variantNames.slice(0, -1).map((variantName) => `  | ${variantName}`),
+        `  | ${variantNames.at(-1)!};`,
         '',
       ].join('\n');
     }
     case 'Proc':
       return `// Proc ${def.name} is omitted from generated type aliases in rieul3d.\n`;
   }
+}
+
+function renderStringLiteral(value: string): string {
+  return `'${value.replaceAll('\\', '\\\\').replaceAll("'", "\\'")}'`;
+}
+
+function toPascalCase(value: string): string {
+  return value
+    .split(/[^a-zA-Z0-9]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join('');
 }
 
 function renderType(type: bdlIr.Type, module: bdlIr.Module): string {

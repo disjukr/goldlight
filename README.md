@@ -8,6 +8,8 @@ The repository is organized as a Deno workspace with packages for:
 - `@rieul3d/core`: scene evaluation and animation helpers
 - `@rieul3d/gpu`: WebGPU context and runtime residency helpers
 - `@rieul3d/renderer`: forward/deferred frame planning and execution contracts
+- `@rieul3d/primitives`: procedural polygon mesh generators for common shapes; separate from SDF
+  primitives
 - `@rieul3d/loaders`: OBJ/STL/glTF ingestion into scene IR
 - `@rieul3d/react`: declarative authoring adapter
 - `@rieul3d/platform`: browser, Deno, and headless targets
@@ -31,6 +33,7 @@ object-oriented API design.
 Implemented today:
 
 - BDL-driven `SceneIr` generation with drift checks in CI
+- camera declarations in Scene IR plus evaluated active-camera view/projection support
 - mesh, texture, first volume residency upload paths, and first volume raymarch execution
 - forward rendering, minimal deferred mesh/unlit execution with optional baseColor texture sampling,
   first-class directional light nodes with built-in forward Lambert shading, first SDF raymarch
@@ -39,11 +42,14 @@ Implemented today:
 - built-in unlit material registration, evaluated mesh transform uploads, base-color texture
   sampling, material parameter uploads, custom WGSL registration, declared material texture
   bindings, and residency-aware custom texture binding validation
+- depth-tested forward mesh rendering with per-target depth attachments and back-face culling
 - glTF JSON, GLB, data-URI buffers, and caller-provided external glTF resource ingestion
 - browser/Deno helpers for resolving external glTF buffers and images into the existing loader
   contract
 - browser canvas examples, Windows BYOW native textured demo, headless PNG snapshot workflow, and
   PNG snapshot encoding
+- Windows BYOW primitives demo using `@rieul3d/primitives`, a reusable BYOW runner script, and a
+  custom lit shader for mesh normals
 - a browser React authoring example that lowers declarative nodes into Scene IR before rendering
 - fixture-backed golden snapshot regression tests for clear, mesh, sphere/box SDF, volume, and
   recovery rebuild renders, including guards against raymarch fixtures collapsing back to clear-only
@@ -75,8 +81,9 @@ Read in this order when onboarding:
 5. [`examples/browser_forward/README.md`](./examples/browser_forward/README.md)
 6. [`examples/browser_textured_forward/README.md`](./examples/browser_textured_forward/README.md)
 7. [`examples/browser_react_authoring/README.md`](./examples/browser_react_authoring/README.md)
-8. [`examples/byow_native_demo/README.md`](./examples/byow_native_demo/README.md)
-9. [`examples/headless_snapshot/README.md`](./examples/headless_snapshot/README.md)
+8. [`examples/byow_primitives_demo/README.md`](./examples/byow_primitives_demo/README.md)
+9. [`examples/byow_native_demo/README.md`](./examples/byow_native_demo/README.md)
+10. [`examples/headless_snapshot/README.md`](./examples/headless_snapshot/README.md)
 
 ## Tasks
 
@@ -95,6 +102,10 @@ Read in this order when onboarding:
 - `deno task example:browser:serve`: serve the repository for local browser testing
 - `deno task example:byow:check`: type-check the Windows BYOW native demo
 - `deno task example:byow:run`: open the Windows BYOW native demo
+- `deno task example:byow:triangle:check`: type-check the Windows BYOW triangle smoke test
+- `deno task example:byow:triangle:run`: open the Windows BYOW triangle smoke test
+- `deno task example:byow:primitives:check`: type-check the Windows BYOW primitives demo
+- `deno task example:byow:primitives:run`: open the Windows BYOW primitives demo
 
 Golden snapshot fixtures live in
 [`tests/fixtures/golden-snapshots`](./tests/fixtures/golden-snapshots). Refresh them intentionally

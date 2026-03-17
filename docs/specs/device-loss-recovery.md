@@ -90,3 +90,10 @@ Today the documented recovery contract covers:
 
 Future renderer-specific transient resources can extend this contract, but they must follow the same
 rule: CPU-owned source data survives, device-local caches are recreated.
+
+## Coverage
+
+- `tests/device_recovery_test.ts` exercises the documented recovery order with offscreen target
+  rebinding, residency rebuild, and the first post-recovery frame submission.
+- The same test file also covers a rebuild failure path so callers can keep the runtime in an
+  explicit non-rendering state until recovery succeeds.

@@ -8,6 +8,7 @@ import {
   ensureMaterialPipeline,
   type GpuRenderExecutionContext,
   registerWgslMaterial,
+  renderDeferredFrame,
   renderForwardFrame,
   resolveMaterialProgram,
 } from '@rieul3d/renderer';
@@ -40,6 +41,7 @@ const createRenderMocks = () => {
   const shaders: MockShader[] = [];
   const buffers: MockBuffer[] = [];
   const bindGroups: MockBindGroup[] = [];
+  const samplers: Readonly<{ id: number }>[] = [];
   const bindGroupEntries: MockBindGroupEntry[][] = [];
   const writeBufferCalls: MockWriteBufferCall[] = [];
   const submits: unknown[][] = [];
@@ -71,6 +73,11 @@ const createRenderMocks = () => {
       bindGroups.push(bindGroup);
       bindGroupEntries.push([...entries]);
       return bindGroup as unknown as GPUBindGroup;
+    },
+    createSampler: () => {
+      const sampler = { id: samplers.length };
+      samplers.push(sampler);
+      return sampler as unknown as GPUSampler;
     },
     createCommandEncoder: () => ({
       beginRenderPass: () => {
@@ -143,6 +150,7 @@ const createRenderMocks = () => {
     shaders,
     buffers,
     bindGroups,
+    samplers,
     bindGroupEntries,
     writeBufferCalls,
     submits,
@@ -238,6 +246,53 @@ Deno.test('renderForwardFrame encodes indexed and non-indexed draws from mesh re
       [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
     ],
   );
+});
+
+Deno.test('renderDeferredFrame encodes depth, gbuffer, and lighting passes for minimal mesh/unlit scenes', () => {
+  const mocks = createRenderMocks();
+  const runtimeResidency = createRuntimeResidency();
+  let scene = createSceneIr('scene');
+  scene = appendMesh(scene, {
+    id: 'mesh-deferred',
+    attributes: [
+      { semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0, 0, 1, 0] },
+      { semantic: 'NORMAL', itemSize: 3, values: [0, 0, 1, 0, 0, 1, 0, 0, 1] },
+    ],
+  });
+  scene = appendNode(scene, createNode('node-deferred', { meshId: 'mesh-deferred' }));
+
+  runtimeResidency.geometry.set('mesh-deferred', {
+    meshId: 'mesh-deferred',
+    attributeBuffers: {
+      POSITION: { id: 0 } as unknown as GPUBuffer,
+      NORMAL: { id: 1 } as unknown as GPUBuffer,
+    },
+    vertexCount: 3,
+    indexCount: 0,
+  });
+
+  const binding = createOffscreenContext({
+    device: mocks.device as unknown as GPUDevice,
+    target: createHeadlessTarget(64, 64),
+  });
+
+  const result = renderDeferredFrame(
+    mocks as unknown as GpuRenderExecutionContext,
+    binding,
+    runtimeResidency,
+    evaluateScene(scene, { timeMs: 0 }),
+  );
+
+  assertEquals(result.drawCount, 3);
+  assertEquals(result.submittedCommandBufferCount, 1);
+  assertEquals(mocks.renderPassCount.current, 3);
+  assertEquals(mocks.pipelines.length, 3);
+  assertEquals(
+    mocks.passActions.filter((action) => action.type === 'draw').length,
+    3,
+  );
+  assertEquals(mocks.bindGroupEntries.length, 4);
+  assertEquals(mocks.samplers.length, 1);
 });
 
 Deno.test('renderForwardFrame encodes a dedicated sdf raymarch pass for supported sphere and box nodes', () => {

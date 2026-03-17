@@ -7,7 +7,7 @@ import {
   createRuntimeResidency,
 } from '@rieul3d/gpu';
 import { appendMesh, appendNode, createNode, createSceneIr } from '@rieul3d/ir';
-import { renderForwardSnapshot } from '@rieul3d/renderer';
+import { renderDeferredSnapshot, renderForwardSnapshot } from '@rieul3d/renderer';
 import { createHeadlessTarget } from '@rieul3d/platform';
 
 const createSnapshotMocks = () => {
@@ -28,6 +28,7 @@ const createSnapshotMocks = () => {
         getBindGroupLayout: () => ({}) as GPUBindGroupLayout,
       }) as unknown as GPURenderPipeline,
     createBindGroup: () => ({}) as GPUBindGroup,
+    createSampler: () => ({}) as GPUSampler,
     createTexture: () => ({
       createView: () => ({ textureId: 0 } as unknown as GPUTextureView),
     } as GPUTexture),
@@ -203,4 +204,56 @@ Deno.test('renderForwardSnapshot also captures volume-only scenes with seeded re
     [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
   );
   assertEquals(mocks.submits.length, 2);
+});
+
+Deno.test('renderDeferredSnapshot returns compact offscreen bytes for minimal deferred scenes', async () => {
+  const mocks = createSnapshotMocks();
+  const runtimeResidency = createRuntimeResidency();
+  let scene = createSceneIr('scene');
+  scene = appendMesh(scene, {
+    id: 'mesh',
+    attributes: [
+      { semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0, 0, 1, 0] },
+      { semantic: 'NORMAL', itemSize: 3, values: [0, 0, 1, 0, 0, 1, 0, 0, 1] },
+    ],
+  });
+  scene = appendNode(scene, createNode('node', { meshId: 'mesh' }));
+
+  runtimeResidency.geometry.set('mesh', {
+    meshId: 'mesh',
+    attributeBuffers: {
+      POSITION: { id: 0 } as unknown as GPUBuffer,
+      NORMAL: { id: 1 } as unknown as GPUBuffer,
+    },
+    vertexCount: 3,
+    indexCount: 0,
+  });
+
+  const binding = createOffscreenContext({
+    device: mocks.device as unknown as GPUDevice,
+    target: createHeadlessTarget(2, 2),
+  });
+
+  const snapshot = await renderDeferredSnapshot(
+    mocks as unknown as Parameters<typeof renderDeferredSnapshot>[0],
+    binding,
+    runtimeResidency,
+    evaluateScene(scene, { timeMs: 0 }),
+  );
+
+  assertEquals(snapshot.drawCount, 3);
+  assertEquals(snapshot.submittedCommandBufferCount, 1);
+  assertEquals(snapshot.width, 2);
+  assertEquals(snapshot.height, 2);
+  assertEquals(
+    [...snapshot.bytes],
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
+  );
+  assertEquals(mocks.submits.length, 2);
+  assertEquals(mocks.copyCalls, [{
+    bytesPerRow: 256,
+    rowsPerImage: 2,
+    width: 2,
+    height: 2,
+  }]);
 });

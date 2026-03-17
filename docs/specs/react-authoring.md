@@ -30,8 +30,8 @@ That direction matters for a few reasons:
 - it creates a cleaner path toward live updates driven by React reconciliation instead of one-shot
   lowering helpers
 
-Core scene/runtime packages must still remain usable without React. A React-facing renderer should be
-an adapter layer over the existing IR, evaluation, and rendering systems, not a replacement for
+Core scene/runtime packages must still remain usable without React. A React-facing renderer should
+be an adapter layer over the existing IR, evaluation, and rendering systems, not a replacement for
 them.
 
 ## Current Status

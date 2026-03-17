@@ -13,6 +13,15 @@ import builtInForwardShader from './shaders/built_in_forward_unlit.wgsl' with { 
 import builtInForwardTexturedShader from './shaders/built_in_forward_unlit_textured.wgsl' with {
   type: 'text',
 };
+import builtInDeferredDepthPrepassShader from './shaders/built_in_deferred_depth_prepass.wgsl' with {
+  type: 'text',
+};
+import builtInDeferredGbufferUnlitShader from './shaders/built_in_deferred_gbuffer_unlit.wgsl' with {
+  type: 'text',
+};
+import builtInDeferredLightingShader from './shaders/built_in_deferred_lighting.wgsl' with {
+  type: 'text',
+};
 import builtInSdfRaymarchShader from './shaders/built_in_sdf_raymarch.wgsl' with { type: 'text' };
 import builtInVolumeRaymarchShader from './shaders/built_in_volume_raymarch.wgsl' with {
   type: 'text',
@@ -67,7 +76,9 @@ export type GpuRenderExecutionContext = Readonly<{
     | 'createBuffer'
     | 'createCommandEncoder'
     | 'createRenderPipeline'
+    | 'createSampler'
     | 'createShaderModule'
+    | 'createTexture'
   >;
   queue: Pick<GPUQueue, 'submit' | 'writeBuffer'>;
 }>;
@@ -84,6 +95,9 @@ export type ForwardSnapshotResult = Readonly<{
   height: number;
   bytes: Uint8Array;
 }>;
+
+export type DeferredRenderResult = ForwardRenderResult;
+export type DeferredSnapshotResult = ForwardSnapshotResult;
 
 export type MaterialVertexAttribute = Readonly<{
   semantic: string;
@@ -163,10 +177,16 @@ export type RendererCapabilityIssue = Readonly<{
 
 const builtInUnlitProgramId = 'built-in:unlit';
 const builtInTexturedUnlitProgramId = 'built-in:unlit-textured';
+const builtInDeferredDepthPrepassProgramId = 'built-in:deferred-depth-prepass';
+const builtInDeferredGbufferUnlitProgramId = 'built-in:deferred-gbuffer-unlit';
+const builtInDeferredLightingProgramId = 'built-in:deferred-lighting';
 const builtInSdfRaymarchProgramId = 'built-in:sdf-raymarch';
 const builtInVolumeRaymarchProgramId = 'built-in:volume-raymarch';
+const textureBindingUsage = 0x04;
+const renderAttachmentUsage = 0x10;
 const uniformUsage = 0x40;
 const bufferCopyDstUsage = 0x08;
+const deferredDepthFormat = 'depth24plus';
 const maxSdfPassItems = 16;
 const toBufferSource = (view: ArrayBufferView): Uint8Array<ArrayBuffer> => {
   const buffer = view.buffer.slice(
@@ -241,6 +261,36 @@ const builtInTexturedUnlitProgram: MaterialProgram = {
       format: 'float32x2',
       offset: 0,
       arrayStride: 8,
+    },
+  ],
+};
+
+const builtInDeferredGbufferUnlitProgram: MaterialProgram = {
+  id: builtInDeferredGbufferUnlitProgramId,
+  label: 'Built-in Deferred G-buffer Unlit',
+  wgsl: builtInDeferredGbufferUnlitShader,
+  vertexEntryPoint: 'vsMain',
+  fragmentEntryPoint: 'fsMain',
+  usesMaterialBindings: true,
+  usesTransformBindings: true,
+  materialBindings: [{
+    kind: 'uniform',
+    binding: 0,
+  }],
+  vertexAttributes: [
+    {
+      semantic: 'POSITION',
+      shaderLocation: 0,
+      format: 'float32x3',
+      offset: 0,
+      arrayStride: 12,
+    },
+    {
+      semantic: 'NORMAL',
+      shaderLocation: 1,
+      format: 'float32x3',
+      offset: 0,
+      arrayStride: 12,
     },
   ],
 };
@@ -410,17 +460,16 @@ export const createDeferredRenderer = (label = 'deferred'): Renderer => ({
   kind: 'deferred',
   label,
   capabilities: {
-    mesh: 'planned',
-    sdf: 'planned',
-    volume: 'planned',
+    mesh: 'supported',
+    sdf: 'unsupported',
+    volume: 'unsupported',
     builtInMaterialKinds: ['unlit'],
-    customShaders: 'planned',
+    customShaders: 'unsupported',
   },
   passes: [
     { id: 'depth-prepass', kind: 'depth-prepass', reads: ['scene'], writes: ['depth'] },
     { id: 'gbuffer', kind: 'gbuffer', reads: ['scene', 'depth'], writes: ['gbuffer'] },
     { id: 'lighting', kind: 'lighting', reads: ['gbuffer', 'depth'], writes: ['color'] },
-    { id: 'raymarch', kind: 'raymarch', reads: ['scene', 'depth', 'color'], writes: ['color'] },
     { id: 'present', kind: 'present', reads: ['color'], writes: ['target'] },
   ],
 });
@@ -483,6 +532,29 @@ export const collectRendererCapabilityIssues = (
         'mesh-execution',
         `renderer "${renderer.label}" does not support mesh execution`,
       );
+    }
+
+    if (renderer.kind === 'deferred' && node.mesh) {
+      if (!node.mesh.attributes.some((attribute) => attribute.semantic === 'NORMAL')) {
+        pushIssue(
+          'mesh',
+          'vertex-attribute:NORMAL',
+          `renderer "${renderer.label}" requires NORMAL vertex data on node "${node.node.id}" for deferred lighting`,
+        );
+      }
+
+      const unsupportedTexture = materialTextures.find((texture) =>
+        texture.semantic === 'baseColor'
+      );
+      if (unsupportedTexture) {
+        pushIssue(
+          'material-binding',
+          'texture-semantic:baseColor',
+          `renderer "${renderer.label}" does not support baseColor textures in the minimal deferred path for material "${
+            material?.id ?? createDefaultMaterial().id
+          }"`,
+        );
+      }
     }
 
     if (node.sdf) {
@@ -812,6 +884,126 @@ export const ensureBuiltInForwardPipeline = (
   format: GPUTextureFormat,
 ): GPURenderPipeline => {
   return ensureMaterialPipeline(context, residency, builtInUnlitProgram, format);
+};
+
+export const ensureDeferredDepthPrepassPipeline = (
+  context: GpuRenderExecutionContext,
+  residency: RuntimeResidency,
+): GPURenderPipeline => {
+  const cacheKey = `${builtInDeferredDepthPrepassProgramId}:${deferredDepthFormat}`;
+  const cached = residency.pipelines.get(cacheKey);
+  if (cached) {
+    return cached as GPURenderPipeline;
+  }
+
+  const shader = context.device.createShaderModule({
+    label: cacheKey,
+    code: builtInDeferredDepthPrepassShader,
+  });
+  const pipeline = context.device.createRenderPipeline({
+    label: cacheKey,
+    layout: 'auto',
+    vertex: {
+      module: shader,
+      entryPoint: 'vsMain',
+      buffers: createVertexBufferLayouts([{
+        semantic: 'POSITION',
+        shaderLocation: 0,
+        format: 'float32x3',
+        offset: 0,
+        arrayStride: 12,
+      }]),
+    },
+    primitive: {
+      topology: 'triangle-list',
+    },
+    depthStencil: {
+      format: deferredDepthFormat,
+      depthWriteEnabled: true,
+      depthCompare: 'less',
+    },
+  });
+
+  residency.pipelines.set(cacheKey, pipeline);
+  return pipeline;
+};
+
+export const ensureDeferredGbufferPipeline = (
+  context: GpuRenderExecutionContext,
+  residency: RuntimeResidency,
+  format: GPUTextureFormat,
+): GPURenderPipeline => {
+  const cacheKey = `${builtInDeferredGbufferUnlitProgramId}:${format}`;
+  const cached = residency.pipelines.get(cacheKey);
+  if (cached) {
+    return cached as GPURenderPipeline;
+  }
+
+  const shader = context.device.createShaderModule({
+    label: cacheKey,
+    code: builtInDeferredGbufferUnlitShader,
+  });
+  const pipeline = context.device.createRenderPipeline({
+    label: cacheKey,
+    layout: 'auto',
+    vertex: {
+      module: shader,
+      entryPoint: 'vsMain',
+      buffers: createVertexBufferLayouts(builtInDeferredGbufferUnlitProgram.vertexAttributes),
+    },
+    fragment: {
+      module: shader,
+      entryPoint: 'fsMain',
+      targets: [{ format }, { format }],
+    },
+    primitive: {
+      topology: 'triangle-list',
+    },
+    depthStencil: {
+      format: deferredDepthFormat,
+      depthWriteEnabled: false,
+      depthCompare: 'equal',
+    },
+  });
+
+  residency.pipelines.set(cacheKey, pipeline);
+  return pipeline;
+};
+
+export const ensureDeferredLightingPipeline = (
+  context: GpuRenderExecutionContext,
+  residency: RuntimeResidency,
+  format: GPUTextureFormat,
+): GPURenderPipeline => {
+  const cacheKey = `${builtInDeferredLightingProgramId}:${format}`;
+  const cached = residency.pipelines.get(cacheKey);
+  if (cached) {
+    return cached as GPURenderPipeline;
+  }
+
+  const shader = context.device.createShaderModule({
+    label: cacheKey,
+    code: builtInDeferredLightingShader,
+  });
+  const pipeline = context.device.createRenderPipeline({
+    label: cacheKey,
+    layout: 'auto',
+    vertex: {
+      module: shader,
+      entryPoint: 'vsMain',
+    },
+    fragment: {
+      module: shader,
+      entryPoint: 'fsMain',
+      targets: [{ format }],
+    },
+    primitive: {
+      topology: 'triangle-list',
+    },
+  });
+
+  residency.pipelines.set(cacheKey, pipeline);
+  return pipeline;
 };
 
 export const ensureMaterialPipeline = (
@@ -1232,6 +1424,256 @@ export const renderForwardFrame = (
   };
 };
 
+const createTransientRenderTexture = (
+  context: GpuRenderExecutionContext,
+  binding: RenderContextBinding,
+  label: string,
+  format: GPUTextureFormat,
+  usage = renderAttachmentUsage | textureBindingUsage,
+): GPUTexture =>
+  context.device.createTexture({
+    label,
+    size: {
+      width: binding.target.width,
+      height: binding.target.height,
+      depthOrArrayLayers: 1,
+    },
+    format,
+    sampleCount: 1,
+    usage,
+  });
+
+export const renderDeferredFrame = (
+  context: GpuRenderExecutionContext,
+  binding: RenderContextBinding,
+  residency: RuntimeResidency,
+  evaluatedScene: EvaluatedScene,
+  materialRegistry = createMaterialRegistry(),
+): DeferredRenderResult => {
+  assertRendererSceneCapabilities(
+    createDeferredRenderer(),
+    evaluatedScene,
+    materialRegistry,
+    residency,
+  );
+
+  const depthTexture = createTransientRenderTexture(
+    context,
+    binding,
+    'deferred-depth',
+    deferredDepthFormat,
+    renderAttachmentUsage | textureBindingUsage,
+  );
+  const depthView = depthTexture.createView();
+  const gbufferAlbedoTexture = createTransientRenderTexture(
+    context,
+    binding,
+    'deferred-gbuffer-albedo',
+    binding.target.format,
+  );
+  const gbufferNormalTexture = createTransientRenderTexture(
+    context,
+    binding,
+    'deferred-gbuffer-normal',
+    binding.target.format,
+  );
+  const gbufferAlbedoView = gbufferAlbedoTexture.createView();
+  const gbufferNormalView = gbufferNormalTexture.createView();
+  const encoder = context.device.createCommandEncoder({
+    label: 'deferred-frame',
+  });
+  const depthPipeline = ensureDeferredDepthPrepassPipeline(context, residency);
+  const gbufferPipeline = ensureDeferredGbufferPipeline(context, residency, binding.target.format);
+  const lightingPipeline = ensureDeferredLightingPipeline(
+    context,
+    residency,
+    binding.target.format,
+  );
+
+  let drawCount = 0;
+
+  const depthPass = encoder.beginRenderPass({
+    colorAttachments: [],
+    depthStencilAttachment: {
+      view: depthView,
+      depthClearValue: 1,
+      depthLoadOp: 'clear',
+      depthStoreOp: 'store',
+    },
+  });
+  depthPass.setPipeline(depthPipeline);
+  for (const node of evaluatedScene.nodes) {
+    const mesh = node.mesh;
+    if (!mesh) {
+      continue;
+    }
+
+    const geometry = residency.geometry.get(mesh.id);
+    const positionBuffer = geometry?.attributeBuffers.POSITION;
+    if (!geometry || !positionBuffer) {
+      continue;
+    }
+
+    depthPass.setVertexBuffer(0, positionBuffer);
+    const transformData = createMeshTransformUniformData(node.worldMatrix);
+    const transformBuffer = context.device.createBuffer({
+      label: `${node.node.id}:deferred-depth-transform`,
+      size: transformData.byteLength,
+      usage: uniformUsage | bufferCopyDstUsage,
+    });
+    context.queue.writeBuffer(transformBuffer, 0, toBufferSource(transformData));
+    depthPass.setBindGroup(
+      0,
+      context.device.createBindGroup({
+        layout: depthPipeline.getBindGroupLayout(0),
+        entries: [{
+          binding: 0,
+          resource: {
+            buffer: transformBuffer,
+          },
+        }],
+      }),
+    );
+
+    if (geometry.indexBuffer && geometry.indexCount > 0) {
+      depthPass.setIndexBuffer(geometry.indexBuffer, 'uint32');
+      depthPass.drawIndexed(geometry.indexCount, 1, 0, 0, 0);
+    } else {
+      depthPass.draw(geometry.vertexCount, 1, 0, 0);
+    }
+    drawCount += 1;
+  }
+  depthPass.end();
+
+  const gbufferPass = encoder.beginRenderPass({
+    colorAttachments: [
+      {
+        view: gbufferAlbedoView,
+        clearValue: { r: 0, g: 0, b: 0, a: 0 },
+        loadOp: 'clear',
+        storeOp: 'store',
+      },
+      {
+        view: gbufferNormalView,
+        clearValue: { r: 0.5, g: 0.5, b: 1, a: 0 },
+        loadOp: 'clear',
+        storeOp: 'store',
+      },
+    ],
+    depthStencilAttachment: {
+      view: depthView,
+      depthLoadOp: 'load',
+      depthStoreOp: 'store',
+    },
+  });
+  gbufferPass.setPipeline(gbufferPipeline);
+  for (const node of evaluatedScene.nodes) {
+    const mesh = node.mesh;
+    if (!mesh) {
+      continue;
+    }
+
+    const geometry = residency.geometry.get(mesh.id);
+    const positionBuffer = geometry?.attributeBuffers.POSITION;
+    const normalBuffer = geometry?.attributeBuffers.NORMAL;
+    if (!geometry || !positionBuffer || !normalBuffer) {
+      continue;
+    }
+
+    gbufferPass.setVertexBuffer(0, positionBuffer);
+    gbufferPass.setVertexBuffer(1, normalBuffer);
+
+    const transformData = createMeshTransformUniformData(node.worldMatrix);
+    const transformBuffer = context.device.createBuffer({
+      label: `${node.node.id}:deferred-gbuffer-transform`,
+      size: transformData.byteLength,
+      usage: uniformUsage | bufferCopyDstUsage,
+    });
+    context.queue.writeBuffer(transformBuffer, 0, toBufferSource(transformData));
+    gbufferPass.setBindGroup(
+      0,
+      context.device.createBindGroup({
+        layout: gbufferPipeline.getBindGroupLayout(0),
+        entries: [{
+          binding: 0,
+          resource: {
+            buffer: transformBuffer,
+          },
+        }],
+      }),
+    );
+
+    const material = node.material ?? createDefaultMaterial();
+    const materialResidency = ensureMaterialResidency(context, residency, material);
+    gbufferPass.setBindGroup(
+      1,
+      context.device.createBindGroup({
+        layout: gbufferPipeline.getBindGroupLayout(1),
+        entries: [{
+          binding: 0,
+          resource: {
+            buffer: materialResidency.uniformBuffer,
+          },
+        }],
+      }),
+    );
+
+    if (geometry.indexBuffer && geometry.indexCount > 0) {
+      gbufferPass.setIndexBuffer(geometry.indexBuffer, 'uint32');
+      gbufferPass.drawIndexed(geometry.indexCount, 1, 0, 0, 0);
+    } else {
+      gbufferPass.draw(geometry.vertexCount, 1, 0, 0);
+    }
+    drawCount += 1;
+  }
+  gbufferPass.end();
+
+  const lightingSampler = context.device.createSampler({
+    magFilter: 'linear',
+    minFilter: 'linear',
+  });
+  const lightingPass = encoder.beginRenderPass({
+    colorAttachments: [{
+      view: acquireColorAttachmentView(binding),
+      clearValue: { r: 0.02, g: 0.02, b: 0.03, a: 1 },
+      loadOp: 'clear',
+      storeOp: 'store',
+    }],
+  });
+  lightingPass.setPipeline(lightingPipeline);
+  lightingPass.setBindGroup(
+    0,
+    context.device.createBindGroup({
+      layout: lightingPipeline.getBindGroupLayout(0),
+      entries: [
+        {
+          binding: 0,
+          resource: gbufferAlbedoView,
+        },
+        {
+          binding: 1,
+          resource: lightingSampler,
+        },
+        {
+          binding: 2,
+          resource: gbufferNormalView,
+        },
+      ],
+    }),
+  );
+  lightingPass.draw(3, 1, 0, 0);
+  lightingPass.end();
+  drawCount += 1;
+
+  const commandBuffer = encoder.finish();
+  context.queue.submit([commandBuffer]);
+
+  return {
+    drawCount,
+    submittedCommandBufferCount: 1,
+  };
+};
+
 export const renderForwardSnapshot = async (
   context: GpuRenderExecutionContext & GpuReadbackContext,
   binding: RenderContextBinding,
@@ -1240,6 +1682,24 @@ export const renderForwardSnapshot = async (
   materialRegistry = createMaterialRegistry(),
 ): Promise<ForwardSnapshotResult> => {
   const frame = renderForwardFrame(context, binding, residency, evaluatedScene, materialRegistry);
+  const snapshot = await readOffscreenSnapshot(context, binding);
+
+  return {
+    ...frame,
+    width: snapshot.width,
+    height: snapshot.height,
+    bytes: snapshot.bytes,
+  };
+};
+
+export const renderDeferredSnapshot = async (
+  context: GpuRenderExecutionContext & GpuReadbackContext,
+  binding: RenderContextBinding,
+  residency: RuntimeResidency,
+  evaluatedScene: EvaluatedScene,
+  materialRegistry = createMaterialRegistry(),
+): Promise<DeferredSnapshotResult> => {
+  const frame = renderDeferredFrame(context, binding, residency, evaluatedScene, materialRegistry);
   const snapshot = await readOffscreenSnapshot(context, binding);
 
   return {

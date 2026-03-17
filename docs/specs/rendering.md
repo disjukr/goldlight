@@ -43,6 +43,8 @@ The initial renderer uses a lightweight pass graph:
 - Custom WGSL programs can be registered and cached through the material registry.
 - Headless/offscreen rendering supports compact byte readback for snapshot testing.
 - Snapshot bytes can also be encoded into PNG for local inspection and regression workflows.
+- The native BYOW demo uses the same forward renderer/runtime residency path on an SDL2-backed
+  surface target instead of a browser canvas.
 
 ## Known Gaps
 

@@ -1,6 +1,6 @@
 import type { OffscreenTarget, SurfaceTarget } from '@rieul3d/gpu';
 
-export const createBrowserSurfaceTarget = (
+export const createSurfaceTarget = (
   width: number,
   height: number,
   format: GPUTextureFormat = 'bgra8unorm',
@@ -10,6 +10,9 @@ export const createBrowserSurfaceTarget = (
   height,
   format,
 });
+
+export const createBrowserSurfaceTarget = createSurfaceTarget;
+export const createDenoSurfaceTarget = createSurfaceTarget;
 
 export const createHeadlessTarget = (
   width: number,

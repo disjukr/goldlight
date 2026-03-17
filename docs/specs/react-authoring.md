@@ -18,6 +18,9 @@ renderer or custom reconciler yet.
 ## Current Status
 
 - The React package currently lowers declarative authoring structures into SceneIr-friendly data.
+- Authoring nodes now lower core node metadata such as names, mesh bindings, and transforms into
+  Scene IR.
 - Rendering, residency preparation, and execution continue to live in the core/gpu/renderer layers.
-- Browser examples currently use the imperative pipeline directly; React rendering examples are not
-  implemented yet.
+- [`../../examples/browser_react_authoring/README.md`](../../examples/browser_react_authoring/README.md)
+  shows the reference browser flow: author a tree with `@rieul3d/react`, lower node data into Scene
+  IR, then hand the result to the existing runtime and renderer layers.

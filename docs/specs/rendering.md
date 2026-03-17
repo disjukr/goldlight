@@ -51,6 +51,8 @@ The initial renderer uses a lightweight pass graph:
   surface target instead of a browser canvas.
 - Fixture-backed golden snapshot tests cover clear-only, mesh, SDF, volume, and recovery-rebuild
   headless frames.
+- Raymarch golden tests also assert that SDF/volume snapshots differ from the clear-only frame so
+  unresolved shader or uniform regressions do not silently lock in blank fixtures.
 - Golden fixtures can be refreshed intentionally with
   `deno run -A --unstable-raw-imports scripts/refresh_golden_snapshots.ts`.
 

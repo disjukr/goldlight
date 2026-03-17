@@ -98,4 +98,4 @@ rule: CPU-owned source data survives, device-local caches are recreated.
 - The same test file also covers a rebuild failure path so callers can keep the runtime in an
   explicit non-rendering state until recovery succeeds.
 - `tests/golden_snapshot_test.ts` also verifies that a volume snapshot remains deterministic after
-  rebuilding residency on a replacement device.
+  rebuilding residency on a replacement device and still differs from the clear-only frame.

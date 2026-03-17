@@ -4,11 +4,13 @@ export const createSurfaceTarget = (
   width: number,
   height: number,
   format: GPUTextureFormat = 'bgra8unorm',
+  alphaMode?: GPUCanvasAlphaMode,
 ): SurfaceTarget => ({
   kind: 'surface',
   width,
   height,
   format,
+  alphaMode,
 });
 
 export const createBrowserSurfaceTarget = createSurfaceTarget;

@@ -1,4 +1,4 @@
-import { assertEquals, assertThrows } from 'jsr:@std/assert@^1.0.14';
+import { assertEquals, assertStrictEquals, assertThrows } from 'jsr:@std/assert@^1.0.14';
 import {
   acquireColorAttachmentView,
   bindRenderTarget,
@@ -41,6 +41,7 @@ const createMockDevice = () => {
 
 Deno.test('configureSurfaceContext configures the canvas context for a surface target', () => {
   const calls: GPUCanvasConfiguration[] = [];
+  const device = {} as GPUDevice;
   const canvasContext = {
     configure: (configuration) => {
       calls.push(configuration);
@@ -52,7 +53,7 @@ Deno.test('configureSurfaceContext configures the canvas context for a surface t
 
   const surface = configureSurfaceContext(
     {
-      device: {} as GPUDevice,
+      device,
       target: createBrowserSurfaceTarget(640, 480),
     },
     canvasContext,
@@ -61,6 +62,32 @@ Deno.test('configureSurfaceContext configures the canvas context for a surface t
   assertEquals(surface.kind, 'surface');
   assertEquals(calls.length, 1);
   assertEquals(calls[0].format, 'bgra8unorm');
+  assertEquals(calls[0].alphaMode, 'premultiplied');
+  assertStrictEquals(surface.device, device);
+});
+
+Deno.test('configureSurfaceContext honors an explicit surface alpha mode', () => {
+  const calls: GPUCanvasConfiguration[] = [];
+  const canvasContext = {
+    configure: (configuration: GPUCanvasConfiguration) => {
+      calls.push(configuration);
+    },
+    getCurrentTexture: () => ({
+      createView: () => ({ textureId: 0 } as unknown as GPUTextureView),
+    } as GPUTexture),
+  } as GPUCanvasContext;
+
+  configureSurfaceContext(
+    {
+      device: {} as GPUDevice,
+      target: createDenoSurfaceTarget(640, 480, 'rgba8unorm', 'opaque'),
+    },
+    canvasContext,
+  );
+
+  assertEquals(calls.length, 1);
+  assertEquals(calls[0].format, 'rgba8unorm');
+  assertEquals(calls[0].alphaMode, 'opaque');
 });
 
 Deno.test('createOffscreenContext allocates an offscreen texture and view', () => {
@@ -109,6 +136,7 @@ Deno.test('acquireColorAttachmentView returns a view for surface and offscreen b
   const { device } = createMockDevice();
   const surfaceView = acquireColorAttachmentView({
     kind: 'surface',
+    device: {} as GPUDevice,
     target: createBrowserSurfaceTarget(10, 10),
     canvasContext: {
       configure: () => undefined,
@@ -129,6 +157,38 @@ Deno.test('acquireColorAttachmentView returns a view for surface and offscreen b
   assertEquals(Boolean(offscreenView), true);
 });
 
+Deno.test('acquireColorAttachmentView reconfigures a dropped surface presentation state', () => {
+  const calls: GPUCanvasConfiguration[] = [];
+  let attempts = 0;
+  const device = {} as GPUDevice;
+
+  const view = acquireColorAttachmentView({
+    kind: 'surface',
+    device,
+    target: createDenoSurfaceTarget(10, 10, 'rgba8unorm', 'opaque'),
+    canvasContext: {
+      configure: (configuration: GPUCanvasConfiguration) => {
+        calls.push(configuration);
+      },
+      unconfigure: () => undefined,
+      getCurrentTexture: () => {
+        if (attempts === 0) {
+          attempts += 1;
+          throw new Error('Surface is not configured for presentation');
+        }
+        return {
+          createView: () => ({ textureId: 7 } as unknown as GPUTextureView),
+        } as GPUTexture;
+      },
+    } as unknown as GPUCanvasContext,
+  });
+
+  assertEquals(Boolean(view), true);
+  assertEquals(calls.length, 1);
+  assertEquals(calls[0].format, 'rgba8unorm');
+  assertEquals(calls[0].alphaMode, 'opaque');
+});
+
 Deno.test('surface/offscreen helpers reject mismatched target kinds and expose target sizing', () => {
   assertThrows(() =>
     configureSurfaceContext(
@@ -145,6 +205,7 @@ Deno.test('surface/offscreen helpers reject mismatched target kinds and expose t
     width: 12,
     height: 6,
     format: 'bgra8unorm',
+    alphaMode: undefined,
   });
   assertEquals(getRenderTargetSize(createHeadlessTarget(8, 4)), { width: 8, height: 4 });
   assertEquals(getRenderTargetByteSize(createHeadlessTarget(8, 4)), 128);

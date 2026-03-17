@@ -13,10 +13,13 @@ struct VsOut {
 
 @vertex
 fn vsMain(@builtin(vertex_index) vertexIndex: u32) -> VsOut {
-  var positions = array<vec2<f32>, 3>(
-    vec2<f32>(-1.0, -3.0),
+  var positions = array<vec2<f32>, 6>(
+    vec2<f32>(-1.0, -1.0),
+    vec2<f32>(1.0, -1.0),
     vec2<f32>(-1.0, 1.0),
-    vec2<f32>(3.0, 1.0),
+    vec2<f32>(-1.0, 1.0),
+    vec2<f32>(1.0, -1.0),
+    vec2<f32>(1.0, 1.0),
   );
 
   let position = positions[vertexIndex];
@@ -75,8 +78,11 @@ fn fsMain(in: VsOut) -> @location(0) vec4<f32> {
     let density = textureSampleLevel(volumeTexture, volumeSampler, uvw, 0.0).r;
     let opacity = density * 0.2;
     let color = vec3<f32>(density * 0.35, density * 0.75, density);
-    accumulated.rgb = accumulated.rgb + ((1.0 - accumulated.a) * color * opacity);
-    accumulated.a = accumulated.a + ((1.0 - accumulated.a) * opacity);
+    let remaining = 1.0 - accumulated.a;
+    accumulated = vec4<f32>(
+      accumulated.rgb + (remaining * color * opacity),
+      accumulated.a + (remaining * opacity),
+    );
 
     if (accumulated.a > 0.98) {
       break;

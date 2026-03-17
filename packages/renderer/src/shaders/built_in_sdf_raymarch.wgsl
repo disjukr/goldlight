@@ -18,10 +18,13 @@ struct VsOut {
 
 @vertex
 fn vsMain(@builtin(vertex_index) vertexIndex: u32) -> VsOut {
-  var positions = array<vec2<f32>, 3>(
-    vec2<f32>(-1.0, -3.0),
+  var positions = array<vec2<f32>, 6>(
+    vec2<f32>(-1.0, -1.0),
+    vec2<f32>(1.0, -1.0),
     vec2<f32>(-1.0, 1.0),
-    vec2<f32>(3.0, 1.0),
+    vec2<f32>(-1.0, 1.0),
+    vec2<f32>(1.0, -1.0),
+    vec2<f32>(1.0, 1.0),
   );
 
   let position = positions[vertexIndex];

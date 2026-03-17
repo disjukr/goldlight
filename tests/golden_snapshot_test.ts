@@ -57,6 +57,26 @@ const compareBytes = (expected: Uint8Array, actual: Uint8Array): Readonly<{
   };
 };
 
+const countMismatchedPixels = (expected: Uint8Array, actual: Uint8Array): number => {
+  const length = Math.min(expected.length, actual.length);
+  let mismatchCount = 0;
+
+  for (let index = 0; index < length; index += 4) {
+    if (
+      expected[index] === actual[index] &&
+      expected[index + 1] === actual[index + 1] &&
+      expected[index + 2] === actual[index + 2] &&
+      expected[index + 3] === actual[index + 3]
+    ) {
+      continue;
+    }
+
+    mismatchCount += 1;
+  }
+
+  return mismatchCount;
+};
+
 const requestGoldenSnapshotContext = async (
   name: string,
 ): Promise<Awaited<ReturnType<typeof requestGpuContext>> | undefined> => {
@@ -76,6 +96,9 @@ const assertGoldenSnapshot = async (
   name: string,
   scenarioFactory: () => GoldenSnapshotScenario,
   expectedPng: Uint8Array,
+  options: Readonly<{
+    clearSnapshotBytes?: Uint8Array;
+  }> = {},
 ): Promise<void> => {
   if (!isWebGPUAvailable()) {
     console.warn(`Skipping golden snapshot "${name}" because WebGPU is unavailable.`);
@@ -100,6 +123,15 @@ const assertGoldenSnapshot = async (
       runtimeResidency,
       evaluatedScene,
     );
+    if (
+      options.clearSnapshotBytes &&
+      countMismatchedPixels(options.clearSnapshotBytes, snapshot.bytes) === 0
+    ) {
+      assert(
+        false,
+        `golden snapshot "${name}" matched the clear-only frame and did not render visible content`,
+      );
+    }
     const actualPng = encodePngRgba(snapshot);
     const { mismatchCount, firstMismatchIndex } = compareBytes(expectedPng, actualPng);
     if (mismatchCount === 0) {
@@ -124,6 +156,9 @@ const assertGoldenSnapshotAfterRecovery = async (
   name: string,
   scenarioFactory: () => GoldenSnapshotScenario,
   expectedPng: Uint8Array,
+  options: Readonly<{
+    clearSnapshotBytes?: Uint8Array;
+  }> = {},
 ): Promise<void> => {
   if (!isWebGPUAvailable()) {
     console.warn(`Skipping golden snapshot "${name}" because WebGPU is unavailable.`);
@@ -164,6 +199,15 @@ const assertGoldenSnapshotAfterRecovery = async (
       residency,
       evaluatedScene,
     );
+    if (
+      options.clearSnapshotBytes &&
+      countMismatchedPixels(options.clearSnapshotBytes, recoveredSnapshot.bytes) === 0
+    ) {
+      assert(
+        false,
+        `golden recovery snapshot "${name}" matched the clear-only frame and did not render visible content`,
+      );
+    }
     const actualPng = encodePngRgba(recoveredSnapshot);
     const { mismatchCount, firstMismatchIndex } = compareBytes(expectedPng, actualPng);
     if (mismatchCount === 0) {
@@ -185,6 +229,30 @@ const assertGoldenSnapshotAfterRecovery = async (
   }
 };
 
+const requestClearSnapshotBytes = async (): Promise<Uint8Array | undefined> => {
+  const gpuContext = await requestGoldenSnapshotContext('clear-reference');
+  if (!gpuContext) {
+    return undefined;
+  }
+
+  try {
+    const binding = createOffscreenContext(gpuContext);
+    const { scene, assets } = createClearScene();
+    const evaluatedScene = evaluateScene(scene, { timeMs: 0 });
+    const runtimeResidency = createRuntimeResidency();
+    rebuildRuntimeResidency(gpuContext, runtimeResidency, scene, evaluatedScene, assets);
+    const snapshot = await renderForwardSnapshot(
+      gpuContext,
+      binding,
+      runtimeResidency,
+      evaluatedScene,
+    );
+    return snapshot.bytes;
+  } finally {
+    gpuContext.device.destroy();
+  }
+};
+
 Deno.test('golden snapshot fixture matches the clear-only frame', async () => {
   await assertGoldenSnapshot('clear-only-frame', createClearScene, clearOnlyFrameFixture);
 });
@@ -194,17 +262,25 @@ Deno.test('golden snapshot fixture matches the solid quad frame', async () => {
 });
 
 Deno.test('golden snapshot fixture matches the sdf sphere frame', async () => {
-  await assertGoldenSnapshot('sdf-sphere-frame', createSdfSphereScene, sdfSphereFrameFixture);
+  const clearSnapshotBytes = await requestClearSnapshotBytes();
+  await assertGoldenSnapshot('sdf-sphere-frame', createSdfSphereScene, sdfSphereFrameFixture, {
+    clearSnapshotBytes,
+  });
 });
 
 Deno.test('golden snapshot fixture matches the volume frame', async () => {
-  await assertGoldenSnapshot('volume-frame', createVolumeScene, volumeFrameFixture);
+  const clearSnapshotBytes = await requestClearSnapshotBytes();
+  await assertGoldenSnapshot('volume-frame', createVolumeScene, volumeFrameFixture, {
+    clearSnapshotBytes,
+  });
 });
 
 Deno.test('golden snapshot recovery fixture matches the rebuilt volume frame', async () => {
+  const clearSnapshotBytes = await requestClearSnapshotBytes();
   await assertGoldenSnapshotAfterRecovery(
     'recovery-volume-frame',
     createVolumeScene,
     recoveryVolumeFrameFixture,
+    { clearSnapshotBytes },
   );
 });

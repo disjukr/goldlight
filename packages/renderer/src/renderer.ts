@@ -790,11 +790,11 @@ export const ensureVolumeRaymarchPipeline = (
 };
 
 const createSdfUniformData = (items: readonly SdfPassItem[]): Float32Array => {
-  const uniformData = new Float32Array(4 + (maxSdfPassItems * 8));
+  const uniformData = new Float32Array(8 + (maxSdfPassItems * 8));
   uniformData[0] = Math.min(items.length, maxSdfPassItems);
 
   items.slice(0, maxSdfPassItems).forEach((item, index) => {
-    const offset = 4 + (index * 8);
+    const offset = 8 + (index * 8);
     uniformData.set([...item.center, item.radius], offset);
     uniformData.set(item.color, offset + 4);
   });
@@ -850,7 +850,7 @@ export const renderSdfRaymarchPass = (
 
   pass.setPipeline(pipeline);
   pass.setBindGroup(0, bindGroup);
-  pass.draw(3, 1, 0, 0);
+  pass.draw(6, 1, 0, 0);
   pass.end();
 
   return 1;
@@ -908,7 +908,7 @@ export const renderVolumeRaymarchPass = (
     });
 
     pass.setBindGroup(0, bindGroup);
-    pass.draw(3, 1, 0, 0);
+    pass.draw(6, 1, 0, 0);
   }
   pass.end();
 

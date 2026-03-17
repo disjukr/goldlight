@@ -1,16 +1,14 @@
 # Browser React Authoring Example
 
 This example shows the current bridge between `@rieul3d/react` and the existing runtime layers. It
-uses the package's declarative authoring helpers to build a scene tree, lowers that tree into Scene
-IR node data, then renders the result through the browser forward pipeline.
+authors a scene with TSX, lowers that tree into Scene IR node data, then renders the result through
+the browser forward pipeline.
 
-This is not a React runtime or JSX example. The current `@rieul3d/react` package exposes an
-authoring API that mirrors the intended React-facing shape, but it does not provide a React renderer
-or reconciler yet.
+This is now a real JSX authoring example, but it is still not a live React renderer or reconciler.
+`@rieul3d/react` currently owns authoring and lowering only.
 
-Longer term, this package should move toward a `react-three-fiber`-style interface where scene
-content is authored as normal React elements and reconciled into rieul3d's runtime, instead of being
-assembled through helper functions first.
+Longer term, this package should move toward a `react-three-fiber`-style interface where
+reconciliation updates rieul3d's runtime over time instead of lowering the tree only once.
 
 Build the example bundle:
 
@@ -34,4 +32,5 @@ Related references:
 
 - [`../../examples/README.md`](../README.md)
 - [`../../docs/specs/react-authoring.md`](../../docs/specs/react-authoring.md)
+- [`../../docs/adr/0004-react-jsx-authoring.md`](../../docs/adr/0004-react-jsx-authoring.md)
 - [`../../docs/specs/rendering.md`](../../docs/specs/rendering.md)

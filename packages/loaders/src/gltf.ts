@@ -84,13 +84,6 @@ type GltfNode = Readonly<{
   children?: readonly number[];
 }>;
 
-type LegacyAnimationChannel = Readonly<{
-  node: number;
-  path: string;
-  times: readonly number[];
-  values: readonly (readonly number[])[];
-}>;
-
 type GltfAnimationSampler = Readonly<{
   input: number;
   output: number;
@@ -131,6 +124,24 @@ type GltfJson = Readonly<{
   scene?: number;
   animations?: readonly GltfAnimation[];
 }>;
+
+export type GltfLoadOptions = Readonly<{
+  baseUri?: string;
+  resources?: Readonly<Record<string, Uint8Array>>;
+}>;
+
+type ResolvedResource = Readonly<{
+  uri: string;
+  bytes?: Uint8Array;
+}>;
+
+const GLB_MAGIC = 0x46546c67;
+const GLB_VERSION = 2;
+const GLB_JSON_CHUNK = 0x4e4f534a;
+const GLB_BIN_CHUNK = 0x004e4942;
+
+const textEncoder = new TextEncoder();
+const textDecoder = new TextDecoder();
 
 const accessorItemSize = (type: GltfAccessorType): number => {
   switch (type) {
@@ -173,7 +184,7 @@ const decodeDataUri = (uri: string): Uint8Array => {
     return Uint8Array.from(binary, (character) => character.charCodeAt(0));
   }
 
-  return new TextEncoder().encode(decodeURIComponent(payload));
+  return textEncoder.encode(decodeURIComponent(payload));
 };
 
 const inferDataUriMimeType = (uri: string): string | undefined => {
@@ -186,55 +197,187 @@ const inferDataUriMimeType = (uri: string): string | undefined => {
   return mimeType.length === 0 ? undefined : mimeType;
 };
 
-const getBufferBytes = (buffer: GltfBuffer, sceneId: string, bufferIndex: number): Uint8Array => {
-  if (!buffer.uri) {
-    throw new Error(
-      `glTF buffer ${bufferIndex} in "${sceneId}" does not provide a uri; GLB buffers are not supported yet`,
-    );
-  }
-
-  if (!buffer.uri.startsWith('data:')) {
-    throw new Error(
-      `glTF buffer ${bufferIndex} in "${sceneId}" uses an external uri; only data URIs are supported right now`,
-    );
-  }
-
-  return decodeDataUri(buffer.uri);
-};
-
-const getImageBytes = (
-  image: GltfImage,
-  buffers: readonly Uint8Array[],
-  bufferViews: readonly GltfBufferView[],
-  sceneId: string,
-  imageIndex: number,
-): Uint8Array | undefined => {
-  if (image.uri) {
-    if (!image.uri.startsWith('data:')) {
-      throw new Error(
-        `glTF image ${imageIndex} in "${sceneId}" uses an external uri; only data URIs are supported right now`,
-      );
-    }
-
-    return decodeDataUri(image.uri);
-  }
-
-  if (image.bufferView === undefined) {
+const inferMimeTypeFromUri = (uri: string): string | undefined => {
+  const path = uri.split('?')[0]?.split('#')[0] ?? uri;
+  const extensionIndex = path.lastIndexOf('.');
+  if (extensionIndex < 0) {
     return undefined;
   }
 
-  const bufferView = bufferViews[image.bufferView];
+  switch (path.slice(extensionIndex + 1).toLowerCase()) {
+    case 'png':
+      return 'image/png';
+    case 'jpg':
+    case 'jpeg':
+      return 'image/jpeg';
+    case 'webp':
+      return 'image/webp';
+    case 'ktx2':
+      return 'image/ktx2';
+    default:
+      return undefined;
+  }
+};
+
+const resolveUri = (uri: string, baseUri?: string): string => {
+  if (!baseUri) {
+    return uri;
+  }
+
+  try {
+    return new URL(uri, baseUri).toString();
+  } catch {
+    return uri;
+  }
+};
+
+const resolveResource = (
+  uri: string,
+  options: GltfLoadOptions,
+): ResolvedResource => {
+  const resolvedUri = resolveUri(uri, options.baseUri);
+  const bytes = options.resources?.[resolvedUri] ?? options.resources?.[uri];
+  return { uri: resolvedUri, bytes };
+};
+
+const sliceBufferView = (
+  buffers: readonly Uint8Array[],
+  bufferViews: readonly GltfBufferView[],
+  bufferViewIndex: number,
+  label: string,
+): Uint8Array => {
+  const bufferView = bufferViews[bufferViewIndex];
   if (!bufferView) {
-    throw new Error(`glTF image ${imageIndex} references missing bufferView ${image.bufferView}`);
+    throw new Error(`${label} references missing bufferView ${bufferViewIndex}`);
   }
 
   const bytes = buffers[bufferView.buffer];
   if (!bytes) {
-    throw new Error(`glTF image ${imageIndex} references missing buffer ${bufferView.buffer}`);
+    throw new Error(`${label} references missing buffer ${bufferView.buffer}`);
   }
 
   const byteOffset = bufferView.byteOffset ?? 0;
   return bytes.slice(byteOffset, byteOffset + bufferView.byteLength);
+};
+
+const parseGlb = (glbBytes: Uint8Array): { json: GltfJson; binaryChunk?: Uint8Array } => {
+  const headerLength = 12;
+  if (glbBytes.byteLength < headerLength) {
+    throw new Error('GLB payload is too short to contain a valid header');
+  }
+
+  const view = new DataView(glbBytes.buffer, glbBytes.byteOffset, glbBytes.byteLength);
+  const magic = view.getUint32(0, true);
+  const version = view.getUint32(4, true);
+  const length = view.getUint32(8, true);
+
+  if (magic !== GLB_MAGIC) {
+    throw new Error('GLB payload is missing the glTF magic header');
+  }
+
+  if (version !== GLB_VERSION) {
+    throw new Error(`GLB version ${version} is not supported`);
+  }
+
+  if (length !== glbBytes.byteLength) {
+    throw new Error(
+      `GLB declared length ${length} does not match payload length ${glbBytes.byteLength}`,
+    );
+  }
+
+  let offset = headerLength;
+  let json: GltfJson | undefined;
+  let binaryChunk: Uint8Array | undefined;
+
+  while (offset + 8 <= glbBytes.byteLength) {
+    const chunkLength = view.getUint32(offset, true);
+    const chunkType = view.getUint32(offset + 4, true);
+    offset += 8;
+
+    if (offset + chunkLength > glbBytes.byteLength) {
+      throw new Error('GLB chunk length exceeds the payload length');
+    }
+
+    const chunkBytes = glbBytes.slice(offset, offset + chunkLength);
+    if (chunkType === GLB_JSON_CHUNK) {
+      json = JSON.parse(textDecoder.decode(chunkBytes).replace(/\0+$/u, '').trimEnd()) as GltfJson;
+    } else if (chunkType === GLB_BIN_CHUNK && binaryChunk === undefined) {
+      binaryChunk = chunkBytes;
+    }
+
+    offset += chunkLength;
+  }
+
+  if (!json) {
+    throw new Error('GLB payload does not contain a JSON chunk');
+  }
+
+  return { json, binaryChunk };
+};
+
+const getBufferBytes = (
+  buffer: GltfBuffer,
+  sceneId: string,
+  bufferIndex: number,
+  options: GltfLoadOptions,
+  binaryChunk?: Uint8Array,
+): Uint8Array => {
+  if (!buffer.uri) {
+    if (binaryChunk) {
+      return binaryChunk.slice(0, buffer.byteLength);
+    }
+
+    throw new Error(
+      `glTF buffer ${bufferIndex} in "${sceneId}" does not provide a uri and no GLB binary chunk was supplied`,
+    );
+  }
+
+  if (buffer.uri.startsWith('data:')) {
+    return decodeDataUri(buffer.uri);
+  }
+
+  const resource = resolveResource(buffer.uri, options);
+  if (!resource.bytes) {
+    throw new Error(
+      `glTF buffer ${bufferIndex} in "${sceneId}" uses external uri "${resource.uri}" without provided bytes`,
+    );
+  }
+
+  return resource.bytes;
+};
+
+const getImageResource = (
+  image: GltfImage,
+  buffers: readonly Uint8Array[],
+  bufferViews: readonly GltfBufferView[],
+  options: GltfLoadOptions,
+  sceneId: string,
+  imageIndex: number,
+): ResolvedResource => {
+  if (image.uri) {
+    if (image.uri.startsWith('data:')) {
+      return {
+        uri: image.uri,
+        bytes: decodeDataUri(image.uri),
+      };
+    }
+
+    return resolveResource(image.uri, options);
+  }
+
+  if (image.bufferView === undefined) {
+    return { uri: `${sceneId}-image-${imageIndex}` };
+  }
+
+  return {
+    uri: `${sceneId}-image-${imageIndex}`,
+    bytes: sliceBufferView(
+      buffers,
+      bufferViews,
+      image.bufferView,
+      `glTF image ${imageIndex}`,
+    ),
+  };
 };
 
 const readComponent = (
@@ -358,6 +501,7 @@ const createTextureRefs = (
   sceneId: string,
   json: GltfJson,
   buffers: readonly Uint8Array[],
+  options: GltfLoadOptions,
 ): { assets: AssetRef[]; textures: TextureRef[] } => {
   const assets: AssetRef[] = [];
   const textures: TextureRef[] = [];
@@ -371,18 +515,20 @@ const createTextureRefs = (
     if (imageIndex !== undefined && image) {
       assetId = `${sceneId}-image-${imageIndex}`;
       if (!assets.some((asset) => asset.id === assetId)) {
-        const imageBytes = getImageBytes(
+        const resource = getImageResource(
           image,
           buffers,
           json.bufferViews ?? [],
+          options,
           sceneId,
           imageIndex,
         );
         assets.push({
           id: assetId,
-          uri: image.uri,
+          uri: image.uri ? resource.uri : undefined,
           mimeType: image.mimeType ?? inferDataUriMimeType(image.uri ?? '') ??
-            (imageBytes ? 'application/octet-stream' : undefined),
+            inferMimeTypeFromUri(resource.uri) ??
+            (resource.bytes ? 'application/octet-stream' : undefined),
         });
       }
     }
@@ -501,16 +647,18 @@ const createAnimationClips = (
     };
   });
 
-export const loadGltfFromJson = (
+const loadGltfScene = (
   json: GltfJson,
-  sceneId = 'gltf-scene',
+  sceneId: string,
+  options: GltfLoadOptions,
+  binaryChunk?: Uint8Array,
 ): SceneIr => {
   const nodes = json.nodes ?? [];
   const buffers = (json.buffers ?? []).map((buffer, bufferIndex) =>
-    getBufferBytes(buffer, sceneId, bufferIndex)
+    getBufferBytes(buffer, sceneId, bufferIndex, options, binaryChunk)
   );
   const parentIds = buildParentIds(sceneId, nodes);
-  const { assets, textures } = createTextureRefs(sceneId, json, buffers);
+  const { assets, textures } = createTextureRefs(sceneId, json, buffers, options);
   const materials = createMaterials(sceneId, json, textures);
   const rootNodeIds = getDefaultRootIndices(json).map((nodeIndex) =>
     `${sceneId}-node-${nodeIndex}`
@@ -582,4 +730,19 @@ export const loadGltfFromJson = (
   }
 
   return scene;
+};
+
+export const loadGltfFromJson = (
+  json: GltfJson,
+  sceneId = 'gltf-scene',
+  options: GltfLoadOptions = {},
+): SceneIr => loadGltfScene(json, sceneId, options);
+
+export const loadGltfFromGlb = (
+  glbBytes: Uint8Array,
+  sceneId = 'gltf-scene',
+  options: GltfLoadOptions = {},
+): SceneIr => {
+  const { json, binaryChunk } = parseGlb(glbBytes);
+  return loadGltfScene(json, sceneId, options, binaryChunk);
 };

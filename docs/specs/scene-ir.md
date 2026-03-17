@@ -17,8 +17,8 @@ standard and declares that explicitly with `# standard - conventional`.
 ## Core Concepts
 
 - Assets describe external source data such as images, geometry files, or volume grids.
-- Scene IR describes spatial declarations: nodes, primitives, materials, textures, animations, and
-  graph bindings.
+- Scene IR describes spatial declarations: nodes, primitives, materials, lights, textures,
+  animations, and graph bindings.
 - IR does not contain `GPUBuffer`, `GPUTexture`, pipelines, or frame scratch state.
 
 ## Spatial Primitives
@@ -26,6 +26,8 @@ standard and declares that explicitly with `# standard - conventional`.
 - `mesh`: indexed or non-indexed polygonal geometry
 - `sdf`: signed distance field graphs or primitives for raymarching
 - `volume`: voxel or density grid primitives
+- `light`: first-class scene lights attached to nodes; the initial renderer consumes directional
+  lights through node transforms
 
 ## Evaluation
 

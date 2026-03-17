@@ -1,5 +1,6 @@
 import type {
   AnimationChannel,
+  Light,
   Material,
   MeshPrimitive,
   Node,
@@ -17,6 +18,7 @@ export type EvaluatedNode = Readonly<{
   material?: Material;
   sdf?: SdfPrimitive;
   volume?: VolumePrimitive;
+  light?: Light;
 }>;
 
 export type EvaluatedScene = Readonly<{
@@ -155,6 +157,11 @@ const applyAnimation = (scene: SceneIr, options: EvaluateSceneOptions): readonly
 export const evaluateScene = (scene: SceneIr, options: EvaluateSceneOptions): EvaluatedScene => {
   const nodes = applyAnimation(scene, options);
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const meshById = new Map(scene.meshes.map((mesh) => [mesh.id, mesh]));
+  const materialById = new Map(scene.materials.map((material) => [material.id, material]));
+  const sdfById = new Map(scene.sdfPrimitives.map((primitive) => [primitive.id, primitive]));
+  const volumeById = new Map(scene.volumePrimitives.map((primitive) => [primitive.id, primitive]));
+  const lightById = new Map(scene.lights.map((light) => [light.id, light]));
   const worldById = new Map<string, Mat4>();
 
   const getWorldMatrix = (node: Node): Mat4 => {
@@ -171,25 +178,18 @@ export const evaluateScene = (scene: SceneIr, options: EvaluateSceneOptions): Ev
   return {
     sceneId: scene.id,
     timeMs: options.timeMs,
-    nodes: nodes.map((node) => ({
-      node,
-      worldMatrix: getWorldMatrix(node),
-      mesh: node.meshId ? scene.meshes.find((mesh) => mesh.id === node.meshId) : undefined,
-      material: node.meshId
-        ? (() => {
-          const mesh = scene.meshes.find((candidate) => candidate.id === node.meshId);
-          return mesh?.materialId
-            ? scene.materials.find((material) => material.id === mesh.materialId)
-            : undefined;
-        })()
-        : undefined,
-      sdf: node.sdfId
-        ? scene.sdfPrimitives.find((primitive) => primitive.id === node.sdfId)
-        : undefined,
-      volume: node.volumeId
-        ? scene.volumePrimitives.find((primitive) => primitive.id === node.volumeId)
-        : undefined,
-    })),
+    nodes: nodes.map((node) => {
+      const mesh = node.meshId ? meshById.get(node.meshId) : undefined;
+      return {
+        node,
+        worldMatrix: getWorldMatrix(node),
+        mesh,
+        material: mesh?.materialId ? materialById.get(mesh.materialId) : undefined,
+        sdf: node.sdfId ? sdfById.get(node.sdfId) : undefined,
+        volume: node.volumeId ? volumeById.get(node.volumeId) : undefined,
+        light: node.lightId ? lightById.get(node.lightId) : undefined,
+      };
+    }),
   };
 };
 

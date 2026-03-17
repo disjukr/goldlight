@@ -58,6 +58,13 @@ export type Material = Readonly<{
   parameters: Readonly<Record<string, Vec4>>;
 }>;
 
+export type Light = Readonly<{
+  id: Id;
+  kind: string;
+  color: Vec3;
+  intensity: Scalar;
+}>;
+
 export type MeshAttribute = Readonly<{
   semantic: string;
   itemSize: number;
@@ -92,6 +99,7 @@ export type Node = Readonly<{
   meshId?: Id;
   sdfId?: Id;
   volumeId?: Id;
+  lightId?: Id;
 }>;
 
 export type AnimationKeyframe = Readonly<{
@@ -117,6 +125,7 @@ export type SceneIr = Readonly<{
   assets: readonly AssetRef[];
   textures: readonly TextureRef[];
   materials: readonly Material[];
+  lights: readonly Light[];
   meshes: readonly MeshPrimitive[];
   sdfPrimitives: readonly SdfPrimitive[];
   volumePrimitives: readonly VolumePrimitive[];

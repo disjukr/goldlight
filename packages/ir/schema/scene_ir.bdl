@@ -59,6 +59,13 @@ struct Material {
   parameters: Vec4[string],
 }
 
+struct Light {
+  id: Id,
+  kind: string,
+  color: Vec3,
+  intensity: Scalar,
+}
+
 struct MeshAttribute {
   semantic: string,
   itemSize: int32,
@@ -93,6 +100,7 @@ struct Node {
   meshId?: Id,
   sdfId?: Id,
   volumeId?: Id,
+  lightId?: Id,
 }
 
 struct AnimationKeyframe {
@@ -118,6 +126,7 @@ struct SceneIr {
   assets: AssetRef[],
   textures: TextureRef[],
   materials: Material[],
+  lights: Light[],
   meshes: MeshPrimitive[],
   sdfPrimitives: SdfPrimitive[],
   volumePrimitives: VolumePrimitive[],

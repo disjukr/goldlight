@@ -2,6 +2,8 @@
 
 This is the main runnable example for the current renderer scaffold.
 
+It renders a triangle through the built-in forward Lambert path with a Scene IR directional light.
+
 Build the example bundle:
 
 ```sh

@@ -1,13 +1,21 @@
 import { assertAlmostEquals, assertEquals, assertThrows } from 'jsr:@std/assert@^1.0.14';
 import { evaluateScene } from '@rieul3d/core';
 import { createRuntimeResidency } from '@rieul3d/gpu';
-import { appendMaterial, appendMesh, appendNode, createNode, createSceneIr } from '@rieul3d/ir';
+import {
+  appendLight,
+  appendMaterial,
+  appendMesh,
+  appendNode,
+  createNode,
+  createSceneIr,
+} from '@rieul3d/ir';
 import {
   assertRendererSceneCapabilities,
   collectRendererCapabilityIssues,
   createDeferredRenderer,
   createForwardRenderer,
   createMaterialRegistry,
+  extractDirectionalLightItems,
   extractSdfPassItems,
   extractVolumePassItems,
   type MaterialProgram,
@@ -245,6 +253,27 @@ Deno.test('extractSdfPassItems returns supported sphere and box sdf nodes with d
   assertAlmostEquals(items[1].worldToLocalRotation[8], 1, 1e-6);
 });
 
+Deno.test('extractDirectionalLightItems resolves world-space directions from light nodes', () => {
+  let scene = createSceneIr('scene');
+  scene = appendLight(scene, {
+    id: 'light-directional',
+    kind: 'directional',
+    color: { x: 1, y: 0.9, z: 0.8 },
+    intensity: 2,
+  });
+  scene = appendNode(scene, createNode('light-node', { lightId: 'light-directional' }));
+
+  const items = extractDirectionalLightItems(evaluateScene(scene, { timeMs: 0 }));
+
+  assertEquals(items, [{
+    nodeId: 'light-node',
+    lightId: 'light-directional',
+    direction: [0, 0, -1],
+    color: [1, 0.9, 0.8],
+    intensity: 2,
+  }]);
+});
+
 Deno.test('collectRendererCapabilityIssues accepts the current forward primitive mix', () => {
   const materialRegistry = createMaterialRegistry();
   registerWgslMaterial(materialRegistry, createFlatRedProgram());
@@ -282,6 +311,94 @@ Deno.test('collectRendererCapabilityIssues accepts the current forward primitive
   );
 
   assertEquals(issues, []);
+});
+
+Deno.test('collectRendererCapabilityIssues accepts lit materials when a directional light is present', () => {
+  let scene = createSceneIr('scene');
+  scene = appendLight(scene, {
+    id: 'light-directional',
+    kind: 'directional',
+    color: { x: 1, y: 1, z: 1 },
+    intensity: 1,
+  });
+  scene = appendMaterial(scene, {
+    id: 'material-lit',
+    kind: 'lit',
+    textures: [],
+    parameters: {
+      color: { x: 0.8, y: 0.4, z: 0.2, w: 1 },
+    },
+  });
+  scene = appendMesh(scene, {
+    id: 'mesh-0',
+    materialId: 'material-lit',
+    attributes: [
+      { semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0, 0, 1, 0] },
+      { semantic: 'NORMAL', itemSize: 3, values: [0, 0, 1, 0, 0, 1, 0, 0, 1] },
+    ],
+  });
+  scene = appendNode(scene, createNode('light-node', { lightId: 'light-directional' }));
+  scene = appendNode(scene, createNode('mesh-node', { meshId: 'mesh-0' }));
+
+  const issues = collectRendererCapabilityIssues(
+    createForwardRenderer(),
+    evaluateScene(scene, { timeMs: 0 }),
+  );
+
+  assertEquals(issues, []);
+});
+
+Deno.test('collectRendererCapabilityIssues rejects lit materials without lights or normals', () => {
+  let scene = createSceneIr('scene');
+  scene = appendMaterial(scene, {
+    id: 'material-lit',
+    kind: 'lit',
+    textures: [{
+      id: 'texture-0',
+      assetId: 'image-0',
+      semantic: 'baseColor',
+      colorSpace: 'srgb',
+      sampler: 'linear-repeat',
+    }],
+    parameters: {
+      color: { x: 0.6, y: 0.7, z: 0.9, w: 1 },
+    },
+  });
+  scene = appendMesh(scene, {
+    id: 'mesh-0',
+    materialId: 'material-lit',
+    attributes: [{ semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0, 0, 1, 0] }],
+  });
+  scene = appendNode(scene, createNode('mesh-node', { meshId: 'mesh-0' }));
+
+  const issues = collectRendererCapabilityIssues(
+    createForwardRenderer(),
+    evaluateScene(scene, { timeMs: 0 }),
+  );
+
+  assertEquals(issues, [
+    {
+      nodeId: 'mesh-node',
+      feature: 'light',
+      requirement: 'light-source:directional',
+      message:
+        'renderer "forward" requires at least one directional light for material "material-lit"',
+    },
+    {
+      nodeId: 'mesh-node',
+      feature: 'material-binding',
+      requirement: 'light-material:textures-unsupported',
+      message:
+        'renderer "forward" does not yet support textures on built-in lit material "material-lit"',
+    },
+    {
+      nodeId: 'mesh-node',
+      feature: 'material-binding',
+      requirement: 'vertex-attribute:NORMAL',
+      message:
+        'renderer "forward" cannot light node "mesh-node" because mesh "mesh-0" is missing NORMAL',
+    },
+  ]);
 });
 
 Deno.test('collectRendererCapabilityIssues accepts supported box sdf ops for execution', () => {

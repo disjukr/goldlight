@@ -35,18 +35,26 @@ The initial renderer uses a lightweight pass graph:
 ## Current Execution Surface
 
 - Forward rendering is the first concrete execution path and currently draws mesh residency items.
+- Forward rendering now also consumes first-class directional light nodes for built-in Lambert mesh
+  shading.
 - Deferred rendering now executes a minimal mesh-only path with a depth prepass, an unlit
   albedo/normal G-buffer pass, and a fullscreen lighting resolve.
 - Forward rendering also encodes a dedicated SDF raymarch pass for supported sphere and box
   primitives.
 - Forward rendering also encodes a first volume raymarch pass for volume primitives with residency.
 - Built-in unlit WGSL is stored as a standalone shader file and imported as text.
+- Built-in forward lit WGSL is stored as a standalone shader file and consumes directional-light
+  uniform data extracted from evaluated light nodes.
 - Built-in unlit shading supports color-only meshes plus optional base-color texture sampling when
   UVs and texture residency are available.
+- Built-in lit shading currently supports color-only Lambert materials that require mesh normals and
+  at least one directional light.
 - Built-in deferred unlit shading supports the same optional base-color texture sampling when
   `NORMAL` and `TEXCOORD_0` data plus texture residency are available.
 - Built-in forward mesh draws upload each evaluated node `worldMatrix` and apply it in the vertex
   stage before rasterization.
+- Built-in forward lit mesh draws also upload an inverse-transpose normal matrix plus a compact
+  directional-light uniform block.
 - Material parameter uploads and bind group creation are implemented for built-in unlit shading.
 - The minimal deferred path currently requires `NORMAL` vertex data and still limits materials to
   built-in `unlit`, with optional base-color textures.
@@ -95,5 +103,6 @@ The initial renderer uses a lightweight pass graph:
 ## Known Gaps
 
 - Deferred rendering does not yet cover custom WGSL materials, SDF primitives, or volume primitives.
+- Deferred rendering does not yet consume Scene IR light nodes or built-in lit materials.
 - SDF execution currently supports sphere and box primitives only; broader graph/operator coverage
   is still pending.

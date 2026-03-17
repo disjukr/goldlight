@@ -10,6 +10,7 @@ import {
   type TextureResidency,
 } from '@rieul3d/gpu';
 import builtInForwardShader from './shaders/built_in_forward_unlit.wgsl' with { type: 'text' };
+import builtInForwardLitShader from './shaders/built_in_forward_lit.wgsl' with { type: 'text' };
 import builtInForwardTexturedShader from './shaders/built_in_forward_unlit_textured.wgsl' with {
   type: 'text',
 };
@@ -52,6 +53,7 @@ export type RendererCapabilities = Readonly<{
   mesh: CapabilityState;
   sdf: CapabilityState;
   volume: CapabilityState;
+  light: CapabilityState;
   builtInMaterialKinds: readonly string[];
   customShaders: CapabilityState;
 }>;
@@ -173,12 +175,28 @@ export type SdfPassItem = Readonly<{
 
 export type RendererCapabilityIssue = Readonly<{
   nodeId: string;
-  feature: 'mesh' | 'sdf' | 'volume' | 'material-kind' | 'custom-shader' | 'material-binding';
+  feature:
+    | 'mesh'
+    | 'sdf'
+    | 'volume'
+    | 'light'
+    | 'material-kind'
+    | 'custom-shader'
+    | 'material-binding';
   requirement: string;
   message: string;
 }>;
 
+export type DirectionalLightItem = Readonly<{
+  nodeId: string;
+  lightId: string;
+  direction: readonly [number, number, number];
+  color: readonly [number, number, number];
+  intensity: number;
+}>;
+
 const builtInUnlitProgramId = 'built-in:unlit';
+const builtInLitProgramId = 'built-in:lit';
 const builtInTexturedUnlitProgramId = 'built-in:unlit-textured';
 const builtInDeferredDepthPrepassProgramId = 'built-in:deferred-depth-prepass';
 const builtInDeferredGbufferUnlitProgramId = 'built-in:deferred-gbuffer-unlit';
@@ -192,6 +210,8 @@ const uniformUsage = 0x40;
 const bufferCopyDstUsage = 0x08;
 const deferredDepthFormat = 'depth24plus';
 const maxSdfPassItems = 16;
+const maxDirectionalLights = 4;
+const defaultAmbientLight = 0.2;
 const toBufferSource = (view: ArrayBufferView): Uint8Array<ArrayBuffer> => {
   const buffer = view.buffer.slice(
     view.byteOffset,
@@ -225,6 +245,36 @@ const builtInUnlitProgram: MaterialProgram = {
     offset: 0,
     arrayStride: 12,
   }],
+};
+
+const builtInLitProgram: MaterialProgram = {
+  id: builtInLitProgramId,
+  label: 'Built-in Lit',
+  wgsl: builtInForwardLitShader,
+  vertexEntryPoint: 'vsMain',
+  fragmentEntryPoint: 'fsMain',
+  usesMaterialBindings: true,
+  usesTransformBindings: true,
+  materialBindings: [{
+    kind: 'uniform',
+    binding: 0,
+  }],
+  vertexAttributes: [
+    {
+      semantic: 'POSITION',
+      shaderLocation: 0,
+      format: 'float32x3',
+      offset: 0,
+      arrayStride: 12,
+    },
+    {
+      semantic: 'NORMAL',
+      shaderLocation: 1,
+      format: 'float32x3',
+      offset: 0,
+      arrayStride: 12,
+    },
+  ],
 };
 
 const builtInTexturedUnlitProgram: MaterialProgram = {
@@ -364,6 +414,7 @@ const createVertexBufferLayouts = (
 export const createMaterialRegistry = (): MaterialRegistry => ({
   programs: new Map([
     [builtInUnlitProgramId, builtInUnlitProgram],
+    [builtInLitProgramId, builtInLitProgram],
     [builtInTexturedUnlitProgramId, builtInTexturedUnlitProgram],
   ]),
 });
@@ -402,6 +453,10 @@ export const resolveMaterialProgram = (
       return registry.programs.get(builtInTexturedUnlitProgramId) ?? builtInTexturedUnlitProgram;
     }
     return registry.programs.get(builtInUnlitProgramId) ?? builtInUnlitProgram;
+  }
+
+  if (material.kind === 'lit') {
+    return registry.programs.get(builtInLitProgramId) ?? builtInLitProgram;
   }
 
   throw new Error(`material "${material.id}" uses unsupported kind "${material.kind}"`);
@@ -493,7 +548,8 @@ export const createForwardRenderer = (label = 'forward'): Renderer => ({
     mesh: 'supported',
     sdf: 'supported',
     volume: 'supported',
-    builtInMaterialKinds: ['unlit'],
+    light: 'supported',
+    builtInMaterialKinds: ['unlit', 'lit'],
     customShaders: 'supported',
   },
   passes: [
@@ -510,6 +566,7 @@ export const createDeferredRenderer = (label = 'deferred'): Renderer => ({
     mesh: 'supported',
     sdf: 'unsupported',
     volume: 'unsupported',
+    light: 'unsupported',
     builtInMaterialKinds: ['unlit'],
     customShaders: 'unsupported',
   },
@@ -615,6 +672,14 @@ export const collectRendererCapabilityIssues = (
       );
     }
 
+    if (node.light && renderer.capabilities.light !== 'supported') {
+      pushIssue(
+        'light',
+        'light-execution',
+        `renderer "${renderer.label}" does not support scene light execution`,
+      );
+    }
+
     if (
       material &&
       !material.shaderId &&
@@ -692,6 +757,38 @@ export const collectRendererCapabilityIssues = (
           'material-binding',
           'texture-residency:baseColor:texture',
           `renderer "${renderer.label}" cannot sample baseColor textures for material "${material.id}" because texture "${baseColorTexture.id}" is not resident`,
+        );
+      }
+    } else if (material?.kind === 'lit') {
+      if (renderer.capabilities.light !== 'supported') {
+        pushIssue(
+          'light',
+          'light-material:lit',
+          `renderer "${renderer.label}" does not support built-in lit materials`,
+        );
+      }
+
+      if (!evaluatedScene.nodes.some((candidate) => candidate.light?.kind === 'directional')) {
+        pushIssue(
+          'light',
+          'light-source:directional',
+          `renderer "${renderer.label}" requires at least one directional light for material "${material.id}"`,
+        );
+      }
+
+      if (materialTextures.length > 0) {
+        pushIssue(
+          'material-binding',
+          'light-material:textures-unsupported',
+          `renderer "${renderer.label}" does not yet support textures on built-in lit material "${material.id}"`,
+        );
+      }
+
+      if (node.mesh && !node.mesh.attributes.some((attribute) => attribute.semantic === 'NORMAL')) {
+        pushIssue(
+          'material-binding',
+          'vertex-attribute:NORMAL',
+          `renderer "${renderer.label}" cannot light node "${node.node.id}" because mesh "${node.mesh.id}" is missing NORMAL`,
         );
       }
     }
@@ -911,6 +1008,55 @@ export const extractSdfPassItems = (
       worldToLocalRotation: getWorldToLocalRotation(node.worldMatrix),
     }];
   });
+
+export const extractDirectionalLightItems = (
+  evaluatedScene: EvaluatedScene,
+): readonly DirectionalLightItem[] =>
+  evaluatedScene.nodes.flatMap((node) => {
+    if (!node.light || node.light.kind !== 'directional') {
+      return [];
+    }
+
+    const [x, y, z] = normalizeVector3(
+      -(node.worldMatrix[8] ?? 0),
+      -(node.worldMatrix[9] ?? 0),
+      -(node.worldMatrix[10] ?? 1),
+    );
+    const direction: readonly [number, number, number] = x === 0 && y === 0 && z === 0
+      ? [0, 0, -1]
+      : [x, y, z];
+
+    return [{
+      nodeId: node.node.id,
+      lightId: node.light.id,
+      direction,
+      color: [node.light.color.x, node.light.color.y, node.light.color.z],
+      intensity: node.light.intensity,
+    }];
+  });
+
+const createDirectionalLightUniformData = (
+  lights: readonly DirectionalLightItem[],
+): Float32Array => {
+  const uniformData = new Float32Array((maxDirectionalLights * 8) + 4);
+  const clampedLights = lights.slice(0, maxDirectionalLights);
+
+  for (let index = 0; index < clampedLights.length; index += 1) {
+    const light = clampedLights[index];
+    const baseIndex = index * 4;
+    uniformData.set(light.direction, baseIndex);
+    uniformData.set(light.color, (maxDirectionalLights * 4) + baseIndex);
+    uniformData[(maxDirectionalLights * 4) + baseIndex + 3] = light.intensity;
+  }
+
+  const settingsOffset = maxDirectionalLights * 8;
+  uniformData[settingsOffset] = clampedLights.length;
+  uniformData[settingsOffset + 1] = defaultAmbientLight;
+  return uniformData;
+};
+
+const usesLitMaterialProgram = (program: MaterialProgram): boolean =>
+  program.id === builtInLitProgramId;
 
 export const ensureBuiltInForwardPipeline = (
   context: GpuRenderExecutionContext,
@@ -1375,6 +1521,7 @@ export const renderForwardFrame = (
   });
 
   let drawCount = 0;
+  const directionalLights = extractDirectionalLightItems(evaluatedScene);
   for (const node of evaluatedScene.nodes) {
     const mesh = node.mesh;
     if (!mesh) {
@@ -1423,7 +1570,9 @@ export const renderForwardFrame = (
     pass.setPipeline(pipeline);
 
     if (program.usesTransformBindings) {
-      const transformData = createMeshTransformUniformData(node.worldMatrix);
+      const transformData = usesLitMaterialProgram(program)
+        ? createDeferredMeshTransformUniformData(node.worldMatrix)
+        : createMeshTransformUniformData(node.worldMatrix);
       const transformBuffer = context.device.createBuffer({
         label: `${node.node.id}:mesh-transform`,
         size: transformData.byteLength,
@@ -1461,6 +1610,28 @@ export const renderForwardFrame = (
         ),
       });
       pass.setBindGroup(materialBindGroupIndex, bindGroup);
+    }
+
+    if (usesLitMaterialProgram(program)) {
+      const lightingData = createDirectionalLightUniformData(directionalLights);
+      const lightingBuffer = context.device.createBuffer({
+        label: `${node.node.id}:lighting`,
+        size: lightingData.byteLength,
+        usage: uniformUsage | bufferCopyDstUsage,
+      });
+      context.queue.writeBuffer(lightingBuffer, 0, toBufferSource(lightingData));
+      pass.setBindGroup(
+        2,
+        context.device.createBindGroup({
+          layout: pipeline.getBindGroupLayout(2),
+          entries: [{
+            binding: 0,
+            resource: {
+              buffer: lightingBuffer,
+            },
+          }],
+        }),
+      );
     }
 
     if (geometry.indexBuffer && geometry.indexCount > 0) {

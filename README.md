@@ -78,7 +78,6 @@ Read in this order when onboarding:
 - `deno task example:browser:build`: bundle the browser forward-rendering example
 - `deno task example:browser:serve`: serve the repository for local browser testing
 - `deno task example:byow:check`: type-check the Windows BYOW native demo
-- `deno task example:byow:run`: open the Windows BYOW native demo
-Golden snapshot fixtures live in
-[`tests/fixtures/golden-snapshots`](./tests/fixtures/golden-snapshots). Refresh them intentionally
-with `deno run -A --unstable-raw-imports ./scripts/refresh_golden_snapshots.ts`.
+- `deno task example:byow:run`: open the Windows BYOW native demo Golden snapshot fixtures live in
+  [`tests/fixtures/golden-snapshots`](./tests/fixtures/golden-snapshots). Refresh them intentionally
+  with `deno run -A --unstable-raw-imports ./scripts/refresh_golden_snapshots.ts`.

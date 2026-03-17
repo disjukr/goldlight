@@ -6,7 +6,7 @@ This demo exercises more of the `rieul3d` runtime than the startup triangle by r
 
 - an indexed quad through the built-in textured unlit path
 - an additional accent mesh with a separate material
-- a native WebGPU surface presented through SDL2 on Windows
+- a native WebGPU surface presented through SDL2 on Windows with an opaque swapchain format
 
 Run with:
 
@@ -34,3 +34,6 @@ Requirements:
 The repository includes a Windows-only installer script that downloads the official SDL2 runtime zip
 from `libsdl.org/release` into `vendor/sdl2/windows-x64`. The run task auto-detects that location on
 Windows, so after setup you can launch the example directly.
+
+If the native surface drops its presentation state after window events, the runtime reconfigures the
+surface binding on the next frame before retrying `getCurrentTexture()`.

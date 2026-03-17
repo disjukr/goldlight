@@ -174,7 +174,7 @@ Deno.test('acquireColorAttachmentView reconfigures a dropped surface presentatio
       getCurrentTexture: () => {
         if (attempts === 0) {
           attempts += 1;
-          throw new Error('Surface is not configured for presentation');
+          throw new DOMException('Presentation state was dropped', 'InvalidStateError');
         }
         return {
           createView: () => ({ textureId: 7 } as unknown as GPUTextureView),
@@ -187,6 +187,28 @@ Deno.test('acquireColorAttachmentView reconfigures a dropped surface presentatio
   assertEquals(calls.length, 1);
   assertEquals(calls[0].format, 'rgba8unorm');
   assertEquals(calls[0].alphaMode, 'opaque');
+});
+
+Deno.test('acquireColorAttachmentView rethrows non-state surface errors', () => {
+  const device = {} as GPUDevice;
+
+  assertThrows(
+    () =>
+      acquireColorAttachmentView({
+        kind: 'surface',
+        device,
+        target: createBrowserSurfaceTarget(10, 10),
+        canvasContext: {
+          configure: () => undefined,
+          unconfigure: () => undefined,
+          getCurrentTexture: () => {
+            throw new DOMException('Surface access denied', 'OperationError');
+          },
+        } as unknown as GPUCanvasContext,
+      }),
+    DOMException,
+    'Surface access denied',
+  );
 });
 
 Deno.test('surface/offscreen helpers reject mismatched target kinds and expose target sizing', () => {

@@ -141,9 +141,8 @@ export const jsx = (
   key?: string,
 ): AuthoringElement => {
   const authoringProps = props ?? {};
-  const children = flattenAuthoringChildren(
-    authoringProps.children as AuthoringRenderable | undefined,
-  );
+  const rawChildren = authoringProps.children as AuthoringRenderable | undefined;
+  const children = flattenAuthoringChildren(rawChildren);
 
   if (type === Fragment) {
     return createAuthoringElement('fragment', key ?? '__fragment', {}, children);
@@ -154,8 +153,8 @@ export const jsx = (
       type(
         {
           ...authoringProps,
-          children,
-        } as SceneJsxProps & NodeJsxProps & { children?: readonly AuthoringElement[] },
+          children: rawChildren,
+        } as SceneJsxProps & NodeJsxProps & { children?: AuthoringRenderable },
       ),
       key ?? '__component',
     );

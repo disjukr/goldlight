@@ -71,3 +71,43 @@ Deno.test('authoringTreeToSceneIr lowers JSX-authored trees with component and f
     },
   ]);
 });
+
+Deno.test('jsx function components receive absent children as undefined', () => {
+  let capturedChildren: unknown = Symbol('unset');
+
+  const ChildProbe = (props: Readonly<{ id: string; children?: unknown }>) => {
+    capturedChildren = props.children;
+    return <node id={props.id} />;
+  };
+
+  authoringTreeToSceneIr(
+    <scene id='jsx-scene'>
+      <ChildProbe id='root' />
+    </scene>,
+  );
+
+  assertEquals(capturedChildren, undefined);
+});
+
+Deno.test('jsx function components receive boolean and null children before lowering', () => {
+  let capturedChildren: unknown = Symbol('unset');
+
+  const ChildProbe = (props: Readonly<{ id: string; children?: unknown }>) => {
+    capturedChildren = props.children;
+    return <node id={props.id}>{props.children as never}</node>;
+  };
+
+  const scene = authoringTreeToSceneIr(
+    <scene id='jsx-scene'>
+      <ChildProbe id='root'>
+        {false}
+        {null}
+        <node id='child' />
+      </ChildProbe>
+    </scene>,
+  );
+
+  assertEquals(capturedChildren, [false, null, createAuthoringElement('node', 'child', {}, [])]);
+  assertEquals(scene.rootNodeIds, ['root']);
+  assertEquals(scene.nodes.find((node) => node.id === 'child')?.parentId, 'root');
+});

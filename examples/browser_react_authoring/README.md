@@ -1,16 +1,16 @@
 # Browser React Authoring Example
 
-This example shows the current bridge between `@rieul3d/react` and the existing runtime layers.
-It uses the package's declarative authoring helpers to build a scene tree, lowers that tree into
-Scene IR node data, then renders the result through the browser forward pipeline.
+This example shows the current bridge between `@rieul3d/react` and the existing runtime layers. It
+uses the package's declarative authoring helpers to build a scene tree, lowers that tree into Scene
+IR node data, then renders the result through the browser forward pipeline.
 
 This is not a React runtime or JSX example. The current `@rieul3d/react` package exposes an
-authoring API that mirrors the intended React-facing shape, but it does not provide a React
-renderer or reconciler yet.
+authoring API that mirrors the intended React-facing shape, but it does not provide a React renderer
+or reconciler yet.
 
 Longer term, this package should move toward a `react-three-fiber`-style interface where scene
-content is authored as normal React elements and reconciled into rieul3d's runtime, instead of
-being assembled through helper functions first.
+content is authored as normal React elements and reconciled into rieul3d's runtime, instead of being
+assembled through helper functions first.
 
 Build the example bundle:
 

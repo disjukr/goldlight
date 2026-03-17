@@ -35,6 +35,8 @@ The initial renderer uses a lightweight pass graph:
 ## Current Execution Surface
 
 - Forward rendering is the first concrete execution path and currently draws mesh residency items.
+- Deferred rendering now executes a minimal mesh-only path with a depth prepass, an unlit
+  albedo/normal G-buffer pass, and a fullscreen lighting resolve.
 - Forward rendering also encodes a dedicated SDF raymarch pass for supported sphere and box
   primitives.
 - Forward rendering also encodes a first volume raymarch pass for volume primitives with residency.
@@ -44,6 +46,8 @@ The initial renderer uses a lightweight pass graph:
 - Built-in forward mesh draws upload each evaluated node `worldMatrix` and apply it in the vertex
   stage before rasterization.
 - Material parameter uploads and bind group creation are implemented for built-in unlit shading.
+- The minimal deferred path currently requires `NORMAL` vertex data and only accepts color-only
+  built-in `unlit` materials.
 - Custom WGSL programs can be registered and cached through the material registry.
 - Headless/offscreen rendering supports compact byte readback for snapshot testing.
 - Snapshot bytes can also be encoded into PNG for local inspection and regression workflows.
@@ -84,6 +88,7 @@ The initial renderer uses a lightweight pass graph:
 
 ## Known Gaps
 
-- Deferred rendering is still at the planning-contract stage.
+- Deferred rendering does not yet cover textured materials, custom WGSL materials, SDF primitives,
+  or volume primitives.
 - SDF execution currently supports sphere and box primitives only; broader graph/operator coverage
   is still pending.

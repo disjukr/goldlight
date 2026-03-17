@@ -34,8 +34,8 @@ The current TypeScript surface is:
   executable for the current release
 - `unsupported`: the renderer does not expose this feature and callers should fail preflight
 
-`planned` is intentionally visible in descriptors so the deferred pipeline can publish its intended
-surface area without pretending the implementation is ready.
+`planned` remains available for future descriptors, but current renderer declarations now prefer
+`supported` or `unsupported` where execution behavior is concrete.
 
 ## Validation Contract
 
@@ -69,7 +69,8 @@ Each issue should include:
 
 Current requirement keys include renderer execution gates such as `mesh-execution`, shape-specific
 keys such as `sdf-op:box`, and binding-specific keys such as `shader:shader:missing`,
-`texture-semantic:normal`, `texture-residency:baseColor:texture`, or `vertex-attribute:TEXCOORD_0`.
+`texture-semantic:normal`, `texture-residency:baseColor:texture`, `vertex-attribute:TEXCOORD_0`, or
+`vertex-attribute:NORMAL`.
 
 Fatal render entry points should throw with the aggregated issue list when any incompatibility is
 present. Non-fatal tooling may inspect the issue list directly for UI, tests, or diagnostics.
@@ -93,14 +94,19 @@ in the forward renderer.
 
 The deferred renderer declares:
 
-- `mesh: planned`
-- `sdf: planned`
-- `volume: planned`
+- `mesh: supported`
+- `sdf: unsupported`
+- `volume: unsupported`
 - `builtInMaterialKinds: ['unlit']`
-- `customShaders: planned`
+- `customShaders: unsupported`
 
-That descriptor is a planning contract only. Callers should not expect deferred execution to accept
-scenes yet, but the declaration makes the intended support matrix explicit for future work.
+This now matches the implemented minimal deferred path:
+
+- mesh nodes are accepted when they provide `POSITION` and `NORMAL`
+- built-in `unlit` material uniforms are written into a small G-buffer and resolved through a
+  fullscreen lighting pass
+- SDF, volume, custom WGSL materials, and textured `baseColor` sampling remain outside the deferred
+  execution surface and fail preflight with explicit diagnostics
 
 ## Relationship To Other Specs
 

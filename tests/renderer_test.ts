@@ -110,13 +110,16 @@ Deno.test('forward renderer omits raymarch pass when scene has no sdf or volume 
   assertEquals(frame.passes.map((pass) => pass.id), ['mesh', 'present']);
 });
 
-Deno.test('deferred renderer keeps raymarch pass when scene has an sdf node', () => {
+Deno.test('deferred renderer plans only the implemented mesh passes', () => {
   let scene = createSceneIr('scene');
-  scene = {
-    ...scene,
-    sdfPrimitives: [{ id: 'sdf-0', op: 'sphere', parameters: {} }],
-  };
-  scene = appendNode(scene, createNode('node-0', { sdfId: 'sdf-0' }));
+  scene = appendMesh(scene, {
+    id: 'mesh-0',
+    attributes: [
+      { semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0, 0, 1, 0] },
+      { semantic: 'NORMAL', itemSize: 3, values: [0, 0, 1, 0, 0, 1, 0, 0, 1] },
+    ],
+  });
+  scene = appendNode(scene, createNode('node-0', { meshId: 'mesh-0' }));
 
   const frame = planFrame(
     createDeferredRenderer(),
@@ -128,7 +131,6 @@ Deno.test('deferred renderer keeps raymarch pass when scene has an sdf node', ()
     'depth-prepass',
     'gbuffer',
     'lighting',
-    'raymarch',
     'present',
   ]);
 });
@@ -484,28 +486,70 @@ Deno.test('assertRendererSceneCapabilities fails early for non-resident built-in
   );
 });
 
-Deno.test('planned deferred renderer features are rejected for execution preflight', () => {
+Deno.test('deferred renderer accepts minimal mesh/unlit scenes with normals', () => {
   let scene = createSceneIr('scene');
-  scene = appendNode(scene, createNode('mesh-node'));
   scene = appendMesh(scene, {
     id: 'mesh-0',
-    attributes: [{ semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0, 0, 1, 0] }],
+    attributes: [
+      { semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0, 0, 1, 0] },
+      { semantic: 'NORMAL', itemSize: 3, values: [0, 0, 1, 0, 0, 1, 0, 0, 1] },
+    ],
   });
-  scene = {
-    ...scene,
-    nodes: [createNode('mesh-node', { meshId: 'mesh-0' })],
-    rootNodeIds: ['mesh-node'],
-  };
+  scene = appendNode(scene, createNode('mesh-node', { meshId: 'mesh-0' }));
 
   const issues = collectRendererCapabilityIssues(
     createDeferredRenderer(),
     evaluateScene(scene, { timeMs: 0 }),
   );
 
-  assertEquals(issues, [{
-    nodeId: 'mesh-node',
-    feature: 'mesh',
-    requirement: 'mesh-execution',
-    message: 'renderer "deferred" does not support mesh execution',
-  }]);
+  assertEquals(issues, []);
+});
+
+Deno.test('deferred renderer rejects missing normals and textured unlit materials during preflight', () => {
+  let scene = createSceneIr('scene');
+  scene = appendMaterial(scene, {
+    id: 'material-textured',
+    kind: 'unlit',
+    textures: [{
+      id: 'texture-0',
+      assetId: 'image-0',
+      semantic: 'baseColor',
+      colorSpace: 'srgb',
+      sampler: 'linear-repeat',
+    }],
+    parameters: {
+      color: { x: 1, y: 1, z: 1, w: 1 },
+    },
+  });
+  scene = appendMesh(scene, {
+    id: 'mesh-0',
+    materialId: 'material-textured',
+    attributes: [
+      { semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0, 0, 1, 0] },
+      { semantic: 'TEXCOORD_0', itemSize: 2, values: [0, 0, 1, 0, 0, 1] },
+    ],
+  });
+  scene = appendNode(scene, createNode('mesh-node', { meshId: 'mesh-0' }));
+
+  const issues = collectRendererCapabilityIssues(
+    createDeferredRenderer(),
+    evaluateScene(scene, { timeMs: 0 }),
+  );
+
+  assertEquals(issues, [
+    {
+      nodeId: 'mesh-node',
+      feature: 'mesh',
+      requirement: 'vertex-attribute:NORMAL',
+      message:
+        'renderer "deferred" requires NORMAL vertex data on node "mesh-node" for deferred lighting',
+    },
+    {
+      nodeId: 'mesh-node',
+      feature: 'material-binding',
+      requirement: 'texture-semantic:baseColor',
+      message:
+        'renderer "deferred" does not support baseColor textures in the minimal deferred path for material "material-textured"',
+    },
+  ]);
 });

@@ -259,7 +259,17 @@ Deno.test('renderDeferredFrame encodes depth, gbuffer, and lighting passes for m
       { semantic: 'NORMAL', itemSize: 3, values: [0, 0, 1, 0, 0, 1, 0, 0, 1] },
     ],
   });
-  scene = appendNode(scene, createNode('node-deferred', { meshId: 'mesh-deferred' }));
+  scene = appendNode(
+    scene,
+    createNode('node-deferred', {
+      meshId: 'mesh-deferred',
+      transform: {
+        translation: { x: 0, y: 0, z: 0 },
+        rotation: { x: 0, y: 0, z: 0, w: 1 },
+        scale: { x: 2, y: 3, z: 4 },
+      },
+    }),
+  );
 
   runtimeResidency.geometry.set('mesh-deferred', {
     meshId: 'mesh-deferred',
@@ -293,6 +303,60 @@ Deno.test('renderDeferredFrame encodes depth, gbuffer, and lighting passes for m
   );
   assertEquals(mocks.bindGroupEntries.length, 4);
   assertEquals(mocks.samplers.length, 1);
+  const deferredVertexBuffers = mocks.pipelines[1].descriptor.vertex?.buffers ?? [];
+  assertEquals(deferredVertexBuffers.length, 2);
+  assertEquals(
+    deferredVertexBuffers.map((buffer) => buffer?.attributes.length ?? 0),
+    [1, 1],
+  );
+  const depthTransformWrite = mocks.writeBufferCalls.find((call) => call.bytes.byteLength === 64);
+  const gbufferTransformWrite = mocks.writeBufferCalls.find((call) =>
+    call.bytes.byteLength === 128
+  );
+  assertEquals(
+    Array.from(new Float32Array(depthTransformWrite?.bytes.buffer.slice(0) ?? new ArrayBuffer(0))),
+    [2, 0, 0, 0, 0, 3, 0, 0, 0, 0, 4, 0, 0, 0, 0, 1],
+  );
+  const expectedDeferredTransform = Float32Array.from([
+    2,
+    0,
+    0,
+    0,
+    0,
+    3,
+    0,
+    0,
+    0,
+    0,
+    4,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0.5,
+    0,
+    0,
+    0,
+    0,
+    1 / 3,
+    0,
+    0,
+    0,
+    0,
+    0.25,
+    0,
+    0,
+    0,
+    0,
+    1,
+  ]);
+  assertEquals(
+    Array.from(
+      new Float32Array(gbufferTransformWrite?.bytes.buffer.slice(0) ?? new ArrayBuffer(0)),
+    ),
+    Array.from(expectedDeferredTransform),
+  );
 });
 
 Deno.test('renderForwardFrame encodes a dedicated sdf raymarch pass for supported sphere and box nodes', () => {

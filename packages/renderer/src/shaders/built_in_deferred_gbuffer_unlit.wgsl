@@ -33,6 +33,6 @@ fn vsMain(@location(0) position: vec3<f32>, @location(1) normal: vec3<f32>) -> V
 fn fsMain(in: VsOut) -> GbufferOut {
   var out: GbufferOut;
   out.albedo = material.values[0];
-  out.normal = vec4<f32>((normalize(in.normal) * 0.5) + vec3<f32>(0.5), 1.0);
+  out.normal = vec4<f32>((normalize(in.normal) * 0.5) + vec3<f32>(0.5), 0.0);
   return out;
 }

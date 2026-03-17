@@ -102,23 +102,25 @@ The deferred renderer declares:
 - `mesh: supported`
 - `sdf: supported`
 - `volume: supported`
-- `light: unsupported`
-- `builtInMaterialKinds: ['unlit']`
+- `light: supported`
+- `builtInMaterialKinds: ['unlit', 'lit']`
 - `customShaders: supported`
 
 This now matches the implemented minimal deferred path:
 
 - mesh nodes are accepted when they provide `POSITION` and `NORMAL`
-- built-in `unlit` material uniforms are written into a small G-buffer and resolved through a
-  fullscreen lighting pass
+- built-in `unlit` material uniforms are written into a small G-buffer and bypass the lighting
+  resolve during fullscreen composition
+- built-in `lit` material uniforms are written into the same G-buffer and consume first-class
+  directional light nodes during the fullscreen lighting resolve
 - built-in `unlit` materials may also sample resident `baseColor` textures when meshes provide
   `TEXCOORD_0`
 - registered custom WGSL materials may also execute in the G-buffer pass when they provide
   compatible transform bindings, fragment outputs, and declared material bindings
 - SDF sphere/box primitives and resident volumes are composited afterward through the existing
   raymarch passes, so deferred frames can execute hybrid mesh-plus-raymarch scenes
-- scene lights and built-in `lit` materials still remain outside the deferred execution surface and
-  fail preflight with explicit diagnostics
+- built-in `lit` materials still reject texture bindings until a deferred textured-lighting contract
+  exists
 
 ## Relationship To Other Specs
 

@@ -24,6 +24,9 @@ import builtInDeferredGbufferUnlitShader from './shaders/built_in_deferred_gbuff
 import builtInDeferredGbufferTexturedUnlitShader from './shaders/built_in_deferred_gbuffer_unlit_textured.wgsl' with {
   type: 'text',
 };
+import builtInDeferredGbufferLitShader from './shaders/built_in_deferred_gbuffer_lit.wgsl' with {
+  type: 'text',
+};
 import builtInDeferredLightingShader from './shaders/built_in_deferred_lighting.wgsl' with {
   type: 'text',
 };
@@ -202,6 +205,7 @@ const builtInTexturedUnlitProgramId = 'built-in:unlit-textured';
 const builtInDeferredDepthPrepassProgramId = 'built-in:deferred-depth-prepass';
 const builtInDeferredGbufferUnlitProgramId = 'built-in:deferred-gbuffer-unlit';
 const builtInDeferredGbufferTexturedUnlitProgramId = 'built-in:deferred-gbuffer-unlit-textured';
+const builtInDeferredGbufferLitProgramId = 'built-in:deferred-gbuffer-lit';
 const builtInDeferredLightingProgramId = 'built-in:deferred-lighting';
 const builtInSdfRaymarchProgramId = 'built-in:sdf-raymarch';
 const builtInVolumeRaymarchProgramId = 'built-in:volume-raymarch';
@@ -506,6 +510,36 @@ const builtInDeferredGbufferTexturedUnlitProgram: MaterialProgram = {
   ],
 };
 
+const builtInDeferredGbufferLitProgram: MaterialProgram = {
+  id: builtInDeferredGbufferLitProgramId,
+  label: 'Built-in Deferred G-buffer Lit',
+  wgsl: builtInDeferredGbufferLitShader,
+  vertexEntryPoint: 'vsMain',
+  fragmentEntryPoint: 'fsMain',
+  usesMaterialBindings: true,
+  usesTransformBindings: true,
+  materialBindings: [{
+    kind: 'uniform',
+    binding: 0,
+  }],
+  vertexAttributes: [
+    {
+      semantic: 'POSITION',
+      shaderLocation: 0,
+      format: 'float32x3',
+      offset: 0,
+      arrayStride: 12,
+    },
+    {
+      semantic: 'NORMAL',
+      shaderLocation: 1,
+      format: 'float32x3',
+      offset: 0,
+      arrayStride: 12,
+    },
+  ],
+};
+
 const createVertexBufferLayouts = (
   attributes: readonly MaterialVertexAttribute[],
 ): GPUVertexBufferLayout[] => {
@@ -674,8 +708,8 @@ export const createDeferredRenderer = (label = 'deferred'): Renderer => ({
     mesh: 'supported',
     sdf: 'supported',
     volume: 'supported',
-    light: 'unsupported',
-    builtInMaterialKinds: ['unlit'],
+    light: 'supported',
+    builtInMaterialKinds: ['unlit', 'lit'],
     customShaders: 'supported',
   },
   passes: [
@@ -781,7 +815,11 @@ export const collectRendererCapabilityIssues = (
       );
     }
 
-    if (node.light && renderer.capabilities.light !== 'supported') {
+    if (
+      node.light &&
+      renderer.capabilities.light !== 'supported' &&
+      renderer.kind !== 'deferred'
+    ) {
       pushIssue(
         'light',
         'light-execution',
@@ -1638,6 +1676,10 @@ const resolveDeferredGbufferProgram = (
     return resolveMaterialProgram(materialRegistry, material);
   }
 
+  if (material.kind === 'lit') {
+    return builtInDeferredGbufferLitProgram;
+  }
+
   const baseColorTexture = getBaseColorTextureResidency(residency, material);
   return baseColorTexture && geometry.attributeBuffers.TEXCOORD_0
     ? builtInDeferredGbufferTexturedUnlitProgram
@@ -1879,6 +1921,7 @@ export const renderDeferredFrame = (
     residency,
     binding.target.format,
   );
+  const directionalLights = extractDirectionalLightItems(evaluatedScene);
 
   let drawCount = 0;
 
@@ -2084,6 +2127,25 @@ export const renderDeferredFrame = (
           resource: gbufferNormalView,
         },
       ],
+    }),
+  );
+  const lightingData = createDirectionalLightUniformData(directionalLights);
+  const lightingBuffer = context.device.createBuffer({
+    label: 'deferred-lighting',
+    size: lightingData.byteLength,
+    usage: uniformUsage | bufferCopyDstUsage,
+  });
+  context.queue.writeBuffer(lightingBuffer, 0, toBufferSource(lightingData));
+  lightingPass.setBindGroup(
+    1,
+    context.device.createBindGroup({
+      layout: lightingPipeline.getBindGroupLayout(1),
+      entries: [{
+        binding: 0,
+        resource: {
+          buffer: lightingBuffer,
+        },
+      }],
     }),
   );
   lightingPass.draw(3, 1, 0, 0);

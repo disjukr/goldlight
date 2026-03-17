@@ -1,5 +1,6 @@
 struct MeshTransform {
   world: mat4x4<f32>,
+  normalMatrix: mat4x4<f32>,
 };
 
 struct MaterialUniforms {
@@ -22,7 +23,7 @@ struct GbufferOut {
 @vertex
 fn vsMain(@location(0) position: vec3<f32>, @location(1) normal: vec3<f32>) -> VsOut {
   var out: VsOut;
-  let worldNormal = normalize((meshTransform.world * vec4<f32>(normal, 0.0)).xyz);
+  let worldNormal = normalize((meshTransform.normalMatrix * vec4<f32>(normal, 0.0)).xyz);
   out.position = meshTransform.world * vec4<f32>(position, 1.0);
   out.normal = worldNormal;
   return out;

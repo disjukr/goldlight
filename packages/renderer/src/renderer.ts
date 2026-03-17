@@ -298,19 +298,13 @@ const builtInDeferredGbufferUnlitProgram: MaterialProgram = {
 const createVertexBufferLayouts = (
   attributes: readonly MaterialVertexAttribute[],
 ): GPUVertexBufferLayout[] => {
-  const grouped = new Map<number, MaterialVertexAttribute[]>();
-
-  for (const attribute of attributes) {
-    grouped.set(attribute.arrayStride, [...(grouped.get(attribute.arrayStride) ?? []), attribute]);
-  }
-
-  return [...grouped.entries()].map(([arrayStride, strideAttributes]) => ({
-    arrayStride,
-    attributes: strideAttributes.map((attribute) => ({
+  return attributes.map((attribute) => ({
+    arrayStride: attribute.arrayStride,
+    attributes: [{
       shaderLocation: attribute.shaderLocation,
       offset: attribute.offset,
       format: attribute.format,
-    })),
+    }],
   }));
 };
 
@@ -1170,6 +1164,34 @@ const createVolumeUniformData = (item: VolumePassItem): Float32Array => {
 const createMeshTransformUniformData = (worldMatrix: readonly number[]): Float32Array =>
   Float32Array.from(worldMatrix.slice(0, 16));
 
+const createDeferredNormalMatrix = (worldMatrix: readonly number[]): readonly number[] => {
+  const inverseWorld = invertAffineMatrix(worldMatrix);
+  return [
+    inverseWorld[0] ?? 0,
+    inverseWorld[4] ?? 0,
+    inverseWorld[8] ?? 0,
+    0,
+    inverseWorld[1] ?? 0,
+    inverseWorld[5] ?? 0,
+    inverseWorld[9] ?? 0,
+    0,
+    inverseWorld[2] ?? 0,
+    inverseWorld[6] ?? 0,
+    inverseWorld[10] ?? 0,
+    0,
+    0,
+    0,
+    0,
+    1,
+  ];
+};
+
+const createDeferredMeshTransformUniformData = (worldMatrix: readonly number[]): Float32Array =>
+  Float32Array.from([
+    ...worldMatrix.slice(0, 16),
+    ...createDeferredNormalMatrix(worldMatrix),
+  ]);
+
 export const renderSdfRaymarchPass = (
   context: GpuRenderExecutionContext,
   encoder: GPUCommandEncoder,
@@ -1583,7 +1605,7 @@ export const renderDeferredFrame = (
     gbufferPass.setVertexBuffer(0, positionBuffer);
     gbufferPass.setVertexBuffer(1, normalBuffer);
 
-    const transformData = createMeshTransformUniformData(node.worldMatrix);
+    const transformData = createDeferredMeshTransformUniformData(node.worldMatrix);
     const transformBuffer = context.device.createBuffer({
       label: `${node.node.id}:deferred-gbuffer-transform`,
       size: transformData.byteLength,

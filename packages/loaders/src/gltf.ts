@@ -249,6 +249,11 @@ const tryParseUrl = (value: string, baseUri?: string): URL | undefined => {
 };
 
 const resolveUri = (uri: string, baseUri?: string): string => {
+  const absoluteUrl = tryParseUrl(uri);
+  if (absoluteUrl) {
+    return absoluteUrl.toString();
+  }
+
   if (!baseUri) {
     return uri;
   }

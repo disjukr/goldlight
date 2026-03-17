@@ -330,6 +330,21 @@ Deno.test('listExternalGltfResourceUris normalizes relative URIs against URL and
       join(Deno.cwd(), 'fixtures', 'textures', 'albedo.png'),
     ],
   );
+
+  assertEquals(
+    listExternalGltfResourceUris({
+      buffers: [
+        { uri: 'geometry.bin', byteLength: 4 },
+        { uri: 'https://example.test/shared.bin', byteLength: 2 },
+      ],
+    }, {
+      baseUri: join(Deno.cwd(), 'fixtures', 'scene.gltf'),
+    }),
+    [
+      join(Deno.cwd(), 'fixtures', 'geometry.bin'),
+      'https://example.test/shared.bin',
+    ],
+  );
 });
 
 Deno.test('fetchGltfExternalResources loads every external buffer and image once', async () => {

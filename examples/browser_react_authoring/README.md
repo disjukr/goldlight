@@ -1,0 +1,29 @@
+# Browser React Authoring Example
+
+This example shows the intended bridge between `@rieul3d/react` and the existing runtime layers. It
+authors a scene tree with the React package, lowers that tree into Scene IR node data, then renders
+the result through the browser forward pipeline.
+
+Build the example bundle:
+
+```sh
+deno task example:browser:react:build
+```
+
+Serve the repository root as static files:
+
+```sh
+deno task example:browser:serve
+```
+
+Then open:
+
+```text
+http://localhost:8000/examples/browser_react_authoring/index.html
+```
+
+Related references:
+
+- [`../../examples/README.md`](../README.md)
+- [`../../docs/specs/react-authoring.md`](../../docs/specs/react-authoring.md)
+- [`../../docs/specs/rendering.md`](../../docs/specs/rendering.md)

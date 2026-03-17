@@ -17,6 +17,8 @@ Use this page as the main navigation hub.
 - Review accepted architecture constraints: [`adr/README.md`](./adr/README.md)
 - Run the browser and native examples, including the textured browser workflow:
   [`../examples/README.md`](../examples/README.md)
+- Review the React authoring browser example:
+  [`../examples/browser_react_authoring/README.md`](../examples/browser_react_authoring/README.md)
 - Run the headless snapshot PNG workflow:
   [`../examples/headless_snapshot/README.md`](../examples/headless_snapshot/README.md)
 

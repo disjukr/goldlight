@@ -41,6 +41,7 @@ Implemented today:
   contract
 - browser canvas examples, Windows BYOW native textured demo, headless PNG snapshot workflow, and
   PNG snapshot encoding
+- a browser React authoring example that lowers declarative nodes into Scene IR before rendering
 - fixture-backed golden snapshot regression tests for clear, mesh, SDF, volume, and recovery rebuild
   renders, including guards against raymarch fixtures collapsing back to clear-only output
 - device-loss observation and residency rebuild helpers plus end-to-end offscreen recovery coverage
@@ -68,8 +69,9 @@ Read in this order when onboarding:
 4. [`docs/specs/rendering.md`](./docs/specs/rendering.md)
 5. [`examples/browser_forward/README.md`](./examples/browser_forward/README.md)
 6. [`examples/browser_textured_forward/README.md`](./examples/browser_textured_forward/README.md)
-7. [`examples/byow_native_demo/README.md`](./examples/byow_native_demo/README.md)
-8. [`examples/headless_snapshot/README.md`](./examples/headless_snapshot/README.md)
+7. [`examples/browser_react_authoring/README.md`](./examples/browser_react_authoring/README.md)
+8. [`examples/byow_native_demo/README.md`](./examples/byow_native_demo/README.md)
+9. [`examples/headless_snapshot/README.md`](./examples/headless_snapshot/README.md)
 
 ## Tasks
 
@@ -82,6 +84,7 @@ Read in this order when onboarding:
 - `deno task example:headless:png`: render a headless frame and write
   `examples/headless_snapshot/out/forward.png`
 - `deno task example:browser:build`: bundle the browser forward-rendering example
+- `deno task example:browser:react:build`: bundle the React authoring browser example
 - `deno task example:browser:textured:build`: bundle the textured browser forward example
 - `deno task example:browser:serve`: serve the repository for local browser testing
 - `deno task example:byow:check`: type-check the Windows BYOW native demo

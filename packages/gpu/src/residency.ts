@@ -151,8 +151,13 @@ const createAttributeArray = (attribute: MeshAttribute): Float32Array =>
 
 const createIndexArray = (indices: readonly number[]): Uint32Array => Uint32Array.from(indices);
 
-const toArrayBuffer = (view: ArrayBufferView): ArrayBuffer =>
-  view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength) as ArrayBuffer;
+const toBufferSource = (view: ArrayBufferView): Uint8Array<ArrayBuffer> => {
+  const buffer = view.buffer.slice(
+    view.byteOffset,
+    view.byteOffset + view.byteLength,
+  ) as ArrayBuffer;
+  return new Uint8Array(buffer);
+};
 
 const getVertexCount = (attribute: MeshAttribute): number =>
   attribute.itemSize > 0 ? Math.floor(attribute.values.length / attribute.itemSize) : 0;
@@ -182,7 +187,7 @@ export const uploadMeshResidency = (
       size: data.byteLength,
       usage: vertexUsage | bufferCopyDstUsage,
     });
-    context.queue.writeBuffer(buffer, 0, toArrayBuffer(data));
+    context.queue.writeBuffer(buffer, 0, toBufferSource(data));
     attributeBuffers[attribute.semantic] = buffer;
   }
 
@@ -194,7 +199,7 @@ export const uploadMeshResidency = (
       size: indexData.byteLength,
       usage: indexUsage | bufferCopyDstUsage,
     });
-    context.queue.writeBuffer(indexBuffer, 0, toArrayBuffer(indexData));
+    context.queue.writeBuffer(indexBuffer, 0, toBufferSource(indexData));
   }
 
   return {
@@ -280,7 +285,7 @@ export const uploadMaterialResidency = (
     size: plan.byteLength,
     usage: uniformUsage | bufferCopyDstUsage,
   });
-  context.queue.writeBuffer(uniformBuffer, 0, toArrayBuffer(plan.uniformData));
+  context.queue.writeBuffer(uniformBuffer, 0, toBufferSource(plan.uniformData));
 
   return {
     materialId: material.id,
@@ -420,7 +425,7 @@ export const uploadTextureResidency = (
 
   context.queue.writeTexture(
     { texture },
-    toArrayBuffer(imageAsset.bytes),
+    toBufferSource(imageAsset.bytes),
     {
       offset: 0,
       bytesPerRow: plan.bytesPerRow,
@@ -526,7 +531,7 @@ export const uploadVolumeResidency = (
 
   context.queue.writeTexture(
     { texture },
-    toArrayBuffer(volumeAsset.bytes),
+    toBufferSource(volumeAsset.bytes),
     {
       offset: 0,
       bytesPerRow: plan.bytesPerRow,

@@ -58,6 +58,14 @@ The initial renderer uses a lightweight pass graph:
 - Custom WGSL programs that want the same evaluated mesh transform upload should register with
   `usesTransformBindings: true` and match the same `@group(0)` transform contract.
 
+## Headless PNG Workflow
+
+- `deno task example:headless:png` renders an offscreen forward frame and writes a PNG to
+  `examples/headless_snapshot/out/forward.png`.
+- The workflow reuses `requestGpuContext`, `rebuildRuntimeResidency`, `renderForwardSnapshot`, and
+  `encodePngRgba` instead of adding a separate renderer path.
+- The command accepts optional output path, width, and height arguments for ad hoc captures.
+
 ## Known Gaps
 
 - Deferred rendering is still at the planning-contract stage.

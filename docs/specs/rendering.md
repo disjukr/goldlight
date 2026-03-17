@@ -51,8 +51,8 @@ The initial renderer uses a lightweight pass graph:
   custom WGSL path that samples texture residency through declared material bindings.
 - The native BYOW demo uses the same forward renderer/runtime residency path on an SDL2-backed
   surface target instead of a browser canvas.
-- Fixture-backed golden snapshot tests cover clear-only, mesh, SDF, volume, and recovery-rebuild
-  headless frames.
+- Fixture-backed golden snapshot tests cover clear-only, mesh, sphere/box SDF, volume, and
+  recovery-rebuild headless frames.
 - Raymarch golden tests also assert that SDF/volume snapshots differ from the clear-only frame so
   unresolved shader or uniform regressions do not silently lock in blank fixtures.
 - Golden fixtures can be refreshed intentionally with

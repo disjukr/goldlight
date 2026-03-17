@@ -10,6 +10,7 @@ import { createHeadlessTarget, encodePngRgba } from '@rieul3d/platform';
 import { renderForwardSnapshot } from '@rieul3d/renderer';
 import {
   createClearScene,
+  createSdfBoxScene,
   createSdfSphereScene,
   createSolidQuadScene,
   createVolumeScene,
@@ -98,5 +99,6 @@ const renderRecoveryFixture = async (
 await renderFixture('clear-only-frame', createClearScene);
 await renderFixture('solid-quad-frame', createSolidQuadScene);
 await renderFixture('sdf-sphere-frame', createSdfSphereScene);
+await renderFixture('sdf-box-frame', createSdfBoxScene);
 await renderFixture('volume-frame', createVolumeScene);
 await renderRecoveryFixture('recovery-volume-frame', createVolumeScene);

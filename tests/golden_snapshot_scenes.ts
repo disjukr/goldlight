@@ -88,6 +88,36 @@ export const createSdfSphereScene = (): GoldenSnapshotScenario => {
   };
 };
 
+export const createSdfBoxScene = (): GoldenSnapshotScenario => {
+  let scene = createSceneIr('golden-sdf-box-scene');
+  scene = {
+    ...scene,
+    sdfPrimitives: [{
+      id: 'sdf-box',
+      op: 'box',
+      parameters: {
+        size: { x: 0.52, y: 0.32, z: 0.28, w: 0 },
+        color: { x: 1, y: 0.45, z: 0.18, w: 1 },
+      },
+    }],
+  };
+  scene = appendNode(
+    scene,
+    createNode('node-sdf-box', {
+      sdfId: 'sdf-box',
+      transform: {
+        translation: { x: 0.08, y: -0.04, z: 0 },
+        rotation: { x: 0, y: 0, z: 0.38268343, w: 0.92387953 },
+        scale: { x: 1.2, y: 0.9, z: 1.1 },
+      },
+    }),
+  );
+  return {
+    scene,
+    assets: emptyAssets(),
+  };
+};
+
 const createVolumeDensityBytes = (): Uint8Array => {
   const bytes = new Uint8Array(4 * 4 * 4);
   let index = 0;

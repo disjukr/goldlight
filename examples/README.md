@@ -21,6 +21,8 @@ Runnable examples live here. Each example should document how to build, serve, o
 
 - Run the native BYOW demo: `deno task example:byow:run`
 - Type-check the native BYOW demo: `deno task example:byow:check`
+- Run the BYOW triangle smoke test: `deno task example:byow:triangle:run`
+- Type-check the BYOW triangle smoke test: `deno task example:byow:triangle:check`
 - Build the browser bundle: `deno task example:browser:build`
 - Build the React authoring browser bundle: `deno task example:browser:react:build`
 - Build the textured browser bundle: `deno task example:browser:textured:build`

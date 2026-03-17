@@ -32,6 +32,8 @@
     "example:headless:png": "deno run -A --unstable-webgpu --unstable-raw-imports ./scripts/render_headless_snapshot.ts",
     "example:byow:check": "deno check --unstable-ffi --unstable-webgpu --unstable-raw-imports ./examples/byow_native_demo/main.ts",
     "example:byow:run": "deno run -A --unstable-ffi --unstable-webgpu --unstable-raw-imports ./scripts/run_byow_native_demo.ts",
+    "example:byow:triangle:check": "deno check --unstable-ffi --unstable-webgpu --unstable-raw-imports ./examples/byow_triangle/main.ts",
+    "example:byow:triangle:run": "deno run -A --unstable-ffi --unstable-webgpu --unstable-raw-imports ./scripts/run_byow_triangle.ts",
     "example:browser:build": "deno bundle --platform browser --unstable-raw-imports -o ./examples/browser_forward/dist/main.js ./examples/browser_forward/main.ts",
     "example:browser:react:build": "deno bundle --platform browser --unstable-raw-imports -o ./examples/browser_react_authoring/dist/main.js ./examples/browser_react_authoring/main.ts",
     "example:browser:textured:build": "deno bundle --platform browser --unstable-raw-imports -o ./examples/browser_textured_forward/dist/main.js ./examples/browser_textured_forward/main.ts",

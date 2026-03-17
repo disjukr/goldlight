@@ -50,7 +50,8 @@ Implemented today:
   PNG snapshot encoding
 - Windows BYOW primitives demo using `@rieul3d/primitives`, a reusable BYOW runner script, and a
   custom lit shader for mesh normals
-- a browser React authoring example that lowers declarative nodes into Scene IR before rendering
+- a browser React authoring example that lowers JSX-authored scene nodes into Scene IR before
+  rendering
 - fixture-backed golden snapshot regression tests for clear, mesh, sphere/box SDF, volume, and
   recovery rebuild renders, including guards against raymarch fixtures collapsing back to clear-only
   output

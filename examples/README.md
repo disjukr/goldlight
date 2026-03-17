@@ -11,7 +11,7 @@ Runnable examples live here. Each example should document how to build, serve, o
   path
 - [`browser_forward/README.md`](./browser_forward/README.md): browser-based forward rendering flow
 - [`browser_react_authoring/README.md`](./browser_react_authoring/README.md): browser forward flow
-  with scene nodes authored through `@rieul3d/react`
+  with scene nodes authored through `@rieul3d/react` TSX
 - [`browser_textured_forward/README.md`](./browser_textured_forward/README.md): browser forward flow
   with uploaded texture residency and built-in unlit sampling
 - [`browser_custom_textured_forward/README.md`](./browser_custom_textured_forward/README.md):

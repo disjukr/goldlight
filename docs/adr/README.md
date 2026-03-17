@@ -10,6 +10,8 @@ supersedes them.
   types
 - [`0003-functional-first.md`](./0003-functional-first.md): public APIs stay data-oriented and
   functional-first
+- [`0004-react-jsx-authoring.md`](./0004-react-jsx-authoring.md): React package owns JSX authoring
+  while core runtime state stays outside React
 
 ## Related References
 

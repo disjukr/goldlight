@@ -1,3 +1,5 @@
+/** @jsxImportSource @rieul3d/react */
+/** @jsxRuntime automatic */
 /// <reference lib="dom" />
 
 import { evaluateScene } from '../../packages/core/mod.ts';
@@ -9,7 +11,7 @@ import {
 } from '../../packages/gpu/mod.ts';
 import { appendMesh, createSceneIr } from '../../packages/ir/mod.ts';
 import { createBrowserSurfaceTarget } from '../../packages/platform/mod.ts';
-import { authoringTreeToSceneIr, createAuthoringElement } from '../../packages/react/mod.ts';
+import { authoringTreeToSceneIr } from '../../packages/react/mod.ts';
 import { createMaterialRegistry, renderForwardFrame } from '../../packages/renderer/mod.ts';
 
 const canvas = document.querySelector<HTMLCanvasElement>('#app');
@@ -20,13 +22,14 @@ if (!canvas) {
 canvas.width = 640;
 canvas.height = 480;
 
+const TriangleNode = (props: Readonly<{ id: string }>) => (
+  <node id={props.id} name='Authored Triangle' meshId='triangle' />
+);
+
 const authoredScene = authoringTreeToSceneIr(
-  createAuthoringElement('scene', 'react-browser-authoring', {}, [
-    createAuthoringElement('node', 'triangle-node', {
-      name: 'Authored Triangle',
-      meshId: 'triangle',
-    }),
-  ]),
+  <scene id='react-browser-authoring'>
+    <TriangleNode id='triangle-node' />
+  </scene>,
 );
 
 const scene = appendMesh(createSceneIr(authoredScene.id), {

@@ -20,6 +20,8 @@
     "@rieul3d/primitives": "./packages/primitives/mod.ts",
     "@rieul3d/loaders": "./packages/loaders/mod.ts",
     "@rieul3d/react": "./packages/react/mod.ts",
+    "@rieul3d/react/jsx-runtime": "./packages/react/jsx-runtime.ts",
+    "@rieul3d/react/jsx-dev-runtime": "./packages/react/jsx-dev-runtime.ts",
     "@rieul3d/platform": "./packages/platform/mod.ts"
   },
   "tasks": {
@@ -39,7 +41,7 @@
     "example:byow:primitives:check": "deno check --unstable-ffi --unstable-webgpu --unstable-raw-imports ./examples/byow_primitives_demo/main.ts",
     "example:byow:primitives:run": "deno run -A --unstable-ffi --unstable-webgpu --unstable-raw-imports ./scripts/run_byow_example.ts ./examples/byow_primitives_demo/main.ts",
     "example:browser:build": "deno bundle --platform browser --unstable-raw-imports -o ./examples/browser_forward/dist/main.js ./examples/browser_forward/main.ts",
-    "example:browser:react:build": "deno bundle --platform browser --unstable-raw-imports -o ./examples/browser_react_authoring/dist/main.js ./examples/browser_react_authoring/main.ts",
+    "example:browser:react:build": "deno bundle --platform browser --unstable-raw-imports -o ./examples/browser_react_authoring/dist/main.js ./examples/browser_react_authoring/main.tsx",
     "example:browser:textured:build": "deno bundle --platform browser --unstable-raw-imports -o ./examples/browser_textured_forward/dist/main.js ./examples/browser_textured_forward/main.ts",
     "example:browser:custom-textured:build": "deno bundle --platform browser --unstable-raw-imports -o ./examples/browser_custom_textured_forward/dist/main.js ./examples/browser_custom_textured_forward/main.ts",
     "example:browser:serve": "deno run -A jsr:@std/http@1/file-server ."

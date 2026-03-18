@@ -288,11 +288,25 @@ const normalizeRenderable = (
   return createAuthoringElement('fragment', fallbackId, {}, []);
 };
 
-const normalizeVec3Like = (value: Vec3Like): Vec3 =>
-  Array.isArray(value) ? { x: value[0], y: value[1], z: value[2] } : value as Vec3;
+const normalizeVec3Like = (value: Vec3Like): Vec3 => {
+  if (!Array.isArray(value)) {
+    return value as Vec3;
+  }
+  if (value.length !== 3) {
+    throw new Error(`position/scale shorthand must contain exactly 3 numbers, received ${value.length}`);
+  }
+  return { x: value[0], y: value[1], z: value[2] };
+};
 
-const normalizeQuatLike = (value: QuatLike): Quat =>
-  Array.isArray(value) ? { x: value[0], y: value[1], z: value[2], w: value[3] } : value as Quat;
+const normalizeQuatLike = (value: QuatLike): Quat => {
+  if (!Array.isArray(value)) {
+    return value as Quat;
+  }
+  if (value.length !== 4) {
+    throw new Error(`rotation shorthand must contain exactly 4 numbers, received ${value.length}`);
+  }
+  return { x: value[0], y: value[1], z: value[2], w: value[3] };
+};
 
 const normalizeNodeProps = (props: NodeAuthoringProps): NodeAuthoringProps => {
   const { position, rotation, scale, transform, ...rest } = props;

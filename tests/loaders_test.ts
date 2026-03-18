@@ -90,6 +90,70 @@ Deno.test('loadStlFromText builds an indexed mesh scene', () => {
   assertEquals(scene.meshes[0].indices, [0, 1, 2]);
 });
 
+Deno.test('loadPlyFromText accepts obj_info headers and triangulates faces', () => {
+  const scene = loadPlyFromText(
+    [
+      'ply',
+      'format ascii 1.0',
+      'comment generated fixture',
+      'obj_info exported-by fixture',
+      'element vertex 4',
+      'property float x',
+      'property float y',
+      'property float z',
+      'element face 1',
+      'property list uchar int vertex_indices',
+      'end_header',
+      '0 0 0',
+      '1 0 0',
+      '1 1 0',
+      '0 1 0',
+      '4 0 1 2 3',
+    ].join('\n'),
+    'ply',
+  );
+
+  assertEquals(scene.meshes[0].attributes[0].values, [
+    0,
+    0,
+    0,
+    1,
+    0,
+    0,
+    1,
+    1,
+    0,
+    0,
+    1,
+    0,
+  ]);
+  assertEquals(scene.meshes[0].indices, [0, 1, 2, 0, 2, 3]);
+});
+
+Deno.test('loadPlyFromText reads face indices from the declared list property', () => {
+  const scene = loadPlyFromText(
+    [
+      'ply',
+      'format ascii 1.0',
+      'element vertex 3',
+      'property float x',
+      'property float y',
+      'property float z',
+      'element face 1',
+      'property uchar material_id',
+      'property list uchar int vertex_indices',
+      'end_header',
+      '0 0 0',
+      '1 0 0',
+      '0 1 0',
+      '7 3 0 1 2',
+    ].join('\n'),
+    'ply',
+  );
+
+  assertEquals(scene.meshes[0].indices, [0, 1, 2]);
+});
+
 Deno.test('loadPlyFromText builds an indexed mesh scene from ascii faces', () => {
   const scene = loadPlyFromText(
     [

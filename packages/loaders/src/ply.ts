@@ -4,7 +4,12 @@ import type { MeshAttribute, SceneIr } from '@rieul3d/ir';
 type PlyElementDefinition = Readonly<{
   name: string;
   count: number;
-  properties: readonly string[];
+  properties: readonly PlyPropertyDefinition[];
+}>;
+
+type PlyPropertyDefinition = Readonly<{
+  name: string;
+  kind: 'scalar' | 'list';
 }>;
 
 const parsePlyElementDefinition = (
@@ -24,7 +29,7 @@ const parsePlyElementDefinition = (
     throw new Error(`Invalid PLY element count for "${name}": ${countText}`);
   }
 
-  const properties: string[] = [];
+  const properties: PlyPropertyDefinition[] = [];
   let nextIndex = startIndex + 1;
   while (nextIndex < lines.length) {
     const trimmed = lines[nextIndex].trim();
@@ -38,7 +43,10 @@ const parsePlyElementDefinition = (
       throw new Error(`Malformed PLY property definition at line ${nextIndex + 1}`);
     }
 
-    properties.push(propertyName);
+    properties.push({
+      name: propertyName,
+      kind: propertyParts[1] === 'list' ? 'list' : 'scalar',
+    });
     nextIndex += 1;
   }
 
@@ -70,7 +78,7 @@ export const loadPlyFromText = (source: string, sceneId = 'ply-scene'): SceneIr 
       lineIndex += 1;
       break;
     }
-    if (trimmed === '' || trimmed.startsWith('comment ')) {
+    if (trimmed === '' || trimmed.startsWith('comment ') || trimmed.startsWith('obj_info ')) {
       lineIndex += 1;
       continue;
     }
@@ -93,11 +101,17 @@ export const loadPlyFromText = (source: string, sceneId = 'ply-scene'): SceneIr 
     throw new Error('PLY source must define a face element');
   }
 
-  const xIndex = vertexDefinition.properties.indexOf('x');
-  const yIndex = vertexDefinition.properties.indexOf('y');
-  const zIndex = vertexDefinition.properties.indexOf('z');
+  const xIndex = vertexDefinition.properties.findIndex((property) => property.name === 'x');
+  const yIndex = vertexDefinition.properties.findIndex((property) => property.name === 'y');
+  const zIndex = vertexDefinition.properties.findIndex((property) => property.name === 'z');
+  const faceIndexPropertyIndex = faceDefinition.properties.findIndex((property) =>
+    property.kind === 'list'
+  );
   if (xIndex === -1 || yIndex === -1 || zIndex === -1) {
     throw new Error('PLY vertex element must define x, y, and z properties');
+  }
+  if (faceIndexPropertyIndex === -1) {
+    throw new Error('PLY face element must define a list property for vertex indices');
   }
 
   const positions: number[] = [];
@@ -118,12 +132,34 @@ export const loadPlyFromText = (source: string, sceneId = 'ply-scene'): SceneIr 
           Number(parts[zIndex]),
         );
       } else if (element.name === 'face') {
-        const vertexCount = Number(parts[0]);
-        if (!Number.isInteger(vertexCount) || vertexCount < 3 || parts.length < vertexCount + 1) {
+        let cursor = 0;
+        let faceIndices: number[] | undefined;
+        for (const [propertyIndex, property] of element.properties.entries()) {
+          if (property.kind === 'list') {
+            const itemCount = Number(parts[cursor]);
+            if (!Number.isInteger(itemCount) || itemCount < 0) {
+              throw new Error(`Invalid PLY list property at line ${lineIndex + 1}`);
+            }
+
+            const values = parts.slice(cursor + 1, cursor + 1 + itemCount).map((value) =>
+              Number(value)
+            );
+            if (values.length !== itemCount) {
+              throw new Error(`Invalid PLY list property at line ${lineIndex + 1}`);
+            }
+            if (propertyIndex === faceIndexPropertyIndex) {
+              faceIndices = values;
+            }
+            cursor += 1 + itemCount;
+          } else {
+            cursor += 1;
+          }
+        }
+
+        if (!faceIndices || faceIndices.length < 3) {
           throw new Error(`Invalid PLY face at line ${lineIndex + 1}`);
         }
 
-        const faceIndices = parts.slice(1, vertexCount + 1).map((value) => Number(value));
         for (let index = 1; index < faceIndices.length - 1; index += 1) {
           indices.push(faceIndices[0], faceIndices[index], faceIndices[index + 1]);
         }

@@ -84,6 +84,9 @@ diff/apply payload for committed changes? That follow-up remains Proposed pendin
   residency when a new committed snapshot replaces resource contents under stable IDs; commit
   summaries now let them scope that rebuild without missing node-only changes that can remap which
   stable resources remain live.
+- `@rieul3d/gpu` now exposes ID-keyed targeted invalidation helpers, so snapshot consumers can drop
+  only the changed mesh/material/texture/volume residency entries before falling back to a full
+  reset for scene-topology changes.
 - Rendering, residency preparation, and execution continue to live in the core/gpu/renderer layers.
 - The browser example now demonstrates full-scene JSX authoring plus scene-root snapshot commits,
   not a live React reconciler.
@@ -93,6 +96,6 @@ diff/apply payload for committed changes? That follow-up remains Proposed pendin
   question.
 - [`../../examples/browser_react_authoring/README.md`](../../examples/browser_react_authoring/README.md)
   shows the reference browser flow: author a tree with `@rieul3d/react` TSX, commit it through
-  `createSceneRoot()`, summarize that commit, apply `commitSummaryNeedsResidencyReset()` for the
-  current runtime-safe invalidation boundary, then hand the published scene snapshot to the existing
-  runtime and renderer layers.
+  `createSceneRoot()`, summarize that commit, drop targeted residency entries where stable resource
+  IDs changed, fall back to a full reset for scene-topology changes, then hand the published scene
+  snapshot to the existing runtime and renderer layers.

@@ -8,12 +8,13 @@ import {
   createRuntimeResidency,
   ensureSceneMeshResidency,
   invalidateResidency,
+  invalidateResidencyResources,
   requestGpuContext,
 } from '../../packages/gpu/mod.ts';
 import { createBrowserSurfaceTarget } from '../../packages/platform/mod.ts';
 import {
-  commitSummaryNeedsResidencyReset,
   createSceneRoot,
+  type SceneRootCommit,
   summarizeSceneRootCommit,
 } from '../../packages/react/mod.ts';
 import { createMaterialRegistry, renderForwardFrame } from '../../packages/renderer/mod.ts';
@@ -66,11 +67,90 @@ const sceneRoot = createSceneRoot();
 let scene = sceneRoot.getScene();
 const residency = createRuntimeResidency();
 
+const collectAssetLinkedIds = (
+  commit: SceneRootCommit,
+  assetIds: readonly string[],
+): Readonly<{
+  textureIds: readonly string[];
+  volumeIds: readonly string[];
+}> => {
+  const changedAssetIds = new Set(assetIds);
+  const scenes = [commit.previousScene, commit.scene].filter((
+    candidate,
+  ): candidate is typeof commit.scene => candidate !== undefined);
+  const textureIds = new Set<string>();
+  const volumeIds = new Set<string>();
+
+  for (const candidateScene of scenes) {
+    for (const texture of candidateScene.textures) {
+      if (texture.assetId && changedAssetIds.has(texture.assetId)) {
+        textureIds.add(texture.id);
+      }
+    }
+
+    for (const volume of candidateScene.volumePrimitives) {
+      if (volume.assetId && changedAssetIds.has(volume.assetId)) {
+        volumeIds.add(volume.id);
+      }
+    }
+  }
+
+  return {
+    textureIds: [...textureIds],
+    volumeIds: [...volumeIds],
+  };
+};
+
 sceneRoot.subscribe((commit) => {
   scene = commit.scene;
-  if (commitSummaryNeedsResidencyReset(summarizeSceneRootCommit(commit))) {
+  const summary = summarizeSceneRootCommit(commit);
+  if (
+    summary.sceneIdChanged ||
+    summary.rootNodeIdsChanged ||
+    summary.nodes.addedIds.length > 0 ||
+    summary.nodes.removedIds.length > 0 ||
+    summary.nodes.updatedIds.length > 0 ||
+    summary.sdfPrimitives.addedIds.length > 0 ||
+    summary.sdfPrimitives.removedIds.length > 0 ||
+    summary.sdfPrimitives.updatedIds.length > 0
+  ) {
     invalidateResidency(residency);
+    return;
   }
+
+  const assetLinkedIds = collectAssetLinkedIds(
+    commit,
+    [
+      ...summary.assets.addedIds,
+      ...summary.assets.removedIds,
+      ...summary.assets.updatedIds,
+    ],
+  );
+
+  invalidateResidencyResources(residency, {
+    meshIds: [
+      ...summary.meshes.addedIds,
+      ...summary.meshes.removedIds,
+      ...summary.meshes.updatedIds,
+    ],
+    materialIds: [
+      ...summary.materials.addedIds,
+      ...summary.materials.removedIds,
+      ...summary.materials.updatedIds,
+    ],
+    textureIds: [
+      ...summary.textures.addedIds,
+      ...summary.textures.removedIds,
+      ...summary.textures.updatedIds,
+      ...assetLinkedIds.textureIds,
+    ],
+    volumeIds: [
+      ...summary.volumePrimitives.addedIds,
+      ...summary.volumePrimitives.removedIds,
+      ...summary.volumePrimitives.updatedIds,
+      ...assetLinkedIds.volumeIds,
+    ],
+  });
 });
 sceneRoot.render(<TriangleScene />);
 

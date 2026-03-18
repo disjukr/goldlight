@@ -37,6 +37,8 @@ from Scene IR so the same IR can run in browsers, Deno, and headless targets.
 
 - Device-local residency is invalidatable and rebuildable from
   `AssetSource + SceneIr + EvaluatedScene`.
+- Callers may now drop targeted mesh/material/texture/volume residency entries by stable IDs when a
+  full rebuild is not required.
 - Pipeline caches are considered disposable and are cleared during rebuild.
 - Device loss is observed explicitly rather than hidden behind global runtime state.
 - Browser examples exercise both `ensureSceneMeshResidency(...)` and

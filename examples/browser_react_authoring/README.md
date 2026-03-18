@@ -6,8 +6,9 @@ node transform shorthands such as `position`, commits that tree through `createS
 renders the published `SceneIr` snapshot through the browser forward pipeline. Resource-only aliases
 remain available when no node binding props or children are supplied. Because the bridge publishes
 whole-scene snapshots, the example also uses `summarizeSceneRootCommit()` together with
-`commitSummaryNeedsResidencyReset()` so cached GPU residency still resets for resource or node
-topology changes before the next frame upload.
+`@rieul3d/gpu` targeted invalidation helpers so cached GPU residency can drop changed
+mesh/material/texture/volume entries by ID before falling back to a full reset for node topology
+changes.
 
 This is now a real JSX authoring example with the first scene-root bridge, but it is still not a
 live React renderer or reconciler. `@rieul3d/react` currently owns authoring, snapshot commits, and

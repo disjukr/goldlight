@@ -73,6 +73,8 @@ The initial renderer uses a lightweight pass graph:
 - Headless/offscreen rendering supports compact byte readback for snapshot testing.
 - Headless/offscreen rendering also supports a dedicated mesh-node id-buffer pick pass with stable
   node-to-mesh metadata and screen-pixel decode helpers.
+- Node-pick snapshots use an internal linear `rgba8unorm` attachment for readback and currently
+  support built-in mesh materials only.
 - Snapshot bytes can also be encoded into PNG for local inspection and regression workflows.
 - Browser examples cover the minimal mesh-only path, a texture-backed built-in unlit path, and a
   custom WGSL path that samples texture residency through declared material bindings.

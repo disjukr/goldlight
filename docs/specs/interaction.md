@@ -36,6 +36,8 @@ offscreen color target.
 
 - pick ids are assigned per evaluated mesh node in scene order, starting at `1`
 - `0` remains the reserved background / no-hit value
+- pick snapshots render into an internal linear `rgba8unorm` target before readback so decoded ids
+  stay stable even when the caller's main render target uses another color format
 - pick snapshots return both compact RGBA bytes and the node-to-mesh metadata needed to decode hits
 - `readNodePickHit()` resolves one screen pixel back to a node id and mesh id without coupling to
   CPU ray construction
@@ -44,4 +46,6 @@ offscreen color target.
 
 - current picking support targets mesh nodes only
 - ids map back to scene nodes and mesh resources, not per-triangle primitives
+- only built-in mesh materials are currently supported; custom WGSL materials are rejected because
+  their vertex/discard behavior can diverge from the visible frame
 - readback currently requires an offscreen render target because it depends on snapshot bytes

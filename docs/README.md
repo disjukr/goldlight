@@ -25,6 +25,8 @@ Use this page as the main navigation hub.
   [`adr/0004-react-jsx-authoring.md`](./adr/0004-react-jsx-authoring.md)
 - Review the proposed React scene-root bridge decision:
   [`adr/0006-react-scene-root-bridge.md`](./adr/0006-react-scene-root-bridge.md)
+- Review the next proposed React live-update contract decision:
+  [`adr/0007-react-scene-root-diff-contract.md`](./adr/0007-react-scene-root-diff-contract.md)
 - Run the browser and native examples, including the textured and custom-material browser workflows:
   [`../examples/README.md`](../examples/README.md)
 - Review the React authoring browser example with full-scene TSX lowering and scene-root commits:

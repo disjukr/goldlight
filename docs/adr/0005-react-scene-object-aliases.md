@@ -14,7 +14,8 @@ The proposed boundary is:
 - combined aliases stay as authoring sugar over existing Scene IR resources plus node bindings
 - explicit resource ids and explicit node ids remain available as the lower-level escape hatch
 - combined aliases may synthesize a default resource plus its first bound node for common authored
-  scene objects, but they must not narrow the underlying IR semantics around rebinding or multiple
+  scene objects when authors provide node-oriented props or children, but they must not change the
+  existing resource-only meaning or narrow the underlying IR semantics around rebinding or multiple
   node attachments
 - aliases must not hide renderer/runtime ownership or make React the source of truth for live scene
   state

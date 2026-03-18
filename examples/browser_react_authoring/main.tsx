@@ -23,7 +23,6 @@ canvas.height = 480;
 
 const TriangleScene = () => (
   <scene id='react-browser-authoring' activeCameraId='camera-main'>
-    <perspectiveCamera id='camera-main' />
     <material
       id='triangle-material'
       kind='unlit'

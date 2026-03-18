@@ -355,6 +355,40 @@ Deno.test('authoringTreeToSceneIr lowers react-style alias intrinsics', () => {
   });
 });
 
+Deno.test('react-style aliases stay resource-only without node intent', () => {
+  const cameraProps = {
+    type: 'orthographic' as const,
+    yfov: 0.8,
+  };
+  const lightProps = {
+    kind: 'point' as const,
+    color: { x: 1, y: 0.95, z: 0.9 },
+    intensity: 1.5,
+  };
+
+  const scene = authoringTreeToSceneIr(
+    <scene id='jsx-scene' activeCameraId='camera-main'>
+      <perspectiveCamera id='camera-main' {...cameraProps} />
+      <directionalLight id='sun' {...lightProps} />
+    </scene>,
+  );
+
+  assertEquals(scene.cameras[0], {
+    id: 'camera-main',
+    type: 'perspective',
+    yfov: 0.8,
+    znear: 0.1,
+    zfar: 100,
+  });
+  assertEquals(scene.lights[0], {
+    id: 'sun',
+    kind: 'directional',
+    color: { x: 1, y: 0.95, z: 0.9 },
+    intensity: 1.5,
+  });
+  assertEquals(scene.nodes, []);
+});
+
 Deno.test('react-style aliases preserve their fixed resource kinds when props are spread in', () => {
   const cameraProps = {
     type: 'orthographic' as const,
@@ -375,6 +409,5 @@ Deno.test('react-style aliases preserve their fixed resource kinds when props ar
 
   assertEquals(scene.cameras[0]?.type, 'perspective');
   assertEquals(scene.lights[0]?.kind, 'directional');
-  assertEquals(scene.nodes.find((node) => node.id === 'camera-main')?.cameraId, 'camera-main');
-  assertEquals(scene.nodes.find((node) => node.id === 'sun')?.lightId, 'sun');
+  assertEquals(scene.nodes, []);
 });

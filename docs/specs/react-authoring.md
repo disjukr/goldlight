@@ -11,7 +11,8 @@ React integration is a separate package. It must not become the source of truth 
   `<light>`, `<texture>`, and `<asset>`.
 - The JSX surface may expose React-style aliases such as `<group>`, `<perspectiveCamera>`,
   `<orthographicCamera>`, and `<directionalLight>` when they lower cleanly into the same Scene IR.
-  Camera/light aliases now synthesize both the scene resource and an initial bound node.
+  Camera/light aliases stay resource-only by default and synthesize an initial bound node only when
+  authors provide node intent such as children or node transform/id props.
 - Node-like authoring elements may use transform shorthands such as `position`, `rotation`, and
   `scale`; these fold into the existing Scene IR transform object during lowering.
 - Authored trees are lowered into complete Scene IR or evaluated scene inputs.
@@ -44,10 +45,10 @@ them.
 
 The current camera/light alias surface follows the proposed boundary in
 [`../adr/0005-react-scene-object-aliases.md`](../adr/0005-react-scene-object-aliases.md): combined
-aliases synthesize a default resource plus its first bound node, while explicit `<camera>`,
-`<light>`, and `<node>` authoring stays available for multi-bind scenes. The remaining open question
-is whether broader object composition such as mesh/material authoring should join that same combined
-surface.
+aliases can synthesize a default resource plus its first bound node when authors ask for node
+behavior, while explicit `<camera>`, `<light>`, and `<node>` authoring stays available for
+resource-only and multi-bind scenes. The remaining open question is whether broader object
+composition such as mesh/material authoring should join that same combined surface.
 
 ## Current Status
 

@@ -6,6 +6,8 @@ import {
   createGradientTexture,
   createNoiseTexture,
   createNoiseVolume,
+  createPerlinTexture,
+  createPerlinVolume,
   createUvDebugTexture,
   createWorleyTexture,
   createWorleyVolume,
@@ -13,6 +15,8 @@ import {
   sampleDomainWarpedFbm3d,
   sampleFbm2d,
   sampleFbm3d,
+  samplePerlinNoise2d,
+  samplePerlinNoise3d,
   sampleRidgedNoise2d,
   sampleRidgedNoise3d,
   sampleTurbulence2d,
@@ -51,6 +55,8 @@ Deno.test('fractal samplers stay normalized', () => {
     sampleTurbulence2d(0.3, 0.4, { seed: 2, octaves: 5 }),
     sampleFbm3d(0.1, 0.2, 0.3, { seed: 2, octaves: 5 }),
     sampleTurbulence3d(0.3, 0.4, 0.5, { seed: 2, octaves: 5 }),
+    samplePerlinNoise2d(0.45, 0.85, { seed: 6 }),
+    samplePerlinNoise3d(0.45, 0.85, 0.25, { seed: 6 }),
     sampleRidgedNoise2d(0.15, 0.25, { seed: 3, octaves: 4 }),
     sampleRidgedNoise3d(0.15, 0.25, 0.35, { seed: 3, octaves: 4 }),
     sampleWorleyNoise2d(1.1, 2.2, { seed: 4 }),
@@ -66,6 +72,14 @@ Deno.test('fractal samplers stay normalized', () => {
 
 Deno.test('extended procedural samplers stay deterministic and react to seeds', () => {
   assertEquals(
+    samplePerlinNoise2d(0.4, 0.8, { seed: 12 }),
+    samplePerlinNoise2d(0.4, 0.8, { seed: 12 }),
+  );
+  assertEquals(
+    samplePerlinNoise3d(0.4, 0.8, 1.2, { seed: 12 }),
+    samplePerlinNoise3d(0.4, 0.8, 1.2, { seed: 12 }),
+  );
+  assertEquals(
     sampleRidgedNoise2d(0.4, 0.8, { seed: 12 }),
     sampleRidgedNoise2d(0.4, 0.8, { seed: 12 }),
   );
@@ -78,6 +92,10 @@ Deno.test('extended procedural samplers stay deterministic and react to seeds', 
     sampleDomainWarpedFbm2d(0.25, 0.75, { seed: 2, warpAmplitude: 0.5 }),
   );
 
+  assertNotEquals(
+    samplePerlinNoise2d(0.4, 0.8, { seed: 12 }),
+    samplePerlinNoise2d(0.4, 0.8, { seed: 13 }),
+  );
   assertNotEquals(
     sampleRidgedNoise3d(0.4, 0.8, 1.2, { seed: 12 }),
     sampleRidgedNoise3d(0.4, 0.8, 1.2, { seed: 13 }),
@@ -156,6 +174,12 @@ Deno.test('extended procedural generators expose stable output ranges', () => {
     seed: 6,
     frequency: 5,
   });
+  const perlinTexture = createPerlinTexture({
+    width: 8,
+    height: 8,
+    seed: 5,
+    frequency: 4,
+  });
   const colorTexture = createColorNoiseTexture({
     width: 4,
     height: 4,
@@ -173,6 +197,13 @@ Deno.test('extended procedural generators expose stable output ranges', () => {
     seed: 6,
     frequency: 4,
   });
+  const perlinVolume = createPerlinVolume({
+    width: 4,
+    height: 4,
+    depth: 3,
+    seed: 5,
+    frequency: 3,
+  });
   const warpedVolume = createDomainWarpedNoiseVolume({
     width: 4,
     height: 4,
@@ -184,12 +215,22 @@ Deno.test('extended procedural generators expose stable output ranges', () => {
   });
 
   assertEquals(worleyTexture.channels, 4);
+  assertEquals(perlinTexture.channels, 4);
   assertEquals(colorTexture.channels, 4);
   assertEquals(worleyVolume.channels, 1);
+  assertEquals(perlinVolume.channels, 1);
   assertEquals(warpedVolume.channels, 1);
   assertEquals(
     worleyTexture.data,
     createWorleyTexture({ width: 8, height: 8, seed: 6, frequency: 5 }).data,
+  );
+  assertEquals(
+    perlinTexture.data,
+    createPerlinTexture({ width: 8, height: 8, seed: 5, frequency: 4 }).data,
+  );
+  assertEquals(
+    perlinVolume.data,
+    createPerlinVolume({ width: 4, height: 4, depth: 3, seed: 5, frequency: 3 }).data,
   );
   assertEquals(
     warpedVolume.data,
@@ -204,8 +245,10 @@ Deno.test('extended procedural generators expose stable output ranges', () => {
     }).data,
   );
   assertByteRange(worleyTexture.data);
+  assertByteRange(perlinTexture.data);
   assertByteRange(colorTexture.data);
   assertByteRange(worleyVolume.data);
+  assertByteRange(perlinVolume.data);
   assertByteRange(warpedVolume.data);
 });
 
@@ -221,9 +264,11 @@ Deno.test('procedural generators reject invalid dimensions', () => {
   );
   assertThrows(() => createUvDebugTexture({ width: -1, height: 2 }));
   assertThrows(() => createNoiseTexture({ width: 2, height: 0 }));
+  assertThrows(() => createPerlinTexture({ width: 0, height: 2 }));
   assertThrows(() => createNoiseVolume({ width: 1, height: 1, depth: 0 }));
   assertThrows(() => createWorleyTexture({ width: 0, height: 2 }));
   assertThrows(() => createColorNoiseTexture({ width: 2, height: 0 }));
+  assertThrows(() => createPerlinVolume({ width: 1, height: 1, depth: 0 }));
   assertThrows(() => createWorleyVolume({ width: 1, height: 1, depth: -1 }));
   assertThrows(() => createDomainWarpedNoiseVolume({ width: 1, height: 1, depth: 0 }));
 });
@@ -234,15 +279,19 @@ Deno.test('procedural noise rejects non-finite fractal parameters', () => {
   assertThrows(() => sampleFbm3d(0.1, 0.2, 0.3, { frequency: Number.POSITIVE_INFINITY }));
   assertThrows(() => sampleTurbulence2d(0.1, 0.2, { gain: Number.NaN }));
   assertThrows(() => sampleTurbulence3d(0.1, 0.2, 0.3, { lacunarity: Number.NEGATIVE_INFINITY }));
+  assertThrows(() => samplePerlinNoise2d(0.1, 0.2, { seed: Number.NaN }));
+  assertThrows(() => samplePerlinNoise3d(0.1, 0.2, 0.3, { seed: Number.POSITIVE_INFINITY }));
   assertThrows(() => sampleRidgedNoise2d(0.1, 0.2, { gain: Number.NaN }));
   assertThrows(() => sampleWorleyNoise3d(0.1, 0.2, 0.3, { seed: Number.POSITIVE_INFINITY }));
   assertThrows(() => sampleDomainWarpedFbm2d(0.1, 0.2, { warpAmplitude: Number.NaN }));
   assertThrows(() => createNoiseTexture({ width: 2, height: 2, frequency: Number.NaN }));
+  assertThrows(() => createPerlinTexture({ width: 2, height: 2, frequency: Number.NaN }));
   assertThrows(() => createWorleyTexture({ width: 2, height: 2, frequency: Number.NaN }));
   assertThrows(() => createColorNoiseTexture({ width: 2, height: 2, warpAmplitude: Number.NaN }));
   assertThrows(() =>
     createNoiseVolume({ width: 2, height: 2, depth: 2, octaves: Number.POSITIVE_INFINITY })
   );
+  assertThrows(() => createPerlinVolume({ width: 2, height: 2, depth: 2, frequency: Number.NaN }));
   assertThrows(() =>
     createDomainWarpedNoiseVolume({
       width: 2,

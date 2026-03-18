@@ -1,4 +1,9 @@
-import { sampleDomainWarpedFbm2d, sampleFbm2d, sampleWorleyNoise2d } from './math.ts';
+import {
+  sampleDomainWarpedFbm2d,
+  sampleFbm2d,
+  samplePerlinNoise2d,
+  sampleWorleyNoise2d,
+} from './math.ts';
 
 export type ColorRgba = readonly [number, number, number, number];
 
@@ -35,6 +40,7 @@ export type NoiseTextureOptions = Readonly<{
 }>;
 
 export type WorleyTextureOptions = NoiseTextureOptions;
+export type PerlinTextureOptions = NoiseTextureOptions;
 
 export type ColorNoiseTextureOptions = Readonly<{
   width: number;
@@ -187,6 +193,28 @@ export const createWorleyTexture = (options: WorleyTextureOptions): ProceduralTe
         seed: options.seed,
       });
       const value = Math.round((1 - sample) * 255);
+      writePixel(data, offset, [value, value, value, 255]);
+    }
+  }
+
+  return { width, height, channels: 4, data };
+};
+
+export const createPerlinTexture = (options: PerlinTextureOptions): ProceduralTexture2d => {
+  const width = assertDimension('width', options.width);
+  const height = assertDimension('height', options.height);
+  const data = createTextureData(width, height);
+  const frequency = assertFiniteNumber('frequency', options.frequency ?? 4);
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const offset = ((y * width) + x) * 4;
+      const u = width === 1 ? 0 : x / (width - 1);
+      const v = height === 1 ? 0 : y / (height - 1);
+      const sample = samplePerlinNoise2d(u * frequency, v * frequency, {
+        seed: options.seed,
+      });
+      const value = Math.round(sample * 255);
       writePixel(data, offset, [value, value, value, 255]);
     }
   }

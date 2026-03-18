@@ -13,17 +13,21 @@ patterns, 2D textures, and 3D volumes without depending on checked-in source ass
 ## Current Coverage
 
 - scalar sampling: value noise in 2D and 3D
+- gradient sampling: Perlin noise in 2D and 3D
 - cellular sampling: Worley noise in 2D and 3D
 - fractal helpers: fBm, turbulence, ridged noise, and domain-warped fBm built on top of the reusable
   scalar samplers
-- 2D generators: checkerboard, linear gradient, UV debug, grayscale noise, Worley, and color
-  domain-warped noise textures
-- 3D generators: grayscale noise, Worley, and domain-warped noise volumes
+- 2D generators: checkerboard, linear gradient, UV debug, grayscale value noise, grayscale Perlin,
+  Worley, and color domain-warped noise textures
+- 3D generators: grayscale value noise, grayscale Perlin, Worley, and domain-warped noise volumes
 
 ## Constraints
 
 - generators return plain typed-array payloads plus explicit dimensions and channel counts
 - deterministic seeds should produce byte-identical output across repeated calls in the same runtime
 - the math layer must remain reusable without forcing callers through a baked texture API
-- richer gradient-noise families such as Perlin and Simplex can extend the same shape later without
-  breaking current callers
+- gradient-noise samplers should preserve the same deterministic seed and normalized `[0, 1]`
+  contract as the existing scalar helpers so textures and volumes can swap between families without
+  changing their upload path
+- richer gradient-noise families such as Simplex can extend the same shape later without breaking
+  current callers

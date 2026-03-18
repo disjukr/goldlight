@@ -1,4 +1,9 @@
-import { sampleDomainWarpedFbm3d, sampleFbm3d, sampleWorleyNoise3d } from './math.ts';
+import {
+  sampleDomainWarpedFbm3d,
+  sampleFbm3d,
+  samplePerlinNoise3d,
+  sampleWorleyNoise3d,
+} from './math.ts';
 
 export type ProceduralVolume3d = Readonly<{
   width: number;
@@ -18,6 +23,7 @@ export type NoiseVolumeOptions = Readonly<{
 }>;
 
 export type WorleyVolumeOptions = NoiseVolumeOptions;
+export type PerlinVolumeOptions = NoiseVolumeOptions;
 
 export type DomainWarpedNoiseVolumeOptions =
   & NoiseVolumeOptions
@@ -84,6 +90,30 @@ export const createWorleyVolume = (options: WorleyVolumeOptions): ProceduralVolu
           seed: options.seed,
         });
         data[(z * width * height) + (y * width) + x] = Math.round((1 - sample) * 255);
+      }
+    }
+  }
+
+  return { width, height, depth, channels: 1, data };
+};
+
+export const createPerlinVolume = (options: PerlinVolumeOptions): ProceduralVolume3d => {
+  const width = assertDimension('width', options.width);
+  const height = assertDimension('height', options.height);
+  const depth = assertDimension('depth', options.depth);
+  const frequency = assertFiniteNumber('frequency', options.frequency ?? 3);
+  const data = new Uint8Array(width * height * depth);
+
+  for (let z = 0; z < depth; z += 1) {
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const u = width === 1 ? 0 : x / (width - 1);
+        const v = height === 1 ? 0 : y / (height - 1);
+        const w = depth === 1 ? 0 : z / (depth - 1);
+        const sample = samplePerlinNoise3d(u * frequency, v * frequency, w * frequency, {
+          seed: options.seed,
+        });
+        data[(z * width * height) + (y * width) + x] = Math.round(sample * 255);
       }
     }
   }

@@ -1010,7 +1010,7 @@ Deno.test('renderForwardFrame keeps rotated volume nodes in local raymarch space
   assertEquals(mocks.bindGroupEntries.length, 1);
   assertEquals(mocks.bindGroupEntries[0].map((entry) => entry.binding), [0, 1, 2]);
   const volumeUniformData = mocks.writeBufferCalls
-    .filter((call) => call.bytes.byteLength === 64)
+    .filter((call) => call.bytes.byteLength === 128)
     .map((call) => new Float32Array(call.bytes.buffer.slice(0)));
   assertEquals(volumeUniformData.length, 1);
   const expected = [
@@ -1030,6 +1030,22 @@ Deno.test('renderForwardFrame keeps rotated volume nodes in local raymarch space
     0.25,
     -0.5,
     1,
+    0,
+    0,
+    2.5,
+    0,
+    1,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    0,
+    -1.75,
+    0,
   ];
   volumeUniformData[0].forEach((value, index) => {
     assertAlmostEquals(value, expected[index], 1e-5);

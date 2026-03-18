@@ -1,7 +1,7 @@
 # Browser React Authoring Example
 
 This example shows the current bridge between `@rieul3d/react` and the existing runtime layers. It
-authors a scene with TSX, including the current built-in `perspectiveCamera` alias plus node
+authors a scene with TSX, including the exported `PerspectiveCamera` convenience component plus node
 transform shorthands such as `position`, commits that tree through `createSceneRoot()`, then renders
 the published `SceneIr` snapshot through the browser forward pipeline. Because the bridge publishes
 whole-scene snapshots, the example also uses `summarizeSceneRootCommit()` together with
@@ -9,9 +9,9 @@ whole-scene snapshots, the example also uses `summarizeSceneRootCommit()` togeth
 mesh/material/texture/volume entries by ID before falling back to a full reset for node topology
 changes.
 
-The long-term direction is to move camera/light convenience toward reusable React components while
-keeping primitive JSX authoring closer to explicit Scene IR concepts such as `<camera>`, `<light>`,
-and `<node>`.
+The example now follows ADR 0005's preferred direction: camera/light convenience lives in reusable
+React components while primitive JSX authoring stays closer to explicit Scene IR concepts such as
+`<camera>`, `<light>`, and `<node>`.
 
 This is now a real JSX authoring example with the current snapshot-based `createSceneRoot()` path,
 but it is still not a live React renderer or reconciler. `@rieul3d/react` currently owns authoring,

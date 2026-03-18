@@ -53,8 +53,9 @@ Implemented today:
   custom lit shader for mesh normals
 - a browser React authoring example plus the current `createSceneRoot()` snapshot path that commits
   JSX-authored trees into `SceneIr` snapshots before rendering, including JSX-authored scene
-  resources such as meshes, materials, and cameras, with commit-summary plus targeted residency
-  invalidation helpers for the current runtime-safe update boundary
+  resources such as meshes, materials, and cameras, exported convenience components for common
+  camera/light composition, and commit-summary plus targeted residency invalidation helpers for the
+  current runtime-safe update boundary
 - proposed ADR/discussion tracking for the next React live-update boundary decision around
   partial-apply scene updates without renderer ownership
 - fixture-backed golden snapshot regression tests for clear, mesh, sphere/box SDF, volume, and

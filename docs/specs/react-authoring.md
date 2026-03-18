@@ -14,7 +14,8 @@ React integration is a separate package. It must not become the source of truth 
   node-oriented Scene IR structure.
 - Higher-level camera/light composition should prefer React convenience components built from
   `<camera>`, `<light>`, and `<node>` instead of expanding the primitive JSX surface with more
-  built-in combined object tags.
+  built-in combined object tags; the package now exports `PerspectiveCamera`, `OrthographicCamera`,
+  and `DirectionalLight` as the first shared examples of that pattern.
 - Node-like authoring elements may use transform shorthands such as `position`, `rotation`, and
   `scale`; these fold into the existing Scene IR transform object during lowering.
 - Authored trees are lowered into complete Scene IR or evaluated scene inputs.
@@ -66,12 +67,15 @@ full-snapshot publication shape as the final contract.
 - The package now exposes a JSX runtime so TSX can author scene trees directly.
 - Authoring nodes lower core node metadata such as names, mesh/camera/light bindings, and transforms
   into Scene IR, including React-style `position`/`rotation`/`scale` shorthands.
-- The JSX surface currently includes group-style node aliases and still carries some built-in
-  combined camera/light aliases from the first authoring pass.
+- The JSX surface currently includes group-style node aliases, while common camera/light composition
+  can now be authored through exported convenience components instead of relying on built-in
+  combined intrinsics.
 - Root scene trees can now also declare cameras, meshes, materials, lights, textures, and assets in
   the same TSX surface before lowering.
 - The preferred long-term direction is to move camera/light convenience toward reusable React
   components while keeping primitive JSX authoring tied to explicit IR concepts.
+- `PerspectiveCamera`, `OrthographicCamera`, and `DirectionalLight` now compose those explicit
+  primitives into reusable React-facing scene objects without changing the underlying IR semantics.
 - `createSceneRoot()` now provides a data-only commit bridge that publishes full `SceneIr` snapshots
   plus previous-scene/revision metadata to caller-owned subscribers as a current implementation
   waypoint.

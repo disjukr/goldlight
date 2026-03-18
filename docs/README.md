@@ -23,7 +23,7 @@ Use this page as the main navigation hub.
 - Review accepted architecture constraints: [`adr/README.md`](./adr/README.md)
 - Review the JSX authoring boundary decision:
   [`adr/0004-react-jsx-authoring.md`](./adr/0004-react-jsx-authoring.md)
-- Review the proposed React scene update boundary decision:
+- Review the accepted React scene update boundary decision:
   [`adr/0006-react-scene-root-bridge.md`](./adr/0006-react-scene-root-bridge.md)
 - Run the browser and native examples, including the textured and custom-material browser workflows:
   [`../examples/README.md`](../examples/README.md)

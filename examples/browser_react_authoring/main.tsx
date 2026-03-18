@@ -10,7 +10,7 @@ import {
   requestGpuContext,
 } from '../../packages/gpu/mod.ts';
 import { createBrowserSurfaceTarget } from '../../packages/platform/mod.ts';
-import { authoringTreeToSceneIr } from '../../packages/react/mod.ts';
+import { createSceneRoot } from '../../packages/react/mod.ts';
 import { createMaterialRegistry, renderForwardFrame } from '../../packages/renderer/mod.ts';
 
 const canvas = document.querySelector<HTMLCanvasElement>('#app');
@@ -57,7 +57,17 @@ const TriangleScene = () => (
   </scene>
 );
 
-const scene = authoringTreeToSceneIr(<TriangleScene />);
+const sceneRoot = createSceneRoot();
+let scene = sceneRoot.getScene();
+
+sceneRoot.subscribe((commit) => {
+  scene = commit.scene;
+});
+sceneRoot.render(<TriangleScene />);
+
+if (!scene) {
+  throw new Error('Scene root did not publish an initial scene snapshot');
+}
 
 const target = createBrowserSurfaceTarget(canvas.width, canvas.height);
 const gpuContext = await requestGpuContext({ target });

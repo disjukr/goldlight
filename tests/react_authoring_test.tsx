@@ -3,7 +3,12 @@
 
 import { assertEquals, assertThrows } from 'jsr:@std/assert@^1.0.14';
 import { identityTransform } from '@rieul3d/ir';
-import { authoringTreeToSceneIr, createAuthoringElement, Fragment } from '@rieul3d/react';
+import {
+  authoringTreeToSceneIr,
+  createAuthoringElement,
+  createSceneRoot,
+  Fragment,
+} from '@rieul3d/react';
 
 Deno.test('authoringTreeToSceneIr lowers declarative nodes into scene ir', () => {
   const scene = authoringTreeToSceneIr(
@@ -410,4 +415,76 @@ Deno.test('react-style aliases preserve their fixed resource kinds when props ar
   assertEquals(scene.cameras[0]?.type, 'perspective');
   assertEquals(scene.lights[0]?.kind, 'directional');
   assertEquals(scene.nodes, []);
+});
+
+Deno.test('createSceneRoot publishes committed scene snapshots', () => {
+  const root = createSceneRoot();
+  const commits: Array<{
+    sceneId: string;
+    previousSceneId?: string;
+    revision: number;
+  }> = [];
+
+  root.subscribe((commit) => {
+    commits.push({
+      sceneId: commit.scene.id,
+      previousSceneId: commit.previousScene?.id,
+      revision: commit.revision,
+    });
+  });
+
+  const firstScene = root.render(
+    <scene id='jsx-scene'>
+      <group id='root' />
+    </scene>,
+  );
+  const secondScene = root.render(
+    <scene id='jsx-scene-next'>
+      <group id='root' position={[1, 2, 3]} />
+    </scene>,
+  );
+
+  assertEquals(root.getScene(), secondScene);
+  assertEquals(root.getRevision(), 2);
+  assertEquals(commits, [
+    {
+      sceneId: firstScene.id,
+      previousSceneId: undefined,
+      revision: 1,
+    },
+    {
+      sceneId: secondScene.id,
+      previousSceneId: firstScene.id,
+      revision: 2,
+    },
+  ]);
+});
+
+Deno.test('createSceneRoot allows subscribers to unsubscribe', () => {
+  const root = createSceneRoot(
+    <scene id='initial-scene'>
+      <group id='root' />
+    </scene>,
+  );
+  const revisions: number[] = [];
+
+  const unsubscribe = root.subscribe((commit) => {
+    revisions.push(commit.revision);
+  });
+
+  root.render(
+    <scene id='next-scene'>
+      <group id='root' />
+    </scene>,
+  );
+  unsubscribe();
+  root.render(
+    <scene id='final-scene'>
+      <group id='root' />
+    </scene>,
+  );
+
+  assertEquals(root.getScene()?.id, 'final-scene');
+  assertEquals(root.getRevision(), 3);
+  assertEquals(revisions, [2]);
 });

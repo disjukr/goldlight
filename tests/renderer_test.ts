@@ -265,6 +265,16 @@ Deno.test('deferred renderer plans a hybrid raymarch pass when sdf or volume nod
   ]);
 });
 
+Deno.test('forward renderer keeps color as the default present input without post-process passes', () => {
+  const frame = planFrame(
+    createForwardRenderer(),
+    evaluateScene(createSceneIr('scene'), { timeMs: 0 }),
+    createRuntimeResidency(),
+  );
+
+  assertEquals(frame.passes.map((pass) => pass.reads), [['scene'], ['color']]);
+});
+
 Deno.test('forward renderer inserts post-process passes between scene color and present', () => {
   const frame = planFrame(
     createForwardRenderer('forward', [createBlitPostProcessPass()]),
@@ -273,6 +283,33 @@ Deno.test('forward renderer inserts post-process passes between scene color and 
   );
 
   assertEquals(frame.passes.map((pass) => pass.id), ['mesh', 'post-process:blit', 'present']);
+  assertEquals(
+    frame.passes.map((pass) => pass.reads),
+    [['scene'], ['scene-color'], ['post-process:blit:output']],
+  );
+});
+
+Deno.test('deferred renderer keeps color as the default present input without post-process passes', () => {
+  let scene = createSceneIr('scene');
+  scene = appendMesh(scene, {
+    id: 'mesh-0',
+    attributes: [
+      { semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0, 0, 1, 0] },
+      { semantic: 'NORMAL', itemSize: 3, values: [0, 0, 1, 0, 0, 1, 0, 0, 1] },
+    ],
+  });
+  scene = appendNode(scene, createNode('node-0', { meshId: 'mesh-0' }));
+
+  const frame = planFrame(
+    createDeferredRenderer(),
+    evaluateScene(scene, { timeMs: 0 }),
+    createRuntimeResidency(),
+  );
+
+  assertEquals(
+    frame.passes.map((pass) => pass.reads),
+    [['scene'], ['scene', 'depth'], ['gbuffer', 'depth'], ['color']],
+  );
 });
 
 Deno.test('deferred renderer inserts post-process passes after lighting and raymarch work', () => {
@@ -299,6 +336,12 @@ Deno.test('deferred renderer inserts post-process passes after lighting and raym
     'post-process:blit',
     'present',
   ]);
+  assertEquals(
+    frame.passes.map((pass) => pass.reads),
+    [['scene'], ['scene', 'depth'], ['gbuffer', 'depth'], ['scene-color'], [
+      'post-process:blit:output',
+    ]],
+  );
 });
 
 Deno.test('extractVolumePassItems returns only evaluated volumes with residency', () => {

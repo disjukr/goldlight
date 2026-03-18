@@ -35,6 +35,10 @@ type MockPipeline = Readonly<{
   getBindGroupLayout: (index: number) => GPUBindGroupLayout;
 }>;
 type MockShader = Readonly<{ code: string }>;
+type MockTexture = Readonly<{
+  id: number;
+  descriptor: GPUTextureDescriptor;
+}>;
 type MockPassAction =
   | Readonly<{ type: 'setPipeline'; pipeline: MockPipeline }>
   | Readonly<{ type: 'setBindGroup'; index: number; bindGroup: MockBindGroup }>
@@ -136,6 +140,7 @@ const createRenderMocks = () => {
   const buffers: MockBuffer[] = [];
   const bindGroups: MockBindGroup[] = [];
   const samplers: Readonly<{ id: number }>[] = [];
+  const textures: MockTexture[] = [];
   const bindGroupEntries: MockBindGroupEntry[][] = [];
   const writeBufferCalls: MockWriteBufferCall[] = [];
   const submits: unknown[][] = [];
@@ -217,9 +222,16 @@ const createRenderMocks = () => {
       },
       finish: () => ({}) as GPUCommandBuffer,
     }),
-    createTexture: () => ({
-      createView: () => ({ textureId: 0 } as unknown as GPUTextureView),
-    } as GPUTexture),
+    createTexture: (descriptor: GPUTextureDescriptor) => {
+      const texture: MockTexture = {
+        id: textures.length,
+        descriptor,
+      };
+      textures.push(texture);
+      return ({
+        createView: () => ({ textureId: texture.id } as unknown as GPUTextureView),
+      } as GPUTexture);
+    },
   };
 
   const queue = {
@@ -245,6 +257,7 @@ const createRenderMocks = () => {
     buffers,
     bindGroups,
     samplers,
+    textures,
     bindGroupEntries,
     writeBufferCalls,
     submits,
@@ -561,6 +574,46 @@ Deno.test('renderForwardFrame runs a post-process pass after scene rendering whe
     2,
   );
   assertEquals(mocks.samplers.length, 1);
+  const postProcessShader = mocks.shaders.at(-1);
+  assertEquals(postProcessShader?.code.includes('vec2<f32>(0.0, 2.0)'), true);
+  assertEquals(postProcessShader?.code.includes('out.uv = uvs[vertexIndex];'), true);
+});
+
+Deno.test('renderForwardFrame preserves the target sample count for intermediate scene color', () => {
+  const mocks = createRenderMocks();
+  const runtimeResidency = createRuntimeResidency();
+  let scene = createSceneIr('scene');
+  scene = appendMesh(scene, {
+    id: 'mesh-post',
+    attributes: [{ semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0, 0, 1, 0] }],
+  });
+  scene = appendNode(scene, createNode('node-post', { meshId: 'mesh-post' }));
+
+  runtimeResidency.geometry.set('mesh-post', {
+    meshId: 'mesh-post',
+    attributeBuffers: { POSITION: { id: 0 } as unknown as GPUBuffer },
+    vertexCount: 3,
+    indexCount: 0,
+  });
+
+  const binding = createOffscreenContext({
+    device: mocks.device as unknown as GPUDevice,
+    target: createHeadlessTarget(64, 64, 'rgba8unorm', 4),
+  });
+
+  renderForwardFrame(
+    mocks as unknown as GpuRenderExecutionContext,
+    binding,
+    runtimeResidency,
+    evaluateScene(scene, { timeMs: 0 }),
+    createMaterialRegistry(),
+    [createBlitPostProcessPass()],
+  );
+
+  const sceneColorTexture = mocks.textures.find((texture) =>
+    texture.descriptor.label === 'forward-scene-color'
+  );
+  assertEquals(sceneColorTexture?.descriptor.sampleCount, 4);
 });
 
 Deno.test('renderDeferredFrame runs a post-process pass after deferred lighting when requested', () => {

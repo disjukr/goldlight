@@ -124,7 +124,8 @@ const assertTriangleWindingMatchesNormals = (mesh: MeshPrimitive) => {
     const averageNormalX = (normals[aIndex] + normals[bIndex] + normals[cIndex]) / 3;
     const averageNormalY = (normals[aIndex + 1] + normals[bIndex + 1] + normals[cIndex + 1]) / 3;
     const averageNormalZ = (normals[aIndex + 2] + normals[bIndex + 2] + normals[cIndex + 2]) / 3;
-    const orientation = (faceX * averageNormalX) + (faceY * averageNormalY) + (faceZ * averageNormalZ);
+    const orientation = (faceX * averageNormalX) + (faceY * averageNormalY) +
+      (faceZ * averageNormalZ);
 
     assert(
       orientation > 0,

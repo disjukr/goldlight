@@ -1,4 +1,4 @@
-import { ensureDir, emptyDir } from '@std/fs';
+import { emptyDir, ensureDir } from '@std/fs';
 import { dirname, fromFileUrl, join, resolve } from '@std/path';
 
 type AssetTarget = 'stanford-bunny' | 'damaged-helmet' | 'sponza';

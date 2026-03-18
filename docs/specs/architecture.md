@@ -28,6 +28,8 @@ The runtime is split into explicit data and execution stages:
 - `packages/renderer`: pass contracts, renderer descriptors, and frame planning.
 - renderer descriptors also publish capability contracts for primitive/material compatibility before
   execution. See [`renderer-capabilities.md`](./renderer-capabilities.md).
+- `packages/procedural`: deterministic CPU-side procedural sampling plus texture/volume baking
+  helpers.
 - `packages/loaders`: format parsers that normalize input into Scene IR.
 - `packages/react`: declarative scene authoring that feeds the same IR/core pipeline.
 - `packages/platform`: target descriptors for browser, Deno, and headless execution.

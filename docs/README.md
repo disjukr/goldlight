@@ -18,6 +18,8 @@ Use this page as the main navigation hub.
   [`specs/renderer-capabilities.md`](./specs/renderer-capabilities.md)
 - Understand loader and interchange direction: [`specs/interop-gltf.md`](./specs/interop-gltf.md)
 - Understand JSX authoring boundaries: [`specs/react-authoring.md`](./specs/react-authoring.md)
+- Understand procedural noise, texture, and volume generation:
+  [`specs/procedural-generation.md`](./specs/procedural-generation.md)
 - Understand reusable built-in mesh generation and example coverage:
   [`../examples/byow_primitives_demo/README.md`](../examples/byow_primitives_demo/README.md)
 - Review accepted architecture constraints: [`adr/README.md`](./adr/README.md)

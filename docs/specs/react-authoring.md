@@ -7,7 +7,9 @@ React integration is a separate package. It must not become the source of truth 
 ## Contract
 
 - JSX authoring trees are built through `@rieul3d/react` primitives such as `<scene>` and `<node>`.
-- Authored trees are lowered into Scene IR or evaluated scene inputs.
+- Authored trees may also declare scene resources such as `<camera>`, `<mesh>`, `<material>`,
+  `<light>`, `<texture>`, and `<asset>`.
+- Authored trees are lowered into complete Scene IR or evaluated scene inputs.
 - Core packages remain usable without React.
 
 ## Scope
@@ -39,10 +41,13 @@ them.
 
 - The React package currently lowers declarative authoring structures into SceneIr-friendly data.
 - The package now exposes a JSX runtime so TSX can author scene trees directly.
-- Authoring nodes now lower core node metadata such as names, mesh bindings, and transforms into
-  Scene IR.
+- Authoring nodes lower core node metadata such as names, mesh/camera/light bindings, and transforms
+  into Scene IR.
+- Root scene trees can now also declare cameras, meshes, materials, lights, textures, and assets in
+  the same TSX surface before lowering.
 - Rendering, residency preparation, and execution continue to live in the core/gpu/renderer layers.
-- The browser example now demonstrates JSX authoring plus lowering, not a live React reconciler.
+- The browser example now demonstrates full-scene JSX authoring plus lowering, not a live React
+  reconciler.
 - [`../../examples/browser_react_authoring/README.md`](../../examples/browser_react_authoring/README.md)
   shows the reference browser flow: author a tree with `@rieul3d/react` TSX, lower node data into
   Scene IR, then hand the result to the existing runtime and renderer layers.

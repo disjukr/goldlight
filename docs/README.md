@@ -25,7 +25,7 @@ Use this page as the main navigation hub.
   [`adr/0004-react-jsx-authoring.md`](./adr/0004-react-jsx-authoring.md)
 - Run the browser and native examples, including the textured and custom-material browser workflows:
   [`../examples/README.md`](../examples/README.md)
-- Review the React authoring browser example:
+- Review the React authoring browser example with full-scene TSX lowering:
   [`../examples/browser_react_authoring/README.md`](../examples/browser_react_authoring/README.md)
 - Run the headless snapshot PNG workflow:
   [`../examples/headless_snapshot/README.md`](../examples/headless_snapshot/README.md)

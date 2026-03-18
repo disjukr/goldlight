@@ -9,7 +9,6 @@ import {
   ensureSceneMeshResidency,
   requestGpuContext,
 } from '../../packages/gpu/mod.ts';
-import { appendMesh, createSceneIr } from '../../packages/ir/mod.ts';
 import { createBrowserSurfaceTarget } from '../../packages/platform/mod.ts';
 import { authoringTreeToSceneIr } from '../../packages/react/mod.ts';
 import { createMaterialRegistry, renderForwardFrame } from '../../packages/renderer/mod.ts';
@@ -22,41 +21,50 @@ if (!canvas) {
 canvas.width = 640;
 canvas.height = 480;
 
-const TriangleNode = (props: Readonly<{ id: string }>) => (
-  <node id={props.id} name='Authored Triangle' meshId='triangle' />
+const TriangleScene = () => (
+  <scene id='react-browser-authoring' activeCameraId='camera-main'>
+    <camera id='camera-main' type='perspective' />
+    <material
+      id='triangle-material'
+      kind='unlit'
+      textures={[]}
+      parameters={{
+        color: { x: 0.19, y: 0.62, z: 0.97, w: 1 },
+      }}
+    />
+    <mesh
+      id='triangle'
+      materialId='triangle-material'
+      attributes={[{
+        semantic: 'POSITION',
+        itemSize: 3,
+        values: [
+          0,
+          0.7,
+          0,
+          -0.7,
+          -0.7,
+          0,
+          0.7,
+          -0.7,
+          0,
+        ],
+      }]}
+    />
+    <node
+      id='camera-node'
+      cameraId='camera-main'
+      transform={{
+        translation: { x: 0, y: 0, z: 2 },
+        rotation: { x: 0, y: 0, z: 0, w: 1 },
+        scale: { x: 1, y: 1, z: 1 },
+      }}
+    />
+    <node id='triangle-node' name='Authored Triangle' meshId='triangle' />
+  </scene>
 );
 
-const authoredScene = authoringTreeToSceneIr(
-  <scene id='react-browser-authoring'>
-    <TriangleNode id='triangle-node' />
-  </scene>,
-);
-
-const scene = appendMesh(createSceneIr(authoredScene.id), {
-  id: 'triangle',
-  attributes: [{
-    semantic: 'POSITION',
-    itemSize: 3,
-    values: [
-      0,
-      0.7,
-      0,
-      -0.7,
-      -0.7,
-      0,
-      0.7,
-      -0.7,
-      0,
-    ],
-  }],
-  materialId: undefined,
-});
-
-const finalScene = {
-  ...scene,
-  nodes: authoredScene.nodes,
-  rootNodeIds: authoredScene.rootNodeIds,
-};
+const scene = authoringTreeToSceneIr(<TriangleScene />);
 
 const target = createBrowserSurfaceTarget(canvas.width, canvas.height);
 const gpuContext = await requestGpuContext({ target });
@@ -70,8 +78,8 @@ const residency = createRuntimeResidency();
 const materialRegistry = createMaterialRegistry();
 
 const drawFrame = () => {
-  const evaluatedScene = evaluateScene(finalScene, { timeMs: performance.now() });
-  ensureSceneMeshResidency(gpuContext, residency, finalScene, evaluatedScene);
+  const evaluatedScene = evaluateScene(scene, { timeMs: performance.now() });
+  ensureSceneMeshResidency(gpuContext, residency, scene, evaluatedScene);
   renderForwardFrame(gpuContext, surface, residency, evaluatedScene, materialRegistry);
   requestAnimationFrame(drawFrame);
 };

@@ -52,7 +52,7 @@ Implemented today:
 - Windows BYOW primitives demo using `@rieul3d/primitives`, a reusable BYOW runner script, and a
   custom lit shader for mesh normals
 - a browser React authoring example that lowers JSX-authored scene nodes into Scene IR before
-  rendering
+  rendering, now including JSX-authored scene resources such as meshes, materials, and cameras
 - fixture-backed golden snapshot regression tests for clear, mesh, sphere/box SDF, volume, and
   recovery rebuild renders, including guards against raymarch fixtures collapsing back to clear-only
   output

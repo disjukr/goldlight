@@ -1,5 +1,6 @@
 import type {
   AnimationClip,
+  AssetRef,
   Camera,
   CameraOrthographic,
   CameraPerspective,
@@ -49,6 +50,11 @@ export const appendNode = (scene: SceneIr, node: Node): SceneIr => ({
   ...scene,
   nodes: [...scene.nodes, node],
   rootNodeIds: node.parentId ? scene.rootNodeIds : [...scene.rootNodeIds, node.id],
+});
+
+export const appendAsset = (scene: SceneIr, asset: AssetRef): SceneIr => ({
+  ...scene,
+  assets: [...scene.assets, asset],
 });
 
 export const appendMesh = (scene: SceneIr, mesh: MeshPrimitive): SceneIr => ({

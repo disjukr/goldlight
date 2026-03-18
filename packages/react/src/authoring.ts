@@ -1,21 +1,74 @@
-import { appendNode, createNode, createSceneIr } from '@rieul3d/ir';
-import type { Node, SceneIr, Transform } from '@rieul3d/ir';
+import {
+  appendAsset,
+  appendCamera,
+  appendLight,
+  appendMaterial,
+  appendMesh,
+  appendNode,
+  appendTexture,
+  createNode,
+  createOrthographicCamera,
+  createPerspectiveCamera,
+  createSceneIr,
+} from '@rieul3d/ir';
+import type {
+  AssetRef,
+  Camera,
+  CameraOrthographic,
+  CameraPerspective,
+  Light,
+  Material,
+  MeshPrimitive,
+  Node,
+  SceneIr,
+  TextureRef,
+  Transform,
+} from '@rieul3d/ir';
 
-export type SceneAuthoringProps = Readonly<Record<string, never>>;
+export type SceneAuthoringProps = Readonly<{
+  activeCameraId?: SceneIr['activeCameraId'];
+}>;
 export type FragmentAuthoringProps = Readonly<Record<string, never>>;
 
 export type NodeAuthoringProps = Readonly<{
   name?: Node['name'];
   meshId?: Node['meshId'];
+  cameraId?: Node['cameraId'];
   sdfId?: Node['sdfId'];
   volumeId?: Node['volumeId'];
+  lightId?: Node['lightId'];
   transform?: Transform;
 }>;
+
+export type AssetJsxProps = AssetRef;
+export type TextureJsxProps = TextureRef;
+export type MaterialJsxProps = Material;
+export type LightJsxProps = Light;
+export type MeshJsxProps = MeshPrimitive;
+export type CameraJsxProps =
+  | Readonly<
+    {
+      id: string;
+      type: 'perspective';
+    } & Partial<Omit<CameraPerspective, 'id' | 'type'>>
+  >
+  | Readonly<
+    {
+      id: string;
+      type: 'orthographic';
+    } & Partial<Omit<CameraOrthographic, 'id' | 'type'>>
+  >;
 
 type AuthoringPropsByType = {
   scene: SceneAuthoringProps;
   node: NodeAuthoringProps;
   fragment: FragmentAuthoringProps;
+  asset: AssetJsxProps;
+  texture: TextureJsxProps;
+  material: MaterialJsxProps;
+  light: LightJsxProps;
+  mesh: MeshJsxProps;
+  camera: CameraJsxProps;
 };
 
 export type AuthoringElement<
@@ -34,10 +87,12 @@ export type AuthoringRenderable =
   | undefined
   | boolean;
 
-export type SceneJsxProps = Readonly<{
-  id: string;
-  children?: AuthoringRenderable;
-}>;
+export type SceneJsxProps = Readonly<
+  {
+    id: string;
+    children?: AuthoringRenderable;
+  } & SceneAuthoringProps
+>;
 
 export type NodeJsxProps = Readonly<
   {
@@ -83,9 +138,54 @@ export function createAuthoringElement(
   children?: readonly AuthoringElement[],
 ): AuthoringElement<'fragment'>;
 export function createAuthoringElement(
+  type: 'asset',
+  id: string,
+  props?: AssetJsxProps,
+  children?: readonly AuthoringElement[],
+): AuthoringElement<'asset'>;
+export function createAuthoringElement(
+  type: 'texture',
+  id: string,
+  props?: TextureJsxProps,
+  children?: readonly AuthoringElement[],
+): AuthoringElement<'texture'>;
+export function createAuthoringElement(
+  type: 'material',
+  id: string,
+  props?: MaterialJsxProps,
+  children?: readonly AuthoringElement[],
+): AuthoringElement<'material'>;
+export function createAuthoringElement(
+  type: 'light',
+  id: string,
+  props?: LightJsxProps,
+  children?: readonly AuthoringElement[],
+): AuthoringElement<'light'>;
+export function createAuthoringElement(
+  type: 'mesh',
+  id: string,
+  props?: MeshJsxProps,
+  children?: readonly AuthoringElement[],
+): AuthoringElement<'mesh'>;
+export function createAuthoringElement(
+  type: 'camera',
+  id: string,
+  props?: CameraJsxProps,
+  children?: readonly AuthoringElement[],
+): AuthoringElement<'camera'>;
+export function createAuthoringElement(
   type: keyof AuthoringPropsByType,
   id: string,
-  props: SceneAuthoringProps | NodeAuthoringProps | FragmentAuthoringProps = {},
+  props:
+    | SceneAuthoringProps
+    | NodeAuthoringProps
+    | FragmentAuthoringProps
+    | AssetJsxProps
+    | TextureJsxProps
+    | MaterialJsxProps
+    | LightJsxProps
+    | MeshJsxProps
+    | CameraJsxProps = {},
   children: readonly AuthoringElement[] = [],
 ): AuthoringElement {
   return {
@@ -136,7 +236,19 @@ const normalizeRenderable = (
 };
 
 export const jsx = (
-  type: 'scene' | 'node' | typeof Fragment | AuthoringComponent<SceneJsxProps | NodeJsxProps>,
+  type:
+    | keyof AuthoringPropsByType
+    | typeof Fragment
+    | AuthoringComponent<
+      | SceneJsxProps
+      | NodeJsxProps
+      | AssetJsxProps
+      | TextureJsxProps
+      | MaterialJsxProps
+      | LightJsxProps
+      | MeshJsxProps
+      | CameraJsxProps
+    >,
   props: Record<string, unknown> | null,
   key?: string,
 ): AuthoringElement => {
@@ -161,8 +273,24 @@ export const jsx = (
   }
 
   if (type === 'scene') {
-    const { id } = authoringProps as SceneJsxProps;
-    return createAuthoringElement('scene', id, {}, children);
+    const { id, children: _children, ...sceneProps } = authoringProps as SceneJsxProps;
+    return createAuthoringElement('scene', id, sceneProps, children);
+  }
+
+  if (
+    type === 'asset' || type === 'texture' || type === 'material' || type === 'light' ||
+    type === 'mesh' || type === 'camera'
+  ) {
+    const { id, children: _children, ...resourceProps } = authoringProps as {
+      id: string;
+      children?: AuthoringRenderable;
+    };
+    return {
+      type,
+      id,
+      props: { id, ...resourceProps } as AuthoringPropsByType[typeof type],
+      children,
+    };
   }
 
   const { id, children: _children, ...nodeProps } = authoringProps as NodeJsxProps;
@@ -177,22 +305,56 @@ export const authoringTreeToSceneIr = (element: AuthoringElement): SceneIr => {
     throw new Error('authoring root must be a scene');
   }
 
-  let scene = createSceneIr(element.id);
+  let scene: SceneIr = createSceneIr(element.id);
+  const sceneProps = element.props as SceneAuthoringProps | undefined;
+  if (sceneProps?.activeCameraId) {
+    scene = {
+      ...scene,
+      activeCameraId: sceneProps.activeCameraId,
+    };
+  }
+
+  const normalizeCamera = (camera: CameraJsxProps): Camera =>
+    camera.type === 'perspective'
+      ? createPerspectiveCamera(camera.id, camera)
+      : createOrthographicCamera(camera.id, camera);
 
   const visit = (parentId: string | undefined, node: AuthoringElement) => {
-    if (node.type !== 'node') {
-      for (const child of node.children ?? []) visit(parentId, child);
-      return;
+    switch (node.type) {
+      case 'fragment':
+        for (const child of node.children ?? []) visit(parentId, child);
+        return;
+      case 'node':
+        scene = appendNode(
+          scene,
+          createNode(node.id, {
+            parentId,
+            ...(node.props ?? {}),
+          }),
+        );
+        for (const child of node.children ?? []) visit(node.id, child);
+        return;
+      case 'asset':
+        scene = appendAsset(scene, node.props as AssetRef);
+        return;
+      case 'texture':
+        scene = appendTexture(scene, node.props as TextureRef);
+        return;
+      case 'material':
+        scene = appendMaterial(scene, node.props as Material);
+        return;
+      case 'light':
+        scene = appendLight(scene, node.props as Light);
+        return;
+      case 'mesh':
+        scene = appendMesh(scene, node.props as MeshPrimitive);
+        return;
+      case 'camera':
+        scene = appendCamera(scene, normalizeCamera(node.props as CameraJsxProps));
+        return;
+      default:
+        return;
     }
-
-    scene = appendNode(
-      scene,
-      createNode(node.id, {
-        parentId,
-        ...(node.props ?? {}),
-      }),
-    );
-    for (const child of node.children ?? []) visit(node.id, child);
   };
 
   for (const child of element.children ?? []) visit(undefined, child);

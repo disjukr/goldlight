@@ -111,3 +111,76 @@ Deno.test('jsx function components receive boolean and null children before lowe
   assertEquals(scene.rootNodeIds, ['root']);
   assertEquals(scene.nodes.find((node) => node.id === 'child')?.parentId, 'root');
 });
+
+Deno.test('authoringTreeToSceneIr lowers scene resources authored in JSX', () => {
+  const scene = authoringTreeToSceneIr(
+    <scene id='jsx-scene' activeCameraId='camera-main'>
+      <camera id='camera-main' type='perspective' yfov={0.9} />
+      <asset id='texture-asset' uri='./checker.png' mimeType='image/png' />
+      <texture
+        id='base-color'
+        assetId='texture-asset'
+        semantic='baseColor'
+        colorSpace='srgb'
+        sampler='linear-repeat'
+      />
+      <material
+        id='material-unlit'
+        kind='unlit'
+        textures={[{
+          id: 'base-color',
+          assetId: 'texture-asset',
+          semantic: 'baseColor',
+          colorSpace: 'srgb',
+          sampler: 'linear-repeat',
+        }]}
+        parameters={{
+          color: { x: 0.8, y: 0.7, z: 0.6, w: 1 },
+        }}
+      />
+      <mesh
+        id='triangle'
+        materialId='material-unlit'
+        attributes={[{
+          semantic: 'POSITION',
+          itemSize: 3,
+          values: [0, 0.7, 0, -0.7, -0.7, 0, 0.7, -0.7, 0],
+        }]}
+      />
+      <light
+        id='sun'
+        kind='directional'
+        color={{ x: 1, y: 0.95, z: 0.9 }}
+        intensity={1.5}
+      />
+      <node id='camera-node' cameraId='camera-main' />
+      <node id='light-node' lightId='sun' />
+      <node id='mesh-node' meshId='triangle' />
+    </scene>,
+  );
+
+  assertEquals(scene.activeCameraId, 'camera-main');
+  assertEquals(scene.cameras, [{
+    id: 'camera-main',
+    type: 'perspective',
+    yfov: 0.9,
+    znear: 0.1,
+    zfar: 100,
+  }]);
+  assertEquals(scene.assets, [{
+    id: 'texture-asset',
+    uri: './checker.png',
+    mimeType: 'image/png',
+  }]);
+  assertEquals(scene.textures, [{
+    id: 'base-color',
+    assetId: 'texture-asset',
+    semantic: 'baseColor',
+    colorSpace: 'srgb',
+    sampler: 'linear-repeat',
+  }]);
+  assertEquals(scene.materials[0]?.id, 'material-unlit');
+  assertEquals(scene.meshes[0]?.id, 'triangle');
+  assertEquals(scene.lights[0]?.id, 'sun');
+  assertEquals(scene.nodes.map((node) => node.id), ['camera-node', 'light-node', 'mesh-node']);
+});

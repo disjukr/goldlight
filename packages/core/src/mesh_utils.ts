@@ -16,8 +16,24 @@ const getPositionValues = (mesh: MeshPrimitive): readonly number[] => {
   if (positions.length === 0 || positions.length % 3 !== 0) {
     throw new Error(`Mesh "${mesh.id}" has invalid POSITION data`);
   }
+  for (let index = 0; index < positions.length; index += 1) {
+    if (!Number.isFinite(positions[index])) {
+      throw new Error(`Mesh "${mesh.id}" has non-finite POSITION data`);
+    }
+  }
 
   return positions;
+};
+
+const requireTriangleIndex = (mesh: MeshPrimitive, vertexCount: number, index: number): number => {
+  if (!Number.isInteger(index)) {
+    throw new Error(`Mesh "${mesh.id}" references a non-integer vertex index`);
+  }
+  if (index < 0 || index >= vertexCount) {
+    throw new Error(`Mesh "${mesh.id}" references an out-of-range vertex index`);
+  }
+
+  return index;
 };
 
 export const createQuaternionFromEulerDegrees = (
@@ -90,23 +106,19 @@ export const createMeshNormalsAttribute = (mesh: MeshPrimitive): MeshAttribute =
   const indices = mesh.indices;
 
   const accumulateFaceNormal = (aIndex: number, bIndex: number, cIndex: number) => {
-    if (
-      aIndex < 0 || aIndex >= vertexCount ||
-      bIndex < 0 || bIndex >= vertexCount ||
-      cIndex < 0 || cIndex >= vertexCount
-    ) {
-      throw new Error(`Mesh "${mesh.id}" references an out-of-range vertex index`);
-    }
+    const validatedAIndex = requireTriangleIndex(mesh, vertexCount, aIndex);
+    const validatedBIndex = requireTriangleIndex(mesh, vertexCount, bIndex);
+    const validatedCIndex = requireTriangleIndex(mesh, vertexCount, cIndex);
 
-    const ax = positions[aIndex * 3] ?? 0;
-    const ay = positions[(aIndex * 3) + 1] ?? 0;
-    const az = positions[(aIndex * 3) + 2] ?? 0;
-    const bx = positions[bIndex * 3] ?? 0;
-    const by = positions[(bIndex * 3) + 1] ?? 0;
-    const bz = positions[(bIndex * 3) + 2] ?? 0;
-    const cx = positions[cIndex * 3] ?? 0;
-    const cy = positions[(cIndex * 3) + 1] ?? 0;
-    const cz = positions[(cIndex * 3) + 2] ?? 0;
+    const ax = positions[validatedAIndex * 3] ?? 0;
+    const ay = positions[(validatedAIndex * 3) + 1] ?? 0;
+    const az = positions[(validatedAIndex * 3) + 2] ?? 0;
+    const bx = positions[validatedBIndex * 3] ?? 0;
+    const by = positions[(validatedBIndex * 3) + 1] ?? 0;
+    const bz = positions[(validatedBIndex * 3) + 2] ?? 0;
+    const cx = positions[validatedCIndex * 3] ?? 0;
+    const cy = positions[(validatedCIndex * 3) + 1] ?? 0;
+    const cz = positions[(validatedCIndex * 3) + 2] ?? 0;
 
     const abx = bx - ax;
     const aby = by - ay;
@@ -118,15 +130,15 @@ export const createMeshNormalsAttribute = (mesh: MeshPrimitive): MeshAttribute =
     const ny = (abz * acx) - (abx * acz);
     const nz = (abx * acy) - (aby * acx);
 
-    normals[aIndex * 3] += nx;
-    normals[(aIndex * 3) + 1] += ny;
-    normals[(aIndex * 3) + 2] += nz;
-    normals[bIndex * 3] += nx;
-    normals[(bIndex * 3) + 1] += ny;
-    normals[(bIndex * 3) + 2] += nz;
-    normals[cIndex * 3] += nx;
-    normals[(cIndex * 3) + 1] += ny;
-    normals[(cIndex * 3) + 2] += nz;
+    normals[validatedAIndex * 3] += nx;
+    normals[(validatedAIndex * 3) + 1] += ny;
+    normals[(validatedAIndex * 3) + 2] += nz;
+    normals[validatedBIndex * 3] += nx;
+    normals[(validatedBIndex * 3) + 1] += ny;
+    normals[(validatedBIndex * 3) + 2] += nz;
+    normals[validatedCIndex * 3] += nx;
+    normals[(validatedCIndex * 3) + 1] += ny;
+    normals[(validatedCIndex * 3) + 2] += nz;
   };
 
   if (indices && indices.length > 0) {

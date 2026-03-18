@@ -65,10 +65,13 @@ Implemented today:
 - a browser React authoring example plus the current `createSceneRoot()` snapshot path that commits
   JSX-authored trees into `SceneIr` snapshots before rendering, including JSX-authored scene
   resources such as meshes, materials, and cameras, exported convenience components for common
-  camera/light composition, and commit-summary plus update-plan helpers for targeted residency
-  invalidation without forcing resets for transform-only node changes
+  camera/light composition, an internal React-owned scene document that preserves stable resource
+  and node host instances across commits before publishing data-only snapshots, and commit-summary
+  plus update-plan helpers for targeted residency invalidation without forcing resets for
+  transform-only node changes
 - proposed ADR/discussion tracking for the next React live-update boundary decision around
-  partial-apply scene updates without renderer ownership
+  partial-apply scene updates without renderer ownership, plus the next proposed reconciler
+  scene-document boundary for issue #112
 - fixture-backed golden snapshot regression tests for clear, mesh, sphere/box SDF, volume, and
   recovery rebuild renders, including guards against raymarch fixtures collapsing back to clear-only
   output

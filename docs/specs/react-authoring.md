@@ -61,6 +61,12 @@ offscreen targets, and multi-scene orchestration outside the React package. The 
 has a first implementation waypoint in `createSceneRoot()`, but ADR 0006 does not treat that
 full-snapshot publication shape as the final contract.
 
+The next unresolved step for issue `#112` is now captured in
+[`../adr/0008-react-reconciler-scene-document.md`](../adr/0008-react-reconciler-scene-document.md):
+add a React-owned internal scene document that a real `react-reconciler` host can update
+incrementally before those changes cross into the existing runtime/residency boundary. Issue `#117`
+tracks the first implementation slice for that scene-document layer.
+
 ## Current Status
 
 - The React package currently lowers declarative authoring structures into SceneIr-friendly data.
@@ -79,6 +85,11 @@ full-snapshot publication shape as the final contract.
 - `createSceneRoot()` now provides a data-only commit bridge that publishes full `SceneIr` snapshots
   plus previous-scene/revision metadata to caller-owned subscribers as a current implementation
   waypoint.
+- `createSceneRoot()` now keeps an internal React-owned scene document so stable resource and node
+  host instances can survive repeated commits even though the published subscriber payload is still
+  a data-only `SceneIr` snapshot.
+- The scene document currently supports stable node/resource identity, parent-child reordering, and
+  subtree/resource removal as the first package-local waypoint before a real reconciler host lands.
 - `summarizeSceneRootCommit()` can derive resource-level added/removed/updated/unchanged ID sets
   from snapshot commits so integrations can make selective invalidation decisions while a finer
   runtime-facing partial-apply contract is designed.
@@ -104,8 +115,13 @@ full-snapshot publication shape as the final contract.
 - The next unresolved architecture question is how React-authored changes should cross into runtime
   update planning so frequent node changes can avoid whole-scene resets while multi-scene
   composition remains outside React ownership.
+- The next unresolved implementation question for a real reconciler host is what internal scene
+  document shape should absorb React mount/update/unmount operations before publishing data-only
+  scene updates outward.
 - Issue `#89` now tracks follow-up implementation work around the next runtime-facing update
   contract.
+- Issue `#117` now tracks the first scene-document implementation slice needed before a true React
+  reconciler host can land.
 - [`../../examples/browser_react_authoring/README.md`](../../examples/browser_react_authoring/README.md)
   shows the reference browser flow: author a tree with `@rieul3d/react` TSX, commit it through
   `createSceneRoot()`, derive an update plan plus summary from that commit, drop targeted residency

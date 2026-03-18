@@ -30,6 +30,8 @@ Use this page as the main navigation hub.
 - Review proposed architecture discussions: [`adr/proposals.md`](./adr/proposals.md)
 - Review the proposed post-processing execution boundary:
   [`adr/0007-post-processing-execution-model.md`](./adr/0007-post-processing-execution-model.md)
+- Review the proposed React reconciler scene-document boundary:
+  [`adr/0008-react-reconciler-scene-document.md`](./adr/0008-react-reconciler-scene-document.md)
 - Review the JSX authoring boundary decision:
   [`adr/0004-react-jsx-authoring.md`](./adr/0004-react-jsx-authoring.md)
 - Review the accepted React scene update boundary decision:
@@ -38,8 +40,8 @@ Use this page as the main navigation hub.
   [`../examples/README.md`](../examples/README.md)
 - Review the React authoring browser example with full-scene TSX lowering and scene-root commits:
   [`../examples/browser_react_authoring/README.md`](../examples/browser_react_authoring/README.md)
-- Review the accepted React scene update planning boundary and current helper surface:
-  [`specs/react-authoring.md`](./specs/react-authoring.md)
+- Review the accepted React scene update planning boundary, internal scene-document waypoint, and
+  current helper surface: [`specs/react-authoring.md`](./specs/react-authoring.md)
 - Run the headless snapshot PNG workflow:
   [`../examples/headless_snapshot/README.md`](../examples/headless_snapshot/README.md)
 

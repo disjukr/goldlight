@@ -45,7 +45,10 @@ primitives into `MeshPrimitive` geometry for baking, inspection, and mesh-pipeli
 ## Validation
 
 - unsupported SDF operators throw instead of silently returning empty meshes
-- extraction rejects non-finite scalar inputs and non-positive grid resolutions
+- extraction rejects non-positive primitive dimensions, non-finite scalar inputs, and non-positive
+  grid resolutions
+- surface-nets stitches boundary-touching contours instead of dropping cap faces when tight bounds
+  place the iso-surface directly on the sampling box
 - regression tests cover deterministic output, mesh validity, and basic sphere/box shape fidelity
 
 ## Follow-Up Direction

@@ -139,6 +139,7 @@ export type ReactSceneRoot = Readonly<{
 
 const hostContext: HostContext = {};
 let currentUpdatePriority = NoEventPriority;
+const activeContainers = new Set<HostContainer>();
 
 const renderer = Reconciler({
   getRootHostContext: () => hostContext,
@@ -364,8 +365,20 @@ const sweepUnvisitedResourceIds = (
 
 const syncContainerSceneDocument = (container: HostContainer): void => {
   if (container.rootChildren.length === 0) {
+    const previousScene = container.currentScene;
     container.document = undefined;
     container.currentScene = undefined;
+    if (previousScene) {
+      const commit = {
+        scene: sceneDocumentToSceneIr(createSceneDocument(previousScene.id)),
+        previousScene,
+        revision: container.revision + 1,
+      };
+      container.revision = commit.revision;
+      for (const subscriber of [...container.subscribers]) {
+        subscriber(commit);
+      }
+    }
     return;
   }
 
@@ -492,6 +505,20 @@ const toRendererError = (error: unknown): Error => {
   return error instanceof Error ? error : new Error(String(error));
 };
 
+const throwPendingContainerError = (container: HostContainer): void => {
+  const pendingError = container.pendingError;
+  if (pendingError) {
+    container.pendingError = undefined;
+    throw pendingError;
+  }
+};
+
+const throwPendingContainerErrors = (containers: Iterable<HostContainer>): void => {
+  for (const container of containers) {
+    throwPendingContainerError(container);
+  }
+};
+
 const createFiberRoot = (container: HostContainer): ReconcilerRoot =>
   renderer.createContainer(
     container,
@@ -524,31 +551,25 @@ export const flushReactSceneUpdates = (work?: () => void): void => {
     renderer.flushSyncFromReconciler(work);
   }
   flushRendererWork();
+  throwPendingContainerErrors(activeContainers);
 };
 
 export const createReactSceneRoot = (initialElement?: ReactNode): ReactSceneRoot => {
   const container = createRootContainer();
   const fiberRoot = createFiberRoot(container);
-
-  const throwPendingError = (): void => {
-    const pendingError = container.pendingError;
-    if (pendingError) {
-      container.pendingError = undefined;
-      throw pendingError;
-    }
-  };
+  activeContainers.add(container);
 
   const render = (element: ReactNode): SceneIr | undefined => {
     renderer.updateContainerSync(element, fiberRoot, null, null);
     flushRendererWork();
-    throwPendingError();
+    throwPendingContainerError(container);
     return container.currentScene;
   };
 
   const unmount = (): void => {
     renderer.updateContainerSync(null, fiberRoot, null, null);
     flushRendererWork();
-    throwPendingError();
+    throwPendingContainerError(container);
   };
 
   if (initialElement !== undefined) {

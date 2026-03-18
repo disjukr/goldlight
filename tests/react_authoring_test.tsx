@@ -1306,6 +1306,70 @@ Deno.test('createReactSceneRoot unmount clears the published scene', () => {
   assertEquals(root.getScene(), undefined);
 });
 
+Deno.test('createReactSceneRoot unmount publishes a terminal empty-scene commit', () => {
+  const root = createReactSceneRoot(
+    React.createElement(
+      'scene',
+      { id: 'mounted-scene' },
+      React.createElement('node', { id: 'root-node' }),
+    ),
+  );
+  const commits: Array<{
+    sceneId: string;
+    nodeIds: string[];
+    previousSceneId?: string;
+    revision: number;
+  }> = [];
+
+  root.subscribe((commit) => {
+    commits.push({
+      sceneId: commit.scene.id,
+      nodeIds: commit.scene.nodes.map((node) => node.id),
+      previousSceneId: commit.previousScene?.id,
+      revision: commit.revision,
+    });
+  });
+
+  root.unmount();
+
+  assertEquals(commits, [{
+    sceneId: 'mounted-scene',
+    nodeIds: [],
+    previousSceneId: 'mounted-scene',
+    revision: 2,
+  }]);
+});
+
+Deno.test('flushReactSceneUpdates surfaces pending reconciler errors from later updates', () => {
+  let setInvalid: React.Dispatch<React.SetStateAction<boolean>> | undefined;
+  const root = createReactSceneRoot();
+
+  const FaultyScene = () => {
+    const [invalid, updateInvalid] = React.useState(false);
+    setInvalid = updateInvalid;
+
+    return React.createElement(
+      'scene',
+      { id: 'faulty-scene' },
+      invalid
+        ? React.createElement('directionalLight', {
+          id: 'unsupported-light',
+          color: { x: 1, y: 1, z: 1 },
+          intensity: 1,
+        })
+        : React.createElement('node', { id: 'safe-node' }),
+    );
+  };
+
+  root.render(React.createElement(FaultyScene));
+
+  assertThrows(
+    () => flushReactSceneUpdates(() => setInvalid?.(true)),
+    Error,
+    '@rieul3d/react reconciler does not support the <directionalLight> intrinsic',
+  );
+});
+
 Deno.test('reconciler convenience components compose primitive scene resources and nodes', () => {
   const root = createReactSceneRoot();
 

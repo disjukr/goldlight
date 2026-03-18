@@ -1926,6 +1926,16 @@ const assertNodePickBindingFormat = (binding: RenderContextBinding): void => {
   }
 };
 
+const assertCubemapCaptureFormat = (format: GPUTextureFormat): GPUTextureFormat => {
+  if (format !== defaultCubemapFormat) {
+    throw new Error(
+      `cubemap capture readback currently requires ${defaultCubemapFormat}, received "${format}"`,
+    );
+  }
+
+  return format;
+};
+
 const assertNodePickSceneCompatibility = (evaluatedScene: EvaluatedScene): void => {
   for (const node of evaluatedScene.nodes) {
     const material = node.material;
@@ -3012,6 +3022,7 @@ export const renderForwardCubemapSnapshot = async (
 ): Promise<CubemapSnapshotResult> => {
   assertCubemapSceneCompatibility(evaluatedScene);
   const size = assertPositiveInteger('size', options.size);
+  const format = assertCubemapCaptureFormat(options.format ?? defaultCubemapFormat);
   const origin = options.position ??
     (evaluatedScene.activeCamera
       ? getMatrixTranslation(evaluatedScene.activeCamera.worldMatrix)
@@ -3035,7 +3046,7 @@ export const renderForwardCubemapSnapshot = async (
         kind: 'offscreen',
         width: size,
         height: size,
-        format: options.format ?? defaultCubemapFormat,
+        format,
         sampleCount: 1,
       },
     });

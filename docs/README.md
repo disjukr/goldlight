@@ -21,6 +21,8 @@ Use this page as the main navigation hub.
 - Understand reusable built-in mesh generation and example coverage:
   [`../examples/byow_primitives_demo/README.md`](../examples/byow_primitives_demo/README.md)
 - Review accepted architecture constraints: [`adr/README.md`](./adr/README.md)
+- Review the proposed post-processing execution boundary:
+  [`adr/0007-post-processing-execution-model.md`](./adr/0007-post-processing-execution-model.md)
 - Review the JSX authoring boundary decision:
   [`adr/0004-react-jsx-authoring.md`](./adr/0004-react-jsx-authoring.md)
 - Review the accepted React scene update boundary decision:

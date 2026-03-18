@@ -31,6 +31,9 @@ Related discussion: `#90`, "ADR 0007: React scene-root diff/apply contract"
   contract decision remains open
 - snapshot consumers can now derive added/removed/updated resource IDs from committed scene pairs
   through helper utilities without locking the repository into a first-class diff/apply protocol
+- the current browser integration still treats node/topology changes as residency-reset boundaries
+  through `commitSummaryNeedsResidencyReset()` because residency caches do not prune dead resource
+  usage yet
 - caller-owned integrations can continue to consume full snapshots immediately without waiting on a
   finer-grained protocol
 - any future diff/apply contract will need to justify its public surface in terms of real caller

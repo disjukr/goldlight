@@ -5,6 +5,7 @@ import { assertEquals, assertThrows } from 'jsr:@std/assert@^1.0.14';
 import { identityTransform } from '@rieul3d/ir';
 import {
   authoringTreeToSceneIr,
+  commitSummaryNeedsResidencyReset,
   createAuthoringElement,
   createSceneRoot,
   Fragment,
@@ -629,6 +630,98 @@ Deno.test('summarizeSceneRootCommit distinguishes added removed and updated stab
       unchangedIds: ['triangle-node'],
     },
     animationClips: { addedIds: [], removedIds: [], updatedIds: [], unchangedIds: [] },
+  });
+});
+
+Deno.test('commitSummaryNeedsResidencyReset stays true for node-only topology changes', () => {
+  const root = createSceneRoot();
+  const resets: boolean[] = [];
+
+  root.subscribe((commit) => {
+    resets.push(commitSummaryNeedsResidencyReset(summarizeSceneRootCommit(commit)));
+  });
+
+  root.render(
+    <scene id='jsx-scene'>
+      <mesh
+        id='triangle'
+        attributes={[{
+          semantic: 'POSITION',
+          itemSize: 3,
+          values: [0, 0.7, 0, -0.7, -0.7, 0, 0.7, -0.7, 0],
+        }]}
+      />
+      <group id='scene-root'>
+        <node id='triangle-node' meshId='triangle' />
+      </group>
+    </scene>,
+  );
+
+  root.render(
+    <scene id='jsx-scene'>
+      <mesh
+        id='triangle'
+        attributes={[{
+          semantic: 'POSITION',
+          itemSize: 3,
+          values: [0, 0.7, 0, -0.7, -0.7, 0, 0.7, -0.7, 0],
+        }]}
+      />
+      <group id='scene-root'>
+        <node id='triangle-node-next' meshId='triangle' />
+      </group>
+    </scene>,
+  );
+
+  assertEquals(resets, [true, true]);
+});
+
+Deno.test('summarizeSceneRootCommit keeps unchanged large mesh payloads stable', () => {
+  const root = createSceneRoot();
+  const summaries: ReturnType<typeof summarizeSceneRootCommit>[] = [];
+  const largeAttributeValues = Array.from({ length: 4096 }, (_, index) => index / 10);
+
+  root.subscribe((commit) => {
+    summaries.push(summarizeSceneRootCommit(commit));
+  });
+
+  root.render(
+    <scene id='jsx-scene'>
+      <mesh
+        id='large-mesh'
+        attributes={[{
+          semantic: 'POSITION',
+          itemSize: 4,
+          values: largeAttributeValues,
+        }]}
+      />
+      <group id='scene-root'>
+        <node id='mesh-node' meshId='large-mesh' />
+      </group>
+    </scene>,
+  );
+
+  root.render(
+    <scene id='jsx-scene'>
+      <mesh
+        id='large-mesh'
+        attributes={[{
+          semantic: 'POSITION',
+          itemSize: 4,
+          values: [...largeAttributeValues],
+        }]}
+      />
+      <group id='scene-root'>
+        <node id='mesh-node' meshId='large-mesh' />
+      </group>
+    </scene>,
+  );
+
+  assertEquals(summaries[1]?.meshes, {
+    addedIds: [],
+    removedIds: [],
+    updatedIds: [],
+    unchangedIds: ['large-mesh'],
   });
 });
 

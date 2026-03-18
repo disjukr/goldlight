@@ -10,6 +10,7 @@ import {
   createSceneIr,
 } from '@rieul3d/ir';
 import {
+  createBlitPostProcessPass,
   createMaterialRegistry,
   ensureBuiltInForwardPipeline,
   ensureMaterialPipeline,
@@ -520,6 +521,92 @@ Deno.test('renderDeferredFrame encodes depth, gbuffer, and lighting passes for m
     ),
     Array.from(expectedDeferredTransform),
   );
+});
+
+Deno.test('renderForwardFrame runs a post-process pass after scene rendering when requested', () => {
+  const mocks = createRenderMocks();
+  const runtimeResidency = createRuntimeResidency();
+  let scene = createSceneIr('scene');
+  scene = appendMesh(scene, {
+    id: 'mesh-post',
+    attributes: [{ semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0, 0, 1, 0] }],
+  });
+  scene = appendNode(scene, createNode('node-post', { meshId: 'mesh-post' }));
+
+  runtimeResidency.geometry.set('mesh-post', {
+    meshId: 'mesh-post',
+    attributeBuffers: { POSITION: { id: 0 } as unknown as GPUBuffer },
+    vertexCount: 3,
+    indexCount: 0,
+  });
+
+  const binding = createOffscreenContext({
+    device: mocks.device as unknown as GPUDevice,
+    target: createHeadlessTarget(64, 64),
+  });
+
+  const result = renderForwardFrame(
+    mocks as unknown as GpuRenderExecutionContext,
+    binding,
+    runtimeResidency,
+    evaluateScene(scene, { timeMs: 0 }),
+    createMaterialRegistry(),
+    [createBlitPostProcessPass()],
+  );
+
+  assertEquals(result.drawCount, 2);
+  assertEquals(mocks.renderPassCount.current, 2);
+  assertEquals(
+    mocks.passActions.filter((action) => action.type === 'draw').length,
+    2,
+  );
+  assertEquals(mocks.samplers.length, 1);
+});
+
+Deno.test('renderDeferredFrame runs a post-process pass after deferred lighting when requested', () => {
+  const mocks = createRenderMocks();
+  const runtimeResidency = createRuntimeResidency();
+  let scene = createSceneIr('scene');
+  scene = appendMesh(scene, {
+    id: 'mesh-post',
+    attributes: [
+      { semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0, 0, 1, 0] },
+      { semantic: 'NORMAL', itemSize: 3, values: [0, 0, 1, 0, 0, 1, 0, 0, 1] },
+    ],
+  });
+  scene = appendNode(scene, createNode('node-post', { meshId: 'mesh-post' }));
+
+  runtimeResidency.geometry.set('mesh-post', {
+    meshId: 'mesh-post',
+    attributeBuffers: {
+      POSITION: { id: 0 } as unknown as GPUBuffer,
+      NORMAL: { id: 1 } as unknown as GPUBuffer,
+    },
+    vertexCount: 3,
+    indexCount: 0,
+  });
+
+  const binding = createOffscreenContext({
+    device: mocks.device as unknown as GPUDevice,
+    target: createHeadlessTarget(64, 64),
+  });
+
+  const result = renderDeferredFrame(
+    mocks as unknown as GpuRenderExecutionContext,
+    binding,
+    runtimeResidency,
+    evaluateScene(scene, { timeMs: 0 }),
+    createMaterialRegistry(),
+    [createBlitPostProcessPass()],
+  );
+
+  assertEquals(result.drawCount, 4);
+  assertEquals(mocks.renderPassCount.current, 4);
+  assertEquals(
+    mocks.passActions.filter((action) => action.type === 'draw').length,
+    4,
+  );
+  assertEquals(mocks.samplers.length, 2);
 });
 
 Deno.test('renderDeferredFrame binds base-color textures for textured deferred unlit materials', () => {

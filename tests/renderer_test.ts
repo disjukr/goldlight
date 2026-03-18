@@ -12,6 +12,7 @@ import {
 import {
   assertRendererSceneCapabilities,
   collectRendererCapabilityIssues,
+  createBlitPostProcessPass,
   createDeferredRenderer,
   createForwardRenderer,
   createMaterialRegistry,
@@ -260,6 +261,42 @@ Deno.test('deferred renderer plans a hybrid raymarch pass when sdf or volume nod
     'gbuffer',
     'lighting',
     'raymarch',
+    'present',
+  ]);
+});
+
+Deno.test('forward renderer inserts post-process passes between scene color and present', () => {
+  const frame = planFrame(
+    createForwardRenderer('forward', [createBlitPostProcessPass()]),
+    evaluateScene(createSceneIr('scene'), { timeMs: 0 }),
+    createRuntimeResidency(),
+  );
+
+  assertEquals(frame.passes.map((pass) => pass.id), ['mesh', 'post-process:blit', 'present']);
+});
+
+Deno.test('deferred renderer inserts post-process passes after lighting and raymarch work', () => {
+  let scene = createSceneIr('scene');
+  scene = appendMesh(scene, {
+    id: 'mesh-0',
+    attributes: [
+      { semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0, 0, 1, 0] },
+      { semantic: 'NORMAL', itemSize: 3, values: [0, 0, 1, 0, 0, 1, 0, 0, 1] },
+    ],
+  });
+  scene = appendNode(scene, createNode('node-0', { meshId: 'mesh-0' }));
+
+  const frame = planFrame(
+    createDeferredRenderer('deferred', [createBlitPostProcessPass()]),
+    evaluateScene(scene, { timeMs: 0 }),
+    createRuntimeResidency(),
+  );
+
+  assertEquals(frame.passes.map((pass) => pass.id), [
+    'depth-prepass',
+    'gbuffer',
+    'lighting',
+    'post-process:blit',
     'present',
   ]);
 });

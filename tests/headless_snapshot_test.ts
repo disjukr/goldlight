@@ -7,7 +7,11 @@ import {
   createRuntimeResidency,
 } from '@rieul3d/gpu';
 import { appendMaterial, appendMesh, appendNode, createNode, createSceneIr } from '@rieul3d/ir';
-import { renderDeferredSnapshot, renderForwardSnapshot } from '@rieul3d/renderer';
+import {
+  createBlitPostProcessPass,
+  renderDeferredSnapshot,
+  renderForwardSnapshot,
+} from '@rieul3d/renderer';
 import { createHeadlessTarget } from '@rieul3d/platform';
 
 const createSnapshotMocks = () => {
@@ -327,5 +331,41 @@ Deno.test('renderDeferredSnapshot also accepts textured deferred scenes with res
     [...snapshot.bytes],
     [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
   );
+  assertEquals(mocks.submits.length, 2);
+});
+
+Deno.test('renderForwardSnapshot also supports post-process blit passes', async () => {
+  const mocks = createSnapshotMocks();
+  const runtimeResidency = createRuntimeResidency();
+  let scene = createSceneIr('scene');
+  scene = appendMesh(scene, {
+    id: 'mesh',
+    attributes: [{ semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0, 0, 1, 0] }],
+  });
+  scene = appendNode(scene, createNode('node', { meshId: 'mesh' }));
+
+  runtimeResidency.geometry.set('mesh', {
+    meshId: 'mesh',
+    attributeBuffers: { POSITION: { id: 0 } as unknown as GPUBuffer },
+    vertexCount: 3,
+    indexCount: 0,
+  });
+
+  const binding = createOffscreenContext({
+    device: mocks.device as unknown as GPUDevice,
+    target: createHeadlessTarget(2, 2),
+  });
+
+  const snapshot = await renderForwardSnapshot(
+    mocks as unknown as Parameters<typeof renderForwardSnapshot>[0],
+    binding,
+    runtimeResidency,
+    evaluateScene(scene, { timeMs: 0 }),
+    undefined,
+    [createBlitPostProcessPass()],
+  );
+
+  assertEquals(snapshot.drawCount, 2);
+  assertEquals(snapshot.submittedCommandBufferCount, 1);
   assertEquals(mocks.submits.length, 2);
 });

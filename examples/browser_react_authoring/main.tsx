@@ -173,8 +173,13 @@ const surface = configureSurfaceContext(gpuContext, canvasContext as unknown as 
 const materialRegistry = createMaterialRegistry();
 
 const drawFrame = () => {
-  const evaluatedScene = evaluateScene(scene, { timeMs: performance.now() });
-  ensureSceneMeshResidency(gpuContext, residency, scene, evaluatedScene);
+  const currentScene = scene;
+  if (!currentScene) {
+    throw new Error('Scene root stopped publishing scene snapshots');
+  }
+
+  const evaluatedScene = evaluateScene(currentScene, { timeMs: performance.now() });
+  ensureSceneMeshResidency(gpuContext, residency, currentScene, evaluatedScene);
   renderForwardFrame(gpuContext, surface, residency, evaluatedScene, materialRegistry);
   requestAnimationFrame(drawFrame);
 };

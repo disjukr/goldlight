@@ -1,6 +1,7 @@
 /** @jsxImportSource @rieul3d/react */
 /** @jsxRuntime automatic */
 
+import React from 'npm:react@19.2.0';
 import { assertEquals, assertThrows } from 'jsr:@std/assert@^1.0.14';
 import { identityTransform } from '@rieul3d/ir';
 import {
@@ -15,6 +16,7 @@ import {
   planSceneRootCommitUpdates,
   summarizeSceneRootCommit,
 } from '@rieul3d/react';
+import { createReactSceneRoot, flushReactSceneUpdates } from '@rieul3d/react/reconciler';
 import {
   createSceneDocument,
   removeSceneDocumentNode,
@@ -1180,4 +1182,90 @@ Deno.test('createSceneRoot does not let mid-dispatch subscriber changes reorder 
     'late:2',
     'second:1',
   ]);
+});
+
+Deno.test('createReactSceneRoot applies React state updates to the scene document', () => {
+  let setOffset: React.Dispatch<React.SetStateAction<number>> | undefined;
+  const revisions: Array<readonly [number, number]> = [];
+  const root = createReactSceneRoot();
+
+  root.subscribe((commit) => {
+    const node = commit.scene.nodes.find((candidate) => candidate.id === 'animated-node');
+    revisions.push([commit.revision, node?.transform.translation.x ?? -1]);
+  });
+
+  const AnimatedNode = () => {
+    const [offset, updateOffset] = React.useState(0);
+    setOffset = updateOffset;
+    return React.createElement('node', {
+      id: 'animated-node',
+      position: [offset, 0, 0],
+    });
+  };
+
+  root.render(
+    React.createElement(
+      'scene',
+      { id: 'react-scene' },
+      React.createElement(AnimatedNode),
+    ),
+  );
+
+  flushReactSceneUpdates(() => setOffset?.(3));
+
+  assertEquals(
+    root.getScene()?.nodes.find((node) => node.id === 'animated-node')?.transform.translation.x,
+    3,
+  );
+  assertEquals(revisions, [[1, 0], [2, 3]]);
+});
+
+Deno.test('createReactSceneRoot flushes layout-effect updates through React lifecycle', () => {
+  const revisions: Array<readonly [number, number]> = [];
+  const root = createReactSceneRoot();
+
+  root.subscribe((commit) => {
+    const node = commit.scene.nodes.find((candidate) => candidate.id === 'effect-node');
+    revisions.push([commit.revision, node?.transform.translation.z ?? -1]);
+  });
+
+  const EffectScene = () => {
+    const [depth, setDepth] = React.useState(1);
+    React.useLayoutEffect(() => {
+      setDepth(2);
+    }, []);
+
+    return React.createElement(
+      'scene',
+      { id: 'effect-scene' },
+      React.createElement('node', {
+        id: 'effect-node',
+        position: [0, 0, depth],
+      }),
+    );
+  };
+
+  root.render(React.createElement(EffectScene));
+
+  assertEquals(
+    root.getScene()?.nodes.find((node) => node.id === 'effect-node')?.transform.translation.z,
+    2,
+  );
+  assertEquals(revisions, [[1, 1], [2, 2]]);
+});
+
+Deno.test('createReactSceneRoot unmount clears the published scene', () => {
+  const root = createReactSceneRoot(
+    React.createElement(
+      'scene',
+      { id: 'mounted-scene' },
+      React.createElement('node', { id: 'root-node' }),
+    ),
+  );
+
+  assertEquals(root.getScene()?.nodes.map((node) => node.id), ['root-node']);
+
+  root.unmount();
+
+  assertEquals(root.getScene(), undefined);
 });

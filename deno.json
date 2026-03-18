@@ -22,6 +22,7 @@
     "@rieul3d/procedural": "./packages/procedural/mod.ts",
     "@rieul3d/loaders": "./packages/loaders/mod.ts",
     "@rieul3d/react": "./packages/react/mod.ts",
+    "@rieul3d/react/reconciler": "./packages/react/reconciler.ts",
     "@rieul3d/react/jsx-runtime": "./packages/react/jsx-runtime.ts",
     "@rieul3d/react/jsx-dev-runtime": "./packages/react/jsx-dev-runtime.ts",
     "@rieul3d/platform": "./packages/platform/mod.ts"
@@ -29,8 +30,8 @@
   "tasks": {
     "generate:ir": "deno run -A ./scripts/generate_bdl_ts.ts",
     "generate:ir:check": "deno run -A ./scripts/generate_bdl_ts.ts --check",
-    "check": "deno fmt --check && deno task generate:ir:check && deno lint && deno test --unstable-raw-imports && deno bench --unstable-raw-imports --no-run",
-    "test": "deno test --unstable-raw-imports",
+    "check": "deno fmt --check && deno task generate:ir:check && deno lint && deno test --allow-env=NODE_ENV --unstable-raw-imports && deno bench --unstable-raw-imports --no-run",
+    "test": "deno test --allow-env=NODE_ENV --unstable-raw-imports",
     "bench": "deno bench --unstable-raw-imports",
     "docs:check": "deno fmt --check --ignore=examples/browser_forward/dist,examples/browser_textured_forward/dist,examples/browser_react_authoring/dist,examples/browser_custom_textured_forward/dist docs packages tests benches examples",
     "asset:examples": "deno run -A ./scripts/fetch_example_asset.ts included",

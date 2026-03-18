@@ -33,6 +33,16 @@ import {
 
 type ResourceIntrinsicType = 'asset' | 'texture' | 'material' | 'light' | 'mesh' | 'camera';
 type HostIntrinsicType = 'scene' | 'node' | ResourceIntrinsicType;
+const supportedIntrinsicTypes = new Set<HostIntrinsicType>([
+  'scene',
+  'node',
+  'asset',
+  'texture',
+  'material',
+  'light',
+  'mesh',
+  'camera',
+]);
 
 type HostPropsByType = {
   scene: SceneJsxProps;
@@ -114,6 +124,7 @@ type HostContainer = {
   currentScene?: SceneIr;
   revision: number;
   subscribers: Set<SceneRootSubscriber>;
+  pendingError?: Error;
 };
 
 type HostContext = Record<string, never>;
@@ -221,27 +232,35 @@ const renderer = Reconciler({
 
 type ReconcilerRoot = ReturnType<typeof renderer.createContainer>;
 
+const assertHostIntrinsicType = (type: string): HostIntrinsicType => {
+  if (supportedIntrinsicTypes.has(type as HostIntrinsicType)) {
+    return type as HostIntrinsicType;
+  }
+  throw new Error(`@rieul3d/react reconciler does not support the <${type}> intrinsic`);
+};
+
 const createHostInstance = (
-  type: HostIntrinsicType,
+  type: string,
   props: Record<string, unknown>,
 ): HostInstance => {
-  const normalizedProps = extractProps(type, props);
-  if (type === 'scene') {
+  const intrinsicType = assertHostIntrinsicType(type);
+  const normalizedProps = extractProps(intrinsicType, props);
+  if (intrinsicType === 'scene') {
     return {
-      type,
+      type: intrinsicType,
       props: normalizedProps as HostPropsWithoutChildren<'scene'>,
       children: [],
     };
   }
-  if (type === 'node') {
+  if (intrinsicType === 'node') {
     return {
-      type,
+      type: intrinsicType,
       props: normalizedProps as HostPropsWithoutChildren<'node'>,
       children: [],
     };
   }
   return {
-    type,
+    type: intrinsicType,
     props: normalizedProps as HostPropsWithoutChildren<ResourceIntrinsicType>,
     children: [],
   } as ResourceHostInstance;
@@ -284,9 +303,17 @@ const appendChild = (parent: HostInstance, child: HostChild): void => {
   parent.children.push(child);
 };
 
-const appendChildToContainer = (container: HostContainer, child: SceneHostInstance): void => {
+const assertSceneRootChild = (child: HostInstance): SceneHostInstance => {
+  if (child.type !== 'scene') {
+    throw new Error('@rieul3d/react reconciler root must be a <scene> element');
+  }
+  return child;
+};
+
+const appendChildToContainer = (container: HostContainer, child: HostInstance): void => {
+  const sceneChild = assertSceneRootChild(child);
   removeIfPresent(container.rootChildren, child);
-  container.rootChildren.push(child);
+  container.rootChildren.push(sceneChild);
 };
 
 const insertChildBefore = (parent: HostInstance, child: HostChild, beforeChild: HostChild): void =>
@@ -294,18 +321,22 @@ const insertChildBefore = (parent: HostInstance, child: HostChild, beforeChild: 
 
 const insertContainerChildBefore = (
   container: HostContainer,
-  child: SceneHostInstance,
-  beforeChild: SceneHostInstance,
+  child: HostInstance,
+  beforeChild: HostInstance,
 ): void => {
-  insertBeforeValue(container.rootChildren, child, beforeChild);
+  insertBeforeValue(
+    container.rootChildren,
+    assertSceneRootChild(child),
+    assertSceneRootChild(beforeChild),
+  );
 };
 
 const removeChild = (parent: HostInstance, child: HostChild): void => {
   removeIfPresent(parent.children, child);
 };
 
-const removeContainerChild = (container: HostContainer, child: SceneHostInstance): void => {
-  removeIfPresent(container.rootChildren, child);
+const removeContainerChild = (container: HostContainer, child: HostInstance): void => {
+  removeIfPresent(container.rootChildren, assertSceneRootChild(child));
 };
 
 const sweepUnvisitedResourceIds = (
@@ -457,6 +488,10 @@ const createRootContainer = (): HostContainer => ({
   subscribers: new Set(),
 });
 
+const toRendererError = (error: unknown): Error => {
+  return error instanceof Error ? error : new Error(String(error));
+};
+
 const createFiberRoot = (container: HostContainer): ReconcilerRoot =>
   renderer.createContainer(
     container,
@@ -465,9 +500,15 @@ const createFiberRoot = (container: HostContainer): ReconcilerRoot =>
     false,
     null,
     '',
-    console.error,
-    console.error,
-    console.error,
+    (error: unknown) => {
+      container.pendingError = toRendererError(error);
+    },
+    (error: unknown) => {
+      container.pendingError = toRendererError(error);
+    },
+    (error: unknown) => {
+      container.pendingError = toRendererError(error);
+    },
     null,
   );
 
@@ -489,15 +530,25 @@ export const createReactSceneRoot = (initialElement?: ReactNode): ReactSceneRoot
   const container = createRootContainer();
   const fiberRoot = createFiberRoot(container);
 
+  const throwPendingError = (): void => {
+    const pendingError = container.pendingError;
+    if (pendingError) {
+      container.pendingError = undefined;
+      throw pendingError;
+    }
+  };
+
   const render = (element: ReactNode): SceneIr | undefined => {
     renderer.updateContainerSync(element, fiberRoot, null, null);
     flushRendererWork();
+    throwPendingError();
     return container.currentScene;
   };
 
   const unmount = (): void => {
     renderer.updateContainerSync(null, fiberRoot, null, null);
     flushRendererWork();
+    throwPendingError();
   };
 
   if (initialElement !== undefined) {

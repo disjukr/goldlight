@@ -119,3 +119,15 @@ Deno.test('procedural generators reject invalid dimensions', () => {
   assertThrows(() => createNoiseTexture({ width: 2, height: 0 }));
   assertThrows(() => createNoiseVolume({ width: 1, height: 1, depth: 0 }));
 });
+
+Deno.test('procedural noise rejects non-finite fractal parameters', () => {
+  assertThrows(() => sampleValueNoise2d(0.1, 0.2, { seed: Number.NaN }));
+  assertThrows(() => sampleFbm2d(0.1, 0.2, { octaves: Number.POSITIVE_INFINITY }));
+  assertThrows(() => sampleFbm3d(0.1, 0.2, 0.3, { frequency: Number.POSITIVE_INFINITY }));
+  assertThrows(() => sampleTurbulence2d(0.1, 0.2, { gain: Number.NaN }));
+  assertThrows(() => sampleTurbulence3d(0.1, 0.2, 0.3, { lacunarity: Number.NEGATIVE_INFINITY }));
+  assertThrows(() => createNoiseTexture({ width: 2, height: 2, frequency: Number.NaN }));
+  assertThrows(() =>
+    createNoiseVolume({ width: 2, height: 2, depth: 2, octaves: Number.POSITIVE_INFINITY })
+  );
+});

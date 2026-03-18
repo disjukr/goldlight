@@ -22,6 +22,7 @@ The design source of truth lives in [`docs/specs`](./docs/specs) and [`docs/adr`
   schema, and contributor references.
 - Browse [`docs/specs/README.md`](./docs/specs/README.md) for design and behavior specifications.
 - Browse [`docs/adr/README.md`](./docs/adr/README.md) for accepted architectural decisions.
+- Browse [`docs/adr/proposals.md`](./docs/adr/proposals.md) for proposed architectural decisions.
 - Browse [`examples/README.md`](./examples/README.md) for runnable example entry points.
 
 ## Status

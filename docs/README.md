@@ -21,6 +21,7 @@ Use this page as the main navigation hub.
 - Understand reusable built-in mesh generation and example coverage:
   [`../examples/byow_primitives_demo/README.md`](../examples/byow_primitives_demo/README.md)
 - Review accepted architecture constraints: [`adr/README.md`](./adr/README.md)
+- Review proposed architecture discussions: [`adr/proposals.md`](./adr/proposals.md)
 - Review the proposed post-processing execution boundary:
   [`adr/0007-post-processing-execution-model.md`](./adr/0007-post-processing-execution-model.md)
 - Review the JSX authoring boundary decision:
@@ -47,4 +48,5 @@ Use this page as the main navigation hub.
 
 - [`specs/README.md`](./specs/README.md): design docs and behavioral contracts
 - [`adr/README.md`](./adr/README.md): short decision records for accepted constraints
+- [`adr/proposals.md`](./adr/proposals.md): proposed decision records awaiting acceptance
 - [`../examples/README.md`](../examples/README.md): runnable example entry points and commands

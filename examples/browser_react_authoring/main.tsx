@@ -60,7 +60,7 @@ const TriangleScene = () => (
 
 const sceneRoot = createSceneRoot();
 let scene = sceneRoot.getScene();
-let residency = createRuntimeResidency();
+const residency = createRuntimeResidency();
 
 sceneRoot.subscribe((commit) => {
   scene = commit.scene;

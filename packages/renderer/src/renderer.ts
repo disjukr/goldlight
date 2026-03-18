@@ -1870,15 +1870,16 @@ const createSdfUniformData = (
   camera: RaymarchCamera = defaultRaymarchCamera,
 ): Float32Array => {
   const floatsPerItem = 24;
-  const uniformData = new Float32Array(16 + (maxSdfPassItems * floatsPerItem));
+  const headerFloats = 20;
+  const uniformData = new Float32Array(headerFloats + (maxSdfPassItems * floatsPerItem));
   uniformData[0] = Math.min(items.length, maxSdfPassItems);
-  uniformData.set(camera.origin, 1);
-  uniformData.set([...camera.right, 0], 4);
-  uniformData.set([...camera.up, 0], 8);
-  uniformData.set([...camera.forward, 0], 12);
+  uniformData.set(camera.origin, 4);
+  uniformData.set([...camera.right, 0], 8);
+  uniformData.set([...camera.up, 0], 12);
+  uniformData.set([...camera.forward, 0], 16);
 
   items.slice(0, maxSdfPassItems).forEach((item, index) => {
-    const offset = 16 + (index * floatsPerItem);
+    const offset = headerFloats + (index * floatsPerItem);
     const opCode = item.op === 'box' ? 1 : 0;
     uniformData.set([...item.center, opCode], offset);
     uniformData.set([...item.halfExtents, item.radius], offset + 4);

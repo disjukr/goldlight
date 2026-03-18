@@ -276,8 +276,9 @@ Deno.test('renderForwardCubemapSnapshot writes face-specific raymarch camera uni
 
   const toFloats = (write: Uint8Array): Float32Array =>
     new Float32Array(write.buffer.slice(write.byteOffset, write.byteOffset + write.byteLength));
-  const sdfOrigins = sdfWrites.map((write) => Array.from(toFloats(write).slice(1, 4)));
-  const sdfForwards = sdfWrites.map((write) => Array.from(toFloats(write).slice(12, 15)));
+  const sdfOrigins = sdfWrites.map((write) => Array.from(toFloats(write).slice(4, 7)));
+  const sdfForwards = sdfWrites.map((write) => Array.from(toFloats(write).slice(16, 19)));
+  const sdfFirstItems = sdfWrites.map((write) => Array.from(toFloats(write).slice(20, 24)));
   const volumeOrigins = volumeWrites.map((write) => Array.from(toFloats(write).slice(16, 19)));
   const volumeForwards = volumeWrites.map((write) => Array.from(toFloats(write).slice(28, 31)));
 
@@ -285,4 +286,5 @@ Deno.test('renderForwardCubemapSnapshot writes face-specific raymarch camera uni
   assertEquals(volumeOrigins, Array(6).fill([3, 4, 5]));
   assertEquals(new Set(sdfForwards.map((forward) => forward.join(','))).size, 6);
   assertEquals(new Set(volumeForwards.map((forward) => forward.join(','))).size, 6);
+  assertEquals(sdfFirstItems, Array(6).fill([0, 0, 0, 0]));
 });

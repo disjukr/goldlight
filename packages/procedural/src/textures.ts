@@ -75,6 +75,14 @@ const assertFiniteNumber = (name: string, value: number): number => {
 const createTextureData = (width: number, height: number): Uint8Array =>
   new Uint8Array(width * height * 4);
 
+const sampleTextureAxisCenter = (index: number, size: number, frequency: number): number => {
+  if (size === 1) {
+    return 0.5 * frequency;
+  }
+
+  return ((index + 0.5) / size) * frequency;
+};
+
 const writePixel = (data: Uint8Array, offset: number, color: ColorRgba): void => {
   data[offset] = color[0];
   data[offset + 1] = color[1];
@@ -209,11 +217,13 @@ export const createPerlinTexture = (options: PerlinTextureOptions): ProceduralTe
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
       const offset = ((y * width) + x) * 4;
-      const u = width === 1 ? 0 : x / (width - 1);
-      const v = height === 1 ? 0 : y / (height - 1);
-      const sample = samplePerlinNoise2d(u * frequency, v * frequency, {
-        seed: options.seed,
-      });
+      const sample = samplePerlinNoise2d(
+        sampleTextureAxisCenter(x, width, frequency),
+        sampleTextureAxisCenter(y, height, frequency),
+        {
+          seed: options.seed,
+        },
+      );
       const value = Math.round(sample * 255);
       writePixel(data, offset, [value, value, value, 255]);
     }

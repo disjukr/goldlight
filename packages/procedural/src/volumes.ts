@@ -47,6 +47,14 @@ const assertFiniteNumber = (name: string, value: number): number => {
   return value;
 };
 
+const sampleVolumeAxisCenter = (index: number, size: number, frequency: number): number => {
+  if (size === 1) {
+    return 0.5 * frequency;
+  }
+
+  return ((index + 0.5) / size) * frequency;
+};
+
 export const createNoiseVolume = (options: NoiseVolumeOptions): ProceduralVolume3d => {
   const width = assertDimension('width', options.width);
   const height = assertDimension('height', options.height);
@@ -107,12 +115,14 @@ export const createPerlinVolume = (options: PerlinVolumeOptions): ProceduralVolu
   for (let z = 0; z < depth; z += 1) {
     for (let y = 0; y < height; y += 1) {
       for (let x = 0; x < width; x += 1) {
-        const u = width === 1 ? 0 : x / (width - 1);
-        const v = height === 1 ? 0 : y / (height - 1);
-        const w = depth === 1 ? 0 : z / (depth - 1);
-        const sample = samplePerlinNoise3d(u * frequency, v * frequency, w * frequency, {
-          seed: options.seed,
-        });
+        const sample = samplePerlinNoise3d(
+          sampleVolumeAxisCenter(x, width, frequency),
+          sampleVolumeAxisCenter(y, height, frequency),
+          sampleVolumeAxisCenter(z, depth, frequency),
+          {
+            seed: options.seed,
+          },
+        );
         data[(z * width * height) + (y * width) + x] = Math.round(sample * 255);
       }
     }

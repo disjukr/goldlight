@@ -263,3 +263,62 @@ Deno.test('createScreenWorldRay rejects invalid viewport dimensions', () => {
     })
   );
 });
+
+Deno.test('createScreenWorldRay follows the evaluated view fallback for singular camera transforms', () => {
+  let scene = createSceneIr('scene');
+  scene = setActiveCamera(
+    appendCamera(
+      scene,
+      createPerspectiveCamera('camera-0', {
+        yfov: Math.PI / 2,
+        znear: 0.1,
+        zfar: 10,
+      }),
+    ),
+    'camera-0',
+  );
+  scene = appendNode(
+    scene,
+    createNode('camera-node', {
+      cameraId: 'camera-0',
+      transform: {
+        translation: { x: 9, y: 4, z: 2 },
+        rotation: { x: 0, y: 0, z: 0, w: 1 },
+        scale: { x: 0, y: 1, z: 1 },
+      },
+    }),
+  );
+
+  const evaluated = evaluateScene(scene, { timeMs: 0 });
+  const ray = createScreenWorldRay(evaluated.activeCamera!, {
+    x: 100,
+    y: 50,
+    viewportWidth: 200,
+    viewportHeight: 100,
+  });
+
+  assertEquals(evaluated.activeCamera?.viewMatrix, [
+    1,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    0,
+    1,
+  ]);
+  assertAlmostEquals(ray.origin.x, 0, 1e-6);
+  assertAlmostEquals(ray.origin.y, 0, 1e-6);
+  assertAlmostEquals(ray.origin.z, 0, 1e-6);
+  assertAlmostEquals(ray.direction.x, 0, 1e-6);
+  assertAlmostEquals(ray.direction.y, 0, 1e-6);
+  assertAlmostEquals(ray.direction.z, -1, 1e-6);
+});

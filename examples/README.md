@@ -10,7 +10,7 @@ Runnable examples live here. Each example should document how to build, serve, o
   rendering the built-in procedural mesh primitive set through a camera-backed, depth-tested forward
   path
 - [`byow_react_bunny_demo/README.md`](./byow_react_bunny_demo/README.md): Windows-native BYOW demo
-  authored through `@rieul3d/react` JSX and rendering the vendored Stanford Bunny PLY mesh
+  mounted through `@rieul3d/react/reconciler` and rendering the vendored Stanford Bunny PLY mesh
 - [`assets/README.md`](./assets/README.md): in-repo small example assets plus refresh commands
   including the Stanford Bunny PLY source mesh
 - [`browser_forward/README.md`](./browser_forward/README.md): browser-based forward rendering flow
@@ -62,7 +62,8 @@ const scene = appendMesh(
 
 The BYOW primitives demo and the BYOW React Bunny demo both show the current camera path: they
 attach a perspective camera to a node, mark it as the scene's active camera, and render through the
-standard forward renderer.
+standard forward renderer. The React Bunny demo now drives that scene path through the experimental
+reconciler host instead of the snapshot-only JSX lowering helper.
 
 ## Related Docs
 

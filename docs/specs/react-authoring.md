@@ -23,15 +23,16 @@ React integration is a separate package. It must not become the source of truth 
 
 ## Scope
 
-The current package owns JSX authoring, lowering, and a first `createSceneRoot()` implementation
-that publishes committed `SceneIr` snapshots. It does not define a live React renderer or custom
-reconciler yet.
+The current package owns JSX authoring, lowering, the snapshot-style `createSceneRoot()`
+implementation, and an experimental `@rieul3d/react/reconciler` entrypoint that mounts normal React
+components into the package-local scene document before publishing committed `SceneIr` snapshots.
 
 ## Direction
 
-The current package now supports normal TSX scene authoring and component composition, but it still
-stops at lowering. The remaining direction is to evolve that surface toward a `react-three-fiber`
-style adapter where reconciliation can drive rieul3d-owned runtime objects over time.
+The current package now supports normal TSX scene authoring and component composition, plus an
+experimental reconciler host that can drive rieul3d-owned scene data from normal React state and
+lifecycle updates. The remaining direction is to evolve that surface toward a fuller
+`react-three-fiber` style adapter with a smoother React-runtime JSX experience.
 
 That direction matters for a few reasons:
 
@@ -61,11 +62,11 @@ offscreen targets, and multi-scene orchestration outside the React package. The 
 has a first implementation waypoint in `createSceneRoot()`, but ADR 0006 does not treat that
 full-snapshot publication shape as the final contract.
 
-The next unresolved step for issue `#112` is now captured in
-[`../adr/0008-react-reconciler-scene-document.md`](../adr/0008-react-reconciler-scene-document.md):
-add a React-owned internal scene document that a real `react-reconciler` host can update
-incrementally before those changes cross into the existing runtime/residency boundary. Issue `#117`
-tracks the first implementation slice for that scene-document layer.
+Issue `#112` has now reached its first experimental reconciler milestone through
+[`@rieul3d/react/reconciler`](../../packages/react/reconciler.ts), which mounts a real
+`react-reconciler` host onto the internal scene document described by
+[`../adr/0008-react-reconciler-scene-document.md`](../adr/0008-react-reconciler-scene-document.md).
+Issue `#117` provided the first scene-document implementation slice that this host now targets.
 
 ## Current Status
 
@@ -88,6 +89,11 @@ tracks the first implementation slice for that scene-document layer.
 - `createSceneRoot()` now keeps an internal React-owned scene document so stable resource and node
   host instances can survive repeated commits even though the published subscriber payload is still
   a data-only `SceneIr` snapshot.
+- `@rieul3d/react/reconciler` now provides an experimental real React renderer that accepts normal
+  React components, applies mount/update/unmount work to the internal scene document, and publishes
+  live `SceneIr` snapshots through `createReactSceneRoot()`.
+- `flushReactSceneUpdates()` now exists as a small helper for tests or deterministic integrations
+  that need to force scheduled React work through the reconciler host.
 - The scene document currently supports stable node/resource identity, parent-child reordering, and
   subtree/resource removal as the first package-local waypoint before a real reconciler host lands.
 - `summarizeSceneRootCommit()` can derive resource-level added/removed/updated/unchanged ID sets
@@ -110,8 +116,9 @@ tracks the first implementation slice for that scene-document layer.
   summaries now let them scope that rebuild without missing node-only changes that can remap which
   stable resources remain live.
 - Rendering, residency preparation, and execution continue to live in the core/gpu/renderer layers.
-- The browser example now demonstrates full-scene JSX authoring plus the current snapshot-based
-  `createSceneRoot()` flow, not a live React reconciler.
+- The browser example still demonstrates full-scene JSX authoring plus the current snapshot-based
+  `createSceneRoot()` flow, while the BYOW React Bunny demo now exercises the experimental
+  reconciler-driven path.
 - The next unresolved architecture question is how React-authored changes should cross into runtime
   update planning so frequent node changes can avoid whole-scene resets while multi-scene
   composition remains outside React ownership.
@@ -120,8 +127,9 @@ tracks the first implementation slice for that scene-document layer.
   scene updates outward.
 - Issue `#89` now tracks follow-up implementation work around the next runtime-facing update
   contract.
-- Issue `#117` now tracks the first scene-document implementation slice needed before a true React
-  reconciler host can land.
+- The next follow-up after the first reconciler landing is improving the React-runtime JSX surface
+  so users do not need to fall back to lower-level `React.createElement()` calls when targeting the
+  live reconciler path.
 - [`../../examples/browser_react_authoring/README.md`](../../examples/browser_react_authoring/README.md)
   shows the reference browser flow: author a tree with `@rieul3d/react` TSX, commit it through
   `createSceneRoot()`, derive an update plan plus summary from that commit, drop targeted residency

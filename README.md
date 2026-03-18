@@ -13,6 +13,8 @@ The repository is organized as a Deno workspace with packages for:
 - `@rieul3d/procedural`: deterministic procedural noise, texture, and volume generators
 - `@rieul3d/loaders`: OBJ/STL/PLY/glTF ingestion into scene IR
 - `@rieul3d/react`: declarative authoring adapter
+- `@rieul3d/react/reconciler`: experimental React reconciler host over the package-local scene
+  document
 - `@rieul3d/platform`: browser, Deno, and headless targets
 
 The design source of truth lives in [`docs/specs`](./docs/specs) and [`docs/adr`](./docs/adr).
@@ -61,7 +63,8 @@ Implemented today:
 - Windows BYOW primitives demo using `@rieul3d/primitives`, a reusable BYOW runner script, and a
   custom lit shader for mesh normals
 - Windows BYOW Stanford Bunny demo authored through `@rieul3d/react`, loading the vendored ASCII PLY
-  mesh and generating runtime normals for built-in lit shading
+  mesh, generating runtime normals for built-in lit shading, and publishing live bunny rotation
+  updates through the experimental React reconciler host
 - a browser React authoring example plus the current `createSceneRoot()` snapshot path that commits
   JSX-authored trees into `SceneIr` snapshots before rendering, including JSX-authored scene
   resources such as meshes, materials, and cameras, exported convenience components for common
@@ -69,6 +72,9 @@ Implemented today:
   and node host instances across commits before publishing data-only snapshots, and commit-summary
   plus update-plan helpers for targeted residency invalidation without forcing resets for
   transform-only node changes
+- an experimental `@rieul3d/react/reconciler` entrypoint that mounts normal React components into
+  the package-local scene document so hooks, state updates, and layout effects can publish live
+  `SceneIr` snapshots without rebuilding authored trees by hand
 - proposed ADR/discussion tracking for the next React live-update boundary decision around
   partial-apply scene updates without renderer ownership, plus the next proposed reconciler
   scene-document boundary for issue #112

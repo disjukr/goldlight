@@ -1,12 +1,13 @@
 # BYOW React Bunny Demo
 
-Windows-native BYOW example that authors the scene through `@rieul3d/react` JSX and renders the
-vendored Stanford Bunny PLY mesh on a native WebGPU surface.
+Windows-native BYOW example that mounts a real React scene through `@rieul3d/react/reconciler` and
+renders the vendored Stanford Bunny PLY mesh on a native WebGPU surface.
 
 This demo exercises:
 
 - ASCII PLY ingestion of the in-repo Stanford Bunny asset
-- React-style scene authoring lowered into `SceneIr`
+- real React reconciliation into the package-local scene document
+- hook-driven live scene updates that publish refreshed `SceneIr` snapshots
 - reusable `@rieul3d/core` helpers for generated normals, mesh bounds, and Euler-authored light
   rotation
 - built-in forward lit shading with a directional light in a native SDL2 window

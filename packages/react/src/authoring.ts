@@ -305,7 +305,7 @@ const normalizeRenderable = (
   return createAuthoringElement('fragment', fallbackId, {}, []);
 };
 
-const normalizeVec3Like = (value: Vec3Like): Vec3 => {
+export const normalizeVec3Like = (value: Vec3Like): Vec3 => {
   if (!Array.isArray(value)) {
     return value as Vec3;
   }
@@ -317,7 +317,7 @@ const normalizeVec3Like = (value: Vec3Like): Vec3 => {
   return { x: value[0], y: value[1], z: value[2] };
 };
 
-const normalizeQuatLike = (value: QuatLike): Quat => {
+export const normalizeQuatLike = (value: QuatLike): Quat => {
   if (!Array.isArray(value)) {
     return value as Quat;
   }
@@ -327,7 +327,7 @@ const normalizeQuatLike = (value: QuatLike): Quat => {
   return { x: value[0], y: value[1], z: value[2], w: value[3] };
 };
 
-const normalizeNodeProps = (props: NodeAuthoringProps): NodeAuthoringProps => {
+export const normalizeNodeProps = (props: NodeAuthoringProps): NodeAuthoringProps => {
   const { position, rotation, scale, transform, ...rest } = props;
   if (position === undefined && rotation === undefined && scale === undefined) {
     return props;
@@ -580,7 +580,7 @@ export const jsx = (
 export const jsxs = jsx;
 export const jsxDEV = jsx;
 
-const normalizeCamera = (camera: CameraJsxProps): Camera =>
+export const normalizeCameraJsxProps = (camera: CameraJsxProps): Camera =>
   camera.type === 'perspective'
     ? createPerspectiveCamera(camera.id, camera)
     : createOrthographicCamera(camera.id, camera);
@@ -701,7 +701,7 @@ export const authoringTreeToSceneDocument = (
         visitedResourceIds.camera.add(node.id);
         upsertSceneDocumentResource(document, {
           kind: 'camera',
-          value: normalizeCamera(node.props as CameraJsxProps),
+          value: normalizeCameraJsxProps(node.props as CameraJsxProps),
         });
         return nodeIndex;
       default:

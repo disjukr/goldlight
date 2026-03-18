@@ -49,6 +49,8 @@ Implemented today:
   execution, and headless snapshot readback
 - forward-renderer cubemap capture for mesh, SDF, and volume scenes as six ordered offscreen face
   snapshots, keeping later reprojection/export layouts as a separate layer
+- Perlin gradient-noise samplers in `@rieul3d/procedural` plus grayscale texture/volume generators
+  that share the existing deterministic seed model
 - forward SDF sphere and box raymarch execution with capability preflight alignment
 - local-space SDF-to-mesh extraction for supported sphere and box primitives, including
   marching-cubes and naive surface-nets contouring helpers for baking or inspection workflows

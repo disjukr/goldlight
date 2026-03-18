@@ -13,8 +13,9 @@ The proposed boundary is:
 
 - combined aliases stay as authoring sugar over existing Scene IR resources plus node bindings
 - explicit resource ids and explicit node ids remain available as the lower-level escape hatch
-- first candidates should be scene objects with a stable 1:1 resource-to-node relationship, such as
-  cameras and directional lights
+- combined aliases may synthesize a default resource plus its first bound node for common authored
+  scene objects, but they must not narrow the underlying IR semantics around rebinding or multiple
+  node attachments
 - aliases must not hide renderer/runtime ownership or make React the source of truth for live scene
   state
 
@@ -27,6 +28,7 @@ Related discussion: `#81`, "ADR 0005: combined scene-object aliases for @rieul3d
 
 - TSX scene authoring can move closer to React scene-library ergonomics without changing core IR
   ownership
-- additive aliases can reduce boilerplate for common camera/light setup flows
+- additive aliases can reduce boilerplate for common authored camera/light setup flows while
+  preserving explicit lower-level escape hatches for multi-bind scenes
 - the package still needs a separate follow-up decision before mesh/material authoring is folded
   into the same combined-object surface

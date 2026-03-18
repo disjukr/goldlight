@@ -42,8 +42,9 @@ be an adapter layer over the existing IR, evaluation, and rendering systems, not
 them.
 
 The next open authoring question is whether the JSX surface should add combined scene-object aliases
-that lower into both a resource and its bound node for common 1:1 cases such as cameras and
-directional lights. That proposal is tracked in
+that lower into both a resource and an initial bound node for common authored camera/light flows,
+while keeping explicit resource ids and node bindings available for multi-bind scenes. That proposal
+is tracked in
 [`../adr/0005-react-scene-object-aliases.md`](../adr/0005-react-scene-object-aliases.md) and should
 stay `Proposed` until discussion `#81` confirms the desired scope.
 

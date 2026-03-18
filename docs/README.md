@@ -28,6 +28,8 @@ Use this page as the main navigation hub.
   [`specs/sdf-mesh-extraction.md`](./specs/sdf-mesh-extraction.md)
 - Understand cubemap face capture and the renderer/export separation:
   [`specs/cubemap-capture.md`](./specs/cubemap-capture.md)
+- Understand cubemap reprojection and export layouts:
+  [`specs/cubemap-export.md`](./specs/cubemap-export.md)
 - Understand reusable built-in mesh generation and example coverage:
   [`../examples/byow_primitives_demo/README.md`](../examples/byow_primitives_demo/README.md)
 - Review accepted architecture constraints: [`adr/README.md`](./adr/README.md)

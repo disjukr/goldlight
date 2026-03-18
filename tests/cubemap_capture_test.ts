@@ -160,3 +160,33 @@ Deno.test('renderForwardCubemapSnapshot rejects raymarched scene content until f
     'mesh-only scenes',
   );
 });
+
+Deno.test('renderForwardCubemapSnapshot rejects formats that are not readback-safe yet', async () => {
+  const mocks = createSnapshotMocks();
+  const runtimeResidency = createRuntimeResidency();
+  let scene = createSceneIr('scene');
+  scene = appendMesh(scene, {
+    id: 'mesh',
+    attributes: [{ semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0, 0, 1, 0] }],
+  });
+  scene = appendNode(scene, createNode('node', { meshId: 'mesh' }));
+
+  runtimeResidency.geometry.set('mesh', {
+    meshId: 'mesh',
+    attributeBuffers: { POSITION: { id: 0 } as unknown as GPUBuffer },
+    vertexCount: 3,
+    indexCount: 0,
+  });
+
+  await assertRejects(
+    () =>
+      renderForwardCubemapSnapshot(
+        mocks as unknown as Parameters<typeof renderForwardCubemapSnapshot>[0],
+        runtimeResidency,
+        evaluateScene(scene, { timeMs: 0 }),
+        { size: 2, format: 'rgba16float' },
+      ),
+    Error,
+    'requires rgba8unorm',
+  );
+});

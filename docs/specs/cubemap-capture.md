@@ -19,6 +19,8 @@ square faces without coupling that capture step to any 2D export layout.
 - each face uses a 90-degree perspective projection with aspect ratio `1`
 - capture origin defaults to the active camera position when present, otherwise world origin
 - callers may override cubemap size, capture origin, near plane, far plane, and output format
+- CPU readback is currently limited to `rgba8unorm`; other formats should fail fast until readback
+  stride sizing becomes format-aware
 
 ## Output Contract
 

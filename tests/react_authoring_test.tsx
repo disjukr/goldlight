@@ -266,3 +266,25 @@ Deno.test('authoringTreeToSceneIr lowers react-style alias intrinsics', () => {
   assertEquals(scene.nodes.find((node) => node.id === 'camera-node')?.parentId, 'root');
   assertEquals(scene.nodes.find((node) => node.id === 'light-node')?.parentId, 'root');
 });
+
+Deno.test('react-style aliases preserve their fixed resource kinds when props are spread in', () => {
+  const cameraProps = {
+    type: 'orthographic' as const,
+    yfov: 0.8,
+  };
+  const lightProps = {
+    kind: 'point' as const,
+    color: { x: 1, y: 0.95, z: 0.9 },
+    intensity: 1.5,
+  };
+
+  const scene = authoringTreeToSceneIr(
+    <scene id='jsx-scene' activeCameraId='camera-main'>
+      <perspectiveCamera id='camera-main' {...cameraProps} />
+      <directionalLight id='sun' {...lightProps} />
+    </scene>,
+  );
+
+  assertEquals(scene.cameras[0]?.type, 'perspective');
+  assertEquals(scene.lights[0]?.kind, 'directional');
+});

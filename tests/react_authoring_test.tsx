@@ -1,9 +1,9 @@
 /** @jsxImportSource @rieul3d/react */
 /** @jsxRuntime automatic */
 
-import React from 'npm:react@19.2.0';
 import { assertEquals, assertThrows } from 'jsr:@std/assert@^1.0.14';
 import { identityTransform } from '@rieul3d/ir';
+import React from 'npm:react@19.2.0';
 import {
   authoringTreeToSceneIr,
   commitSummaryNeedsResidencyReset,
@@ -16,7 +16,12 @@ import {
   planSceneRootCommitUpdates,
   summarizeSceneRootCommit,
 } from '@rieul3d/react';
-import { createReactSceneRoot, flushReactSceneUpdates } from '@rieul3d/react/reconciler';
+import {
+  createReactSceneRoot,
+  DirectionalLight as ReconcilerDirectionalLight,
+  flushReactSceneUpdates,
+  PerspectiveCamera as ReconcilerPerspectiveCamera,
+} from '@rieul3d/react/reconciler';
 import {
   createSceneDocument,
   removeSceneDocumentNode,
@@ -535,6 +540,37 @@ Deno.test('createSceneRoot publishes committed scene snapshots', () => {
       revision: 2,
     },
   ]);
+});
+
+Deno.test('createReactSceneRoot rejects unsupported intrinsic tags', () => {
+  const root = createReactSceneRoot();
+
+  assertThrows(
+    () =>
+      root.render(
+        React.createElement(
+          'scene',
+          { id: 'jsx-scene' },
+          React.createElement('directionalLight', {
+            id: 'sun',
+            color: { x: 1, y: 0.95, z: 0.9 },
+            intensity: 1.5,
+          }),
+        ),
+      ),
+    Error,
+    '@rieul3d/react reconciler does not support the <directionalLight> intrinsic',
+  );
+});
+
+Deno.test('createReactSceneRoot rejects non-scene roots', () => {
+  const root = createReactSceneRoot();
+
+  assertThrows(
+    () => root.render(React.createElement('node', { id: 'root' })),
+    Error,
+    '@rieul3d/react reconciler root must be a <scene> element',
+  );
 });
 
 Deno.test('authoringTreeToSceneDocument reuses stable node and resource instances across renders', () => {
@@ -1268,4 +1304,43 @@ Deno.test('createReactSceneRoot unmount clears the published scene', () => {
   root.unmount();
 
   assertEquals(root.getScene(), undefined);
+});
+
+Deno.test('reconciler convenience components compose primitive scene resources and nodes', () => {
+  const root = createReactSceneRoot();
+
+  root.render(
+    React.createElement(
+      'scene',
+      { id: 'reconciler-components', activeCameraId: 'camera-main' },
+      React.createElement(ReconcilerPerspectiveCamera, {
+        id: 'camera-main',
+        yfov: 0.8,
+        position: [0, 0, 2],
+      }),
+      React.createElement(ReconcilerDirectionalLight, {
+        id: 'sun',
+        color: { x: 1, y: 0.95, z: 0.9 },
+        intensity: 1.5,
+        nodeId: 'sun-node',
+        position: [1, 2, 3],
+      }),
+    ),
+  );
+
+  assertEquals(root.getScene()?.activeCameraId, 'camera-main');
+  assertEquals(root.getScene()?.cameras, [{
+    id: 'camera-main',
+    type: 'perspective',
+    yfov: 0.8,
+    znear: 0.1,
+    zfar: 100,
+  }]);
+  assertEquals(root.getScene()?.lights, [{
+    id: 'sun',
+    kind: 'directional',
+    color: { x: 1, y: 0.95, z: 0.9 },
+    intensity: 1.5,
+  }]);
+  assertEquals(root.getScene()?.nodes.map((node) => node.id), ['camera-main', 'sun-node']);
 });

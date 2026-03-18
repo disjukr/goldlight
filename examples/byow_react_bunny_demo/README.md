@@ -7,6 +7,7 @@ This demo exercises:
 
 - ASCII PLY ingestion of the in-repo Stanford Bunny asset
 - real React reconciliation into the package-local scene document
+- normal TSX authoring against the `@rieul3d/react/reconciler` React-runtime JSX surface
 - hook-driven live scene updates that publish refreshed `SceneIr` snapshots
 - reusable `@rieul3d/core` helpers for generated normals, mesh bounds, and Euler-authored light
   rotation

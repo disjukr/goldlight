@@ -92,6 +92,12 @@ Issue `#117` provided the first scene-document implementation slice that this ho
 - `@rieul3d/react/reconciler` now provides an experimental real React renderer that accepts normal
   React components, applies mount/update/unmount work to the internal scene document, and publishes
   live `SceneIr` snapshots through `createReactSceneRoot()`.
+- The reconciler entrypoint now also augments the normal React JSX runtime so `<scene>`, `<node>`,
+  `<camera>`, `<light>`, `<mesh>`, `<material>`, `<texture>`, and `<asset>` can be authored in plain
+  TSX on the live path.
+- `@rieul3d/react/reconciler` now exports React-runtime `PerspectiveCamera`, `OrthographicCamera`,
+  and `DirectionalLight` convenience components so live reconciler scenes can keep the same
+  high-level camera/light composition style as the snapshot authoring surface.
 - `flushReactSceneUpdates()` now exists as a small helper for tests or deterministic integrations
   that need to force scheduled React work through the reconciler host.
 - The scene document currently supports stable node/resource identity, parent-child reordering, and
@@ -128,8 +134,8 @@ Issue `#117` provided the first scene-document implementation slice that this ho
 - Issue `#89` now tracks follow-up implementation work around the next runtime-facing update
   contract.
 - The next follow-up after the first reconciler landing is improving the React-runtime JSX surface
-  so users do not need to fall back to lower-level `React.createElement()` calls when targeting the
-  live reconciler path.
+  so the live path can expand beyond the current primitive and convenience-component set without
+  falling back to lower-level `React.createElement()` calls.
 - [`../../examples/browser_react_authoring/README.md`](../../examples/browser_react_authoring/README.md)
   shows the reference browser flow: author a tree with `@rieul3d/react` TSX, commit it through
   `createSceneRoot()`, derive an update plan plus summary from that commit, drop targeted residency

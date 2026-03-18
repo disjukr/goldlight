@@ -73,6 +73,14 @@ export type RuntimeResidency = {
   readonly pipelines: Map<string, GPURenderPipeline | GPUComputePipeline>;
 };
 
+export type ResidencyInvalidationPlan = Readonly<{
+  meshIds?: readonly string[];
+  materialIds?: readonly string[];
+  textureIds?: readonly string[];
+  volumeIds?: readonly string[];
+  pipelineKeys?: readonly string[];
+}>;
+
 export const createRuntimeResidency = (): RuntimeResidency => ({
   textures: new Map(),
   geometry: new Map(),
@@ -94,12 +102,66 @@ export const describeResidencyInputs = (
   nodeCount: evaluatedScene.nodes.length,
 });
 
+const destroyGeometryResidency = (geometry: GeometryResidency): void => {
+  for (const buffer of Object.values(geometry.attributeBuffers)) {
+    buffer.destroy?.();
+  }
+
+  geometry.indexBuffer?.destroy?.();
+};
+
+const destroyMaterialResidency = (material: MaterialResidency): void => {
+  material.uniformBuffer.destroy?.();
+};
+
+const destroyTextureResidency = (texture: TextureResidency): void => {
+  texture.texture.destroy?.();
+};
+
+const destroyVolumeResidency = (volume: VolumeResidency): void => {
+  volume.texture.destroy?.();
+};
+
+const deleteResidencyEntries = <TEntry>(
+  cache: Map<string, TEntry>,
+  ids: readonly string[] | undefined,
+  destroyEntry: (entry: TEntry) => void,
+): void => {
+  for (const id of ids ?? []) {
+    const cached = cache.get(id);
+    if (!cached) {
+      continue;
+    }
+
+    destroyEntry(cached);
+    cache.delete(id);
+  }
+};
+
+export const invalidateResidencyResources = (
+  residency: RuntimeResidency,
+  plan: ResidencyInvalidationPlan,
+): RuntimeResidency => {
+  deleteResidencyEntries(residency.geometry, plan.meshIds, destroyGeometryResidency);
+  deleteResidencyEntries(residency.materials, plan.materialIds, destroyMaterialResidency);
+  deleteResidencyEntries(residency.textures, plan.textureIds, destroyTextureResidency);
+  deleteResidencyEntries(residency.volumes, plan.volumeIds, destroyVolumeResidency);
+
+  for (const pipelineKey of plan.pipelineKeys ?? []) {
+    residency.pipelines.delete(pipelineKey);
+  }
+
+  return residency;
+};
+
 export const invalidateResidency = (residency: RuntimeResidency): RuntimeResidency => {
-  residency.textures.clear();
-  residency.geometry.clear();
-  residency.materials.clear();
-  residency.volumes.clear();
-  residency.pipelines.clear();
+  invalidateResidencyResources(residency, {
+    meshIds: [...residency.geometry.keys()],
+    materialIds: [...residency.materials.keys()],
+    textureIds: [...residency.textures.keys()],
+    volumeIds: [...residency.volumes.keys()],
+    pipelineKeys: [...residency.pipelines.keys()],
+  });
   return residency;
 };
 

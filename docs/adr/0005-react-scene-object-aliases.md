@@ -21,8 +21,8 @@ The proposed boundary is:
 - questions about how far convenience composition should extend stay in the component layer instead
   of expanding the primitive JSX contract
 
-Mesh, material, rig, and other higher-level composition may evolve independently as React
-components without forcing a new primitive decision for each combined object shape.
+Mesh, material, rig, and other higher-level composition may evolve independently as React components
+without forcing a new primitive decision for each combined object shape.
 
 Related discussion: `#81`, "ADR 0005: React scene-object convenience components for @rieul3d/react"
 

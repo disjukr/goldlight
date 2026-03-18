@@ -39,6 +39,46 @@ Deno.test('authoringTreeToSceneIr preserves supported node props', () => {
   }]);
 });
 
+Deno.test('authoringTreeToSceneIr normalizes node transform shorthands', () => {
+  const scene = authoringTreeToSceneIr(
+    <scene id='jsx-scene'>
+      <group
+        id='root'
+        position={[1, 2, 3]}
+        rotation={[0, 0, 0, 1]}
+        scale={{ x: 2, y: 3, z: 4 }}
+      />
+    </scene>,
+  );
+
+  assertEquals(scene.nodes[0]?.transform, {
+    translation: { x: 1, y: 2, z: 3 },
+    rotation: { x: 0, y: 0, z: 0, w: 1 },
+    scale: { x: 2, y: 3, z: 4 },
+  });
+});
+
+Deno.test('node transform shorthands override matching fields on transform', () => {
+  const scene = authoringTreeToSceneIr(
+    createAuthoringElement('scene', 'authoring-scene', {}, [
+      createAuthoringElement('node', 'mesh-node', {
+        transform: {
+          translation: { x: 5, y: 6, z: 7 },
+          rotation: { x: 0.1, y: 0.2, z: 0.3, w: 0.9 },
+          scale: { x: 1, y: 1, z: 1 },
+        },
+        position: [1, 2, 3],
+      }),
+    ]),
+  );
+
+  assertEquals(scene.nodes[0]?.transform, {
+    translation: { x: 1, y: 2, z: 3 },
+    rotation: { x: 0.1, y: 0.2, z: 0.3, w: 0.9 },
+    scale: { x: 1, y: 1, z: 1 },
+  });
+});
+
 Deno.test('authoringTreeToSceneIr lowers JSX-authored trees with component and fragment composition', () => {
   const transform = identityTransform();
   const MeshNode = (props: Readonly<{ id: string; name: string }>) => (

@@ -10,6 +10,7 @@ import {
   createOrthographicCamera,
   createPerspectiveCamera,
   createSceneIr,
+  identityTransform,
 } from '@rieul3d/ir';
 import type {
   AssetRef,
@@ -20,10 +21,15 @@ import type {
   Material,
   MeshPrimitive,
   Node,
+  Quat,
   SceneIr,
   TextureRef,
   Transform,
+  Vec3,
 } from '@rieul3d/ir';
+
+type Vec3Like = Vec3 | readonly [number, number, number];
+type QuatLike = Quat | readonly [number, number, number, number];
 
 export type SceneAuthoringProps = Readonly<{
   activeCameraId?: SceneIr['activeCameraId'];
@@ -38,6 +44,9 @@ export type NodeAuthoringProps = Readonly<{
   volumeId?: Node['volumeId'];
   lightId?: Node['lightId'];
   transform?: Transform;
+  position?: Vec3Like;
+  rotation?: QuatLike;
+  scale?: Vec3Like;
 }>;
 
 export type AssetJsxProps = AssetRef;
@@ -225,7 +234,7 @@ export function createAuthoringElement(
     | CameraAuthoringProps = {},
   children: readonly AuthoringElement[] = [],
 ): AuthoringElement {
-  const normalizedProps = (
+  const normalizedProps = type === 'node' ? normalizeNodeProps(props as NodeAuthoringProps) : (
       type === 'asset' || type === 'texture' || type === 'material' || type === 'light' ||
       type === 'mesh' || type === 'camera'
     )
@@ -277,6 +286,29 @@ const normalizeRenderable = (
     return renderable;
   }
   return createAuthoringElement('fragment', fallbackId, {}, []);
+};
+
+const normalizeVec3Like = (value: Vec3Like): Vec3 =>
+  Array.isArray(value) ? { x: value[0], y: value[1], z: value[2] } : value as Vec3;
+
+const normalizeQuatLike = (value: QuatLike): Quat =>
+  Array.isArray(value) ? { x: value[0], y: value[1], z: value[2], w: value[3] } : value as Quat;
+
+const normalizeNodeProps = (props: NodeAuthoringProps): NodeAuthoringProps => {
+  const { position, rotation, scale, transform, ...rest } = props;
+  if (position === undefined && rotation === undefined && scale === undefined) {
+    return props;
+  }
+
+  const baseTransform = transform ?? identityTransform();
+  return {
+    ...rest,
+    transform: {
+      translation: position === undefined ? baseTransform.translation : normalizeVec3Like(position),
+      rotation: rotation === undefined ? baseTransform.rotation : normalizeQuatLike(rotation),
+      scale: scale === undefined ? baseTransform.scale : normalizeVec3Like(scale),
+    },
+  };
 };
 
 export const jsx = (
@@ -331,7 +363,7 @@ export const jsx = (
 
   if (type === 'group') {
     const { id, children: _children, ...groupProps } = authoringProps as GroupJsxProps;
-    return createAuthoringElement('node', id, groupProps, children);
+    return createAuthoringElement('node', id, normalizeNodeProps(groupProps), children);
   }
 
   if (type === 'perspectiveCamera') {
@@ -371,7 +403,7 @@ export const jsx = (
   }
 
   const { id, children: _children, ...nodeProps } = authoringProps as NodeJsxProps;
-  return createAuthoringElement('node', id, nodeProps, children);
+  return createAuthoringElement('node', id, normalizeNodeProps(nodeProps), children);
 };
 
 export const jsxs = jsx;

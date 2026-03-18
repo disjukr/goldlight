@@ -8,6 +8,7 @@ import {
   createAuthoringElement,
   createSceneRoot,
   Fragment,
+  summarizeSceneRootCommit,
 } from '@rieul3d/react';
 
 Deno.test('authoringTreeToSceneIr lowers declarative nodes into scene ir', () => {
@@ -458,6 +459,177 @@ Deno.test('createSceneRoot publishes committed scene snapshots', () => {
       revision: 2,
     },
   ]);
+});
+
+Deno.test('summarizeSceneRootCommit reports first-commit additions', () => {
+  const root = createSceneRoot();
+  let summary:
+    | ReturnType<typeof summarizeSceneRootCommit>
+    | undefined;
+
+  root.subscribe((commit) => {
+    summary = summarizeSceneRootCommit(commit);
+  });
+
+  root.render(
+    <scene id='jsx-scene' activeCameraId='camera-main'>
+      <material
+        id='triangle-material'
+        kind='unlit'
+        textures={[]}
+        parameters={{
+          color: { x: 0.19, y: 0.62, z: 0.97, w: 1 },
+        }}
+      />
+      <mesh
+        id='triangle'
+        materialId='triangle-material'
+        attributes={[{
+          semantic: 'POSITION',
+          itemSize: 3,
+          values: [0, 0.7, 0, -0.7, -0.7, 0, 0.7, -0.7, 0],
+        }]}
+      />
+      <perspectiveCamera id='camera-main' position={[0, 0, 2]} />
+      <group id='scene-root'>
+        <node id='triangle-node' meshId='triangle' />
+      </group>
+    </scene>,
+  );
+
+  assertEquals(summary, {
+    sceneIdChanged: true,
+    activeCameraChanged: true,
+    rootNodeIdsChanged: true,
+    assets: { addedIds: [], removedIds: [], updatedIds: [], unchangedIds: [] },
+    textures: { addedIds: [], removedIds: [], updatedIds: [], unchangedIds: [] },
+    materials: {
+      addedIds: ['triangle-material'],
+      removedIds: [],
+      updatedIds: [],
+      unchangedIds: [],
+    },
+    lights: { addedIds: [], removedIds: [], updatedIds: [], unchangedIds: [] },
+    meshes: { addedIds: ['triangle'], removedIds: [], updatedIds: [], unchangedIds: [] },
+    cameras: { addedIds: ['camera-main'], removedIds: [], updatedIds: [], unchangedIds: [] },
+    sdfPrimitives: { addedIds: [], removedIds: [], updatedIds: [], unchangedIds: [] },
+    volumePrimitives: { addedIds: [], removedIds: [], updatedIds: [], unchangedIds: [] },
+    nodes: {
+      addedIds: ['camera-main', 'scene-root', 'triangle-node'],
+      removedIds: [],
+      updatedIds: [],
+      unchangedIds: [],
+    },
+    animationClips: { addedIds: [], removedIds: [], updatedIds: [], unchangedIds: [] },
+  });
+});
+
+Deno.test('summarizeSceneRootCommit distinguishes added removed and updated stable ids', () => {
+  const root = createSceneRoot();
+  const summaries: ReturnType<typeof summarizeSceneRootCommit>[] = [];
+
+  root.subscribe((commit) => {
+    summaries.push(summarizeSceneRootCommit(commit));
+  });
+
+  root.render(
+    <scene id='jsx-scene' activeCameraId='camera-main'>
+      <material
+        id='triangle-material'
+        kind='unlit'
+        textures={[]}
+        parameters={{
+          color: { x: 0.19, y: 0.62, z: 0.97, w: 1 },
+        }}
+      />
+      <mesh
+        id='triangle'
+        materialId='triangle-material'
+        attributes={[{
+          semantic: 'POSITION',
+          itemSize: 3,
+          values: [0, 0.7, 0, -0.7, -0.7, 0, 0.7, -0.7, 0],
+        }]}
+      />
+      <directionalLight
+        id='sun'
+        color={{ x: 1, y: 0.95, z: 0.9 }}
+        intensity={1.5}
+      />
+      <perspectiveCamera id='camera-main' position={[0, 0, 2]} />
+      <group id='scene-root'>
+        <node id='triangle-node' meshId='triangle' />
+      </group>
+    </scene>,
+  );
+
+  root.render(
+    <scene id='jsx-scene' activeCameraId='camera-close'>
+      <material
+        id='triangle-material'
+        kind='unlit'
+        textures={[]}
+        parameters={{
+          color: { x: 0.93, y: 0.48, z: 0.24, w: 1 },
+        }}
+      />
+      <mesh
+        id='triangle'
+        materialId='triangle-material'
+        attributes={[{
+          semantic: 'POSITION',
+          itemSize: 3,
+          values: [0, 0.9, 0, -0.8, -0.8, 0, 0.8, -0.8, 0],
+        }]}
+      />
+      <perspectiveCamera id='camera-main' position={[0, 0, 1.5]} />
+      <orthographicCamera id='camera-close' xmag={0.8} ymag={0.8} />
+      <group id='scene-root' position={[1, 2, 3]}>
+        <node id='triangle-node' meshId='triangle' />
+      </group>
+    </scene>,
+  );
+
+  assertEquals(summaries[1], {
+    sceneIdChanged: false,
+    activeCameraChanged: true,
+    rootNodeIdsChanged: false,
+    assets: { addedIds: [], removedIds: [], updatedIds: [], unchangedIds: [] },
+    textures: { addedIds: [], removedIds: [], updatedIds: [], unchangedIds: [] },
+    materials: {
+      addedIds: [],
+      removedIds: [],
+      updatedIds: ['triangle-material'],
+      unchangedIds: [],
+    },
+    lights: {
+      addedIds: [],
+      removedIds: ['sun'],
+      updatedIds: [],
+      unchangedIds: [],
+    },
+    meshes: {
+      addedIds: [],
+      removedIds: [],
+      updatedIds: ['triangle'],
+      unchangedIds: [],
+    },
+    cameras: {
+      addedIds: ['camera-close'],
+      removedIds: [],
+      updatedIds: [],
+      unchangedIds: ['camera-main'],
+    },
+    sdfPrimitives: { addedIds: [], removedIds: [], updatedIds: [], unchangedIds: [] },
+    volumePrimitives: { addedIds: [], removedIds: [], updatedIds: [], unchangedIds: [] },
+    nodes: {
+      addedIds: [],
+      removedIds: [],
+      updatedIds: ['camera-main', 'scene-root'],
+      unchangedIds: ['triangle-node'],
+    },
+    animationClips: { addedIds: [], removedIds: [], updatedIds: [], unchangedIds: [] },
+  });
 });
 
 Deno.test('createSceneRoot allows subscribers to unsubscribe', () => {

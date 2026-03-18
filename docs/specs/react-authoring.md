@@ -74,8 +74,12 @@ diff/apply payload for committed changes? That follow-up remains Proposed pendin
   the same TSX surface before lowering.
 - `createSceneRoot()` now provides a data-only commit bridge that publishes full `SceneIr` snapshots
   plus previous-scene/revision metadata to caller-owned subscribers.
+- `summarizeSceneRootCommit()` can derive resource-level added/removed/updated/unchanged ID sets
+  from snapshot commits so integrations can make selective invalidation decisions without a separate
+  public diff/apply contract.
 - Integrations that cache GPU residency against scene/resource IDs must invalidate or rebuild that
-  residency when a new committed snapshot replaces resource contents under stable IDs.
+  residency when a new committed snapshot replaces resource contents under stable IDs; commit
+  summaries now let them scope that rebuild to the resource classes that actually changed.
 - Rendering, residency preparation, and execution continue to live in the core/gpu/renderer layers.
 - The browser example now demonstrates full-scene JSX authoring plus scene-root snapshot commits,
   not a live React reconciler.
@@ -85,5 +89,5 @@ diff/apply payload for committed changes? That follow-up remains Proposed pendin
   question.
 - [`../../examples/browser_react_authoring/README.md`](../../examples/browser_react_authoring/README.md)
   shows the reference browser flow: author a tree with `@rieul3d/react` TSX, commit it through
-  `createSceneRoot()`, then hand the published scene snapshot to the existing runtime and renderer
-  layers.
+  `createSceneRoot()`, optionally summarize that commit for selective residency invalidation, then
+  hand the published scene snapshot to the existing runtime and renderer layers.

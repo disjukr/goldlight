@@ -22,6 +22,22 @@ const lerp = (a: number, b: number, t: number): number => a + ((b - a) * t);
 
 const smoothstep = (value: number): number => value * value * (3 - (2 * value));
 
+const assertFiniteNumber = (name: string, value: number): number => {
+  if (!Number.isFinite(value)) {
+    throw new Error(`"${name}" must be a finite number`);
+  }
+
+  return value;
+};
+
+const assertNonNegativeInteger = (name: string, value: number): number => {
+  if (!Number.isInteger(value) || value < 0) {
+    throw new Error(`"${name}" must be a non-negative integer`);
+  }
+
+  return value;
+};
+
 const hash = (seed: number, x: number, y: number, z: number): number => {
   const sineInput = (x * 127.1) + (y * 311.7) + (z * 74.7) + (seed * 101.3);
   const hashed = Math.sin(sineInput) * 43758.5453123;
@@ -33,12 +49,14 @@ const sampleLattice2d = (x: number, y: number, seed: number): number => hash(see
 const sampleLattice3d = (x: number, y: number, z: number, seed: number): number =>
   hash(seed, x, y, z);
 
+const noiseSeed = (options: NoiseOptions): number => assertFiniteNumber('seed', options.seed ?? 0);
+
 const fractalWeights = (options: FractalNoiseOptions) => ({
-  octaves: options.octaves ?? defaultOctaves,
-  lacunarity: options.lacunarity ?? defaultLacunarity,
-  gain: options.gain ?? defaultGain,
-  frequency: options.frequency ?? defaultFrequency,
-  seed: options.seed ?? 0,
+  octaves: assertNonNegativeInteger('octaves', options.octaves ?? defaultOctaves),
+  lacunarity: assertFiniteNumber('lacunarity', options.lacunarity ?? defaultLacunarity),
+  gain: assertFiniteNumber('gain', options.gain ?? defaultGain),
+  frequency: assertFiniteNumber('frequency', options.frequency ?? defaultFrequency),
+  seed: noiseSeed(options),
 });
 
 export const sampleValueNoise2d = (
@@ -46,7 +64,7 @@ export const sampleValueNoise2d = (
   y: number,
   options: NoiseOptions = {},
 ): number => {
-  const seed = options.seed ?? 0;
+  const seed = noiseSeed(options);
   const x0 = Math.floor(x);
   const y0 = Math.floor(y);
   const x1 = x0 + 1;
@@ -68,7 +86,7 @@ export const sampleValueNoise3d = (
   z: number,
   options: NoiseOptions = {},
 ): number => {
-  const seed = options.seed ?? 0;
+  const seed = noiseSeed(options);
   const x0 = Math.floor(x);
   const y0 = Math.floor(y);
   const z0 = Math.floor(z);

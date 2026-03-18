@@ -2,7 +2,8 @@
 
 This example shows the current bridge between `@rieul3d/react` and the existing runtime layers. It
 authors a scene with TSX, including React-style aliases such as `perspectiveCamera` and `group`,
-lowers that tree into `SceneIr`, then renders the result through the browser forward pipeline.
+plus node transform shorthands such as `position`, lowers that tree into `SceneIr`, then renders the
+result through the browser forward pipeline.
 
 This is now a real JSX authoring example, but it is still not a live React renderer or reconciler.
 `@rieul3d/react` currently owns authoring and lowering only.

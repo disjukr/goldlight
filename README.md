@@ -37,6 +37,8 @@ Implemented today:
 - BDL-driven `SceneIr` generation with drift checks in CI
 - camera declarations in Scene IR plus evaluated active-camera view/projection support
 - screen-to-world mouse ray generation from evaluated camera state for interaction foundations
+- reusable core helpers for quaternion-from-Euler rotation authoring, mesh bounds, and generated
+  mesh normals
 - mesh, texture, first volume residency upload paths, and first volume raymarch execution
 - forward rendering, minimal deferred mesh execution with built-in unlit/lit plus custom WGSL
   G-buffer paths, deferred directional-light resolve support, optional baseColor texture sampling,

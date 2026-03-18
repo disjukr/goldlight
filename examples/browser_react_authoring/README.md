@@ -1,8 +1,8 @@
 # Browser React Authoring Example
 
 This example shows the current bridge between `@rieul3d/react` and the existing runtime layers. It
-authors a scene with TSX, including React-style aliases such as `perspectiveCamera` and `group`,
-plus node transform shorthands such as `position`, lowers that tree into `SceneIr`, then renders the
+authors a scene with TSX, including combined scene-object aliases such as `perspectiveCamera` plus
+node transform shorthands such as `position`, lowers that tree into `SceneIr`, then renders the
 result through the browser forward pipeline.
 
 This is now a real JSX authoring example, but it is still not a live React renderer or reconciler.

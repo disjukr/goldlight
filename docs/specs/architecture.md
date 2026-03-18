@@ -28,6 +28,8 @@ The runtime is split into explicit data and execution stages:
   interaction foundations.
 - `packages/gpu`: explicit WebGPU context and residency management helpers.
 - `packages/renderer`: pass contracts, renderer descriptors, and frame planning.
+- `packages/renderer` also owns renderer-side id-buffer picking for mesh-node selection and
+  readback.
 - renderer descriptors also publish capability contracts for primitive/material compatibility before
   execution. See [`renderer-capabilities.md`](./renderer-capabilities.md).
 - `packages/procedural`: deterministic CPU-side procedural sampling plus texture/volume baking
@@ -56,6 +58,7 @@ The current scaffold already includes:
 - benchmark coverage for key runtime paths, including material binding and renderer capability
   preflight costs
 - screen-to-world ray construction from evaluated perspective and orthographic camera state
+- offscreen mesh-node pick snapshots with stable node-to-mesh id decoding
 
 ## Design Constraints
 

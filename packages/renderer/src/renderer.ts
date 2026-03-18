@@ -34,6 +34,7 @@ import builtInSdfRaymarchShader from './shaders/built_in_sdf_raymarch.wgsl' with
 import builtInVolumeRaymarchShader from './shaders/built_in_volume_raymarch.wgsl' with {
   type: 'text',
 };
+import builtInNodePickShader from './shaders/built_in_node_pick.wgsl' with { type: 'text' };
 
 export type RendererKind = 'forward' | 'deferred';
 export type PassKind =
@@ -107,6 +108,33 @@ export type ForwardSnapshotResult = Readonly<{
 
 export type DeferredRenderResult = ForwardRenderResult;
 export type DeferredSnapshotResult = ForwardSnapshotResult;
+
+export type NodePickItem = Readonly<{
+  encodedId: number;
+  nodeId: string;
+  meshId: string;
+}>;
+
+export type NodePickRenderResult = Readonly<{
+  drawCount: number;
+  submittedCommandBufferCount: number;
+  picks: readonly NodePickItem[];
+}>;
+
+export type NodePickSnapshotResult = Readonly<{
+  drawCount: number;
+  submittedCommandBufferCount: number;
+  width: number;
+  height: number;
+  bytes: Uint8Array;
+  picks: readonly NodePickItem[];
+}>;
+
+export type NodePickHit = Readonly<{
+  encodedId: number;
+  nodeId: string;
+  meshId: string;
+}>;
 
 export type MaterialVertexAttribute = Readonly<{
   semantic: string;
@@ -209,6 +237,7 @@ const builtInDeferredGbufferLitProgramId = 'built-in:deferred-gbuffer-lit';
 const builtInDeferredLightingProgramId = 'built-in:deferred-lighting';
 const builtInSdfRaymarchProgramId = 'built-in:sdf-raymarch';
 const builtInVolumeRaymarchProgramId = 'built-in:volume-raymarch';
+const builtInNodePickProgramId = 'built-in:node-pick';
 const textureBindingUsage = 0x04;
 const renderAttachmentUsage = 0x10;
 const uniformUsage = 0x40;
@@ -1213,6 +1242,55 @@ export const ensureBuiltInForwardPipeline = (
   return ensureMaterialPipeline(context, residency, builtInUnlitProgram, format);
 };
 
+export const ensureNodePickPipeline = (
+  context: GpuRenderExecutionContext,
+  residency: RuntimeResidency,
+  format: GPUTextureFormat,
+): GPURenderPipeline => {
+  const cacheKey = `${builtInNodePickProgramId}:${format}`;
+  const cached = residency.pipelines.get(cacheKey);
+  if (cached) {
+    return cached as GPURenderPipeline;
+  }
+
+  const shader = context.device.createShaderModule({
+    label: cacheKey,
+    code: builtInNodePickShader,
+  });
+  const pipeline = context.device.createRenderPipeline({
+    label: cacheKey,
+    layout: 'auto',
+    vertex: {
+      module: shader,
+      entryPoint: 'vsMain',
+      buffers: createVertexBufferLayouts([{
+        semantic: 'POSITION',
+        shaderLocation: 0,
+        format: 'float32x3',
+        offset: 0,
+        arrayStride: 12,
+      }]),
+    },
+    fragment: {
+      module: shader,
+      entryPoint: 'fsMain',
+      targets: [{ format }],
+    },
+    primitive: {
+      topology: 'triangle-list',
+      cullMode: 'back',
+    },
+    depthStencil: {
+      format: depthTextureFormat,
+      depthWriteEnabled: true,
+      depthCompare: 'less',
+    },
+  });
+
+  residency.pipelines.set(cacheKey, pipeline);
+  return pipeline;
+};
+
 export const ensureDeferredDepthPrepassPipeline = (
   context: GpuRenderExecutionContext,
   residency: RuntimeResidency,
@@ -1519,6 +1597,52 @@ const createForwardLitMeshTransformUniformData = (
     ...viewProjectionMatrix.slice(0, 16),
     ...createDeferredNormalMatrix(worldMatrix),
   ]);
+
+const encodePickIdColor = (encodedId: number): readonly [number, number, number, number] => [
+  (encodedId & 0xff) / 255,
+  ((encodedId >> 8) & 0xff) / 255,
+  ((encodedId >> 16) & 0xff) / 255,
+  ((encodedId >> 24) & 0xff) / 255,
+];
+
+const createNodePickTransformUniformData = (
+  worldMatrix: readonly number[],
+  viewProjectionMatrix: readonly number[],
+  encodedId: number,
+): Float32Array =>
+  Float32Array.from([
+    ...worldMatrix.slice(0, 16),
+    ...viewProjectionMatrix.slice(0, 16),
+    ...encodePickIdColor(encodedId),
+  ]);
+
+export const createNodePickItems = (
+  evaluatedScene: EvaluatedScene,
+): readonly NodePickItem[] => {
+  const picks: NodePickItem[] = [];
+  let encodedId = 1;
+
+  for (const node of evaluatedScene.nodes) {
+    if (!node.mesh) {
+      continue;
+    }
+
+    picks.push({
+      encodedId,
+      nodeId: node.node.id,
+      meshId: node.mesh.id,
+    });
+    encodedId += 1;
+  }
+
+  return picks;
+};
+
+export const decodePickId = (pixel: ArrayLike<number>): number =>
+  (pixel[0] ?? 0) +
+  ((pixel[1] ?? 0) << 8) +
+  ((pixel[2] ?? 0) << 16) +
+  ((pixel[3] ?? 0) << 24);
 
 const createWorldTransformUniformData = (worldMatrix: readonly number[]): Float32Array =>
   Float32Array.from(worldMatrix.slice(0, 16));
@@ -2161,6 +2285,144 @@ export const renderDeferredFrame = (
   return {
     drawCount,
     submittedCommandBufferCount: 1,
+  };
+};
+
+export const renderNodePickFrame = (
+  context: GpuRenderExecutionContext,
+  binding: RenderContextBinding,
+  residency: RuntimeResidency,
+  evaluatedScene: EvaluatedScene,
+): NodePickRenderResult => {
+  const pipeline = ensureNodePickPipeline(context, residency, binding.target.format);
+  const viewProjectionMatrix = createViewProjectionMatrix(binding, evaluatedScene.activeCamera);
+  const picks = createNodePickItems(evaluatedScene);
+  const pickByNodeId = new Map(picks.map((pick) => [pick.nodeId, pick]));
+  const encoder = context.device.createCommandEncoder({
+    label: 'node-pick-frame',
+  });
+  const pass = encoder.beginRenderPass({
+    colorAttachments: [{
+      view: acquireColorAttachmentView(binding),
+      clearValue: { r: 0, g: 0, b: 0, a: 0 },
+      loadOp: 'clear',
+      storeOp: 'store',
+    }],
+    depthStencilAttachment: {
+      view: acquireDepthAttachmentView(binding),
+      depthClearValue: 1,
+      depthLoadOp: 'clear',
+      depthStoreOp: 'store',
+    },
+  });
+
+  pass.setPipeline(pipeline);
+
+  let drawCount = 0;
+  for (const node of evaluatedScene.nodes) {
+    const mesh = node.mesh;
+    if (!mesh) {
+      continue;
+    }
+
+    const geometry = residency.geometry.get(mesh.id);
+    const positionBuffer = geometry?.attributeBuffers.POSITION;
+    const pick = pickByNodeId.get(node.node.id);
+    if (!geometry || !positionBuffer || !pick) {
+      continue;
+    }
+
+    pass.setVertexBuffer(0, positionBuffer);
+    const uniformData = createNodePickTransformUniformData(
+      node.worldMatrix,
+      viewProjectionMatrix,
+      pick.encodedId,
+    );
+    const uniformBuffer = context.device.createBuffer({
+      label: `${node.node.id}:node-pick-transform`,
+      size: uniformData.byteLength,
+      usage: uniformUsage | bufferCopyDstUsage,
+    });
+    context.queue.writeBuffer(uniformBuffer, 0, toBufferSource(uniformData));
+    pass.setBindGroup(
+      0,
+      context.device.createBindGroup({
+        layout: pipeline.getBindGroupLayout(0),
+        entries: [{
+          binding: 0,
+          resource: {
+            buffer: uniformBuffer,
+          },
+        }],
+      }),
+    );
+
+    if (geometry.indexBuffer && geometry.indexCount > 0) {
+      pass.setIndexBuffer(geometry.indexBuffer, 'uint32');
+      pass.drawIndexed(geometry.indexCount, 1, 0, 0, 0);
+    } else {
+      pass.draw(geometry.vertexCount, 1, 0, 0);
+    }
+    drawCount += 1;
+  }
+
+  pass.end();
+
+  const commandBuffer = encoder.finish();
+  context.queue.submit([commandBuffer]);
+
+  return {
+    drawCount,
+    submittedCommandBufferCount: 1,
+    picks,
+  };
+};
+
+const assertPixelCoordinate = (name: string, value: number, limit: number): number => {
+  if (!Number.isInteger(value) || value < 0 || value >= limit) {
+    throw new Error(`"${name}" must be an integer between 0 and ${limit - 1}`);
+  }
+
+  return value;
+};
+
+export const readNodePickHit = (
+  snapshot: Pick<NodePickSnapshotResult, 'width' | 'height' | 'bytes' | 'picks'>,
+  x: number,
+  y: number,
+): NodePickHit | undefined => {
+  const pixelX = assertPixelCoordinate('x', x, snapshot.width);
+  const pixelY = assertPixelCoordinate('y', y, snapshot.height);
+  const pixelOffset = ((pixelY * snapshot.width) + pixelX) * 4;
+  const encodedId = decodePickId(snapshot.bytes.slice(pixelOffset, pixelOffset + 4));
+  if (encodedId === 0) {
+    return undefined;
+  }
+
+  const pick = snapshot.picks.find((candidate) => candidate.encodedId === encodedId);
+  return pick
+    ? {
+      encodedId,
+      nodeId: pick.nodeId,
+      meshId: pick.meshId,
+    }
+    : undefined;
+};
+
+export const renderNodePickSnapshot = async (
+  context: GpuRenderExecutionContext & GpuReadbackContext,
+  binding: RenderContextBinding,
+  residency: RuntimeResidency,
+  evaluatedScene: EvaluatedScene,
+): Promise<NodePickSnapshotResult> => {
+  const frame = renderNodePickFrame(context, binding, residency, evaluatedScene);
+  const snapshot = await readOffscreenSnapshot(context, binding);
+
+  return {
+    ...frame,
+    width: snapshot.width,
+    height: snapshot.height,
+    bytes: snapshot.bytes,
   };
 };
 

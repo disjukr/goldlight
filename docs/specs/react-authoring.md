@@ -57,6 +57,11 @@ into `SceneIr` snapshots and lets caller-owned integrations subscribe to commit 
 moving residency or renderer ownership into the React package. ADR 0006 still remains Proposed until
 discussion `#85` receives a decision.
 
+The next blocker after that first bridge is now captured in
+[`../adr/0007-react-scene-root-diff-contract.md`](../adr/0007-react-scene-root-diff-contract.md):
+should the public live-update contract remain full-scene snapshots for now, or should React expose a
+diff/apply payload for committed changes? That follow-up remains Proposed pending discussion `#90`.
+
 ## Current Status
 
 - The React package currently lowers declarative authoring structures into SceneIr-friendly data.
@@ -76,6 +81,8 @@ discussion `#85` receives a decision.
   not a live React reconciler.
 - The next unresolved architecture question is whether this full-snapshot scene-root bridge should
   remain the long-term boundary or evolve toward a finer-grained diff/apply contract.
+- Issue `#89` now tracks the implementation follow-up once discussion `#90` resolves that contract
+  question.
 - [`../../examples/browser_react_authoring/README.md`](../../examples/browser_react_authoring/README.md)
   shows the reference browser flow: author a tree with `@rieul3d/react` TSX, commit it through
   `createSceneRoot()`, then hand the published scene snapshot to the existing runtime and renderer

@@ -19,6 +19,8 @@ supersedes them.
   add combined camera/light-style JSX aliases without changing core ownership
 - [`0006-react-scene-root-bridge.md`](./0006-react-scene-root-bridge.md): React should publish
   committed scene snapshots through a scene-root bridge before it owns a full live reconciler
+- [`0007-react-scene-root-diff-contract.md`](./0007-react-scene-root-diff-contract.md): decide
+  whether React scene-root commits should stay snapshot-only or expose diff/apply data
 
 ## Related References
 

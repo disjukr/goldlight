@@ -54,6 +54,8 @@ Implemented today:
 - a browser React authoring example plus scene-root bridge that commits JSX-authored trees into
   `SceneIr` snapshots before rendering, including JSX-authored scene resources such as meshes,
   materials, and cameras
+- proposed ADR/discussion tracking for the next React live-update boundary decision: whether
+  scene-root commits should stay snapshot-only or expose diff/apply metadata
 - fixture-backed golden snapshot regression tests for clear, mesh, sphere/box SDF, volume, and
   recovery rebuild renders, including guards against raymarch fixtures collapsing back to clear-only
   output

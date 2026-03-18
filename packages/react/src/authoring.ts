@@ -376,6 +376,18 @@ const createSceneObjectAliasElement = (
   );
 };
 
+const hasSceneObjectAliasNodeIntent = (
+  nodeProps: SceneObjectAliasNodeProps,
+  children: readonly AuthoringElement[],
+): boolean =>
+  children.length > 0 ||
+  nodeProps.nodeId !== undefined ||
+  nodeProps.name !== undefined ||
+  nodeProps.transform !== undefined ||
+  nodeProps.position !== undefined ||
+  nodeProps.rotation !== undefined ||
+  nodeProps.scale !== undefined;
+
 export const jsx = (
   type:
     | keyof AuthoringPropsByType
@@ -443,11 +455,15 @@ export const jsx = (
       scale,
       ...cameraProps
     } = authoringProps as PerspectiveCameraJsxProps;
+    const aliasNodeProps = { nodeId, name, transform, position, rotation, scale };
+    if (!hasSceneObjectAliasNodeIntent(aliasNodeProps, children)) {
+      return createAuthoringElement('camera', id, { ...cameraProps, type: 'perspective' });
+    }
     return createSceneObjectAliasElement(
       'camera',
       id,
       { ...cameraProps, type: 'perspective' },
-      { nodeId, name, transform, position, rotation, scale },
+      aliasNodeProps,
       { cameraId: id },
       children,
       key,
@@ -466,11 +482,15 @@ export const jsx = (
       scale,
       ...cameraProps
     } = authoringProps as OrthographicCameraJsxProps;
+    const aliasNodeProps = { nodeId, name, transform, position, rotation, scale };
+    if (!hasSceneObjectAliasNodeIntent(aliasNodeProps, children)) {
+      return createAuthoringElement('camera', id, { ...cameraProps, type: 'orthographic' });
+    }
     return createSceneObjectAliasElement(
       'camera',
       id,
       { ...cameraProps, type: 'orthographic' },
-      { nodeId, name, transform, position, rotation, scale },
+      aliasNodeProps,
       { cameraId: id },
       children,
       key,
@@ -489,11 +509,15 @@ export const jsx = (
       scale,
       ...lightProps
     } = authoringProps as DirectionalLightJsxProps;
+    const aliasNodeProps = { nodeId, name, transform, position, rotation, scale };
+    if (!hasSceneObjectAliasNodeIntent(aliasNodeProps, children)) {
+      return createAuthoringElement('light', id, { ...lightProps, kind: 'directional' });
+    }
     return createSceneObjectAliasElement(
       'light',
       id,
       { ...lightProps, kind: 'directional' },
-      { nodeId, name, transform, position, rotation, scale },
+      aliasNodeProps,
       { lightId: id },
       children,
       key,

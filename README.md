@@ -51,12 +51,12 @@ Implemented today:
   PNG snapshot encoding
 - Windows BYOW primitives demo using `@rieul3d/primitives`, a reusable BYOW runner script, and a
   custom lit shader for mesh normals
-- a browser React authoring example plus scene-root bridge that commits JSX-authored trees into
-  `SceneIr` snapshots before rendering, including JSX-authored scene resources such as meshes,
-  materials, and cameras, with commit-summary helpers for the current runtime-safe residency reset
-  boundary
-- proposed ADR/discussion tracking for the next React live-update boundary decision: whether
-  scene-root commits should stay snapshot-only or expose diff/apply metadata
+- a browser React authoring example plus the current `createSceneRoot()` snapshot path that commits
+  JSX-authored trees into `SceneIr` snapshots before rendering, including JSX-authored scene
+  resources such as meshes, materials, and cameras, with commit-summary helpers for the current
+  runtime-safe residency reset boundary
+- proposed ADR/discussion tracking for the next React live-update boundary decision around
+  partial-apply scene updates without renderer ownership
 - fixture-backed golden snapshot regression tests for clear, mesh, sphere/box SDF, volume, and
   recovery rebuild renders, including guards against raymarch fixtures collapsing back to clear-only
   output

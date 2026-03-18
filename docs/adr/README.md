@@ -17,6 +17,8 @@ supersedes them.
   while core runtime state stays outside React
 - [`0005-react-scene-object-aliases.md`](./0005-react-scene-object-aliases.md): React authoring may
   add combined camera/light-style JSX aliases without changing core ownership
+- [`0006-react-scene-root-bridge.md`](./0006-react-scene-root-bridge.md): React should publish
+  committed scene snapshots through a scene-root bridge before it owns a full live reconciler
 
 ## Related References
 

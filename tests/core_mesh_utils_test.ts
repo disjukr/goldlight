@@ -154,7 +154,11 @@ Deno.test('createMeshNormalsAttribute rejects invalid triangle topology', () => 
     createMeshNormalsAttribute(createMesh({
       id: 'mesh-nan-position',
       indices: [0, 1, 2],
-      attributes: [{ semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0, 0, Number.NaN, 0] }],
+      attributes: [{
+        semantic: 'POSITION',
+        itemSize: 3,
+        values: [0, 0, 0, 1, 0, 0, 0, Number.NaN, 0],
+      }],
     }))
   );
 });

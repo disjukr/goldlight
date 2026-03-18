@@ -27,7 +27,7 @@ Use this page as the main navigation hub.
   [`adr/0006-react-scene-root-bridge.md`](./adr/0006-react-scene-root-bridge.md)
 - Run the browser and native examples, including the textured and custom-material browser workflows:
   [`../examples/README.md`](../examples/README.md)
-- Review the React authoring browser example with full-scene TSX lowering:
+- Review the React authoring browser example with full-scene TSX lowering and scene-root commits:
   [`../examples/browser_react_authoring/README.md`](../examples/browser_react_authoring/README.md)
 - Run the headless snapshot PNG workflow:
   [`../examples/headless_snapshot/README.md`](../examples/headless_snapshot/README.md)

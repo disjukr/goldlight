@@ -36,3 +36,5 @@ Related discussion: `#85`, "ADR 0006: React scene-root bridge for @rieul3d/react
   config or renderer mutation model
 - full reconciler internals, host object granularity, and diff/application strategy remain open
   follow-up decisions
+- the first implementation may stay data-only by publishing full `SceneIr` snapshots with revision
+  metadata before any finer-grained diff contract is introduced

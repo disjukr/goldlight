@@ -20,8 +20,8 @@ React integration is a separate package. It must not become the source of truth 
 
 ## Scope
 
-The current package owns JSX authoring and lowering. It does not define a live React renderer or
-custom reconciler yet.
+The current package owns JSX authoring, lowering, and a first scene-root bridge that publishes
+committed `SceneIr` snapshots. It does not define a live React renderer or custom reconciler yet.
 
 ## Direction
 
@@ -50,11 +50,12 @@ behavior, while explicit `<camera>`, `<light>`, and `<node>` authoring stays ava
 resource-only and multi-bind scenes. The remaining open question is whether broader object
 composition such as mesh/material authoring should join that same combined surface.
 
-The next proposed step for issue `#64` is captured in
-[`../adr/0006-react-scene-root-bridge.md`](../adr/0006-react-scene-root-bridge.md): introduce a
-React scene-root bridge that publishes committed `SceneIr` snapshots without moving residency or
-renderer ownership into the React package. That decision is still pending discussion and should not
-be treated as accepted yet.
+The next proposed step for issue `#64` was captured in
+[`../adr/0006-react-scene-root-bridge.md`](../adr/0006-react-scene-root-bridge.md), and the
+repository now has a first implementation of that bridge: `createSceneRoot()` commits authored trees
+into `SceneIr` snapshots and lets caller-owned integrations subscribe to commit events without
+moving residency or renderer ownership into the React package. ADR 0006 still remains Proposed until
+discussion `#85` receives a decision.
 
 ## Current Status
 
@@ -66,11 +67,14 @@ be treated as accepted yet.
   can read closer to react-three-fiber while still lowering into the same IR.
 - Root scene trees can now also declare cameras, meshes, materials, lights, textures, and assets in
   the same TSX surface before lowering.
+- `createSceneRoot()` now provides a data-only commit bridge that publishes full `SceneIr` snapshots
+  plus previous-scene/revision metadata to caller-owned subscribers.
 - Rendering, residency preparation, and execution continue to live in the core/gpu/renderer layers.
-- The browser example now demonstrates full-scene JSX authoring plus lowering, not a live React
-  reconciler.
-- The next unresolved architecture question is how a live React scene root should hand committed
-  scene updates to caller-owned runtime integrations.
+- The browser example now demonstrates full-scene JSX authoring plus scene-root snapshot commits,
+  not a live React reconciler.
+- The next unresolved architecture question is whether this full-snapshot scene-root bridge should
+  remain the long-term boundary or evolve toward a finer-grained diff/apply contract.
 - [`../../examples/browser_react_authoring/README.md`](../../examples/browser_react_authoring/README.md)
-  shows the reference browser flow: author a tree with `@rieul3d/react` TSX, lower node data into
-  Scene IR, then hand the result to the existing runtime and renderer layers.
+  shows the reference browser flow: author a tree with `@rieul3d/react` TSX, commit it through
+  `createSceneRoot()`, then hand the published scene snapshot to the existing runtime and renderer
+  layers.

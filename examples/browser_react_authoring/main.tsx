@@ -23,7 +23,7 @@ canvas.height = 480;
 
 const TriangleScene = () => (
   <scene id='react-browser-authoring' activeCameraId='camera-main'>
-    <camera id='camera-main' type='perspective' />
+    <perspectiveCamera id='camera-main' />
     <material
       id='triangle-material'
       kind='unlit'
@@ -51,7 +51,7 @@ const TriangleScene = () => (
         ],
       }]}
     />
-    <node
+    <group
       id='camera-node'
       cameraId='camera-main'
       transform={{
@@ -60,7 +60,9 @@ const TriangleScene = () => (
         scale: { x: 1, y: 1, z: 1 },
       }}
     />
-    <node id='triangle-node' name='Authored Triangle' meshId='triangle' />
+    <group id='scene-root' name='Authored Root'>
+      <node id='triangle-node' name='Authored Triangle' meshId='triangle' />
+    </group>
   </scene>
 );
 

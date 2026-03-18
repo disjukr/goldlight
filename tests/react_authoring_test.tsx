@@ -230,3 +230,39 @@ Deno.test('createAuthoringElement mirrors ids into programmatic scene resources'
   assertEquals(scene.meshes[0]?.id, 'triangle');
   assertEquals(scene.lights[0]?.id, 'sun');
 });
+
+Deno.test('authoringTreeToSceneIr lowers react-style alias intrinsics', () => {
+  const scene = authoringTreeToSceneIr(
+    <scene id='jsx-scene' activeCameraId='camera-main'>
+      <perspectiveCamera id='camera-main' yfov={0.8} />
+      <directionalLight
+        id='sun'
+        color={{ x: 1, y: 0.95, z: 0.9 }}
+        intensity={1.5}
+      />
+      <group id='root' name='Root Group'>
+        <node id='camera-node' cameraId='camera-main' />
+        <node id='light-node' lightId='sun' />
+      </group>
+    </scene>,
+  );
+
+  assertEquals(scene.activeCameraId, 'camera-main');
+  assertEquals(scene.cameras[0], {
+    id: 'camera-main',
+    type: 'perspective',
+    yfov: 0.8,
+    znear: 0.1,
+    zfar: 100,
+  });
+  assertEquals(scene.lights[0], {
+    id: 'sun',
+    kind: 'directional',
+    color: { x: 1, y: 0.95, z: 0.9 },
+    intensity: 1.5,
+  });
+  assertEquals(scene.nodes.map((node) => node.id), ['root', 'camera-node', 'light-node']);
+  assertEquals(scene.nodes.find((node) => node.id === 'root')?.name, 'Root Group');
+  assertEquals(scene.nodes.find((node) => node.id === 'camera-node')?.parentId, 'root');
+  assertEquals(scene.nodes.find((node) => node.id === 'light-node')?.parentId, 'root');
+});

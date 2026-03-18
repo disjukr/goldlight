@@ -26,6 +26,8 @@ Use this page as the main navigation hub.
   [`specs/procedural-generation.md`](./specs/procedural-generation.md)
 - Understand local SDF-to-mesh extraction helpers and current algorithm tradeoffs:
   [`specs/sdf-mesh-extraction.md`](./specs/sdf-mesh-extraction.md)
+- Understand cubemap face capture and the renderer/export separation:
+  [`specs/cubemap-capture.md`](./specs/cubemap-capture.md)
 - Understand reusable built-in mesh generation and example coverage:
   [`../examples/byow_primitives_demo/README.md`](../examples/byow_primitives_demo/README.md)
 - Review accepted architecture constraints: [`adr/README.md`](./adr/README.md)
@@ -34,6 +36,8 @@ Use this page as the main navigation hub.
   [`adr/0007-post-processing-execution-model.md`](./adr/0007-post-processing-execution-model.md)
 - Review the proposed React reconciler scene-document boundary:
   [`adr/0008-react-reconciler-scene-document.md`](./adr/0008-react-reconciler-scene-document.md)
+- Review the proposed cubemap capture boundary before 2D reprojection/export:
+  [`adr/0009-cubemap-capture-boundary.md`](./adr/0009-cubemap-capture-boundary.md)
 - Review the JSX authoring boundary decision:
   [`adr/0004-react-jsx-authoring.md`](./adr/0004-react-jsx-authoring.md)
 - Review the accepted React scene update boundary decision:

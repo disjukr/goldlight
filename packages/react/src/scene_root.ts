@@ -33,7 +33,8 @@ export const createSceneRoot = (initialElement?: AuthoringElement): SceneRoot =>
     currentScene = scene;
     revision = commit.revision;
 
-    for (const subscriber of subscribers) {
+    const currentSubscribers = [...subscribers];
+    for (const subscriber of currentSubscribers) {
       subscriber(commit);
     }
 

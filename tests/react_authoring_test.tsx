@@ -488,3 +488,39 @@ Deno.test('createSceneRoot allows subscribers to unsubscribe', () => {
   assertEquals(root.getRevision(), 3);
   assertEquals(revisions, [2]);
 });
+
+Deno.test('createSceneRoot does not let mid-dispatch subscriber changes reorder a commit', () => {
+  const root = createSceneRoot();
+  const events: string[] = [];
+
+  root.subscribe((commit) => {
+    events.push(`first:${commit.revision}`);
+    if (commit.revision === 1) {
+      root.subscribe((nestedCommit) => {
+        events.push(`late:${nestedCommit.revision}`);
+      });
+      root.render(
+        <scene id='second-scene'>
+          <group id='root' position={[1, 2, 3]} />
+        </scene>,
+      );
+    }
+  });
+  root.subscribe((commit) => {
+    events.push(`second:${commit.revision}`);
+  });
+
+  root.render(
+    <scene id='first-scene'>
+      <group id='root' />
+    </scene>,
+  );
+
+  assertEquals(events, [
+    'first:1',
+    'first:2',
+    'second:2',
+    'late:2',
+    'second:1',
+  ]);
+});

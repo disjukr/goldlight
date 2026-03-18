@@ -14,8 +14,8 @@ supersedes them.
   while core runtime state stays outside React
 - [`0005-react-scene-object-aliases.md`](./0005-react-scene-object-aliases.md): React authoring may
   provide convenience scene-object components without changing primitive IR ownership
-- [`0006-react-scene-root-bridge.md`](./0006-react-scene-root-bridge.md): React should publish
-  scene updates through a partial-apply boundary without taking renderer ownership
+- [`0006-react-scene-root-bridge.md`](./0006-react-scene-root-bridge.md): React should publish scene
+  updates through a partial-apply boundary without taking renderer ownership
 
 ## Related References
 

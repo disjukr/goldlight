@@ -54,11 +54,11 @@ combined scene object into another primitive-surface decision.
 
 The next proposed step for issue `#64` is now captured in
 [`../adr/0006-react-scene-root-bridge.md`](../adr/0006-react-scene-root-bridge.md): move from the
-current provisional snapshot bridge toward a scene update boundary that can apply high-frequency node
-changes without whole-scene residency rebuilds, while still keeping residency, rendering, offscreen
-targets, and multi-scene orchestration outside the React package. The repository currently has a
-first implementation waypoint in `createSceneRoot()`, but ADR 0006 does not treat that full-snapshot
-publication shape as the final contract.
+current provisional snapshot bridge toward a scene update boundary that can apply high-frequency
+node changes without whole-scene residency rebuilds, while still keeping residency, rendering,
+offscreen targets, and multi-scene orchestration outside the React package. The repository currently
+has a first implementation waypoint in `createSceneRoot()`, but ADR 0006 does not treat that
+full-snapshot publication shape as the final contract.
 
 ## Current Status
 
@@ -78,6 +78,9 @@ publication shape as the final contract.
 - `summarizeSceneRootCommit()` can derive resource-level added/removed/updated/unchanged ID sets
   from snapshot commits so integrations can make selective invalidation decisions while a finer
   runtime-facing partial-apply contract is designed.
+- `@rieul3d/gpu` now exposes ID-keyed targeted invalidation helpers, so snapshot consumers can drop
+  changed mesh/material/texture/volume residency entries before falling back to a full reset for
+  scene-topology changes.
 - `commitSummaryNeedsResidencyReset()` captures the current safe residency-reset boundary for
   snapshot consumers: resource changes plus node/topology changes still require a full reset until
   finer-grained residency pruning exists.
@@ -89,12 +92,12 @@ publication shape as the final contract.
 - The browser example now demonstrates full-scene JSX authoring plus the current snapshot-based
   `createSceneRoot()` flow, not a live React reconciler.
 - The next unresolved architecture question is how React-authored changes should cross into runtime
-  update planning so frequent node changes can avoid whole-scene resets while multi-scene composition
-  remains outside React ownership.
+  update planning so frequent node changes can avoid whole-scene resets while multi-scene
+  composition remains outside React ownership.
 - Issue `#89` now tracks follow-up implementation work around the next runtime-facing update
   contract.
 - [`../../examples/browser_react_authoring/README.md`](../../examples/browser_react_authoring/README.md)
   shows the reference browser flow: author a tree with `@rieul3d/react` TSX, commit it through
-  `createSceneRoot()`, summarize that commit, apply `commitSummaryNeedsResidencyReset()` for the
-  current runtime-safe invalidation boundary, then hand the published scene snapshot to the existing
-  runtime and renderer layers.
+  `createSceneRoot()`, summarize that commit, drop targeted residency entries where stable resource
+  IDs changed, fall back to a full reset for scene-topology changes, then hand the published scene
+  snapshot to the existing runtime and renderer layers.

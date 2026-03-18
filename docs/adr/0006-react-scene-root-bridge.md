@@ -21,8 +21,8 @@ The proposed boundary is:
 - React-facing authoring may still commit trees through a root object such as `createSceneRoot()`,
   but full-scene `SceneIr` snapshots are a provisional implementation path, not the desired final
   public update contract
-- the long-term live-update boundary should admit partial node/resource application so high-frequency
-  React state changes can avoid whole-scene residency rebuilds
+- the long-term live-update boundary should admit partial node/resource application so
+  high-frequency React state changes can avoid whole-scene residency rebuilds
 - scene evaluation, residency ownership, frame execution, render targets, and multi-scene
   orchestration stay outside the React package
 - any update-planning layer should stay data-oriented enough to connect to React shallowly while
@@ -45,7 +45,8 @@ The repository's current implementation waypoint is:
 
 - `createSceneRoot()` publishes full `SceneIr` snapshots with previous-scene and revision metadata
 - `summarizeSceneRootCommit()` derives collection-level change summaries from snapshot pairs
-- `commitSummaryNeedsResidencyReset()` marks the current conservative reset boundary for integrations
+- `commitSummaryNeedsResidencyReset()` marks the current conservative reset boundary for
+  integrations
 
 That waypoint is acceptable for low-frequency authored scene changes, but it is intentionally too
 coarse for high-frequency React-driven node animation.

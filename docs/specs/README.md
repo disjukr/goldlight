@@ -10,6 +10,7 @@ source of truth for package boundaries and feature expectations.
 - [`interop-gltf.md`](./interop-gltf.md): interchange strategy for Blender, glTF, OBJ, and STL
 - [`procedural-generation.md`](./procedural-generation.md): procedural sampling, texture, and volume
   generation helpers
+- [`interaction.md`](./interaction.md): screen-to-world interaction ray construction
 - [`react-authoring.md`](./react-authoring.md): React package role and lowering boundaries
 
 ## Runtime Behavior

@@ -1,11 +1,12 @@
-import { assertAlmostEquals, assertEquals } from 'jsr:@std/assert@^1.0.14';
-import { evaluateScene } from '@rieul3d/core';
+import { assertAlmostEquals, assertEquals, assertThrows } from 'jsr:@std/assert@^1.0.14';
+import { createScreenWorldRay, evaluateScene } from '@rieul3d/core';
 import {
   appendAnimationClip,
   appendCamera,
   appendMesh,
   appendNode,
   createNode,
+  createOrthographicCamera,
   createPerspectiveCamera,
   createSceneIr,
   setActiveCamera,
@@ -128,4 +129,137 @@ Deno.test('evaluateScene resolves the active camera and its view matrix', () => 
   assertEquals(evaluated.activeCamera?.camera.type, 'perspective');
   assertEquals(evaluated.activeCamera?.worldMatrix[14], 3);
   assertAlmostEquals(evaluated.activeCamera?.viewMatrix[14] ?? 0, -3, 1e-6);
+});
+
+Deno.test('createScreenWorldRay returns a centered forward ray for a perspective camera', () => {
+  let scene = createSceneIr('scene');
+  scene = setActiveCamera(
+    appendCamera(
+      scene,
+      createPerspectiveCamera('camera-0', {
+        yfov: Math.PI / 2,
+        znear: 0.1,
+        zfar: 10,
+      }),
+    ),
+    'camera-0',
+  );
+  scene = appendNode(scene, createNode('camera-node', { cameraId: 'camera-0' }));
+
+  const evaluated = evaluateScene(scene, { timeMs: 0 });
+  const ray = createScreenWorldRay(evaluated.activeCamera!, {
+    x: 100,
+    y: 50,
+    viewportWidth: 200,
+    viewportHeight: 100,
+  });
+
+  assertAlmostEquals(ray.origin.x, 0, 1e-6);
+  assertAlmostEquals(ray.origin.y, 0, 1e-6);
+  assertAlmostEquals(ray.origin.z, 0, 1e-6);
+  assertAlmostEquals(ray.direction.x, 0, 1e-6);
+  assertAlmostEquals(ray.direction.y, 0, 1e-6);
+  assertAlmostEquals(ray.direction.z, -1, 1e-6);
+});
+
+Deno.test('createScreenWorldRay respects viewport offsets and camera rotation', () => {
+  let scene = createSceneIr('scene');
+  scene = setActiveCamera(
+    appendCamera(
+      scene,
+      createPerspectiveCamera('camera-0', {
+        yfov: Math.PI / 2,
+        znear: 0.1,
+        zfar: 10,
+      }),
+    ),
+    'camera-0',
+  );
+  scene = appendNode(
+    scene,
+    createNode('camera-node', {
+      cameraId: 'camera-0',
+      transform: {
+        translation: { x: 4, y: 2, z: 1 },
+        rotation: { x: 0, y: 0.70710678, z: 0, w: 0.70710678 },
+        scale: { x: 1, y: 1, z: 1 },
+      },
+    }),
+  );
+
+  const evaluated = evaluateScene(scene, { timeMs: 0 });
+  const ray = createScreenWorldRay(evaluated.activeCamera!, {
+    x: 150,
+    y: 70,
+    viewportX: 50,
+    viewportY: 20,
+    viewportWidth: 200,
+    viewportHeight: 100,
+  });
+
+  assertAlmostEquals(ray.origin.x, 4, 1e-6);
+  assertAlmostEquals(ray.origin.y, 2, 1e-6);
+  assertAlmostEquals(ray.origin.z, 1, 1e-6);
+  assertAlmostEquals(ray.direction.x, -1, 1e-5);
+  assertAlmostEquals(ray.direction.y, 0, 1e-6);
+  assertAlmostEquals(ray.direction.z, 0, 1e-5);
+});
+
+Deno.test('createScreenWorldRay offsets orthographic origins across the viewport', () => {
+  let scene = createSceneIr('scene');
+  scene = setActiveCamera(
+    appendCamera(
+      scene,
+      createOrthographicCamera('camera-0', {
+        xmag: 2,
+        ymag: 1,
+        znear: 0.5,
+        zfar: 10,
+      }),
+    ),
+    'camera-0',
+  );
+  scene = appendNode(
+    scene,
+    createNode('camera-node', {
+      cameraId: 'camera-0',
+      transform: {
+        translation: { x: 1, y: 2, z: 3 },
+        rotation: { x: 0, y: 0, z: 0, w: 1 },
+        scale: { x: 1, y: 1, z: 1 },
+      },
+    }),
+  );
+
+  const evaluated = evaluateScene(scene, { timeMs: 0 });
+  const ray = createScreenWorldRay(evaluated.activeCamera!, {
+    x: 200,
+    y: 0,
+    viewportWidth: 200,
+    viewportHeight: 100,
+  });
+
+  assertAlmostEquals(ray.origin.x, 3, 1e-6);
+  assertAlmostEquals(ray.origin.y, 3, 1e-6);
+  assertAlmostEquals(ray.origin.z, 2.5, 1e-6);
+  assertAlmostEquals(ray.direction.x, 0, 1e-6);
+  assertAlmostEquals(ray.direction.y, 0, 1e-6);
+  assertAlmostEquals(ray.direction.z, -1, 1e-6);
+});
+
+Deno.test('createScreenWorldRay rejects invalid viewport dimensions', () => {
+  let scene = createSceneIr('scene');
+  scene = setActiveCamera(appendCamera(scene, createPerspectiveCamera('camera-0')), 'camera-0');
+  scene = appendNode(scene, createNode('camera-node', { cameraId: 'camera-0' }));
+
+  const evaluated = evaluateScene(scene, { timeMs: 0 });
+
+  assertThrows(() =>
+    createScreenWorldRay(evaluated.activeCamera!, {
+      x: 0,
+      y: 0,
+      viewportWidth: 0,
+      viewportHeight: 100,
+    })
+  );
 });

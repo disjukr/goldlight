@@ -36,6 +36,7 @@ Implemented today:
 
 - BDL-driven `SceneIr` generation with drift checks in CI
 - camera declarations in Scene IR plus evaluated active-camera view/projection support
+- screen-to-world mouse ray generation from evaluated camera state for interaction foundations
 - mesh, texture, first volume residency upload paths, and first volume raymarch execution
 - forward rendering, minimal deferred mesh execution with built-in unlit/lit plus custom WGSL
   G-buffer paths, deferred directional-light resolve support, optional baseColor texture sampling,
@@ -81,6 +82,7 @@ Implemented today:
   [`docs/specs/device-loss-recovery.md`](./docs/specs/device-loss-recovery.md)
 - Runtime residency and rebuild rules:
   [`docs/specs/runtime-residency.md`](./docs/specs/runtime-residency.md)
+- Interaction utilities: [`docs/specs/interaction.md`](./docs/specs/interaction.md)
 
 ## Quick Start
 

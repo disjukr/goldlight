@@ -24,6 +24,8 @@ The runtime is split into explicit data and execution stages:
 - BDL schema files must declare an explicit standard. `rieul3d` currently uses the `conventional`
   standard for scene IR modules.
 - `packages/core`: pure functions that evaluate IR into renderable CPU state.
+- `packages/core` also owns evaluated-camera math helpers such as screen-to-world ray generation for
+  interaction foundations.
 - `packages/gpu`: explicit WebGPU context and residency management helpers.
 - `packages/renderer`: pass contracts, renderer descriptors, and frame planning.
 - renderer descriptors also publish capability contracts for primitive/material compatibility before
@@ -53,6 +55,7 @@ The current scaffold already includes:
 - explicit device-loss recovery sequencing for device replacement and target rebinding
 - benchmark coverage for key runtime paths, including material binding and renderer capability
   preflight costs
+- screen-to-world ray construction from evaluated perspective and orthographic camera state
 
 ## Design Constraints
 

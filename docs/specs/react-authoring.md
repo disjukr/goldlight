@@ -11,6 +11,7 @@ React integration is a separate package. It must not become the source of truth 
   `<light>`, `<texture>`, and `<asset>`.
 - The JSX surface may expose React-style aliases such as `<group>`, `<perspectiveCamera>`,
   `<orthographicCamera>`, and `<directionalLight>` when they lower cleanly into the same Scene IR.
+  Camera/light aliases now synthesize both the scene resource and an initial bound node.
 - Node-like authoring elements may use transform shorthands such as `position`, `rotation`, and
   `scale`; these fold into the existing Scene IR transform object during lowering.
 - Authored trees are lowered into complete Scene IR or evaluated scene inputs.
@@ -41,12 +42,12 @@ Core scene/runtime packages must still remain usable without React. A React-faci
 be an adapter layer over the existing IR, evaluation, and rendering systems, not a replacement for
 them.
 
-The next open authoring question is whether the JSX surface should add combined scene-object aliases
-that lower into both a resource and an initial bound node for common authored camera/light flows,
-while keeping explicit resource ids and node bindings available for multi-bind scenes. That proposal
-is tracked in
-[`../adr/0005-react-scene-object-aliases.md`](../adr/0005-react-scene-object-aliases.md) and should
-stay `Proposed` until discussion `#81` confirms the desired scope.
+The current camera/light alias surface follows the proposed boundary in
+[`../adr/0005-react-scene-object-aliases.md`](../adr/0005-react-scene-object-aliases.md): combined
+aliases synthesize a default resource plus its first bound node, while explicit `<camera>`,
+`<light>`, and `<node>` authoring stays available for multi-bind scenes. The remaining open question
+is whether broader object composition such as mesh/material authoring should join that same combined
+surface.
 
 ## Current Status
 
@@ -54,7 +55,7 @@ stay `Proposed` until discussion `#81` confirms the desired scope.
 - The package now exposes a JSX runtime so TSX can author scene trees directly.
 - Authoring nodes lower core node metadata such as names, mesh/camera/light bindings, and transforms
   into Scene IR, including React-style `position`/`rotation`/`scale` shorthands.
-- The JSX surface now includes first React-style aliases for common scene authoring patterns so TSX
+- The JSX surface now includes combined camera/light aliases plus group-style node aliases so TSX
   can read closer to react-three-fiber while still lowering into the same IR.
 - Root scene trees can now also declare cameras, meshes, materials, lights, textures, and assets in
   the same TSX surface before lowering.

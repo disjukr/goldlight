@@ -131,20 +131,37 @@ export type NodeJsxProps = Readonly<
     children?: AuthoringRenderable;
   } & NodeAuthoringProps
 >;
+type SceneObjectAliasNodeProps = Readonly<{
+  nodeId?: string;
+  name?: Node['name'];
+  transform?: Transform;
+  position?: Vec3Like;
+  rotation?: QuatLike;
+  scale?: Vec3Like;
+}>;
 export type PerspectiveCameraJsxProps = Readonly<
-  {
+  & {
     id: string;
-  } & Partial<Omit<CameraPerspective, 'id' | 'type'>>
+    children?: AuthoringRenderable;
+  }
+  & Partial<Omit<CameraPerspective, 'id' | 'type'>>
+  & SceneObjectAliasNodeProps
 >;
 export type OrthographicCameraJsxProps = Readonly<
-  {
+  & {
     id: string;
-  } & Partial<Omit<CameraOrthographic, 'id' | 'type'>>
+    children?: AuthoringRenderable;
+  }
+  & Partial<Omit<CameraOrthographic, 'id' | 'type'>>
+  & SceneObjectAliasNodeProps
 >;
 export type DirectionalLightJsxProps = Readonly<
-  {
+  & {
     id: string;
-  } & Omit<Light, 'id' | 'kind'>
+    children?: AuthoringRenderable;
+  }
+  & Omit<Light, 'id' | 'kind'>
+  & SceneObjectAliasNodeProps
 >;
 
 type AuthoringComponent<Props> = (
@@ -327,6 +344,38 @@ const normalizeNodeProps = (props: NodeAuthoringProps): NodeAuthoringProps => {
   };
 };
 
+const createSceneObjectAliasElement = (
+  resourceType: 'camera' | 'light',
+  id: string,
+  resourceProps: CameraAuthoringProps | LightAuthoringProps,
+  nodeProps: SceneObjectAliasNodeProps,
+  binding: Pick<NodeAuthoringProps, 'cameraId'> | Pick<NodeAuthoringProps, 'lightId'>,
+  children: readonly AuthoringElement[],
+  key?: string,
+): AuthoringElement<'fragment'> => {
+  const { nodeId, ...restNodeProps } = nodeProps;
+  const resourceElement = resourceType === 'camera'
+    ? createAuthoringElement('camera', id, resourceProps as CameraAuthoringProps)
+    : createAuthoringElement('light', id, resourceProps as LightAuthoringProps);
+  return createAuthoringElement(
+    'fragment',
+    key ?? `${id}__alias`,
+    {},
+    [
+      resourceElement,
+      createAuthoringElement(
+        'node',
+        nodeId ?? id,
+        normalizeNodeProps({
+          ...restNodeProps,
+          ...binding,
+        }),
+        children,
+      ),
+    ],
+  );
+};
+
 export const jsx = (
   type:
     | keyof AuthoringPropsByType
@@ -383,23 +432,72 @@ export const jsx = (
   }
 
   if (type === 'perspectiveCamera') {
-    const { id, ...cameraProps } = authoringProps as PerspectiveCameraJsxProps;
-    return createAuthoringElement('camera', id, { ...cameraProps, type: 'perspective' }, children);
+    const {
+      id,
+      children: _children,
+      nodeId,
+      name,
+      transform,
+      position,
+      rotation,
+      scale,
+      ...cameraProps
+    } = authoringProps as PerspectiveCameraJsxProps;
+    return createSceneObjectAliasElement(
+      'camera',
+      id,
+      { ...cameraProps, type: 'perspective' },
+      { nodeId, name, transform, position, rotation, scale },
+      { cameraId: id },
+      children,
+      key,
+    );
   }
 
   if (type === 'orthographicCamera') {
-    const { id, ...cameraProps } = authoringProps as OrthographicCameraJsxProps;
-    return createAuthoringElement(
+    const {
+      id,
+      children: _children,
+      nodeId,
+      name,
+      transform,
+      position,
+      rotation,
+      scale,
+      ...cameraProps
+    } = authoringProps as OrthographicCameraJsxProps;
+    return createSceneObjectAliasElement(
       'camera',
       id,
       { ...cameraProps, type: 'orthographic' },
+      { nodeId, name, transform, position, rotation, scale },
+      { cameraId: id },
       children,
+      key,
     );
   }
 
   if (type === 'directionalLight') {
-    const { id, ...lightProps } = authoringProps as DirectionalLightJsxProps;
-    return createAuthoringElement('light', id, { ...lightProps, kind: 'directional' }, children);
+    const {
+      id,
+      children: _children,
+      nodeId,
+      name,
+      transform,
+      position,
+      rotation,
+      scale,
+      ...lightProps
+    } = authoringProps as DirectionalLightJsxProps;
+    return createSceneObjectAliasElement(
+      'light',
+      id,
+      { ...lightProps, kind: 'directional' },
+      { nodeId, name, transform, position, rotation, scale },
+      { lightId: id },
+      children,
+      key,
+    );
   }
 
   if (

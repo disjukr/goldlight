@@ -51,11 +51,7 @@ const TriangleScene = () => (
         ],
       }]}
     />
-    <group
-      id='camera-node'
-      cameraId='camera-main'
-      position={[0, 0, 2]}
-    />
+    <perspectiveCamera id='camera-main' position={[0, 0, 2]} />
     <group id='scene-root' name='Authored Root'>
       <node id='triangle-node' name='Authored Triangle' meshId='triangle' />
     </group>

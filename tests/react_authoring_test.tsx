@@ -301,16 +301,16 @@ Deno.test('createAuthoringElement mirrors ids into programmatic scene resources'
 Deno.test('authoringTreeToSceneIr lowers react-style alias intrinsics', () => {
   const scene = authoringTreeToSceneIr(
     <scene id='jsx-scene' activeCameraId='camera-main'>
-      <perspectiveCamera id='camera-main' yfov={0.8} />
+      <perspectiveCamera id='camera-main' yfov={0.8} position={[0, 0, 2]}>
+        <node id='camera-child' />
+      </perspectiveCamera>
       <directionalLight
         id='sun'
         color={{ x: 1, y: 0.95, z: 0.9 }}
         intensity={1.5}
+        nodeId='sun-node'
+        position={[1, 2, 3]}
       />
-      <group id='root' name='Root Group'>
-        <node id='camera-node' cameraId='camera-main' />
-        <node id='light-node' lightId='sun' />
-      </group>
     </scene>,
   );
 
@@ -328,10 +328,31 @@ Deno.test('authoringTreeToSceneIr lowers react-style alias intrinsics', () => {
     color: { x: 1, y: 0.95, z: 0.9 },
     intensity: 1.5,
   });
-  assertEquals(scene.nodes.map((node) => node.id), ['root', 'camera-node', 'light-node']);
-  assertEquals(scene.nodes.find((node) => node.id === 'root')?.name, 'Root Group');
-  assertEquals(scene.nodes.find((node) => node.id === 'camera-node')?.parentId, 'root');
-  assertEquals(scene.nodes.find((node) => node.id === 'light-node')?.parentId, 'root');
+  assertEquals(scene.rootNodeIds, ['camera-main', 'sun-node']);
+  assertEquals(scene.nodes.map((node) => node.id), ['camera-main', 'camera-child', 'sun-node']);
+  assertEquals(scene.nodes.find((node) => node.id === 'camera-main'), {
+    id: 'camera-main',
+    name: undefined,
+    parentId: undefined,
+    cameraId: 'camera-main',
+    transform: {
+      translation: { x: 0, y: 0, z: 2 },
+      rotation: { x: 0, y: 0, z: 0, w: 1 },
+      scale: { x: 1, y: 1, z: 1 },
+    },
+  });
+  assertEquals(scene.nodes.find((node) => node.id === 'camera-child')?.parentId, 'camera-main');
+  assertEquals(scene.nodes.find((node) => node.id === 'sun-node'), {
+    id: 'sun-node',
+    name: undefined,
+    parentId: undefined,
+    lightId: 'sun',
+    transform: {
+      translation: { x: 1, y: 2, z: 3 },
+      rotation: { x: 0, y: 0, z: 0, w: 1 },
+      scale: { x: 1, y: 1, z: 1 },
+    },
+  });
 });
 
 Deno.test('react-style aliases preserve their fixed resource kinds when props are spread in', () => {
@@ -354,4 +375,6 @@ Deno.test('react-style aliases preserve their fixed resource kinds when props ar
 
   assertEquals(scene.cameras[0]?.type, 'perspective');
   assertEquals(scene.lights[0]?.kind, 'directional');
+  assertEquals(scene.nodes.find((node) => node.id === 'camera-main')?.cameraId, 'camera-main');
+  assertEquals(scene.nodes.find((node) => node.id === 'sun')?.lightId, 'sun');
 });

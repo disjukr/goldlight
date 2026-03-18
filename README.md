@@ -8,8 +8,8 @@ The repository is organized as a Deno workspace with packages for:
 - `@rieul3d/core`: scene evaluation and animation helpers
 - `@rieul3d/gpu`: WebGPU context and runtime residency helpers
 - `@rieul3d/renderer`: forward/deferred frame planning and execution contracts
-- `@rieul3d/primitives`: procedural polygon mesh generators for common shapes; separate from SDF
-  primitives
+- `@rieul3d/primitives`: procedural polygon mesh generators for common shapes plus local SDF-to-mesh
+  extraction helpers; separate from runtime SDF primitives
 - `@rieul3d/procedural`: deterministic procedural noise, texture, and volume generators
 - `@rieul3d/loaders`: OBJ/STL/PLY/glTF ingestion into scene IR
 - `@rieul3d/react`: declarative authoring adapter
@@ -48,6 +48,8 @@ Implemented today:
   first-class directional light nodes with built-in forward Lambert shading, first SDF raymarch
   execution, and headless snapshot readback
 - forward SDF sphere and box raymarch execution with capability preflight alignment
+- local-space SDF-to-mesh extraction for supported sphere and box primitives, including
+  marching-cubes and naive surface-nets contouring helpers for baking or inspection workflows
 - mesh node id-buffer picking snapshots with stable node-to-mesh id mapping and screen-pixel
   readback helpers
 - built-in unlit material registration, evaluated mesh transform uploads, base-color texture
@@ -94,6 +96,8 @@ Implemented today:
 - Architecture overview: [`docs/specs/architecture.md`](./docs/specs/architecture.md)
 - Procedural generation contracts:
   [`docs/specs/procedural-generation.md`](./docs/specs/procedural-generation.md)
+- SDF-to-mesh extraction contracts:
+  [`docs/specs/sdf-mesh-extraction.md`](./docs/specs/sdf-mesh-extraction.md)
 - Rendering contracts: [`docs/specs/rendering.md`](./docs/specs/rendering.md)
 - Renderer capability model:
   [`docs/specs/renderer-capabilities.md`](./docs/specs/renderer-capabilities.md)

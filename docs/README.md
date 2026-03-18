@@ -24,6 +24,8 @@ Use this page as the main navigation hub.
   [`specs/interaction.md`](./specs/interaction.md)
 - Understand procedural noise, texture, and volume generation:
   [`specs/procedural-generation.md`](./specs/procedural-generation.md)
+- Understand local SDF-to-mesh extraction helpers and current algorithm tradeoffs:
+  [`specs/sdf-mesh-extraction.md`](./specs/sdf-mesh-extraction.md)
 - Understand reusable built-in mesh generation and example coverage:
   [`../examples/byow_primitives_demo/README.md`](../examples/byow_primitives_demo/README.md)
 - Review accepted architecture constraints: [`adr/README.md`](./adr/README.md)

@@ -38,6 +38,7 @@ The runtime is split into explicit data and execution stages:
   execution. See [`renderer-capabilities.md`](./renderer-capabilities.md).
 - `packages/procedural`: deterministic CPU-side procedural sampling plus texture/volume baking
   helpers.
+- `packages/primitives`: reusable polygon mesh generation plus local SDF-to-mesh extraction helpers.
 - `packages/loaders`: format parsers that normalize input into Scene IR.
 - `packages/react`: declarative scene authoring that feeds the same IR/core pipeline.
 - `packages/platform`: target descriptors for browser, Deno, and headless execution.
@@ -52,6 +53,8 @@ The current scaffold already includes:
 - texture GPU residency upload and caching
 - first volume GPU residency upload and extraction
 - forward frame encoding for mesh draws plus first SDF raymarch execution
+- local-space SDF sphere/box extraction into `MeshPrimitive` geometry through marching-cubes and
+  naive surface-nets helpers
 - intermediate scene-color routing plus first renderer-owned fullscreen post-process blit pass
 - built-in unlit base-color texture sampling, material parameter uploads, and custom WGSL pipeline
   registration

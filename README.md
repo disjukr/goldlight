@@ -47,8 +47,8 @@ Implemented today:
   post-lighting deferred SDF/volume composition, optional scene-color post-process blit passes,
   first-class directional light nodes with built-in forward Lambert shading, first SDF raymarch
   execution, and headless snapshot readback
-- forward-renderer cubemap capture for mesh scenes as six ordered offscreen face snapshots, keeping
-  later reprojection/export layouts as a separate layer
+- forward-renderer cubemap capture for mesh, SDF, and volume scenes as six ordered offscreen face
+  snapshots, keeping later reprojection/export layouts as a separate layer
 - forward SDF sphere and box raymarch execution with capability preflight alignment
 - local-space SDF-to-mesh extraction for supported sphere and box primitives, including
   marching-cubes and naive surface-nets contouring helpers for baking or inspection workflows

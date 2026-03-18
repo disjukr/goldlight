@@ -9,7 +9,10 @@ struct SdfItem {
 
 struct SdfUniforms {
   itemCount: f32,
-  _padding0: vec3<f32>,
+  cameraOrigin: vec3<f32>,
+  cameraRight: vec4<f32>,
+  cameraUp: vec4<f32>,
+  cameraForward: vec4<f32>,
   items: array<SdfItem, 16>,
 };
 
@@ -69,8 +72,12 @@ fn sceneSdf(point: vec3<f32>) -> vec4<f32> {
 
 @fragment
 fn fsMain(in: VsOut) -> @location(0) vec4<f32> {
-  let cameraOrigin = vec3<f32>(0.0, 0.0, 2.5);
-  let rayDirection = normalize(vec3<f32>(in.uv.x, -in.uv.y, -1.75));
+  let cameraOrigin = sdf.cameraOrigin;
+  let rayDirection = normalize(
+    sdf.cameraForward.xyz +
+      (in.uv.x * sdf.cameraRight.xyz) -
+      (in.uv.y * sdf.cameraUp.xyz),
+  );
   var travel = 0.0;
 
   for (var step: u32 = 0u; step < 48u; step = step + 1u) {

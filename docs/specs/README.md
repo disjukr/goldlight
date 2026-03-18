@@ -13,7 +13,7 @@ source of truth for package boundaries and feature expectations.
 - [`sdf-mesh-extraction.md`](./sdf-mesh-extraction.md): local-space SDF-to-mesh extraction helpers
   and algorithm tradeoffs
 - [`cubemap-capture.md`](./cubemap-capture.md): offscreen cubemap face capture contracts and current
-  mesh-only compatibility limits
+  format/readback limits
 - [`interaction.md`](./interaction.md): screen-to-world interaction ray construction
 - [`react-authoring.md`](./react-authoring.md): React package role and lowering boundaries
 

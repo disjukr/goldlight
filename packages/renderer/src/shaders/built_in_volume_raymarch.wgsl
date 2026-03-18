@@ -1,5 +1,9 @@
 struct VolumeUniforms {
   worldToLocal: mat4x4<f32>,
+  cameraOrigin: vec4<f32>,
+  cameraRight: vec4<f32>,
+  cameraUp: vec4<f32>,
+  cameraForward: vec4<f32>,
 };
 
 struct VsOut {
@@ -55,9 +59,12 @@ fn transformVector(matrix: mat4x4<f32>, vector: vec3<f32>) -> vec3<f32> {
 
 @fragment
 fn fsMain(in: VsOut) -> @location(0) vec4<f32> {
-  let cameraOrigin = vec3<f32>(0.0, 0.0, 2.5);
-  let rayDirection = normalize(vec3<f32>(in.uv.x, -in.uv.y, -1.75));
-  let localOrigin = transformPoint(volume.worldToLocal, cameraOrigin);
+  let rayDirection = normalize(
+    volume.cameraForward.xyz +
+      (in.uv.x * volume.cameraRight.xyz) -
+      (in.uv.y * volume.cameraUp.xyz),
+  );
+  let localOrigin = transformPoint(volume.worldToLocal, volume.cameraOrigin.xyz);
   let localDirection = transformVector(volume.worldToLocal, rayDirection);
   let boxMin = vec3<f32>(-0.5, -0.5, -0.5);
   let boxMax = vec3<f32>(0.5, 0.5, 0.5);

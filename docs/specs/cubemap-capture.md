@@ -2,7 +2,7 @@
 
 ## Goal
 
-`@rieul3d/renderer` exposes an offscreen cubemap capture path that renders a mesh scene into six
+`@rieul3d/renderer` exposes an offscreen cubemap capture path that renders scene content into six
 square faces without coupling that capture step to any 2D export layout.
 
 ## Current Scope
@@ -43,13 +43,14 @@ equirectangular, angular-map, cross, or strip reprojection.
 
 - built-in forward mesh rendering, lit/unlit materials, texture sampling, and directional lights are
   supported
-- the first capture path rejects scenes with SDF or volume nodes because current raymarch shaders
-  still assume one fixed camera instead of face-specific cubemap cameras
+- sphere/box SDF raymarch content and resident volume content now consume face-specific cubemap
+  camera uniforms during capture
+- cubemap capture keeps the existing forward-renderer primitive limits, so unsupported SDF ops still
+  fail through normal renderer capability checks
 - downstream reprojection/export should consume the returned face snapshots rather than reaching
   back into the renderer
 
 ## Follow-Up Direction
 
-- add camera-aware SDF and volume raymarch uniforms so cubemap capture can cover hybrid scenes
 - add renderer-level reprojection/export helpers on top of captured cubemap faces
 - evaluate a shared GPU texture-array backing when cubemap capture needs to stay on the device

@@ -146,6 +146,13 @@ export type CubemapSnapshotResult = Readonly<{
   faces: readonly CubemapFaceSnapshotResult[];
 }>;
 
+type RaymarchCamera = Readonly<{
+  origin: readonly [number, number, number];
+  right: readonly [number, number, number];
+  up: readonly [number, number, number];
+  forward: readonly [number, number, number];
+}>;
+
 export type NodePickItem = Readonly<{
   encodedId: number;
   nodeId: string;
@@ -304,6 +311,12 @@ const defaultAmbientLight = 0.2;
 const defaultCubemapFormat = 'rgba8unorm';
 const defaultCubemapZnear = 0.1;
 const defaultCubemapZfar = 100;
+const defaultRaymarchCamera: RaymarchCamera = {
+  origin: [0, 0, 2.5],
+  right: [1, 0, 0],
+  up: [0, 1, 0],
+  forward: [0, 0, -1.75],
+};
 const toBufferSource = (view: ArrayBuffer | ArrayBufferView): Uint8Array<ArrayBuffer> => {
   if (view instanceof ArrayBuffer) {
     return new Uint8Array(view.slice(0));
@@ -474,6 +487,28 @@ const createLookAtViewMatrix = (
     dotVector3(forward, origin),
     1,
   ];
+};
+
+const createRaymarchCamera = (
+  origin: readonly [number, number, number],
+  forward: readonly [number, number, number],
+  up: readonly [number, number, number],
+  forwardScale = 1,
+): RaymarchCamera => {
+  const normalizedForward = normalizeVector3(...forward);
+  const right = normalizeVector3(...crossVector3(normalizedForward, up));
+  const adjustedUp = normalizeVector3(...crossVector3(right, normalizedForward));
+
+  return {
+    origin,
+    right,
+    up: adjustedUp,
+    forward: [
+      normalizedForward[0] * forwardScale,
+      normalizedForward[1] * forwardScale,
+      normalizedForward[2] * forwardScale,
+    ],
+  };
 };
 
 const cubemapFaceDescriptors: readonly Readonly<{
@@ -1830,13 +1865,20 @@ export const ensurePostProcessPipeline = (
   return pipeline;
 };
 
-const createSdfUniformData = (items: readonly SdfPassItem[]): Float32Array => {
+const createSdfUniformData = (
+  items: readonly SdfPassItem[],
+  camera: RaymarchCamera = defaultRaymarchCamera,
+): Float32Array => {
   const floatsPerItem = 24;
-  const uniformData = new Float32Array(8 + (maxSdfPassItems * floatsPerItem));
+  const uniformData = new Float32Array(16 + (maxSdfPassItems * floatsPerItem));
   uniformData[0] = Math.min(items.length, maxSdfPassItems);
+  uniformData.set(camera.origin, 1);
+  uniformData.set([...camera.right, 0], 4);
+  uniformData.set([...camera.up, 0], 8);
+  uniformData.set([...camera.forward, 0], 12);
 
   items.slice(0, maxSdfPassItems).forEach((item, index) => {
-    const offset = 8 + (index * floatsPerItem);
+    const offset = 16 + (index * floatsPerItem);
     const opCode = item.op === 'box' ? 1 : 0;
     uniformData.set([...item.center, opCode], offset);
     uniformData.set([...item.halfExtents, item.radius], offset + 4);
@@ -1849,9 +1891,21 @@ const createSdfUniformData = (items: readonly SdfPassItem[]): Float32Array => {
   return uniformData;
 };
 
-const createVolumeUniformData = (item: VolumePassItem): Float32Array => {
-  return Float32Array.from(invertAffineMatrix(item.worldMatrix));
-};
+const createVolumeUniformData = (
+  item: VolumePassItem,
+  camera: RaymarchCamera = defaultRaymarchCamera,
+): Float32Array =>
+  Float32Array.from([
+    ...invertAffineMatrix(item.worldMatrix),
+    ...camera.origin,
+    0,
+    ...camera.right,
+    0,
+    ...camera.up,
+    0,
+    ...camera.forward,
+    0,
+  ]);
 
 const createForwardMeshTransformUniformData = (
   worldMatrix: readonly number[],
@@ -1988,6 +2042,7 @@ export const renderSdfRaymarchPass = (
   evaluatedScene: EvaluatedScene,
   targetView = acquireColorAttachmentView(binding),
   targetFormat = binding.target.format,
+  camera: RaymarchCamera = defaultRaymarchCamera,
 ): number => {
   const items = extractSdfPassItems(evaluatedScene);
   if (items.length === 0) {
@@ -1995,7 +2050,7 @@ export const renderSdfRaymarchPass = (
   }
 
   const pipeline = ensureSdfRaymarchPipeline(context, residency, targetFormat);
-  const uniformData = createSdfUniformData(items);
+  const uniformData = createSdfUniformData(items, camera);
   const uniformBuffer = context.device.createBuffer({
     label: 'sdf-raymarch-uniforms',
     size: uniformData.byteLength,
@@ -2037,6 +2092,7 @@ export const renderVolumeRaymarchPass = (
   evaluatedScene: EvaluatedScene,
   targetView = acquireColorAttachmentView(binding),
   targetFormat = binding.target.format,
+  camera: RaymarchCamera = defaultRaymarchCamera,
 ): number => {
   const items = extractVolumePassItems(evaluatedScene, residency);
   if (items.length === 0) {
@@ -2054,7 +2110,7 @@ export const renderVolumeRaymarchPass = (
 
   pass.setPipeline(pipeline);
   for (const item of items) {
-    const uniformData = createVolumeUniformData(item);
+    const uniformData = createVolumeUniformData(item, camera);
     const uniformBuffer = context.device.createBuffer({
       label: `${item.nodeId}:volume-raymarch-uniforms`,
       size: uniformData.byteLength,
@@ -2146,6 +2202,7 @@ const renderForwardFrameInternal = (
   options: Readonly<{
     viewProjectionMatrix?: readonly number[];
     includeRaymarchPasses?: boolean;
+    raymarchCamera?: RaymarchCamera;
   }> = {},
 ): ForwardRenderResult => {
   assertRendererSceneCapabilities(
@@ -2321,6 +2378,7 @@ const renderForwardFrameInternal = (
       evaluatedScene,
       colorView,
       binding.target.format,
+      options.raymarchCamera,
     );
     drawCount += renderVolumeRaymarchPass(
       context,
@@ -2330,6 +2388,7 @@ const renderForwardFrameInternal = (
       evaluatedScene,
       colorView,
       binding.target.format,
+      options.raymarchCamera,
     );
   }
   if (sceneColorView) {
@@ -2998,20 +3057,6 @@ export const renderDeferredSnapshot = async (
   };
 };
 
-const assertCubemapSceneCompatibility = (evaluatedScene: EvaluatedScene): void => {
-  const unsupportedNode = evaluatedScene.nodes.find((node) => node.sdf || node.volume);
-  if (!unsupportedNode) {
-    return;
-  }
-
-  throw new Error(
-    `cubemap capture currently supports mesh-only scenes; node "${unsupportedNode.node.id}" uses ` +
-      `${
-        unsupportedNode.sdf ? 'sdf' : 'volume'
-      } content that still relies on a fixed raymarch camera`,
-  );
-};
-
 export const renderForwardCubemapSnapshot = async (
   context: GpuRenderExecutionContext & GpuReadbackContext,
   residency: RuntimeResidency,
@@ -3020,7 +3065,6 @@ export const renderForwardCubemapSnapshot = async (
   materialRegistry = createMaterialRegistry(),
   postProcessPasses: readonly PostProcessPass[] = [],
 ): Promise<CubemapSnapshotResult> => {
-  assertCubemapSceneCompatibility(evaluatedScene);
   const size = assertPositiveInteger('size', options.size);
   const format = assertCubemapCaptureFormat(options.format ?? defaultCubemapFormat);
   const origin = options.position ??
@@ -3056,6 +3100,7 @@ export const renderForwardCubemapSnapshot = async (
       origin[2] + descriptor.direction[2],
     ] as const;
     const viewMatrix = createLookAtViewMatrix(origin, target, descriptor.up);
+    const raymarchCamera = createRaymarchCamera(origin, descriptor.direction, descriptor.up);
     const frame = renderForwardFrameInternal(
       context,
       binding,
@@ -3065,7 +3110,7 @@ export const renderForwardCubemapSnapshot = async (
       postProcessPasses,
       {
         viewProjectionMatrix: multiplyMat4(projectionMatrix, viewMatrix),
-        includeRaymarchPasses: false,
+        raymarchCamera,
       },
     );
     const snapshot = await readOffscreenSnapshot(context, binding);

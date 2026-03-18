@@ -54,8 +54,8 @@ Implemented today:
 - a browser React authoring example plus the current `createSceneRoot()` snapshot path that commits
   JSX-authored trees into `SceneIr` snapshots before rendering, including JSX-authored scene
   resources such as meshes, materials, and cameras, exported convenience components for common
-  camera/light composition, and commit-summary plus targeted residency invalidation helpers for the
-  current runtime-safe update boundary
+  camera/light composition, and commit-summary plus update-plan helpers for targeted residency
+  invalidation without forcing resets for transform-only node changes
 - proposed ADR/discussion tracking for the next React live-update boundary decision around
   partial-apply scene updates without renderer ownership
 - fixture-backed golden snapshot regression tests for clear, mesh, sphere/box SDF, volume, and
@@ -98,6 +98,12 @@ Read in this order when onboarding:
 - `deno task docs:check`: format-check docs, packages, tests, benches, and examples content
 - `deno task generate:ir`: regenerate TypeScript from BDL IR
 - `deno task generate:ir:check`: fail when generated IR files are stale
+- `deno task asset:examples`: refresh the in-repo example assets (`Stanford Bunny` and
+  `DamagedHelmet`)
+- `deno task asset:stanford-bunny`: refresh the Stanford Bunny source archive and extracted PLY
+- `deno task asset:damaged-helmet`: refresh the Khronos `DamagedHelmet.glb` sample
+- `deno task asset:sponza`: download the external Khronos `Sponza` sample under
+  `examples/external-assets/sponza`
 - `deno task setup:sdl2:windows`: download the official SDL2 Windows runtime for BYOW examples
 - `deno task example:headless:check`: type-check the headless snapshot PNG workflow
 - `deno task example:headless:png`: render a headless frame and write

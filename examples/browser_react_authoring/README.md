@@ -4,9 +4,10 @@ This example shows the current bridge between `@rieul3d/react` and the existing 
 authors a scene with TSX, including the exported `PerspectiveCamera` convenience component plus node
 transform shorthands such as `position`, commits that tree through `createSceneRoot()`, then renders
 the published `SceneIr` snapshot through the browser forward pipeline. Because the bridge publishes
-whole-scene snapshots, the example also uses `summarizeSceneRootCommit()` together with
-`@rieul3d/gpu` targeted invalidation helpers so cached GPU residency can drop changed
-mesh/material/texture/volume entries by ID before falling back to a full reset for node topology
+whole-scene snapshots, the example also uses `planSceneRootCommitUpdates()` and
+`summarizeSceneRootCommit()` together with `@rieul3d/gpu` targeted invalidation helpers so cached
+GPU residency can drop changed mesh/material/texture/volume entries by ID, keep transform-only node
+updates on the lighter path, and still fall back to a full reset for node topology or binding
 changes.
 
 The example now follows ADR 0005's preferred direction: camera/light convenience lives in reusable

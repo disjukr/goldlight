@@ -15,8 +15,8 @@ import { createBrowserSurfaceTarget } from '../../packages/platform/mod.ts';
 import {
   createSceneRoot,
   PerspectiveCamera,
+  planSceneRootCommitUpdates,
   type SceneRootCommit,
-  summarizeSceneRootCommit,
 } from '../../packages/react/mod.ts';
 import { createMaterialRegistry, renderForwardFrame } from '../../packages/renderer/mod.ts';
 
@@ -104,16 +104,19 @@ const collectAssetLinkedIds = (
 
 sceneRoot.subscribe((commit) => {
   scene = commit.scene;
-  const summary = summarizeSceneRootCommit(commit);
+  const updatePlan = planSceneRootCommitUpdates(commit);
   if (
-    summary.sceneIdChanged ||
-    summary.rootNodeIdsChanged ||
-    summary.nodes.addedIds.length > 0 ||
-    summary.nodes.removedIds.length > 0 ||
-    summary.nodes.updatedIds.length > 0 ||
-    summary.sdfPrimitives.addedIds.length > 0 ||
-    summary.sdfPrimitives.removedIds.length > 0 ||
-    summary.sdfPrimitives.updatedIds.length > 0
+    updatePlan.sceneIdChanged ||
+    updatePlan.rootNodeIdsChanged ||
+    updatePlan.nodes.addedIds.length > 0 ||
+    updatePlan.nodes.removedIds.length > 0 ||
+    updatePlan.nodes.parentingIds.length > 0 ||
+    updatePlan.nodes.resourceBindingIds.length > 0 ||
+    updatePlan.nodes.metadataIds.length > 0 ||
+    updatePlan.nodes.otherUpdatedIds.length > 0 ||
+    updatePlan.sdfPrimitives.addedIds.length > 0 ||
+    updatePlan.sdfPrimitives.removedIds.length > 0 ||
+    updatePlan.sdfPrimitives.updatedIds.length > 0
   ) {
     invalidateResidency(residency);
     return;
@@ -122,33 +125,33 @@ sceneRoot.subscribe((commit) => {
   const assetLinkedIds = collectAssetLinkedIds(
     commit,
     [
-      ...summary.assets.addedIds,
-      ...summary.assets.removedIds,
-      ...summary.assets.updatedIds,
+      ...updatePlan.assets.addedIds,
+      ...updatePlan.assets.removedIds,
+      ...updatePlan.assets.updatedIds,
     ],
   );
 
   invalidateResidencyResources(residency, {
     meshIds: [
-      ...summary.meshes.addedIds,
-      ...summary.meshes.removedIds,
-      ...summary.meshes.updatedIds,
+      ...updatePlan.meshes.addedIds,
+      ...updatePlan.meshes.removedIds,
+      ...updatePlan.meshes.updatedIds,
     ],
     materialIds: [
-      ...summary.materials.addedIds,
-      ...summary.materials.removedIds,
-      ...summary.materials.updatedIds,
+      ...updatePlan.materials.addedIds,
+      ...updatePlan.materials.removedIds,
+      ...updatePlan.materials.updatedIds,
     ],
     textureIds: [
-      ...summary.textures.addedIds,
-      ...summary.textures.removedIds,
-      ...summary.textures.updatedIds,
+      ...updatePlan.textures.addedIds,
+      ...updatePlan.textures.removedIds,
+      ...updatePlan.textures.updatedIds,
       ...assetLinkedIds.textureIds,
     ],
     volumeIds: [
-      ...summary.volumePrimitives.addedIds,
-      ...summary.volumePrimitives.removedIds,
-      ...summary.volumePrimitives.updatedIds,
+      ...updatePlan.volumePrimitives.addedIds,
+      ...updatePlan.volumePrimitives.removedIds,
+      ...updatePlan.volumePrimitives.updatedIds,
       ...assetLinkedIds.volumeIds,
     ],
   });

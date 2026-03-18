@@ -9,6 +9,7 @@ Runnable examples live here. Each example should document how to build, serve, o
 - [`byow_primitives_demo/README.md`](./byow_primitives_demo/README.md): Windows-native BYOW demo
   rendering the built-in procedural mesh primitive set through a camera-backed, depth-tested forward
   path
+- [`assets/README.md`](./assets/README.md): in-repo small example assets plus refresh commands
 - [`browser_forward/README.md`](./browser_forward/README.md): browser-based forward rendering flow
 - [`browser_react_authoring/README.md`](./browser_react_authoring/README.md): browser forward flow
   with scene nodes authored through `@rieul3d/react` TSX
@@ -28,6 +29,10 @@ Runnable examples live here. Each example should document how to build, serve, o
 - Type-check the BYOW triangle smoke test: `deno task example:byow:triangle:check`
 - Run the BYOW primitives demo: `deno task example:byow:primitives:run`
 - Type-check the BYOW primitives demo: `deno task example:byow:primitives:check`
+- Refresh the in-repo example assets: `deno task asset:examples`
+- Refresh the Stanford Bunny source and extracted mesh: `deno task asset:stanford-bunny`
+- Refresh the Damaged Helmet sample: `deno task asset:damaged-helmet`
+- Download the external Sponza sample: `deno task asset:sponza`
 - Build the browser bundle: `deno task example:browser:build`
 - Build the React authoring browser bundle: `deno task example:browser:react:build`
 - Build the textured browser bundle: `deno task example:browser:textured:build`

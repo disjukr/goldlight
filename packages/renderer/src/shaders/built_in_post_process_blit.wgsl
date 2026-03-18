@@ -10,10 +10,15 @@ fn vsMain(@builtin(vertex_index) vertexIndex: u32) -> VsOut {
     vec2<f32>(-1.0, 1.0),
     vec2<f32>(3.0, 1.0),
   );
+  var uvs = array<vec2<f32>, 3>(
+    vec2<f32>(0.0, 2.0),
+    vec2<f32>(0.0, 0.0),
+    vec2<f32>(2.0, 0.0),
+  );
   let position = positions[vertexIndex];
   var out: VsOut;
   out.position = vec4<f32>(position, 0.0, 1.0);
-  out.uv = (position + vec2<f32>(1.0, 1.0)) * 0.5;
+  out.uv = uvs[vertexIndex];
   return out;
 }
 

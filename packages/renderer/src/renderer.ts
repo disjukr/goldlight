@@ -814,7 +814,7 @@ export const createForwardRenderer = (
     {
       id: 'present',
       kind: 'present',
-      reads: [getFinalPresentInputResource('scene-color', postProcessPasses)],
+      reads: [getFinalPresentInputResource('color', postProcessPasses)],
       writes: ['target'],
     },
   ],
@@ -853,7 +853,7 @@ export const createDeferredRenderer = (
     {
       id: 'present',
       kind: 'present',
-      reads: [getFinalPresentInputResource('scene-color', postProcessPasses)],
+      reads: [getFinalPresentInputResource('color', postProcessPasses)],
       writes: ['target'],
     },
   ],
@@ -1996,7 +1996,14 @@ export const renderForwardFrame = (
     residency,
   );
   const sceneColorTexture = postProcessPasses.length > 0
-    ? createTransientRenderTexture(context, binding, 'forward-scene-color', binding.target.format)
+    ? createTransientRenderTexture(
+      context,
+      binding,
+      'forward-scene-color',
+      binding.target.format,
+      renderAttachmentUsage | textureBindingUsage,
+      getRenderTargetSampleCount(binding),
+    )
     : undefined;
   const sceneColorView = sceneColorTexture?.createView();
   const colorView = sceneColorView ?? acquireColorAttachmentView(binding);
@@ -2189,6 +2196,7 @@ const createTransientRenderTexture = (
   label: string,
   format: GPUTextureFormat,
   usage = renderAttachmentUsage | textureBindingUsage,
+  sampleCount = 1,
 ): GPUTexture =>
   context.device.createTexture({
     label,
@@ -2198,9 +2206,12 @@ const createTransientRenderTexture = (
       depthOrArrayLayers: 1,
     },
     format,
-    sampleCount: 1,
+    sampleCount,
     usage,
   });
+
+const getRenderTargetSampleCount = (binding: RenderContextBinding): number =>
+  'sampleCount' in binding.target ? binding.target.sampleCount : 1;
 
 const renderPostProcessPasses = (
   context: GpuRenderExecutionContext,
@@ -2334,7 +2345,14 @@ export const renderDeferredFrame = (
   const gbufferAlbedoView = gbufferAlbedoTexture.createView();
   const gbufferNormalView = gbufferNormalTexture.createView();
   const sceneColorTexture = postProcessPasses.length > 0
-    ? createTransientRenderTexture(context, binding, 'deferred-scene-color', binding.target.format)
+    ? createTransientRenderTexture(
+      context,
+      binding,
+      'deferred-scene-color',
+      binding.target.format,
+      renderAttachmentUsage | textureBindingUsage,
+      getRenderTargetSampleCount(binding),
+    )
     : undefined;
   const sceneColorView = sceneColorTexture?.createView();
   const lightingOutputView = sceneColorView ?? acquireColorAttachmentView(binding);

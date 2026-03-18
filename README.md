@@ -43,6 +43,8 @@ Implemented today:
   post-lighting deferred SDF/volume composition, first-class directional light nodes with built-in
   forward Lambert shading, first SDF raymarch execution, and headless snapshot readback
 - forward SDF sphere and box raymarch execution with capability preflight alignment
+- mesh node id-buffer picking snapshots with stable node-to-mesh id mapping and screen-pixel
+  readback helpers
 - built-in unlit material registration, evaluated mesh transform uploads, base-color texture
   sampling, material parameter uploads, custom WGSL registration, declared material texture
   bindings, and residency-aware custom texture binding validation

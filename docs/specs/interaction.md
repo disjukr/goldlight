@@ -26,3 +26,22 @@ world-space ray from the current evaluated camera.
 - intended as a reusable foundation for picking and hover workflows
 - does not perform mesh, SDF, or bounds intersection tests
 - index-buffer or id-buffer picking remains a separate renderer-side concern
+
+## Renderer-Side Picking
+
+`@rieul3d/renderer` exposes a mesh-node picking path that rasterizes stable encoded ids into an
+offscreen color target.
+
+### Contract
+
+- pick ids are assigned per evaluated mesh node in scene order, starting at `1`
+- `0` remains the reserved background / no-hit value
+- pick snapshots return both compact RGBA bytes and the node-to-mesh metadata needed to decode hits
+- `readNodePickHit()` resolves one screen pixel back to a node id and mesh id without coupling to
+  CPU ray construction
+
+### Current Scope
+
+- current picking support targets mesh nodes only
+- ids map back to scene nodes and mesh resources, not per-triangle primitives
+- readback currently requires an offscreen render target because it depends on snapshot bytes

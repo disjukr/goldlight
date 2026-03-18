@@ -71,6 +71,8 @@ The initial renderer uses a lightweight pass graph:
   plus non-textured built-in `lit` materials, with optional base-color textures on `unlit`.
 - Custom WGSL programs can be registered and cached through the material registry.
 - Headless/offscreen rendering supports compact byte readback for snapshot testing.
+- Headless/offscreen rendering also supports a dedicated mesh-node id-buffer pick pass with stable
+  node-to-mesh metadata and screen-pixel decode helpers.
 - Snapshot bytes can also be encoded into PNG for local inspection and regression workflows.
 - Browser examples cover the minimal mesh-only path, a texture-backed built-in unlit path, and a
   custom WGSL path that samples texture residency through declared material bindings.
@@ -100,6 +102,8 @@ The initial renderer uses a lightweight pass graph:
   `@group(1) @binding(1)` and `@group(1) @binding(2)`.
 - Built-in deferred textured unlit shading uses the same `@group(1)` base-color texture/sampler
   contract during G-buffer writes.
+- Built-in node picking reserves `@group(0) @binding(0)` for a uniform containing the evaluated node
+  world matrix, active camera `viewProjection`, and RGBA-encoded pick id color.
 - Deferred custom WGSL programs that register with `usesTransformBindings: true` should match the
   deferred `@group(0)` transform contract: evaluated node world matrix plus inverse-transpose normal
   matrix.
@@ -121,5 +125,7 @@ The initial renderer uses a lightweight pass graph:
 ## Known Gaps
 
 - Deferred rendering does not yet support textures on built-in lit materials.
+- Renderer-side picking currently targets mesh nodes only; SDF, volume, and per-triangle picking are
+  still pending.
 - SDF execution currently supports sphere and box primitives only; broader graph/operator coverage
   is still pending.

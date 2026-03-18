@@ -9,6 +9,8 @@ Runnable examples live here. Each example should document how to build, serve, o
 - [`byow_primitives_demo/README.md`](./byow_primitives_demo/README.md): Windows-native BYOW demo
   rendering the built-in procedural mesh primitive set through a camera-backed, depth-tested forward
   path
+- [`byow_react_bunny_demo/README.md`](./byow_react_bunny_demo/README.md): Windows-native BYOW demo
+  authored through `@rieul3d/react` JSX and rendering the vendored Stanford Bunny PLY mesh
 - [`assets/README.md`](./assets/README.md): in-repo small example assets plus refresh commands
   including the Stanford Bunny PLY source mesh
 - [`browser_forward/README.md`](./browser_forward/README.md): browser-based forward rendering flow
@@ -30,6 +32,8 @@ Runnable examples live here. Each example should document how to build, serve, o
 - Type-check the BYOW triangle smoke test: `deno task example:byow:triangle:check`
 - Run the BYOW primitives demo: `deno task example:byow:primitives:run`
 - Type-check the BYOW primitives demo: `deno task example:byow:primitives:check`
+- Run the BYOW React Bunny demo: `deno task example:byow:react-bunny:run`
+- Type-check the BYOW React Bunny demo: `deno task example:byow:react-bunny:check`
 - Refresh the in-repo example assets: `deno task asset:examples`
 - Refresh the Stanford Bunny source and extracted mesh: `deno task asset:stanford-bunny`
 - Refresh the Damaged Helmet sample: `deno task asset:damaged-helmet`
@@ -56,9 +60,9 @@ const scene = appendMesh(
 );
 ```
 
-The BYOW primitives demo also shows the current camera path: it attaches a perspective camera to a
-node, marks it as the scene's active camera, and renders the primitive grid through the standard
-forward renderer.
+The BYOW primitives demo and the BYOW React Bunny demo both show the current camera path: they
+attach a perspective camera to a node, mark it as the scene's active camera, and render through the
+standard forward renderer.
 
 ## Related Docs
 

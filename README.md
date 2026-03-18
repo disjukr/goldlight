@@ -54,6 +54,8 @@ Implemented today:
   PNG snapshot encoding
 - Windows BYOW primitives demo using `@rieul3d/primitives`, a reusable BYOW runner script, and a
   custom lit shader for mesh normals
+- Windows BYOW Stanford Bunny demo authored through `@rieul3d/react`, loading the vendored ASCII PLY
+  mesh and generating runtime normals for built-in lit shading
 - a browser React authoring example plus the current `createSceneRoot()` snapshot path that commits
   JSX-authored trees into `SceneIr` snapshots before rendering, including JSX-authored scene
   resources such as meshes, materials, and cameras, exported convenience components for common
@@ -107,8 +109,8 @@ Read in this order when onboarding:
   `DamagedHelmet`)
 - `deno task asset:stanford-bunny`: refresh the Stanford Bunny source archive and extracted PLY
 - `deno task asset:damaged-helmet`: refresh the Khronos `DamagedHelmet.glb` sample
-- `deno task asset:sponza`: download the external Khronos `Sponza` sample under
-  `examples/external-assets/sponza`
+- `deno task asset:sponza`: download the ignored Khronos `Sponza` sample under
+  `examples/assets/sponza`
 - `deno task setup:sdl2:windows`: download the official SDL2 Windows runtime for BYOW examples
 - `deno task example:headless:check`: type-check the headless snapshot PNG workflow
 - `deno task example:headless:png`: render a headless frame and write
@@ -124,6 +126,8 @@ Read in this order when onboarding:
 - `deno task example:byow:triangle:run`: open the Windows BYOW triangle smoke test
 - `deno task example:byow:primitives:check`: type-check the Windows BYOW primitives demo
 - `deno task example:byow:primitives:run`: open the Windows BYOW primitives demo
+- `deno task example:byow:react-bunny:check`: type-check the Windows BYOW React Stanford Bunny demo
+- `deno task example:byow:react-bunny:run`: open the Windows BYOW React Stanford Bunny demo
 
 Golden snapshot fixtures live in
 [`tests/fixtures/golden-snapshots`](./tests/fixtures/golden-snapshots). Refresh them intentionally

@@ -1,7 +1,12 @@
 # ADR Index
 
 Architectural decision records capture constraints that should stay stable unless a new decision
-supersedes them.
+supersedes them. Proposed ADRs are listed separately until they are accepted.
+
+## Proposed Decisions
+
+- [`0007-post-processing-execution-model.md`](./0007-post-processing-execution-model.md): introduce
+  an explicit scene-color to post-process to present execution boundary
 
 ## Accepted Decisions
 
@@ -20,5 +25,6 @@ supersedes them.
 ## Related References
 
 - [`../specs/architecture.md`](../specs/architecture.md): package and runtime layering
+- [`../specs/rendering.md`](../specs/rendering.md): renderer execution surface and pass model
 - [`../specs/scene-ir.md`](../specs/scene-ir.md): data schema expectations
 - [`../README.md`](../README.md): docs landing page

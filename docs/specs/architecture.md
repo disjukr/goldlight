@@ -26,6 +26,8 @@ The runtime is split into explicit data and execution stages:
 - `packages/core`: pure functions that evaluate IR into renderable CPU state.
 - `packages/core` also owns evaluated-camera math helpers such as screen-to-world ray generation for
   interaction foundations.
+- `packages/core` also owns reusable CPU-side transform and mesh helpers such as quaternion
+  construction, mesh bounds, and generated mesh normals.
 - `packages/gpu`: explicit WebGPU context and residency management helpers.
 - `packages/renderer`: pass contracts, renderer descriptors, and frame planning.
 - `packages/renderer` also owns renderer-side id-buffer picking for mesh-node selection and

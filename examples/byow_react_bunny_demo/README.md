@@ -7,7 +7,8 @@ This demo exercises:
 
 - ASCII PLY ingestion of the in-repo Stanford Bunny asset
 - React-style scene authoring lowered into `SceneIr`
-- generated vertex normals for a loader-supplied position-only mesh
+- reusable `@rieul3d/core` helpers for generated normals, mesh bounds, and Euler-authored light
+  rotation
 - built-in forward lit shading with a directional light in a native SDL2 window
 
 Run with:

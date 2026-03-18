@@ -184,3 +184,49 @@ Deno.test('authoringTreeToSceneIr lowers scene resources authored in JSX', () =>
   assertEquals(scene.lights[0]?.id, 'sun');
   assertEquals(scene.nodes.map((node) => node.id), ['camera-node', 'light-node', 'mesh-node']);
 });
+
+Deno.test('createAuthoringElement mirrors ids into programmatic scene resources', () => {
+  const scene = authoringTreeToSceneIr(
+    createAuthoringElement('scene', 'programmatic-scene', { activeCameraId: 'camera-main' }, [
+      createAuthoringElement('camera', 'camera-main', { type: 'perspective', yfov: 0.9 }),
+      createAuthoringElement('asset', 'texture-asset', {
+        uri: './checker.png',
+        mimeType: 'image/png',
+      }),
+      createAuthoringElement('texture', 'base-color', {
+        assetId: 'texture-asset',
+        semantic: 'baseColor',
+        colorSpace: 'srgb',
+        sampler: 'linear-repeat',
+      }),
+      createAuthoringElement('material', 'material-unlit', {
+        kind: 'unlit',
+        textures: [],
+        parameters: {
+          color: { x: 0.8, y: 0.7, z: 0.6, w: 1 },
+        },
+      }),
+      createAuthoringElement('mesh', 'triangle', {
+        materialId: 'material-unlit',
+        attributes: [{
+          semantic: 'POSITION',
+          itemSize: 3,
+          values: [0, 0.7, 0, -0.7, -0.7, 0, 0.7, -0.7, 0],
+        }],
+      }),
+      createAuthoringElement('light', 'sun', {
+        kind: 'directional',
+        color: { x: 1, y: 0.95, z: 0.9 },
+        intensity: 1.5,
+      }),
+    ]),
+  );
+
+  assertEquals(scene.activeCameraId, 'camera-main');
+  assertEquals(scene.cameras[0]?.id, 'camera-main');
+  assertEquals(scene.assets[0]?.id, 'texture-asset');
+  assertEquals(scene.textures[0]?.id, 'base-color');
+  assertEquals(scene.materials[0]?.id, 'material-unlit');
+  assertEquals(scene.meshes[0]?.id, 'triangle');
+  assertEquals(scene.lights[0]?.id, 'sun');
+});

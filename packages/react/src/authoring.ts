@@ -58,6 +58,22 @@ export type CameraJsxProps =
       type: 'orthographic';
     } & Partial<Omit<CameraOrthographic, 'id' | 'type'>>
   >;
+type AssetAuthoringProps = Readonly<Omit<AssetRef, 'id'>>;
+type TextureAuthoringProps = Readonly<Omit<TextureRef, 'id'>>;
+type MaterialAuthoringProps = Readonly<Omit<Material, 'id'>>;
+type LightAuthoringProps = Readonly<Omit<Light, 'id'>>;
+type MeshAuthoringProps = Readonly<Omit<MeshPrimitive, 'id'>>;
+type CameraAuthoringProps =
+  | Readonly<
+    {
+      type: 'perspective';
+    } & Partial<Omit<CameraPerspective, 'id' | 'type'>>
+  >
+  | Readonly<
+    {
+      type: 'orthographic';
+    } & Partial<Omit<CameraOrthographic, 'id' | 'type'>>
+  >;
 
 type AuthoringPropsByType = {
   scene: SceneAuthoringProps;
@@ -140,37 +156,37 @@ export function createAuthoringElement(
 export function createAuthoringElement(
   type: 'asset',
   id: string,
-  props?: AssetJsxProps,
+  props?: AssetAuthoringProps,
   children?: readonly AuthoringElement[],
 ): AuthoringElement<'asset'>;
 export function createAuthoringElement(
   type: 'texture',
   id: string,
-  props?: TextureJsxProps,
+  props?: TextureAuthoringProps,
   children?: readonly AuthoringElement[],
 ): AuthoringElement<'texture'>;
 export function createAuthoringElement(
   type: 'material',
   id: string,
-  props?: MaterialJsxProps,
+  props?: MaterialAuthoringProps,
   children?: readonly AuthoringElement[],
 ): AuthoringElement<'material'>;
 export function createAuthoringElement(
   type: 'light',
   id: string,
-  props?: LightJsxProps,
+  props?: LightAuthoringProps,
   children?: readonly AuthoringElement[],
 ): AuthoringElement<'light'>;
 export function createAuthoringElement(
   type: 'mesh',
   id: string,
-  props?: MeshJsxProps,
+  props?: MeshAuthoringProps,
   children?: readonly AuthoringElement[],
 ): AuthoringElement<'mesh'>;
 export function createAuthoringElement(
   type: 'camera',
   id: string,
-  props?: CameraJsxProps,
+  props?: CameraAuthoringProps,
   children?: readonly AuthoringElement[],
 ): AuthoringElement<'camera'>;
 export function createAuthoringElement(
@@ -180,18 +196,25 @@ export function createAuthoringElement(
     | SceneAuthoringProps
     | NodeAuthoringProps
     | FragmentAuthoringProps
-    | AssetJsxProps
-    | TextureJsxProps
-    | MaterialJsxProps
-    | LightJsxProps
-    | MeshJsxProps
-    | CameraJsxProps = {},
+    | AssetAuthoringProps
+    | TextureAuthoringProps
+    | MaterialAuthoringProps
+    | LightAuthoringProps
+    | MeshAuthoringProps
+    | CameraAuthoringProps = {},
   children: readonly AuthoringElement[] = [],
 ): AuthoringElement {
+  const normalizedProps = (
+      type === 'asset' || type === 'texture' || type === 'material' || type === 'light' ||
+      type === 'mesh' || type === 'camera'
+    )
+    ? { id, ...props }
+    : props;
+
   return {
     type,
     id,
-    props,
+    props: normalizedProps as AuthoringElement['props'],
     children,
   };
 }

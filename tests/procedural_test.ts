@@ -33,6 +33,8 @@ const assertByteRange = (values: Uint8Array): void => {
   }
 };
 
+const countDistinct = (values: Iterable<number>): number => new Set(values).size;
+
 Deno.test('value noise samplers are deterministic and seed-sensitive', () => {
   const sample2d = sampleValueNoise2d(1.25, 2.5, { seed: 7 });
   const sample2dRepeat = sampleValueNoise2d(1.25, 2.5, { seed: 7 });
@@ -250,6 +252,14 @@ Deno.test('extended procedural generators expose stable output ranges', () => {
   assertByteRange(worleyVolume.data);
   assertByteRange(perlinVolume.data);
   assertByteRange(warpedVolume.data);
+});
+
+Deno.test('Perlin generators avoid lattice-aligned flat outputs for small grids', () => {
+  const texture = createPerlinTexture({ width: 5, height: 5, seed: 9, frequency: 4 });
+  const volume = createPerlinVolume({ width: 4, height: 4, depth: 4, seed: 9, frequency: 3 });
+
+  assert(countDistinct(texture.data.filter((_, index) => index % 4 === 0)) > 1);
+  assert(countDistinct(volume.data) > 1);
 });
 
 Deno.test('procedural generators reject invalid dimensions', () => {

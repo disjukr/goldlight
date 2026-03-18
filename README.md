@@ -10,7 +10,7 @@ The repository is organized as a Deno workspace with packages for:
 - `@rieul3d/renderer`: forward/deferred frame planning and execution contracts
 - `@rieul3d/primitives`: procedural polygon mesh generators for common shapes; separate from SDF
   primitives
-- `@rieul3d/loaders`: OBJ/STL/glTF ingestion into scene IR
+- `@rieul3d/loaders`: OBJ/STL/PLY/glTF ingestion into scene IR
 - `@rieul3d/react`: declarative authoring adapter
 - `@rieul3d/platform`: browser, Deno, and headless targets
 
@@ -45,6 +45,7 @@ Implemented today:
   bindings, and residency-aware custom texture binding validation
 - depth-tested forward mesh rendering with per-target depth attachments and back-face culling
 - glTF JSON, GLB, data-URI buffers, and caller-provided external glTF resource ingestion
+- ASCII PLY ingestion for in-repo meshes such as the Stanford Bunny reconstruction asset
 - browser/Deno helpers for resolving external glTF buffers and images into the existing loader
   contract
 - browser canvas examples, Windows BYOW native textured demo, headless PNG snapshot workflow, and

@@ -10,6 +10,7 @@ Runnable examples live here. Each example should document how to build, serve, o
   rendering the built-in procedural mesh primitive set through a camera-backed, depth-tested forward
   path
 - [`assets/README.md`](./assets/README.md): in-repo small example assets plus refresh commands
+  including the Stanford Bunny PLY source mesh
 - [`browser_forward/README.md`](./browser_forward/README.md): browser-based forward rendering flow
 - [`browser_react_authoring/README.md`](./browser_react_authoring/README.md): browser forward flow
   with scene nodes authored through `@rieul3d/react` TSX

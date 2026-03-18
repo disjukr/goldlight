@@ -6,6 +6,7 @@ import {
   loadGltfFromGlb,
   loadGltfFromJson,
   loadObjFromText,
+  loadPlyFromText,
   loadStlFromText,
   readDenoGltfExternalResources,
 } from '@rieul3d/loaders';
@@ -87,6 +88,68 @@ Deno.test('loadStlFromText builds an indexed mesh scene', () => {
   );
 
   assertEquals(scene.meshes[0].indices, [0, 1, 2]);
+});
+
+Deno.test('loadPlyFromText builds an indexed mesh scene from ascii faces', () => {
+  const scene = loadPlyFromText(
+    [
+      'ply',
+      'format ascii 1.0',
+      'element vertex 4',
+      'property float x',
+      'property float y',
+      'property float z',
+      'property float confidence',
+      'element face 1',
+      'property list uchar int vertex_indices',
+      'end_header',
+      '0 0 0 1',
+      '1 0 0 1',
+      '1 1 0 1',
+      '0 1 0 1',
+      '4 0 1 2 3',
+    ].join('\n'),
+    'ply',
+  );
+
+  assertEquals(scene.meshes.length, 1);
+  assertEquals(scene.meshes[0].attributes[0].values, [
+    0,
+    0,
+    0,
+    1,
+    0,
+    0,
+    1,
+    1,
+    0,
+    0,
+    1,
+    0,
+  ]);
+  assertEquals(scene.meshes[0].indices, [0, 1, 2, 0, 2, 3]);
+});
+
+Deno.test({
+  name: 'loadPlyFromText ingests the vendored Stanford Bunny asset',
+  async fn() {
+    const readPermission = await Deno.permissions.query({
+      name: 'read',
+      path: 'examples/assets/stanford-bunny/bun_zipper.ply',
+    });
+    if (readPermission.state !== 'granted') {
+      return;
+    }
+
+    const bunnySource = await Deno.readTextFile('examples/assets/stanford-bunny/bun_zipper.ply');
+    const scene = loadPlyFromText(bunnySource, 'bunny');
+    const bunnyMesh = scene.meshes[0];
+
+    assertEquals(scene.meshes.length, 1);
+    assertEquals(scene.nodes.length, 1);
+    assertEquals(bunnyMesh?.attributes[0].values.length, 35947 * 3);
+    assertEquals(bunnyMesh?.indices?.length, 69451 * 3);
+  },
 });
 
 Deno.test('loadGltfFromJson normalizes nodes, meshes, and animations', () => {

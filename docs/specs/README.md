@@ -14,6 +14,8 @@ source of truth for package boundaries and feature expectations.
   and algorithm tradeoffs
 - [`cubemap-capture.md`](./cubemap-capture.md): offscreen cubemap face capture contracts and current
   format/readback limits
+- [`cubemap-export.md`](./cubemap-export.md): CPU-side reprojection/export layouts built on captured
+  cubemap faces
 - [`interaction.md`](./interaction.md): screen-to-world interaction ray construction
 - [`react-authoring.md`](./react-authoring.md): React package role and lowering boundaries
 

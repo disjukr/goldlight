@@ -48,7 +48,7 @@ Implemented today:
   first-class directional light nodes with built-in forward Lambert shading, first SDF raymarch
   execution, and headless snapshot readback
 - forward-renderer cubemap capture for mesh, SDF, and volume scenes as six ordered offscreen face
-  snapshots, keeping later reprojection/export layouts as a separate layer
+  snapshots, plus CPU-side export helpers for equirectangular, angular-map, cross, and strip layouts
 - Perlin gradient-noise samplers in `@rieul3d/procedural` plus grayscale texture/volume generators
   that share the existing deterministic seed model
 - forward SDF sphere and box raymarch execution with capability preflight alignment
@@ -103,6 +103,7 @@ Implemented today:
 - SDF-to-mesh extraction contracts:
   [`docs/specs/sdf-mesh-extraction.md`](./docs/specs/sdf-mesh-extraction.md)
 - Cubemap capture contracts: [`docs/specs/cubemap-capture.md`](./docs/specs/cubemap-capture.md)
+- Cubemap export contracts: [`docs/specs/cubemap-export.md`](./docs/specs/cubemap-export.md)
 - Rendering contracts: [`docs/specs/rendering.md`](./docs/specs/rendering.md)
 - Renderer capability model:
   [`docs/specs/renderer-capabilities.md`](./docs/specs/renderer-capabilities.md)

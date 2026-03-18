@@ -163,6 +163,9 @@ export type DirectionalLightJsxProps = Readonly<
   & Omit<Light, 'id' | 'kind'>
   & SceneObjectAliasNodeProps
 >;
+export type PerspectiveCameraProps = PerspectiveCameraJsxProps;
+export type OrthographicCameraProps = OrthographicCameraJsxProps;
+export type DirectionalLightProps = DirectionalLightJsxProps;
 
 type AuthoringComponent<Props> = (
   props: Props & {
@@ -388,6 +391,108 @@ const hasSceneObjectAliasNodeIntent = (
   nodeProps.rotation !== undefined ||
   nodeProps.scale !== undefined;
 
+const buildPerspectiveCameraElement = (
+  props: PerspectiveCameraJsxProps,
+  key?: string,
+): AuthoringElement => {
+  const {
+    id,
+    children: rawChildren,
+    nodeId,
+    name,
+    transform,
+    position,
+    rotation,
+    scale,
+    ...cameraProps
+  } = props;
+  const children = flattenAuthoringChildren(rawChildren);
+  const aliasNodeProps = { nodeId, name, transform, position, rotation, scale };
+  if (!hasSceneObjectAliasNodeIntent(aliasNodeProps, children)) {
+    return createAuthoringElement('camera', id, { ...cameraProps, type: 'perspective' });
+  }
+  return createSceneObjectAliasElement(
+    'camera',
+    id,
+    { ...cameraProps, type: 'perspective' },
+    aliasNodeProps,
+    { cameraId: id },
+    children,
+    key,
+  );
+};
+
+const buildOrthographicCameraElement = (
+  props: OrthographicCameraJsxProps,
+  key?: string,
+): AuthoringElement => {
+  const {
+    id,
+    children: rawChildren,
+    nodeId,
+    name,
+    transform,
+    position,
+    rotation,
+    scale,
+    ...cameraProps
+  } = props;
+  const children = flattenAuthoringChildren(rawChildren);
+  const aliasNodeProps = { nodeId, name, transform, position, rotation, scale };
+  if (!hasSceneObjectAliasNodeIntent(aliasNodeProps, children)) {
+    return createAuthoringElement('camera', id, { ...cameraProps, type: 'orthographic' });
+  }
+  return createSceneObjectAliasElement(
+    'camera',
+    id,
+    { ...cameraProps, type: 'orthographic' },
+    aliasNodeProps,
+    { cameraId: id },
+    children,
+    key,
+  );
+};
+
+const buildDirectionalLightElement = (
+  props: DirectionalLightJsxProps,
+  key?: string,
+): AuthoringElement => {
+  const {
+    id,
+    children: rawChildren,
+    nodeId,
+    name,
+    transform,
+    position,
+    rotation,
+    scale,
+    ...lightProps
+  } = props;
+  const children = flattenAuthoringChildren(rawChildren);
+  const aliasNodeProps = { nodeId, name, transform, position, rotation, scale };
+  if (!hasSceneObjectAliasNodeIntent(aliasNodeProps, children)) {
+    return createAuthoringElement('light', id, { ...lightProps, kind: 'directional' });
+  }
+  return createSceneObjectAliasElement(
+    'light',
+    id,
+    { ...lightProps, kind: 'directional' },
+    aliasNodeProps,
+    { lightId: id },
+    children,
+    key,
+  );
+};
+
+export const PerspectiveCamera = (props: PerspectiveCameraProps): AuthoringElement =>
+  buildPerspectiveCameraElement(props);
+
+export const OrthographicCamera = (props: OrthographicCameraProps): AuthoringElement =>
+  buildOrthographicCameraElement(props);
+
+export const DirectionalLight = (props: DirectionalLightProps): AuthoringElement =>
+  buildDirectionalLightElement(props);
+
 export const jsx = (
   type:
     | keyof AuthoringPropsByType
@@ -444,84 +549,15 @@ export const jsx = (
   }
 
   if (type === 'perspectiveCamera') {
-    const {
-      id,
-      children: _children,
-      nodeId,
-      name,
-      transform,
-      position,
-      rotation,
-      scale,
-      ...cameraProps
-    } = authoringProps as PerspectiveCameraJsxProps;
-    const aliasNodeProps = { nodeId, name, transform, position, rotation, scale };
-    if (!hasSceneObjectAliasNodeIntent(aliasNodeProps, children)) {
-      return createAuthoringElement('camera', id, { ...cameraProps, type: 'perspective' });
-    }
-    return createSceneObjectAliasElement(
-      'camera',
-      id,
-      { ...cameraProps, type: 'perspective' },
-      aliasNodeProps,
-      { cameraId: id },
-      children,
-      key,
-    );
+    return buildPerspectiveCameraElement(authoringProps as PerspectiveCameraJsxProps, key);
   }
 
   if (type === 'orthographicCamera') {
-    const {
-      id,
-      children: _children,
-      nodeId,
-      name,
-      transform,
-      position,
-      rotation,
-      scale,
-      ...cameraProps
-    } = authoringProps as OrthographicCameraJsxProps;
-    const aliasNodeProps = { nodeId, name, transform, position, rotation, scale };
-    if (!hasSceneObjectAliasNodeIntent(aliasNodeProps, children)) {
-      return createAuthoringElement('camera', id, { ...cameraProps, type: 'orthographic' });
-    }
-    return createSceneObjectAliasElement(
-      'camera',
-      id,
-      { ...cameraProps, type: 'orthographic' },
-      aliasNodeProps,
-      { cameraId: id },
-      children,
-      key,
-    );
+    return buildOrthographicCameraElement(authoringProps as OrthographicCameraJsxProps, key);
   }
 
   if (type === 'directionalLight') {
-    const {
-      id,
-      children: _children,
-      nodeId,
-      name,
-      transform,
-      position,
-      rotation,
-      scale,
-      ...lightProps
-    } = authoringProps as DirectionalLightJsxProps;
-    const aliasNodeProps = { nodeId, name, transform, position, rotation, scale };
-    if (!hasSceneObjectAliasNodeIntent(aliasNodeProps, children)) {
-      return createAuthoringElement('light', id, { ...lightProps, kind: 'directional' });
-    }
-    return createSceneObjectAliasElement(
-      'light',
-      id,
-      { ...lightProps, kind: 'directional' },
-      aliasNodeProps,
-      { lightId: id },
-      children,
-      key,
-    );
+    return buildDirectionalLightElement(authoringProps as DirectionalLightJsxProps, key);
   }
 
   if (

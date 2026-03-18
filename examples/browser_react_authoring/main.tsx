@@ -14,6 +14,7 @@ import {
 import { createBrowserSurfaceTarget } from '../../packages/platform/mod.ts';
 import {
   createSceneRoot,
+  PerspectiveCamera,
   type SceneRootCommit,
   summarizeSceneRootCommit,
 } from '../../packages/react/mod.ts';
@@ -56,7 +57,7 @@ const TriangleScene = () => (
         ],
       }]}
     />
-    <perspectiveCamera id='camera-main' position={[0, 0, 2]} />
+    <PerspectiveCamera id='camera-main' position={[0, 0, 2]} />
     <group id='scene-root' name='Authored Root'>
       <node id='triangle-node' name='Authored Triangle' meshId='triangle' />
     </group>

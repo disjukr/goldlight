@@ -8,7 +8,10 @@ import {
   commitSummaryNeedsResidencyReset,
   createAuthoringElement,
   createSceneRoot,
+  DirectionalLight,
   Fragment,
+  OrthographicCamera,
+  PerspectiveCamera,
   summarizeSceneRootCommit,
 } from '@rieul3d/react';
 
@@ -362,6 +365,51 @@ Deno.test('authoringTreeToSceneIr lowers react-style alias intrinsics', () => {
   });
 });
 
+Deno.test('authoringTreeToSceneIr lowers exported convenience components through primitives', () => {
+  const scene = authoringTreeToSceneIr(
+    <scene id='jsx-scene' activeCameraId='camera-main'>
+      <PerspectiveCamera id='camera-main' yfov={0.8} position={[0, 0, 2]}>
+        <node id='camera-child' />
+      </PerspectiveCamera>
+      <DirectionalLight
+        id='sun'
+        color={{ x: 1, y: 0.95, z: 0.9 }}
+        intensity={1.5}
+        nodeId='sun-node'
+        position={[1, 2, 3]}
+      />
+      <OrthographicCamera id='camera-close' xmag={0.8} ymag={0.8} />
+    </scene>,
+  );
+
+  assertEquals(scene.activeCameraId, 'camera-main');
+  assertEquals(scene.cameras, [
+    {
+      id: 'camera-main',
+      type: 'perspective',
+      yfov: 0.8,
+      znear: 0.1,
+      zfar: 100,
+    },
+    {
+      id: 'camera-close',
+      type: 'orthographic',
+      xmag: 0.8,
+      ymag: 0.8,
+      znear: 0,
+      zfar: 100,
+    },
+  ]);
+  assertEquals(scene.lights[0], {
+    id: 'sun',
+    kind: 'directional',
+    color: { x: 1, y: 0.95, z: 0.9 },
+    intensity: 1.5,
+  });
+  assertEquals(scene.rootNodeIds, ['camera-main', 'sun-node']);
+  assertEquals(scene.nodes.map((node) => node.id), ['camera-main', 'camera-child', 'sun-node']);
+});
+
 Deno.test('react-style aliases stay resource-only without node intent', () => {
   const cameraProps = {
     type: 'orthographic' as const,
@@ -411,6 +459,23 @@ Deno.test('react-style aliases preserve their fixed resource kinds when props ar
     <scene id='jsx-scene' activeCameraId='camera-main'>
       <perspectiveCamera id='camera-main' {...cameraProps} />
       <directionalLight id='sun' {...lightProps} />
+    </scene>,
+  );
+
+  assertEquals(scene.cameras[0]?.type, 'perspective');
+  assertEquals(scene.lights[0]?.kind, 'directional');
+  assertEquals(scene.nodes, []);
+});
+
+Deno.test('convenience components stay resource-only without node intent', () => {
+  const scene = authoringTreeToSceneIr(
+    <scene id='jsx-scene' activeCameraId='camera-main'>
+      <PerspectiveCamera id='camera-main' yfov={0.8} />
+      <DirectionalLight
+        id='sun'
+        color={{ x: 1, y: 0.95, z: 0.9 }}
+        intensity={1.5}
+      />
     </scene>,
   );
 
@@ -491,7 +556,7 @@ Deno.test('summarizeSceneRootCommit reports first-commit additions', () => {
           values: [0, 0.7, 0, -0.7, -0.7, 0, 0.7, -0.7, 0],
         }]}
       />
-      <perspectiveCamera id='camera-main' position={[0, 0, 2]} />
+      <PerspectiveCamera id='camera-main' position={[0, 0, 2]} />
       <group id='scene-root'>
         <node id='triangle-node' meshId='triangle' />
       </group>
@@ -552,12 +617,12 @@ Deno.test('summarizeSceneRootCommit distinguishes added removed and updated stab
           values: [0, 0.7, 0, -0.7, -0.7, 0, 0.7, -0.7, 0],
         }]}
       />
-      <directionalLight
+      <DirectionalLight
         id='sun'
         color={{ x: 1, y: 0.95, z: 0.9 }}
         intensity={1.5}
       />
-      <perspectiveCamera id='camera-main' position={[0, 0, 2]} />
+      <PerspectiveCamera id='camera-main' position={[0, 0, 2]} />
       <group id='scene-root'>
         <node id='triangle-node' meshId='triangle' />
       </group>
@@ -583,8 +648,8 @@ Deno.test('summarizeSceneRootCommit distinguishes added removed and updated stab
           values: [0, 0.9, 0, -0.8, -0.8, 0, 0.8, -0.8, 0],
         }]}
       />
-      <perspectiveCamera id='camera-main' position={[0, 0, 1.5]} />
-      <orthographicCamera id='camera-close' xmag={0.8} ymag={0.8} />
+      <PerspectiveCamera id='camera-main' position={[0, 0, 1.5]} />
+      <OrthographicCamera id='camera-close' xmag={0.8} ymag={0.8} />
       <group id='scene-root' position={[1, 2, 3]}>
         <node id='triangle-node' meshId='triangle' />
       </group>

@@ -36,6 +36,9 @@ import builtInVolumeRaymarchShader from './shaders/built_in_volume_raymarch.wgsl
   type: 'text',
 };
 import builtInNodePickShader from './shaders/built_in_node_pick.wgsl' with { type: 'text' };
+import builtInPostProcessBlitShader from './shaders/built_in_post_process_blit.wgsl' with {
+  type: 'text',
+};
 
 export type RendererKind = 'forward' | 'deferred';
 export type PassKind =
@@ -43,6 +46,7 @@ export type PassKind =
   | 'gbuffer'
   | 'lighting'
   | 'mesh'
+  | 'post-process'
   | 'raymarch'
   | 'present';
 
@@ -178,6 +182,21 @@ export type MaterialRegistry = Readonly<{
   programs: Map<string, MaterialProgram>;
 }>;
 
+export type PostProcessProgram = Readonly<{
+  id: string;
+  label: string;
+  wgsl: string;
+  fragmentEntryPoint: string;
+  usesUniformBuffer?: boolean;
+}>;
+
+export type PostProcessPass = Readonly<{
+  id: string;
+  label: string;
+  program: PostProcessProgram;
+  uniformData?: ArrayBuffer | ArrayBufferView;
+}>;
+
 export type VolumePassItem = Readonly<{
   nodeId: string;
   volumeId: string;
@@ -239,6 +258,7 @@ const builtInDeferredLightingProgramId = 'built-in:deferred-lighting';
 const builtInSdfRaymarchProgramId = 'built-in:sdf-raymarch';
 const builtInVolumeRaymarchProgramId = 'built-in:volume-raymarch';
 const builtInNodePickProgramId = 'built-in:node-pick';
+const builtInPostProcessBlitProgramId = 'built-in:post-process-blit';
 const nodePickTargetFormat = 'rgba8unorm';
 const textureBindingUsage = 0x04;
 const renderAttachmentUsage = 0x10;
@@ -249,7 +269,11 @@ const maxSdfPassItems = 16;
 const depthTextureFormat = 'depth24plus';
 const maxDirectionalLights = 4;
 const defaultAmbientLight = 0.2;
-const toBufferSource = (view: ArrayBufferView): Uint8Array<ArrayBuffer> => {
+const toBufferSource = (view: ArrayBuffer | ArrayBufferView): Uint8Array<ArrayBuffer> => {
+  if (view instanceof ArrayBuffer) {
+    return new Uint8Array(view.slice(0));
+  }
+
   const buffer = view.buffer.slice(
     view.byteOffset,
     view.byteOffset + view.byteLength,
@@ -571,6 +595,22 @@ const builtInDeferredGbufferLitProgram: MaterialProgram = {
   ],
 };
 
+const builtInPostProcessBlitProgram: PostProcessProgram = {
+  id: builtInPostProcessBlitProgramId,
+  label: 'Built-in Post-Process Blit',
+  wgsl: builtInPostProcessBlitShader,
+  fragmentEntryPoint: 'fsMain',
+};
+
+export const createBlitPostProcessPass = (
+  id = 'post-process:blit',
+  label = 'Blit',
+): PostProcessPass => ({
+  id,
+  label,
+  program: builtInPostProcessBlitProgram,
+});
+
 const createVertexBufferLayouts = (
   attributes: readonly MaterialVertexAttribute[],
 ): GPUVertexBufferLayout[] => {
@@ -714,7 +754,39 @@ const resolveMaterialBindingResource = (
   }
 };
 
-export const createForwardRenderer = (label = 'forward'): Renderer => ({
+const createPostProcessPassPlans = (
+  inputResource: string,
+  postProcessPasses: readonly PostProcessPass[],
+): readonly RenderPassPlan[] => {
+  const passes: RenderPassPlan[] = [];
+  let previousOutput = inputResource;
+
+  for (const pass of postProcessPasses) {
+    const output = `${pass.id}:output`;
+    passes.push({
+      id: pass.id,
+      kind: 'post-process',
+      reads: [previousOutput],
+      writes: [output],
+    });
+    previousOutput = output;
+  }
+
+  return passes;
+};
+
+const getFinalPresentInputResource = (
+  baseInputResource: string,
+  postProcessPasses: readonly PostProcessPass[],
+): string => {
+  const lastPass = postProcessPasses.at(-1);
+  return lastPass ? `${lastPass.id}:output` : baseInputResource;
+};
+
+export const createForwardRenderer = (
+  label = 'forward',
+  postProcessPasses: readonly PostProcessPass[] = [],
+): Renderer => ({
   kind: 'forward',
   label,
   capabilities: {
@@ -726,13 +798,32 @@ export const createForwardRenderer = (label = 'forward'): Renderer => ({
     customShaders: 'supported',
   },
   passes: [
-    { id: 'mesh', kind: 'mesh', reads: ['scene'], writes: ['color', 'depth'] },
-    { id: 'raymarch', kind: 'raymarch', reads: ['scene', 'depth'], writes: ['color'] },
-    { id: 'present', kind: 'present', reads: ['color'], writes: ['target'] },
+    {
+      id: 'mesh',
+      kind: 'mesh',
+      reads: ['scene'],
+      writes: [postProcessPasses.length > 0 ? 'scene-color' : 'color', 'depth'],
+    },
+    {
+      id: 'raymarch',
+      kind: 'raymarch',
+      reads: ['scene', 'depth'],
+      writes: [postProcessPasses.length > 0 ? 'scene-color' : 'color'],
+    },
+    ...createPostProcessPassPlans('scene-color', postProcessPasses),
+    {
+      id: 'present',
+      kind: 'present',
+      reads: [getFinalPresentInputResource('scene-color', postProcessPasses)],
+      writes: ['target'],
+    },
   ],
 });
 
-export const createDeferredRenderer = (label = 'deferred'): Renderer => ({
+export const createDeferredRenderer = (
+  label = 'deferred',
+  postProcessPasses: readonly PostProcessPass[] = [],
+): Renderer => ({
   kind: 'deferred',
   label,
   capabilities: {
@@ -746,9 +837,25 @@ export const createDeferredRenderer = (label = 'deferred'): Renderer => ({
   passes: [
     { id: 'depth-prepass', kind: 'depth-prepass', reads: ['scene'], writes: ['depth'] },
     { id: 'gbuffer', kind: 'gbuffer', reads: ['scene', 'depth'], writes: ['gbuffer'] },
-    { id: 'lighting', kind: 'lighting', reads: ['gbuffer', 'depth'], writes: ['color'] },
-    { id: 'raymarch', kind: 'raymarch', reads: ['scene', 'color'], writes: ['color'] },
-    { id: 'present', kind: 'present', reads: ['color'], writes: ['target'] },
+    {
+      id: 'lighting',
+      kind: 'lighting',
+      reads: ['gbuffer', 'depth'],
+      writes: [postProcessPasses.length > 0 ? 'scene-color' : 'color'],
+    },
+    {
+      id: 'raymarch',
+      kind: 'raymarch',
+      reads: ['scene', postProcessPasses.length > 0 ? 'scene-color' : 'color'],
+      writes: [postProcessPasses.length > 0 ? 'scene-color' : 'color'],
+    },
+    ...createPostProcessPassPlans('scene-color', postProcessPasses),
+    {
+      id: 'present',
+      kind: 'present',
+      reads: [getFinalPresentInputResource('scene-color', postProcessPasses)],
+      writes: ['target'],
+    },
   ],
 });
 
@@ -1558,6 +1665,43 @@ export const ensureVolumeRaymarchPipeline = (
   return pipeline;
 };
 
+export const ensurePostProcessPipeline = (
+  context: GpuRenderExecutionContext,
+  residency: RuntimeResidency,
+  program: PostProcessProgram,
+  format: GPUTextureFormat,
+): GPURenderPipeline => {
+  const cacheKey = `${program.id}:${format}`;
+  const cached = residency.pipelines.get(cacheKey);
+  if (cached) {
+    return cached as GPURenderPipeline;
+  }
+
+  const shader = context.device.createShaderModule({
+    label: cacheKey,
+    code: program.wgsl,
+  });
+  const pipeline = context.device.createRenderPipeline({
+    label: cacheKey,
+    layout: 'auto',
+    vertex: {
+      module: shader,
+      entryPoint: 'vsMain',
+    },
+    fragment: {
+      module: shader,
+      entryPoint: program.fragmentEntryPoint,
+      targets: [{ format }],
+    },
+    primitive: {
+      topology: 'triangle-list',
+    },
+  });
+
+  residency.pipelines.set(cacheKey, pipeline);
+  return pipeline;
+};
+
 const createSdfUniformData = (items: readonly SdfPassItem[]): Float32Array => {
   const floatsPerItem = 24;
   const uniformData = new Float32Array(8 + (maxSdfPassItems * floatsPerItem));
@@ -1704,13 +1848,15 @@ export const renderSdfRaymarchPass = (
   binding: RenderContextBinding,
   residency: RuntimeResidency,
   evaluatedScene: EvaluatedScene,
+  targetView = acquireColorAttachmentView(binding),
+  targetFormat = binding.target.format,
 ): number => {
   const items = extractSdfPassItems(evaluatedScene);
   if (items.length === 0) {
     return 0;
   }
 
-  const pipeline = ensureSdfRaymarchPipeline(context, residency, binding.target.format);
+  const pipeline = ensureSdfRaymarchPipeline(context, residency, targetFormat);
   const uniformData = createSdfUniformData(items);
   const uniformBuffer = context.device.createBuffer({
     label: 'sdf-raymarch-uniforms',
@@ -1731,7 +1877,7 @@ export const renderSdfRaymarchPass = (
 
   const pass = encoder.beginRenderPass({
     colorAttachments: [{
-      view: acquireColorAttachmentView(binding),
+      view: targetView,
       loadOp: 'load',
       storeOp: 'store',
     }],
@@ -1751,16 +1897,18 @@ export const renderVolumeRaymarchPass = (
   binding: RenderContextBinding,
   residency: RuntimeResidency,
   evaluatedScene: EvaluatedScene,
+  targetView = acquireColorAttachmentView(binding),
+  targetFormat = binding.target.format,
 ): number => {
   const items = extractVolumePassItems(evaluatedScene, residency);
   if (items.length === 0) {
     return 0;
   }
 
-  const pipeline = ensureVolumeRaymarchPipeline(context, residency, binding.target.format);
+  const pipeline = ensureVolumeRaymarchPipeline(context, residency, targetFormat);
   const pass = encoder.beginRenderPass({
     colorAttachments: [{
-      view: acquireColorAttachmentView(binding),
+      view: targetView,
       loadOp: 'load',
       storeOp: 'store',
     }],
@@ -1839,21 +1987,26 @@ export const renderForwardFrame = (
   residency: RuntimeResidency,
   evaluatedScene: EvaluatedScene,
   materialRegistry = createMaterialRegistry(),
+  postProcessPasses: readonly PostProcessPass[] = [],
 ): ForwardRenderResult => {
   assertRendererSceneCapabilities(
-    createForwardRenderer(),
+    createForwardRenderer('forward', postProcessPasses),
     evaluatedScene,
     materialRegistry,
     residency,
   );
-  const view = acquireColorAttachmentView(binding);
+  const sceneColorTexture = postProcessPasses.length > 0
+    ? createTransientRenderTexture(context, binding, 'forward-scene-color', binding.target.format)
+    : undefined;
+  const sceneColorView = sceneColorTexture?.createView();
+  const colorView = sceneColorView ?? acquireColorAttachmentView(binding);
   const viewProjectionMatrix = createViewProjectionMatrix(binding, evaluatedScene.activeCamera);
   const encoder = context.device.createCommandEncoder({
     label: 'forward-frame',
   });
   const pass = encoder.beginRenderPass({
     colorAttachments: [{
-      view,
+      view: colorView,
       clearValue: { r: 0.02, g: 0.02, b: 0.03, a: 1 },
       loadOp: 'clear',
       storeOp: 'store',
@@ -1992,8 +2145,34 @@ export const renderForwardFrame = (
 
   pass.end();
 
-  drawCount += renderSdfRaymarchPass(context, encoder, binding, residency, evaluatedScene);
-  drawCount += renderVolumeRaymarchPass(context, encoder, binding, residency, evaluatedScene);
+  drawCount += renderSdfRaymarchPass(
+    context,
+    encoder,
+    binding,
+    residency,
+    evaluatedScene,
+    colorView,
+    binding.target.format,
+  );
+  drawCount += renderVolumeRaymarchPass(
+    context,
+    encoder,
+    binding,
+    residency,
+    evaluatedScene,
+    colorView,
+    binding.target.format,
+  );
+  if (sceneColorView) {
+    drawCount += renderPostProcessPasses(
+      context,
+      encoder,
+      binding,
+      residency,
+      postProcessPasses,
+      sceneColorView,
+    );
+  }
 
   const commandBuffer = encoder.finish();
   context.queue.submit([commandBuffer]);
@@ -2023,15 +2202,110 @@ const createTransientRenderTexture = (
     usage,
   });
 
+const renderPostProcessPasses = (
+  context: GpuRenderExecutionContext,
+  encoder: GPUCommandEncoder,
+  binding: RenderContextBinding,
+  residency: RuntimeResidency,
+  postProcessPasses: readonly PostProcessPass[],
+  inputView: GPUTextureView,
+): number => {
+  if (postProcessPasses.length === 0) {
+    return 0;
+  }
+
+  const sampler = context.device.createSampler({
+    label: 'post-process-input-sampler',
+    magFilter: 'linear',
+    minFilter: 'linear',
+  });
+  const intermediateTextures = postProcessPasses.length > 1
+    ? [
+      createTransientRenderTexture(context, binding, 'post-process-temp-a', binding.target.format),
+      createTransientRenderTexture(context, binding, 'post-process-temp-b', binding.target.format),
+    ]
+    : [];
+  const intermediateViews = intermediateTextures.map((texture) => texture.createView());
+  let sourceView = inputView;
+  let drawCount = 0;
+
+  for (let index = 0; index < postProcessPasses.length; index += 1) {
+    const postProcessPass = postProcessPasses[index];
+    const pipeline = ensurePostProcessPipeline(
+      context,
+      residency,
+      postProcessPass.program,
+      binding.target.format,
+    );
+    const isLastPass = index === postProcessPasses.length - 1;
+    const targetView = isLastPass
+      ? acquireColorAttachmentView(binding)
+      : intermediateViews[index % intermediateViews.length];
+    const entries: GPUBindGroupEntry[] = [
+      {
+        binding: 0,
+        resource: sourceView,
+      },
+      {
+        binding: 1,
+        resource: sampler,
+      },
+    ];
+
+    if (postProcessPass.program.usesUniformBuffer) {
+      const uniformBytes = postProcessPass.uniformData
+        ? toBufferSource(postProcessPass.uniformData)
+        : new Uint8Array(0);
+      const uniformBuffer = context.device.createBuffer({
+        label: `${postProcessPass.id}:post-process-uniforms`,
+        size: Math.max(uniformBytes.byteLength, 16),
+        usage: uniformUsage | bufferCopyDstUsage,
+      });
+      if (uniformBytes.byteLength > 0) {
+        context.queue.writeBuffer(uniformBuffer, 0, uniformBytes);
+      }
+      entries.push({
+        binding: 2,
+        resource: {
+          buffer: uniformBuffer,
+        },
+      });
+    }
+
+    const bindGroup = context.device.createBindGroup({
+      layout: pipeline.getBindGroupLayout(0),
+      entries,
+    });
+    const pass = encoder.beginRenderPass({
+      colorAttachments: [{
+        view: targetView,
+        clearValue: { r: 0, g: 0, b: 0, a: 1 },
+        loadOp: 'clear',
+        storeOp: 'store',
+      }],
+    });
+
+    pass.setPipeline(pipeline);
+    pass.setBindGroup(0, bindGroup);
+    pass.draw(3, 1, 0, 0);
+    pass.end();
+    sourceView = targetView;
+    drawCount += 1;
+  }
+
+  return drawCount;
+};
+
 export const renderDeferredFrame = (
   context: GpuRenderExecutionContext,
   binding: RenderContextBinding,
   residency: RuntimeResidency,
   evaluatedScene: EvaluatedScene,
   materialRegistry = createMaterialRegistry(),
+  postProcessPasses: readonly PostProcessPass[] = [],
 ): DeferredRenderResult => {
   assertRendererSceneCapabilities(
-    createDeferredRenderer(),
+    createDeferredRenderer('deferred', postProcessPasses),
     evaluatedScene,
     materialRegistry,
     residency,
@@ -2059,6 +2333,11 @@ export const renderDeferredFrame = (
   );
   const gbufferAlbedoView = gbufferAlbedoTexture.createView();
   const gbufferNormalView = gbufferNormalTexture.createView();
+  const sceneColorTexture = postProcessPasses.length > 0
+    ? createTransientRenderTexture(context, binding, 'deferred-scene-color', binding.target.format)
+    : undefined;
+  const sceneColorView = sceneColorTexture?.createView();
+  const lightingOutputView = sceneColorView ?? acquireColorAttachmentView(binding);
   const encoder = context.device.createCommandEncoder({
     label: 'deferred-frame',
   });
@@ -2249,7 +2528,7 @@ export const renderDeferredFrame = (
   });
   const lightingPass = encoder.beginRenderPass({
     colorAttachments: [{
-      view: acquireColorAttachmentView(binding),
+      view: lightingOutputView,
       clearValue: { r: 0.02, g: 0.02, b: 0.03, a: 1 },
       loadOp: 'clear',
       storeOp: 'store',
@@ -2299,8 +2578,34 @@ export const renderDeferredFrame = (
   lightingPass.end();
   drawCount += 1;
 
-  drawCount += renderSdfRaymarchPass(context, encoder, binding, residency, evaluatedScene);
-  drawCount += renderVolumeRaymarchPass(context, encoder, binding, residency, evaluatedScene);
+  drawCount += renderSdfRaymarchPass(
+    context,
+    encoder,
+    binding,
+    residency,
+    evaluatedScene,
+    lightingOutputView,
+    binding.target.format,
+  );
+  drawCount += renderVolumeRaymarchPass(
+    context,
+    encoder,
+    binding,
+    residency,
+    evaluatedScene,
+    lightingOutputView,
+    binding.target.format,
+  );
+  if (sceneColorView) {
+    drawCount += renderPostProcessPasses(
+      context,
+      encoder,
+      binding,
+      residency,
+      postProcessPasses,
+      sceneColorView,
+    );
+  }
 
   const commandBuffer = encoder.finish();
   context.queue.submit([commandBuffer]);
@@ -2467,8 +2772,16 @@ export const renderForwardSnapshot = async (
   residency: RuntimeResidency,
   evaluatedScene: EvaluatedScene,
   materialRegistry = createMaterialRegistry(),
+  postProcessPasses: readonly PostProcessPass[] = [],
 ): Promise<ForwardSnapshotResult> => {
-  const frame = renderForwardFrame(context, binding, residency, evaluatedScene, materialRegistry);
+  const frame = renderForwardFrame(
+    context,
+    binding,
+    residency,
+    evaluatedScene,
+    materialRegistry,
+    postProcessPasses,
+  );
   const snapshot = await readOffscreenSnapshot(context, binding);
 
   return {
@@ -2485,8 +2798,16 @@ export const renderDeferredSnapshot = async (
   residency: RuntimeResidency,
   evaluatedScene: EvaluatedScene,
   materialRegistry = createMaterialRegistry(),
+  postProcessPasses: readonly PostProcessPass[] = [],
 ): Promise<DeferredSnapshotResult> => {
-  const frame = renderDeferredFrame(context, binding, residency, evaluatedScene, materialRegistry);
+  const frame = renderDeferredFrame(
+    context,
+    binding,
+    residency,
+    evaluatedScene,
+    materialRegistry,
+    postProcessPasses,
+  );
   const snapshot = await readOffscreenSnapshot(context, binding);
 
   return {

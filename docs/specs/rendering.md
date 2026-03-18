@@ -17,6 +17,7 @@ The initial renderer uses a lightweight pass graph:
 - explicit resource names
 - explicit dependencies
 - no full frame-graph aliasing or aggressive optimization yet
+- optional post-process passes that run after scene-color rendering and before final present
 
 ## Primitive Mapping
 
@@ -64,6 +65,10 @@ The initial renderer uses a lightweight pass graph:
 - Deferred frames now reuse the existing SDF sphere/box and volume raymarch passes after lighting,
   so hybrid scenes can keep mesh shading in deferred while compositing raymarched primitives into
   the same output target.
+- Forward and deferred rendering can now route scene output through an explicit intermediate
+  scene-color texture when ordered post-process passes are requested.
+- The first post-process milestone ships a built-in fullscreen blit pass plus a minimal post-process
+  program contract for renderer-owned fullscreen passes.
 - Built-in forward lit mesh draws also upload an inverse-transpose normal matrix plus a compact
   directional-light uniform block.
 - Material parameter uploads and bind group creation are implemented for built-in unlit shading.
@@ -106,6 +111,9 @@ The initial renderer uses a lightweight pass graph:
   contract during G-buffer writes.
 - Built-in node picking reserves `@group(0) @binding(0)` for a uniform containing the evaluated node
   world matrix, active camera `viewProjection`, and RGBA-encoded pick id color.
+- Post-process programs reserve `@group(0) @binding(0)` for the input color texture and
+  `@group(0) @binding(1)` for the input sampler; programs that opt into uniforms also reserve
+  `@group(0) @binding(2)` for a uniform buffer.
 - Deferred custom WGSL programs that register with `usesTransformBindings: true` should match the
   deferred `@group(0)` transform contract: evaluated node world matrix plus inverse-transpose normal
   matrix.
@@ -126,6 +134,8 @@ The initial renderer uses a lightweight pass graph:
 
 ## Known Gaps
 
+- Post-processing currently exposes a renderer-owned fullscreen pass contract only; scene IR does
+  not declare effect graphs yet.
 - Deferred rendering does not yet support textures on built-in lit materials.
 - Renderer-side picking currently targets mesh nodes only; SDF, volume, and per-triangle picking are
   still pending.

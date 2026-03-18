@@ -42,8 +42,9 @@ Implemented today:
 - mesh, texture, first volume residency upload paths, and first volume raymarch execution
 - forward rendering, minimal deferred mesh execution with built-in unlit/lit plus custom WGSL
   G-buffer paths, deferred directional-light resolve support, optional baseColor texture sampling,
-  post-lighting deferred SDF/volume composition, first-class directional light nodes with built-in
-  forward Lambert shading, first SDF raymarch execution, and headless snapshot readback
+  post-lighting deferred SDF/volume composition, optional scene-color post-process blit passes,
+  first-class directional light nodes with built-in forward Lambert shading, first SDF raymarch
+  execution, and headless snapshot readback
 - forward SDF sphere and box raymarch execution with capability preflight alignment
 - mesh node id-buffer picking snapshots with stable node-to-mesh id mapping and screen-pixel
   readback helpers

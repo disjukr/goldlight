@@ -32,6 +32,8 @@ The runtime is split into explicit data and execution stages:
 - `packages/renderer`: pass contracts, renderer descriptors, and frame planning.
 - `packages/renderer` also owns renderer-side id-buffer picking for mesh-node selection and
   readback.
+- `packages/renderer` also owns intermediate scene-color targets plus renderer-managed post-process
+  pass execution.
 - renderer descriptors also publish capability contracts for primitive/material compatibility before
   execution. See [`renderer-capabilities.md`](./renderer-capabilities.md).
 - `packages/procedural`: deterministic CPU-side procedural sampling plus texture/volume baking
@@ -50,6 +52,7 @@ The current scaffold already includes:
 - texture GPU residency upload and caching
 - first volume GPU residency upload and extraction
 - forward frame encoding for mesh draws plus first SDF raymarch execution
+- intermediate scene-color routing plus first renderer-owned fullscreen post-process blit pass
 - built-in unlit base-color texture sampling, material parameter uploads, and custom WGSL pipeline
   registration
 - headless snapshot readback and PNG encoding

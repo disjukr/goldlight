@@ -12,6 +12,7 @@ import {
   Fragment,
   OrthographicCamera,
   PerspectiveCamera,
+  planSceneRootCommitUpdates,
   summarizeSceneRootCommit,
 } from '@rieul3d/react';
 
@@ -739,6 +740,149 @@ Deno.test('commitSummaryNeedsResidencyReset stays true for node-only topology ch
   );
 
   assertEquals(resets, [true, true]);
+});
+
+Deno.test('planSceneRootCommitUpdates classifies node mutations by update kind', () => {
+  const root = createSceneRoot();
+  const plans: ReturnType<typeof planSceneRootCommitUpdates>[] = [];
+
+  root.subscribe((commit) => {
+    plans.push(planSceneRootCommitUpdates(commit));
+  });
+
+  root.render(
+    <scene id='jsx-scene'>
+      <mesh
+        id='triangle-a'
+        attributes={[{
+          semantic: 'POSITION',
+          itemSize: 3,
+          values: [0, 0.7, 0, -0.7, -0.7, 0, 0.7, -0.7, 0],
+        }]}
+      />
+      <mesh
+        id='triangle-b'
+        attributes={[{
+          semantic: 'POSITION',
+          itemSize: 3,
+          values: [0, 0.9, 0, -0.8, -0.8, 0, 0.8, -0.8, 0],
+        }]}
+      />
+      <group id='scene-root'>
+        <node id='transform-node' position={[0, 0, 0]} />
+        <node id='binding-node' meshId='triangle-a' />
+        <node id='metadata-node' name='Before' />
+        <node id='parent-a'>
+          <node id='reparent-target' />
+        </node>
+        <node id='parent-b' />
+      </group>
+    </scene>,
+  );
+
+  root.render(
+    <scene id='jsx-scene'>
+      <mesh
+        id='triangle-a'
+        attributes={[{
+          semantic: 'POSITION',
+          itemSize: 3,
+          values: [0, 0.7, 0, -0.7, -0.7, 0, 0.7, -0.7, 0],
+        }]}
+      />
+      <mesh
+        id='triangle-b'
+        attributes={[{
+          semantic: 'POSITION',
+          itemSize: 3,
+          values: [0, 0.9, 0, -0.8, -0.8, 0, 0.8, -0.8, 0],
+        }]}
+      />
+      <group id='scene-root'>
+        <node id='transform-node' position={[1, 2, 3]} />
+        <node id='binding-node' meshId='triangle-b' />
+        <node id='metadata-node' name='After' />
+        <node id='parent-a' />
+        <node id='parent-b'>
+          <node id='reparent-target' />
+        </node>
+      </group>
+    </scene>,
+  );
+
+  assertEquals(plans[1]?.nodes, {
+    addedIds: [],
+    removedIds: [],
+    updatedIds: ['transform-node', 'binding-node', 'metadata-node', 'reparent-target'],
+    unchangedIds: ['scene-root', 'parent-a', 'parent-b'],
+    transformIds: ['transform-node'],
+    transformOnlyIds: ['transform-node'],
+    parentingIds: ['reparent-target'],
+    resourceBindingIds: ['binding-node'],
+    metadataIds: ['metadata-node'],
+    otherUpdatedIds: [],
+  });
+});
+
+Deno.test('planSceneRootCommitUpdates keeps transform-only ids separate from binding updates', () => {
+  const root = createSceneRoot();
+  const plans: ReturnType<typeof planSceneRootCommitUpdates>[] = [];
+
+  root.subscribe((commit) => {
+    plans.push(planSceneRootCommitUpdates(commit));
+  });
+
+  root.render(
+    <scene id='jsx-scene'>
+      <mesh
+        id='triangle-a'
+        attributes={[{
+          semantic: 'POSITION',
+          itemSize: 3,
+          values: [0, 0.7, 0, -0.7, -0.7, 0, 0.7, -0.7, 0],
+        }]}
+      />
+      <mesh
+        id='triangle-b'
+        attributes={[{
+          semantic: 'POSITION',
+          itemSize: 3,
+          values: [0, 0.9, 0, -0.8, -0.8, 0, 0.8, -0.8, 0],
+        }]}
+      />
+      <group id='scene-root'>
+        <node id='mixed-node' meshId='triangle-a' position={[0, 0, 0]} />
+      </group>
+    </scene>,
+  );
+
+  root.render(
+    <scene id='jsx-scene'>
+      <mesh
+        id='triangle-a'
+        attributes={[{
+          semantic: 'POSITION',
+          itemSize: 3,
+          values: [0, 0.7, 0, -0.7, -0.7, 0, 0.7, -0.7, 0],
+        }]}
+      />
+      <mesh
+        id='triangle-b'
+        attributes={[{
+          semantic: 'POSITION',
+          itemSize: 3,
+          values: [0, 0.9, 0, -0.8, -0.8, 0, 0.8, -0.8, 0],
+        }]}
+      />
+      <group id='scene-root'>
+        <node id='mixed-node' meshId='triangle-b' position={[1, 0, 0]} />
+      </group>
+    </scene>,
+  );
+
+  assertEquals(plans[1]?.nodes.transformIds, ['mixed-node']);
+  assertEquals(plans[1]?.nodes.resourceBindingIds, ['mixed-node']);
+  assertEquals(plans[1]?.nodes.transformOnlyIds, []);
 });
 
 Deno.test('summarizeSceneRootCommit keeps unchanged large mesh payloads stable', () => {

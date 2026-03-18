@@ -1,4 +1,4 @@
-import type { SceneIr } from '@rieul3d/ir';
+import type { Node, SceneIr } from '@rieul3d/ir';
 
 import { type AuthoringElement, authoringTreeToSceneIr } from './authoring.ts';
 
@@ -32,6 +32,34 @@ export type SceneRootCommitSummary = Readonly<{
   sdfPrimitives: SceneRootCollectionSummary;
   volumePrimitives: SceneRootCollectionSummary;
   nodes: SceneRootCollectionSummary;
+  animationClips: SceneRootCollectionSummary;
+}>;
+
+export type SceneRootNodeUpdatePlan = Readonly<
+  & SceneRootCollectionSummary
+  & {
+    transformIds: readonly string[];
+    transformOnlyIds: readonly string[];
+    parentingIds: readonly string[];
+    resourceBindingIds: readonly string[];
+    metadataIds: readonly string[];
+    otherUpdatedIds: readonly string[];
+  }
+>;
+
+export type SceneRootCommitUpdatePlan = Readonly<{
+  sceneIdChanged: boolean;
+  activeCameraChanged: boolean;
+  rootNodeIdsChanged: boolean;
+  assets: SceneRootCollectionSummary;
+  textures: SceneRootCollectionSummary;
+  materials: SceneRootCollectionSummary;
+  lights: SceneRootCollectionSummary;
+  meshes: SceneRootCollectionSummary;
+  cameras: SceneRootCollectionSummary;
+  sdfPrimitives: SceneRootCollectionSummary;
+  volumePrimitives: SceneRootCollectionSummary;
+  nodes: SceneRootNodeUpdatePlan;
   animationClips: SceneRootCollectionSummary;
 }>;
 
@@ -168,6 +196,70 @@ const compareSceneRootCollection = <TEntry extends SceneRootEntityWithId>(
   };
 };
 
+const nodeResourceBindingsChanged = (currentNode: Node, previousNode: Node): boolean => {
+  return currentNode.meshId !== previousNode.meshId ||
+    currentNode.cameraId !== previousNode.cameraId ||
+    currentNode.sdfId !== previousNode.sdfId ||
+    currentNode.volumeId !== previousNode.volumeId ||
+    currentNode.lightId !== previousNode.lightId;
+};
+
+const compareSceneRootNodes = (
+  currentNodes: readonly Node[],
+  previousNodes: readonly Node[] | undefined,
+): SceneRootNodeUpdatePlan => {
+  const summary = compareSceneRootCollection(currentNodes, previousNodes);
+  const currentById = new Map(currentNodes.map((node) => [node.id, node]));
+  const previousById = new Map((previousNodes ?? []).map((node) => [node.id, node]));
+  const transformIds: string[] = [];
+  const parentingIds: string[] = [];
+  const resourceBindingIds: string[] = [];
+  const metadataIds: string[] = [];
+
+  for (const nodeId of summary.updatedIds) {
+    const currentNode = currentById.get(nodeId);
+    const previousNode = previousById.get(nodeId);
+    if (!currentNode || !previousNode) {
+      continue;
+    }
+
+    if (fingerprintValue(currentNode.transform) !== fingerprintValue(previousNode.transform)) {
+      transformIds.push(nodeId);
+    }
+    if (currentNode.parentId !== previousNode.parentId) {
+      parentingIds.push(nodeId);
+    }
+    if (nodeResourceBindingsChanged(currentNode, previousNode)) {
+      resourceBindingIds.push(nodeId);
+    }
+    if (currentNode.name !== previousNode.name) {
+      metadataIds.push(nodeId);
+    }
+  }
+
+  const classifiedUpdatedIds = new Set([
+    ...transformIds,
+    ...parentingIds,
+    ...resourceBindingIds,
+    ...metadataIds,
+  ]);
+  const transformOnlyIds = transformIds.filter((nodeId) =>
+    !parentingIds.includes(nodeId) &&
+    !resourceBindingIds.includes(nodeId) &&
+    !metadataIds.includes(nodeId)
+  );
+
+  return {
+    ...summary,
+    transformIds,
+    transformOnlyIds,
+    parentingIds,
+    resourceBindingIds,
+    metadataIds,
+    otherUpdatedIds: summary.updatedIds.filter((nodeId) => !classifiedUpdatedIds.has(nodeId)),
+  };
+};
+
 export const summarizeSceneRootCommit = (commit: SceneRootCommit): SceneRootCommitSummary => ({
   sceneIdChanged: commit.scene.id !== commit.previousScene?.id,
   activeCameraChanged: commit.scene.activeCameraId !== commit.previousScene?.activeCameraId,
@@ -188,6 +280,32 @@ export const summarizeSceneRootCommit = (commit: SceneRootCommit): SceneRootComm
     commit.previousScene?.volumePrimitives,
   ),
   nodes: compareSceneRootCollection(commit.scene.nodes, commit.previousScene?.nodes),
+  animationClips: compareSceneRootCollection(
+    commit.scene.animationClips,
+    commit.previousScene?.animationClips,
+  ),
+});
+
+export const planSceneRootCommitUpdates = (commit: SceneRootCommit): SceneRootCommitUpdatePlan => ({
+  sceneIdChanged: commit.scene.id !== commit.previousScene?.id,
+  activeCameraChanged: commit.scene.activeCameraId !== commit.previousScene?.activeCameraId,
+  rootNodeIdsChanged: fingerprintValue(commit.scene.rootNodeIds) !==
+    fingerprintValue(commit.previousScene?.rootNodeIds ?? []),
+  assets: compareSceneRootCollection(commit.scene.assets, commit.previousScene?.assets),
+  textures: compareSceneRootCollection(commit.scene.textures, commit.previousScene?.textures),
+  materials: compareSceneRootCollection(commit.scene.materials, commit.previousScene?.materials),
+  lights: compareSceneRootCollection(commit.scene.lights, commit.previousScene?.lights),
+  meshes: compareSceneRootCollection(commit.scene.meshes, commit.previousScene?.meshes),
+  cameras: compareSceneRootCollection(commit.scene.cameras, commit.previousScene?.cameras),
+  sdfPrimitives: compareSceneRootCollection(
+    commit.scene.sdfPrimitives,
+    commit.previousScene?.sdfPrimitives,
+  ),
+  volumePrimitives: compareSceneRootCollection(
+    commit.scene.volumePrimitives,
+    commit.previousScene?.volumePrimitives,
+  ),
+  nodes: compareSceneRootNodes(commit.scene.nodes, commit.previousScene?.nodes),
   animationClips: compareSceneRootCollection(
     commit.scene.animationClips,
     commit.previousScene?.animationClips,

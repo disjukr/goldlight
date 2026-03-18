@@ -82,6 +82,10 @@ full-snapshot publication shape as the final contract.
 - `summarizeSceneRootCommit()` can derive resource-level added/removed/updated/unchanged ID sets
   from snapshot commits so integrations can make selective invalidation decisions while a finer
   runtime-facing partial-apply contract is designed.
+- `planSceneRootCommitUpdates()` now derives a data-only update plan from snapshot commits that
+  separates node transform-only changes from parenting, resource-binding, and metadata changes so
+  integrations can avoid full residency resets for high-frequency transform updates without pulling
+  GPU ownership into `@rieul3d/react`.
 - `@rieul3d/gpu` now exposes ID-keyed targeted invalidation helpers, so snapshot consumers can drop
   changed mesh/material/texture/volume residency entries before falling back to a full reset for
   scene-topology changes.
@@ -102,6 +106,7 @@ full-snapshot publication shape as the final contract.
   contract.
 - [`../../examples/browser_react_authoring/README.md`](../../examples/browser_react_authoring/README.md)
   shows the reference browser flow: author a tree with `@rieul3d/react` TSX, commit it through
-  `createSceneRoot()`, summarize that commit, drop targeted residency entries where stable resource
-  IDs changed, fall back to a full reset for scene-topology changes, then hand the published scene
-  snapshot to the existing runtime and renderer layers.
+  `createSceneRoot()`, derive an update plan plus summary from that commit, drop targeted residency
+  entries where stable resource IDs changed, avoid resets for transform-only node updates, fall back
+  to a full reset for scene-topology or binding changes, then hand the published scene snapshot to
+  the existing runtime and renderer layers.

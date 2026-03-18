@@ -12,6 +12,7 @@ const createSnapshotMocks = () => {
     width: number;
     height: number;
   }> = [];
+  const bufferWrites = new Map<string, Uint8Array[]>();
 
   const device = {
     createShaderModule: ({ code }: GPUShaderModuleDescriptor) =>
@@ -34,11 +35,13 @@ const createSnapshotMocks = () => {
       }
 
       return {
+        label,
+        bytes,
         mapAsync: () => Promise.resolve(),
         getMappedRange: () => bytes.buffer,
         unmap: () => undefined,
         destroy: () => undefined,
-      } as unknown as GPUBuffer;
+      } as unknown as GPUBuffer & { label?: string; bytes?: Uint8Array };
     },
     createCommandEncoder: ({ label }: GPUCommandEncoderDescriptor = {}) => {
       if (label === 'offscreen-readback') {
@@ -75,7 +78,22 @@ const createSnapshotMocks = () => {
   };
 
   const queue = {
-    writeBuffer: () => undefined,
+    writeBuffer: (
+      buffer: GPUBuffer & { label?: string },
+      _offset: number,
+      data: BufferSource,
+    ) => {
+      const bytes = data instanceof Uint8Array ? data.slice() : new Uint8Array(
+        data instanceof ArrayBuffer ? data.slice(0) : data.buffer.slice(
+          data.byteOffset,
+          data.byteOffset + data.byteLength,
+        ),
+      );
+      const label = buffer.label ?? 'unknown';
+      const writes = bufferWrites.get(label) ?? [];
+      writes.push(bytes);
+      bufferWrites.set(label, writes);
+    },
     submit: (buffers: readonly GPUCommandBuffer[]) => {
       submits.push([...buffers]);
     },
@@ -86,6 +104,7 @@ const createSnapshotMocks = () => {
     queue,
     submits,
     copyCalls,
+    bufferWrites,
   };
 };
 
@@ -132,7 +151,7 @@ Deno.test('renderForwardCubemapSnapshot returns six ordered cubemap faces for me
   assertEquals(mocks.copyCalls.length, 6);
 });
 
-Deno.test('renderForwardCubemapSnapshot rejects raymarched scene content until face cameras are supported', async () => {
+Deno.test('renderForwardCubemapSnapshot captures hybrid raymarched scenes across all six faces', async () => {
   const mocks = createSnapshotMocks();
   const runtimeResidency = createRuntimeResidency();
   let scene = createSceneIr('scene');
@@ -145,20 +164,39 @@ Deno.test('renderForwardCubemapSnapshot rejects raymarched scene content until f
         radius: { x: 0.5, y: 0, z: 0, w: 0 },
       },
     }],
+    volumePrimitives: [{
+      id: 'volume-0',
+      assetId: 'volume-asset-0',
+      dimensions: { x: 4, y: 4, z: 4 },
+      format: 'density:r8unorm',
+    }],
   };
   scene = appendNode(scene, createNode('sdf-node', { sdfId: 'sdf-0' }));
+  scene = appendNode(scene, createNode('volume-node', { volumeId: 'volume-0' }));
+  runtimeResidency.volumes.set('volume-0', {
+    volumeId: 'volume-0',
+    texture: {} as GPUTexture,
+    view: {} as GPUTextureView,
+    sampler: {} as GPUSampler,
+    width: 4,
+    height: 4,
+    depth: 4,
+    format: 'r8unorm',
+  });
 
-  await assertRejects(
-    () =>
-      renderForwardCubemapSnapshot(
-        mocks as unknown as Parameters<typeof renderForwardCubemapSnapshot>[0],
-        runtimeResidency,
-        evaluateScene(scene, { timeMs: 0 }),
-        { size: 2 },
-      ),
-    Error,
-    'mesh-only scenes',
+  const snapshot = await renderForwardCubemapSnapshot(
+    mocks as unknown as Parameters<typeof renderForwardCubemapSnapshot>[0],
+    runtimeResidency,
+    evaluateScene(scene, { timeMs: 0 }),
+    { size: 2 },
   );
+
+  assertEquals(snapshot.size, 2);
+  assertEquals(snapshot.faces.length, 6);
+  assertEquals(snapshot.drawCount, 12);
+  assertEquals(snapshot.submittedCommandBufferCount, 6);
+  assertEquals(mocks.bufferWrites.get('sdf-raymarch-uniforms')?.length, 6);
+  assertEquals(mocks.bufferWrites.get('volume-node:volume-raymarch-uniforms')?.length, 6);
 });
 
 Deno.test('renderForwardCubemapSnapshot rejects formats that are not readback-safe yet', async () => {
@@ -189,4 +227,62 @@ Deno.test('renderForwardCubemapSnapshot rejects formats that are not readback-sa
     Error,
     'requires rgba8unorm',
   );
+});
+
+Deno.test('renderForwardCubemapSnapshot writes face-specific raymarch camera uniforms', async () => {
+  const mocks = createSnapshotMocks();
+  const runtimeResidency = createRuntimeResidency();
+  let scene = createSceneIr('scene');
+  scene = {
+    ...scene,
+    sdfPrimitives: [{
+      id: 'sdf-0',
+      op: 'sphere',
+      parameters: {
+        radius: { x: 0.5, y: 0, z: 0, w: 0 },
+      },
+    }],
+    volumePrimitives: [{
+      id: 'volume-0',
+      assetId: 'volume-asset-0',
+      dimensions: { x: 4, y: 4, z: 4 },
+      format: 'density:r8unorm',
+    }],
+  };
+  scene = appendNode(scene, createNode('sdf-node', { sdfId: 'sdf-0' }));
+  scene = appendNode(scene, createNode('volume-node', { volumeId: 'volume-0' }));
+  runtimeResidency.volumes.set('volume-0', {
+    volumeId: 'volume-0',
+    texture: {} as GPUTexture,
+    view: {} as GPUTextureView,
+    sampler: {} as GPUSampler,
+    width: 4,
+    height: 4,
+    depth: 4,
+    format: 'r8unorm',
+  });
+
+  await renderForwardCubemapSnapshot(
+    mocks as unknown as Parameters<typeof renderForwardCubemapSnapshot>[0],
+    runtimeResidency,
+    evaluateScene(scene, { timeMs: 0 }),
+    { size: 2, position: [3, 4, 5] },
+  );
+
+  const sdfWrites = mocks.bufferWrites.get('sdf-raymarch-uniforms') ?? [];
+  const volumeWrites = mocks.bufferWrites.get('volume-node:volume-raymarch-uniforms') ?? [];
+  assertEquals(sdfWrites.length, 6);
+  assertEquals(volumeWrites.length, 6);
+
+  const toFloats = (write: Uint8Array): Float32Array =>
+    new Float32Array(write.buffer.slice(write.byteOffset, write.byteOffset + write.byteLength));
+  const sdfOrigins = sdfWrites.map((write) => Array.from(toFloats(write).slice(1, 4)));
+  const sdfForwards = sdfWrites.map((write) => Array.from(toFloats(write).slice(12, 15)));
+  const volumeOrigins = volumeWrites.map((write) => Array.from(toFloats(write).slice(16, 19)));
+  const volumeForwards = volumeWrites.map((write) => Array.from(toFloats(write).slice(28, 31)));
+
+  assertEquals(sdfOrigins, Array(6).fill([3, 4, 5]));
+  assertEquals(volumeOrigins, Array(6).fill([3, 4, 5]));
+  assertEquals(new Set(sdfForwards.map((forward) => forward.join(','))).size, 6);
+  assertEquals(new Set(volumeForwards.map((forward) => forward.join(','))).size, 6);
 });

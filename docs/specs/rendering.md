@@ -77,7 +77,8 @@ The initial renderer uses a lightweight pass graph:
 - Custom WGSL programs can be registered and cached through the material registry.
 - Headless/offscreen rendering supports compact byte readback for snapshot testing.
 - Headless/offscreen rendering also supports forward-renderer cubemap capture as six ordered
-  offscreen face snapshots for mesh scenes, decoupled from later reprojection/export layouts.
+  offscreen face snapshots for mesh, SDF, and volume scenes, decoupled from later
+  reprojection/export layouts.
 - Headless/offscreen rendering also supports a dedicated mesh-node id-buffer pick pass with stable
   node-to-mesh metadata and screen-pixel decode helpers.
 - Node-pick snapshots use an internal linear `rgba8unorm` attachment for readback and currently
@@ -140,8 +141,6 @@ The initial renderer uses a lightweight pass graph:
 
 - Post-processing currently exposes a renderer-owned fullscreen pass contract only; scene IR does
   not declare effect graphs yet.
-- Cubemap capture currently rejects SDF and volume nodes because the current raymarch shaders still
-  assume one fixed camera instead of face-specific cubemap cameras.
 - Deferred rendering does not yet support textures on built-in lit materials.
 - Renderer-side picking currently targets mesh nodes only; SDF, volume, and per-triangle picking are
   still pending.

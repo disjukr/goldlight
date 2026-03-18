@@ -85,6 +85,11 @@ tracks the first implementation slice for that scene-document layer.
 - `createSceneRoot()` now provides a data-only commit bridge that publishes full `SceneIr` snapshots
   plus previous-scene/revision metadata to caller-owned subscribers as a current implementation
   waypoint.
+- `createSceneRoot()` now keeps an internal React-owned scene document so stable resource and node
+  host instances can survive repeated commits even though the published subscriber payload is still
+  a data-only `SceneIr` snapshot.
+- The scene document currently supports stable node/resource identity, parent-child reordering, and
+  subtree/resource removal as the first package-local waypoint before a real reconciler host lands.
 - `summarizeSceneRootCommit()` can derive resource-level added/removed/updated/unchanged ID sets
   from snapshot commits so integrations can make selective invalidation decisions while a finer
   runtime-facing partial-apply contract is designed.

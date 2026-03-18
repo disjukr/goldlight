@@ -1,17 +1,4 @@
-import {
-  appendAsset,
-  appendCamera,
-  appendLight,
-  appendMaterial,
-  appendMesh,
-  appendNode,
-  appendTexture,
-  createNode,
-  createOrthographicCamera,
-  createPerspectiveCamera,
-  createSceneIr,
-  identityTransform,
-} from '@rieul3d/ir';
+import { createOrthographicCamera, createPerspectiveCamera, identityTransform } from '@rieul3d/ir';
 import type {
   AssetRef,
   Camera,
@@ -27,6 +14,16 @@ import type {
   Transform,
   Vec3,
 } from '@rieul3d/ir';
+import {
+  applySceneDocumentScene,
+  createSceneDocument,
+  removeSceneDocumentNode,
+  removeSceneDocumentResource,
+  type SceneDocument,
+  sceneDocumentToSceneIr,
+  upsertSceneDocumentNode,
+  upsertSceneDocumentResource,
+} from './scene_document.ts';
 
 type Vec3Like = Vec3 | readonly [number, number, number];
 type QuatLike = Quat | readonly [number, number, number, number];
@@ -583,63 +580,151 @@ export const jsx = (
 export const jsxs = jsx;
 export const jsxDEV = jsx;
 
-export const authoringTreeToSceneIr = (element: AuthoringElement): SceneIr => {
+const normalizeCamera = (camera: CameraJsxProps): Camera =>
+  camera.type === 'perspective'
+    ? createPerspectiveCamera(camera.id, camera)
+    : createOrthographicCamera(camera.id, camera);
+
+const sweepUnvisitedResourceIds = (
+  document: SceneDocument,
+  kind: 'asset' | 'texture' | 'material' | 'light' | 'mesh' | 'camera',
+  visitedIds: ReadonlySet<string>,
+): void => {
+  const collection = kind === 'asset'
+    ? document.assets.order
+    : kind === 'texture'
+    ? document.textures.order
+    : kind === 'material'
+    ? document.materials.order
+    : kind === 'light'
+    ? document.lights.order
+    : kind === 'mesh'
+    ? document.meshes.order
+    : document.cameras.order;
+  for (const id of [...collection]) {
+    if (!visitedIds.has(id)) {
+      removeSceneDocumentResource(document, kind, id);
+    }
+  }
+};
+
+export const authoringTreeToSceneDocument = (
+  element: AuthoringElement,
+  document = createSceneDocument(element.id),
+): SceneDocument => {
   if (element.type !== 'scene') {
     throw new Error('authoring root must be a scene');
   }
 
-  let scene: SceneIr = createSceneIr(element.id);
   const sceneProps = element.props as SceneAuthoringProps | undefined;
-  if (sceneProps?.activeCameraId) {
-    scene = {
-      ...scene,
-      activeCameraId: sceneProps.activeCameraId,
-    };
-  }
+  applySceneDocumentScene(document, {
+    id: element.id,
+    activeCameraId: sceneProps?.activeCameraId,
+  });
 
-  const normalizeCamera = (camera: CameraJsxProps): Camera =>
-    camera.type === 'perspective'
-      ? createPerspectiveCamera(camera.id, camera)
-      : createOrthographicCamera(camera.id, camera);
+  const visitedNodeIds = new Set<string>();
+  const visitedResourceIds = {
+    asset: new Set<string>(),
+    texture: new Set<string>(),
+    material: new Set<string>(),
+    light: new Set<string>(),
+    mesh: new Set<string>(),
+    camera: new Set<string>(),
+  };
 
-  const visit = (parentId: string | undefined, node: AuthoringElement) => {
+  const visitChildren = (
+    parentId: string | undefined,
+    children: readonly AuthoringElement[],
+    startIndex = 0,
+  ): number => {
+    let nodeIndex = startIndex;
+    for (const child of children) {
+      nodeIndex = visit(parentId, child, nodeIndex);
+    }
+    return nodeIndex;
+  };
+
+  const visit = (
+    parentId: string | undefined,
+    node: AuthoringElement,
+    nodeIndex: number,
+  ): number => {
     switch (node.type) {
       case 'fragment':
-        for (const child of node.children ?? []) visit(parentId, child);
-        return;
+        return visitChildren(parentId, node.children ?? [], nodeIndex);
       case 'node':
-        scene = appendNode(
-          scene,
-          createNode(node.id, {
-            parentId,
-            ...(node.props ?? {}),
-          }),
-        );
-        for (const child of node.children ?? []) visit(node.id, child);
-        return;
+        visitedNodeIds.add(node.id);
+        upsertSceneDocumentNode(document, {
+          id: node.id,
+          parentId,
+          index: nodeIndex,
+          props: node.props as NodeAuthoringProps | undefined,
+        });
+        visitChildren(node.id, node.children ?? []);
+        return nodeIndex + 1;
       case 'asset':
-        scene = appendAsset(scene, node.props as AssetRef);
-        return;
+        visitedResourceIds.asset.add(node.id);
+        upsertSceneDocumentResource(document, {
+          kind: 'asset',
+          value: node.props as AssetRef,
+        });
+        return nodeIndex;
       case 'texture':
-        scene = appendTexture(scene, node.props as TextureRef);
-        return;
+        visitedResourceIds.texture.add(node.id);
+        upsertSceneDocumentResource(document, {
+          kind: 'texture',
+          value: node.props as TextureRef,
+        });
+        return nodeIndex;
       case 'material':
-        scene = appendMaterial(scene, node.props as Material);
-        return;
+        visitedResourceIds.material.add(node.id);
+        upsertSceneDocumentResource(document, {
+          kind: 'material',
+          value: node.props as Material,
+        });
+        return nodeIndex;
       case 'light':
-        scene = appendLight(scene, node.props as Light);
-        return;
+        visitedResourceIds.light.add(node.id);
+        upsertSceneDocumentResource(document, {
+          kind: 'light',
+          value: node.props as Light,
+        });
+        return nodeIndex;
       case 'mesh':
-        scene = appendMesh(scene, node.props as MeshPrimitive);
-        return;
+        visitedResourceIds.mesh.add(node.id);
+        upsertSceneDocumentResource(document, {
+          kind: 'mesh',
+          value: node.props as MeshPrimitive,
+        });
+        return nodeIndex;
       case 'camera':
-        scene = appendCamera(scene, normalizeCamera(node.props as CameraJsxProps));
-        return;
+        visitedResourceIds.camera.add(node.id);
+        upsertSceneDocumentResource(document, {
+          kind: 'camera',
+          value: normalizeCamera(node.props as CameraJsxProps),
+        });
+        return nodeIndex;
       default:
-        return;
+        return nodeIndex;
     }
   };
 
-  for (const child of element.children ?? []) visit(undefined, child);
-  return scene;
+  visitChildren(undefined, element.children ?? []);
+
+  for (const nodeId of [...document.nodes.order].reverse()) {
+    if (!visitedNodeIds.has(nodeId)) {
+      removeSceneDocumentNode(document, nodeId);
+    }
+  }
+  sweepUnvisitedResourceIds(document, 'asset', visitedResourceIds.asset);
+  sweepUnvisitedResourceIds(document, 'texture', visitedResourceIds.texture);
+  sweepUnvisitedResourceIds(document, 'material', visitedResourceIds.material);
+  sweepUnvisitedResourceIds(document, 'light', visitedResourceIds.light);
+  sweepUnvisitedResourceIds(document, 'mesh', visitedResourceIds.mesh);
+  sweepUnvisitedResourceIds(document, 'camera', visitedResourceIds.camera);
+
+  return document;
 };
+
+export const authoringTreeToSceneIr = (element: AuthoringElement): SceneIr =>
+  sceneDocumentToSceneIr(authoringTreeToSceneDocument(element));

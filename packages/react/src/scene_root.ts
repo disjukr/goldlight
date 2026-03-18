@@ -1,6 +1,11 @@
 import type { Node, SceneIr } from '@rieul3d/ir';
 
-import { type AuthoringElement, authoringTreeToSceneIr } from './authoring.ts';
+import { type AuthoringElement, authoringTreeToSceneDocument } from './authoring.ts';
+import {
+  createSceneDocument,
+  type SceneDocument,
+  sceneDocumentToSceneIr,
+} from './scene_document.ts';
 
 type SceneRootEntityWithId = Readonly<{ id: string }>;
 
@@ -367,11 +372,16 @@ export const commitSummaryNeedsResidencyReset = (summary: SceneRootCommitSummary
 
 export const createSceneRoot = (initialElement?: AuthoringElement): SceneRoot => {
   let currentScene: SceneIr | undefined;
+  let currentDocument: SceneDocument | undefined;
   let revision = 0;
   const subscribers = new Set<SceneRootSubscriber>();
 
   const render = (element: AuthoringElement): SceneIr => {
-    const scene = authoringTreeToSceneIr(element);
+    if (currentDocument === undefined) {
+      currentDocument = createSceneDocument(element.id);
+    }
+    authoringTreeToSceneDocument(element, currentDocument);
+    const scene = sceneDocumentToSceneIr(currentDocument);
     const commit = {
       scene,
       previousScene: currentScene,

@@ -15,6 +15,13 @@ import {
   planSceneRootCommitUpdates,
   summarizeSceneRootCommit,
 } from '@rieul3d/react';
+import {
+  createSceneDocument,
+  removeSceneDocumentNode,
+  sceneDocumentToSceneIr,
+  upsertSceneDocumentNode,
+} from '../packages/react/src/scene_document.ts';
+import { authoringTreeToSceneDocument } from '../packages/react/src/authoring.ts';
 
 Deno.test('authoringTreeToSceneIr lowers declarative nodes into scene ir', () => {
   const scene = authoringTreeToSceneIr(
@@ -528,6 +535,117 @@ Deno.test('createSceneRoot publishes committed scene snapshots', () => {
   ]);
 });
 
+Deno.test('authoringTreeToSceneDocument reuses stable node and resource instances across renders', () => {
+  const document = createSceneDocument('jsx-scene');
+
+  authoringTreeToSceneDocument(
+    <scene id='jsx-scene' activeCameraId='camera-main'>
+      <PerspectiveCamera id='camera-main' position={[0, 0, 2]} />
+      <group id='root'>
+        <node id='mesh-node' name='Before' />
+      </group>
+    </scene>,
+    document,
+  );
+
+  const firstCamera = document.cameras.byId.get('camera-main');
+  const firstRoot = document.nodes.byId.get('root');
+  const firstMeshNode = document.nodes.byId.get('mesh-node');
+
+  authoringTreeToSceneDocument(
+    <scene id='jsx-scene' activeCameraId='camera-main'>
+      <PerspectiveCamera id='camera-main' position={[1, 2, 3]} />
+      <group id='root' position={[4, 5, 6]}>
+        <node id='mesh-node' name='After' />
+      </group>
+    </scene>,
+    document,
+  );
+
+  assertEquals(document.cameras.byId.get('camera-main') === firstCamera, true);
+  assertEquals(document.nodes.byId.get('root') === firstRoot, true);
+  assertEquals(document.nodes.byId.get('mesh-node') === firstMeshNode, true);
+  assertEquals(document.nodes.byId.get('root')?.props.transform, {
+    translation: { x: 4, y: 5, z: 6 },
+    rotation: { x: 0, y: 0, z: 0, w: 1 },
+    scale: { x: 1, y: 1, z: 1 },
+  });
+  assertEquals(document.nodes.byId.get('mesh-node')?.props.name, 'After');
+});
+
+Deno.test('authoringTreeToSceneDocument removes stale resources and node subtrees', () => {
+  const document = createSceneDocument('jsx-scene');
+
+  authoringTreeToSceneDocument(
+    <scene id='jsx-scene'>
+      <mesh
+        id='triangle'
+        attributes={[{
+          semantic: 'POSITION',
+          itemSize: 3,
+          values: [0, 0.7, 0, -0.7, -0.7, 0, 0.7, -0.7, 0],
+        }]}
+      />
+      <group id='root'>
+        <node id='parent'>
+          <node id='child' meshId='triangle' />
+        </node>
+      </group>
+    </scene>,
+    document,
+  );
+
+  authoringTreeToSceneDocument(
+    <scene id='jsx-scene'>
+      <group id='root' />
+    </scene>,
+    document,
+  );
+
+  assertEquals(document.meshes.order, []);
+  assertEquals(document.nodes.order, ['root']);
+  assertEquals(document.nodes.byId.has('parent'), false);
+  assertEquals(document.nodes.byId.has('child'), false);
+});
+
+Deno.test('scene document helpers preserve node identity through reparenting and recursive removal', () => {
+  const document = createSceneDocument('scene-doc');
+
+  upsertSceneDocumentNode(document, { id: 'parent-a', index: 0 });
+  upsertSceneDocumentNode(document, { id: 'parent-b', index: 1 });
+  const child = upsertSceneDocumentNode(document, {
+    id: 'child',
+    parentId: 'parent-a',
+    index: 0,
+    props: { name: 'Child' },
+  });
+  upsertSceneDocumentNode(document, {
+    id: 'grandchild',
+    parentId: 'child',
+    index: 0,
+  });
+
+  upsertSceneDocumentNode(document, {
+    id: 'child',
+    parentId: 'parent-b',
+    index: 0,
+    props: { name: 'Child Moved' },
+  });
+
+  assertEquals(document.nodes.byId.get('child') === child, true);
+  assertEquals(document.nodes.byId.get('parent-a')?.childIds, []);
+  assertEquals(document.nodes.byId.get('parent-b')?.childIds, ['child']);
+  assertEquals(document.nodes.byId.get('child')?.props.name, 'Child Moved');
+
+  removeSceneDocumentNode(document, 'parent-b');
+
+  assertEquals(document.nodes.rootNodeIds, ['parent-a']);
+  assertEquals(document.nodes.byId.has('parent-b'), false);
+  assertEquals(document.nodes.byId.has('child'), false);
+  assertEquals(document.nodes.byId.has('grandchild'), false);
+  assertEquals(sceneDocumentToSceneIr(document).nodes.map((node) => node.id), ['parent-a']);
+});
+
 Deno.test('summarizeSceneRootCommit reports first-commit additions', () => {
   const root = createSceneRoot();
   let summary:
@@ -833,8 +951,8 @@ Deno.test('planSceneRootCommitUpdates classifies node mutations by update kind',
     unchangedIds: [
       'scene-root',
       'parent-a',
-      'parent-b',
       'reparent-child',
+      'parent-b',
       'transform-child',
     ],
     transformIds: [

@@ -5,8 +5,9 @@ authors a scene with TSX, including combined scene-object aliases such as `persp
 node transform shorthands such as `position`, commits that tree through `createSceneRoot()`, then
 renders the published `SceneIr` snapshot through the browser forward pipeline. Resource-only aliases
 remain available when no node binding props or children are supplied. Because the bridge publishes
-whole-scene snapshots, the example also invalidates cached GPU residency on each new commit before
-the next frame uploads the new mesh/material contents.
+whole-scene snapshots, the example also uses `summarizeSceneRootCommit()` to detect which resource
+classes changed and only resets cached GPU residency when mesh/material/texture/volume inputs
+actually changed before the next frame upload.
 
 This is now a real JSX authoring example with the first scene-root bridge, but it is still not a
 live React renderer or reconciler. `@rieul3d/react` currently owns authoring, snapshot commits, and

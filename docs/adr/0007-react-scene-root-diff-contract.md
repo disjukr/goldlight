@@ -29,6 +29,8 @@ Related discussion: `#90`, "ADR 0007: React scene-root diff/apply contract"
 
 - the repository keeps ADR 0006's snapshot bridge as the current implemented path while the next
   contract decision remains open
+- snapshot consumers can now derive added/removed/updated resource IDs from committed scene pairs
+  through helper utilities without locking the repository into a first-class diff/apply protocol
 - caller-owned integrations can continue to consume full snapshots immediately without waiting on a
   finer-grained protocol
 - any future diff/apply contract will need to justify its public surface in terms of real caller

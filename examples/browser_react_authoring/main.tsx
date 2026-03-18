@@ -11,7 +11,7 @@ import {
   requestGpuContext,
 } from '../../packages/gpu/mod.ts';
 import { createBrowserSurfaceTarget } from '../../packages/platform/mod.ts';
-import { createSceneRoot } from '../../packages/react/mod.ts';
+import { createSceneRoot, summarizeSceneRootCommit } from '../../packages/react/mod.ts';
 import { createMaterialRegistry, renderForwardFrame } from '../../packages/renderer/mod.ts';
 
 const canvas = document.querySelector<HTMLCanvasElement>('#app');
@@ -64,7 +64,26 @@ const residency = createRuntimeResidency();
 
 sceneRoot.subscribe((commit) => {
   scene = commit.scene;
-  invalidateResidency(residency);
+  const summary = summarizeSceneRootCommit(commit);
+  const needsResidencyReset = summary.assets.addedIds.length > 0 ||
+    summary.assets.removedIds.length > 0 ||
+    summary.assets.updatedIds.length > 0 ||
+    summary.textures.addedIds.length > 0 ||
+    summary.textures.removedIds.length > 0 ||
+    summary.textures.updatedIds.length > 0 ||
+    summary.materials.addedIds.length > 0 ||
+    summary.materials.removedIds.length > 0 ||
+    summary.materials.updatedIds.length > 0 ||
+    summary.meshes.addedIds.length > 0 ||
+    summary.meshes.removedIds.length > 0 ||
+    summary.meshes.updatedIds.length > 0 ||
+    summary.volumePrimitives.addedIds.length > 0 ||
+    summary.volumePrimitives.removedIds.length > 0 ||
+    summary.volumePrimitives.updatedIds.length > 0;
+
+  if (needsResidencyReset) {
+    invalidateResidency(residency);
+  }
 });
 sceneRoot.render(<TriangleScene />);
 

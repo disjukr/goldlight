@@ -15,6 +15,8 @@ supersedes them.
 
 - [`0004-react-jsx-authoring.md`](./0004-react-jsx-authoring.md): React package owns JSX authoring
   while core runtime state stays outside React
+- [`0005-react-scene-object-aliases.md`](./0005-react-scene-object-aliases.md): React authoring may
+  add combined camera/light-style JSX aliases without changing core ownership
 
 ## Related References
 

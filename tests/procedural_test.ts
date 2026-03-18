@@ -1,16 +1,26 @@
 import { assert, assertEquals, assertNotEquals, assertThrows } from 'jsr:@std/assert@^1.0.14';
 import {
   createCheckerboardTexture,
+  createColorNoiseTexture,
+  createDomainWarpedNoiseVolume,
   createGradientTexture,
   createNoiseTexture,
   createNoiseVolume,
   createUvDebugTexture,
+  createWorleyTexture,
+  createWorleyVolume,
+  sampleDomainWarpedFbm2d,
+  sampleDomainWarpedFbm3d,
   sampleFbm2d,
   sampleFbm3d,
+  sampleRidgedNoise2d,
+  sampleRidgedNoise3d,
   sampleTurbulence2d,
   sampleTurbulence3d,
   sampleValueNoise2d,
   sampleValueNoise3d,
+  sampleWorleyNoise2d,
+  sampleWorleyNoise3d,
 } from '@rieul3d/procedural';
 
 const assertByteRange = (values: Uint8Array): void => {
@@ -41,11 +51,45 @@ Deno.test('fractal samplers stay normalized', () => {
     sampleTurbulence2d(0.3, 0.4, { seed: 2, octaves: 5 }),
     sampleFbm3d(0.1, 0.2, 0.3, { seed: 2, octaves: 5 }),
     sampleTurbulence3d(0.3, 0.4, 0.5, { seed: 2, octaves: 5 }),
+    sampleRidgedNoise2d(0.15, 0.25, { seed: 3, octaves: 4 }),
+    sampleRidgedNoise3d(0.15, 0.25, 0.35, { seed: 3, octaves: 4 }),
+    sampleWorleyNoise2d(1.1, 2.2, { seed: 4 }),
+    sampleWorleyNoise3d(1.1, 2.2, 3.3, { seed: 4 }),
+    sampleDomainWarpedFbm2d(0.2, 0.6, { seed: 5, octaves: 3, warpAmplitude: 0.4 }),
+    sampleDomainWarpedFbm3d(0.2, 0.6, 0.8, { seed: 5, octaves: 3, warpAmplitude: 0.4 }),
   ];
 
   for (const sample of samples) {
     assert(sample >= 0 && sample <= 1);
   }
+});
+
+Deno.test('extended procedural samplers stay deterministic and react to seeds', () => {
+  assertEquals(
+    sampleRidgedNoise2d(0.4, 0.8, { seed: 12 }),
+    sampleRidgedNoise2d(0.4, 0.8, { seed: 12 }),
+  );
+  assertEquals(
+    sampleWorleyNoise3d(1.5, 2.5, 3.5, { seed: 9 }),
+    sampleWorleyNoise3d(1.5, 2.5, 3.5, { seed: 9 }),
+  );
+  assertEquals(
+    sampleDomainWarpedFbm2d(0.25, 0.75, { seed: 2, warpAmplitude: 0.5 }),
+    sampleDomainWarpedFbm2d(0.25, 0.75, { seed: 2, warpAmplitude: 0.5 }),
+  );
+
+  assertNotEquals(
+    sampleRidgedNoise3d(0.4, 0.8, 1.2, { seed: 12 }),
+    sampleRidgedNoise3d(0.4, 0.8, 1.2, { seed: 13 }),
+  );
+  assertNotEquals(
+    sampleWorleyNoise2d(1.5, 2.5, { seed: 9 }),
+    sampleWorleyNoise2d(1.5, 2.5, { seed: 10 }),
+  );
+  assertNotEquals(
+    sampleDomainWarpedFbm3d(0.25, 0.75, 0.5, { seed: 2, warpAmplitude: 0.5 }),
+    sampleDomainWarpedFbm3d(0.25, 0.75, 0.5, { seed: 3, warpAmplitude: 0.5 }),
+  );
 });
 
 Deno.test('checkerboard, gradient, and uv textures expose stable dimensions and pixels', () => {
@@ -105,6 +149,66 @@ Deno.test('noise texture and volume stay deterministic with valid ranges', () =>
   assertByteRange(volume.data);
 });
 
+Deno.test('extended procedural generators expose stable output ranges', () => {
+  const worleyTexture = createWorleyTexture({
+    width: 8,
+    height: 8,
+    seed: 6,
+    frequency: 5,
+  });
+  const colorTexture = createColorNoiseTexture({
+    width: 4,
+    height: 4,
+    seed: 7,
+    octaves: 4,
+    frequency: 3,
+    warpAmplitude: 0.45,
+    lowColor: [10, 20, 30, 255],
+    highColor: [200, 210, 220, 255],
+  });
+  const worleyVolume = createWorleyVolume({
+    width: 4,
+    height: 4,
+    depth: 3,
+    seed: 6,
+    frequency: 4,
+  });
+  const warpedVolume = createDomainWarpedNoiseVolume({
+    width: 4,
+    height: 4,
+    depth: 3,
+    seed: 7,
+    octaves: 4,
+    frequency: 3,
+    warpAmplitude: 0.45,
+  });
+
+  assertEquals(worleyTexture.channels, 4);
+  assertEquals(colorTexture.channels, 4);
+  assertEquals(worleyVolume.channels, 1);
+  assertEquals(warpedVolume.channels, 1);
+  assertEquals(
+    worleyTexture.data,
+    createWorleyTexture({ width: 8, height: 8, seed: 6, frequency: 5 }).data,
+  );
+  assertEquals(
+    warpedVolume.data,
+    createDomainWarpedNoiseVolume({
+      width: 4,
+      height: 4,
+      depth: 3,
+      seed: 7,
+      octaves: 4,
+      frequency: 3,
+      warpAmplitude: 0.45,
+    }).data,
+  );
+  assertByteRange(worleyTexture.data);
+  assertByteRange(colorTexture.data);
+  assertByteRange(worleyVolume.data);
+  assertByteRange(warpedVolume.data);
+});
+
 Deno.test('procedural generators reject invalid dimensions', () => {
   assertThrows(() => createCheckerboardTexture({ width: 0, height: 4 }));
   assertThrows(() =>
@@ -118,6 +222,10 @@ Deno.test('procedural generators reject invalid dimensions', () => {
   assertThrows(() => createUvDebugTexture({ width: -1, height: 2 }));
   assertThrows(() => createNoiseTexture({ width: 2, height: 0 }));
   assertThrows(() => createNoiseVolume({ width: 1, height: 1, depth: 0 }));
+  assertThrows(() => createWorleyTexture({ width: 0, height: 2 }));
+  assertThrows(() => createColorNoiseTexture({ width: 2, height: 0 }));
+  assertThrows(() => createWorleyVolume({ width: 1, height: 1, depth: -1 }));
+  assertThrows(() => createDomainWarpedNoiseVolume({ width: 1, height: 1, depth: 0 }));
 });
 
 Deno.test('procedural noise rejects non-finite fractal parameters', () => {
@@ -126,8 +234,21 @@ Deno.test('procedural noise rejects non-finite fractal parameters', () => {
   assertThrows(() => sampleFbm3d(0.1, 0.2, 0.3, { frequency: Number.POSITIVE_INFINITY }));
   assertThrows(() => sampleTurbulence2d(0.1, 0.2, { gain: Number.NaN }));
   assertThrows(() => sampleTurbulence3d(0.1, 0.2, 0.3, { lacunarity: Number.NEGATIVE_INFINITY }));
+  assertThrows(() => sampleRidgedNoise2d(0.1, 0.2, { gain: Number.NaN }));
+  assertThrows(() => sampleWorleyNoise3d(0.1, 0.2, 0.3, { seed: Number.POSITIVE_INFINITY }));
+  assertThrows(() => sampleDomainWarpedFbm2d(0.1, 0.2, { warpAmplitude: Number.NaN }));
   assertThrows(() => createNoiseTexture({ width: 2, height: 2, frequency: Number.NaN }));
+  assertThrows(() => createWorleyTexture({ width: 2, height: 2, frequency: Number.NaN }));
+  assertThrows(() => createColorNoiseTexture({ width: 2, height: 2, warpAmplitude: Number.NaN }));
   assertThrows(() =>
     createNoiseVolume({ width: 2, height: 2, depth: 2, octaves: Number.POSITIVE_INFINITY })
+  );
+  assertThrows(() =>
+    createDomainWarpedNoiseVolume({
+      width: 2,
+      height: 2,
+      depth: 2,
+      warpAmplitude: Number.NaN,
+    })
   );
 });

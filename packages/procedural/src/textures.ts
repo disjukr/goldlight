@@ -1,4 +1,4 @@
-import { sampleFbm2d } from './math.ts';
+import { sampleDomainWarpedFbm2d, sampleFbm2d, sampleWorleyNoise2d } from './math.ts';
 
 export type ColorRgba = readonly [number, number, number, number];
 
@@ -34,12 +34,33 @@ export type NoiseTextureOptions = Readonly<{
   octaves?: number;
 }>;
 
+export type WorleyTextureOptions = NoiseTextureOptions;
+
+export type ColorNoiseTextureOptions = Readonly<{
+  width: number;
+  height: number;
+  seed?: number;
+  frequency?: number;
+  octaves?: number;
+  warpAmplitude?: number;
+  lowColor?: ColorRgba;
+  highColor?: ColorRgba;
+}>;
+
 const defaultColorA: ColorRgba = [32, 32, 32, 255];
 const defaultColorB: ColorRgba = [224, 224, 224, 255];
 
 const assertDimension = (name: string, value: number): number => {
   if (!Number.isInteger(value) || value <= 0) {
     throw new Error(`"${name}" must be a positive integer`);
+  }
+
+  return value;
+};
+
+const assertFiniteNumber = (name: string, value: number): number => {
+  if (!Number.isFinite(value)) {
+    throw new Error(`"${name}" must be a finite number`);
   }
 
   return value;
@@ -131,7 +152,7 @@ export const createNoiseTexture = (options: NoiseTextureOptions): ProceduralText
   const width = assertDimension('width', options.width);
   const height = assertDimension('height', options.height);
   const data = createTextureData(width, height);
-  const frequency = options.frequency ?? 4;
+  const frequency = assertFiniteNumber('frequency', options.frequency ?? 4);
 
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
@@ -145,6 +166,56 @@ export const createNoiseTexture = (options: NoiseTextureOptions): ProceduralText
       });
       const value = Math.round(sample * 255);
       writePixel(data, offset, [value, value, value, 255]);
+    }
+  }
+
+  return { width, height, channels: 4, data };
+};
+
+export const createWorleyTexture = (options: WorleyTextureOptions): ProceduralTexture2d => {
+  const width = assertDimension('width', options.width);
+  const height = assertDimension('height', options.height);
+  const data = createTextureData(width, height);
+  const frequency = assertFiniteNumber('frequency', options.frequency ?? 4);
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const offset = ((y * width) + x) * 4;
+      const u = width === 1 ? 0 : x / (width - 1);
+      const v = height === 1 ? 0 : y / (height - 1);
+      const sample = sampleWorleyNoise2d(u * frequency, v * frequency, {
+        seed: options.seed,
+      });
+      const value = Math.round((1 - sample) * 255);
+      writePixel(data, offset, [value, value, value, 255]);
+    }
+  }
+
+  return { width, height, channels: 4, data };
+};
+
+export const createColorNoiseTexture = (
+  options: ColorNoiseTextureOptions,
+): ProceduralTexture2d => {
+  const width = assertDimension('width', options.width);
+  const height = assertDimension('height', options.height);
+  const data = createTextureData(width, height);
+  const frequency = assertFiniteNumber('frequency', options.frequency ?? 4);
+  const lowColor = options.lowColor ?? [24, 52, 96, 255];
+  const highColor = options.highColor ?? [236, 246, 255, 255];
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const offset = ((y * width) + x) * 4;
+      const u = width === 1 ? 0 : x / (width - 1);
+      const v = height === 1 ? 0 : y / (height - 1);
+      const sample = sampleDomainWarpedFbm2d(u * frequency, v * frequency, {
+        seed: options.seed,
+        octaves: options.octaves,
+        frequency,
+        warpAmplitude: options.warpAmplitude,
+      });
+      writePixel(data, offset, lerpColor(lowColor, highColor, sample));
     }
   }
 

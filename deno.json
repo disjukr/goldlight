@@ -5,6 +5,7 @@
     "./packages/gpu",
     "./packages/renderer",
     "./packages/primitives",
+    "./packages/procedural",
     "./packages/loaders",
     "./packages/react",
     "./packages/platform"
@@ -18,6 +19,7 @@
     "@rieul3d/gpu": "./packages/gpu/mod.ts",
     "@rieul3d/renderer": "./packages/renderer/mod.ts",
     "@rieul3d/primitives": "./packages/primitives/mod.ts",
+    "@rieul3d/procedural": "./packages/procedural/mod.ts",
     "@rieul3d/loaders": "./packages/loaders/mod.ts",
     "@rieul3d/react": "./packages/react/mod.ts",
     "@rieul3d/react/jsx-runtime": "./packages/react/jsx-runtime.ts",

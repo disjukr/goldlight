@@ -8,6 +8,8 @@ source of truth for package boundaries and feature expectations.
 - [`architecture.md`](./architecture.md): top-level runtime layers and package responsibilities
 - [`scene-ir.md`](./scene-ir.md): serializable scene schema and lowering expectations
 - [`interop-gltf.md`](./interop-gltf.md): interchange strategy for Blender, glTF, OBJ, and STL
+- [`procedural-generation.md`](./procedural-generation.md): procedural sampling, texture, and volume
+  generation helpers
 - [`react-authoring.md`](./react-authoring.md): React package role and lowering boundaries
 
 ## Runtime Behavior

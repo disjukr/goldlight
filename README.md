@@ -10,6 +10,7 @@ The repository is organized as a Deno workspace with packages for:
 - `@rieul3d/renderer`: forward/deferred frame planning and execution contracts
 - `@rieul3d/primitives`: procedural polygon mesh generators for common shapes; separate from SDF
   primitives
+- `@rieul3d/procedural`: deterministic procedural noise, texture, and volume generators
 - `@rieul3d/loaders`: OBJ/STL/PLY/glTF ingestion into scene IR
 - `@rieul3d/react`: declarative authoring adapter
 - `@rieul3d/platform`: browser, Deno, and headless targets
@@ -71,6 +72,8 @@ Implemented today:
 ## Documentation
 
 - Architecture overview: [`docs/specs/architecture.md`](./docs/specs/architecture.md)
+- Procedural generation contracts:
+  [`docs/specs/procedural-generation.md`](./docs/specs/procedural-generation.md)
 - Rendering contracts: [`docs/specs/rendering.md`](./docs/specs/rendering.md)
 - Renderer capability model:
   [`docs/specs/renderer-capabilities.md`](./docs/specs/renderer-capabilities.md)

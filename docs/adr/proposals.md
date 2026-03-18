@@ -7,6 +7,8 @@ ADR index.
 
 - [`0007-post-processing-execution-model.md`](./0007-post-processing-execution-model.md): introduce
   an explicit scene-color to post-process to present execution boundary
+- [`0008-react-reconciler-scene-document.md`](./0008-react-reconciler-scene-document.md): introduce
+  an internal React-owned scene document before a real reconciler host mutates live scene state
 
 ## Related References
 

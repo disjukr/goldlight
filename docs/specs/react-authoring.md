@@ -92,6 +92,9 @@ Issue `#117` provided the first scene-document implementation slice that this ho
 - `@rieul3d/react/reconciler` now provides an experimental real React renderer that accepts normal
   React components, applies mount/update/unmount work to the internal scene document, and publishes
   live `SceneIr` snapshots through `createReactSceneRoot()`.
+- `createReactSceneRoot()` now publishes a terminal empty-scene snapshot on unmount before clearing
+  its retained `getScene()` value, so subscriber-driven integrations can explicitly clear any
+  previously rendered scene state.
 - The reconciler entrypoint now also augments the normal React JSX runtime so `<scene>`, `<node>`,
   `<camera>`, `<light>`, `<mesh>`, `<material>`, `<texture>`, and `<asset>` can be authored in plain
   TSX on the live path.
@@ -99,7 +102,8 @@ Issue `#117` provided the first scene-document implementation slice that this ho
   and `DirectionalLight` convenience components so live reconciler scenes can keep the same
   high-level camera/light composition style as the snapshot authoring surface.
 - `flushReactSceneUpdates()` now exists as a small helper for tests or deterministic integrations
-  that need to force scheduled React work through the reconciler host.
+  that need to force scheduled React work through the reconciler host; it now also rethrows pending
+  reconciler errors captured during those later React-driven updates.
 - The scene document currently supports stable node/resource identity, parent-child reordering, and
   subtree/resource removal as the first package-local waypoint before a real reconciler host lands.
 - `summarizeSceneRootCommit()` can derive resource-level added/removed/updated/unchanged ID sets

@@ -76,11 +76,15 @@ The initial renderer uses a lightweight pass graph:
   plus non-textured built-in `lit` materials, with optional base-color textures on `unlit`.
 - Custom WGSL programs can be registered and cached through the material registry.
 - Headless/offscreen rendering supports compact byte readback for snapshot testing.
+- Headless/offscreen rendering also supports forward-renderer cubemap capture as six ordered
+  offscreen face snapshots for mesh scenes, decoupled from later reprojection/export layouts.
 - Headless/offscreen rendering also supports a dedicated mesh-node id-buffer pick pass with stable
   node-to-mesh metadata and screen-pixel decode helpers.
 - Node-pick snapshots use an internal linear `rgba8unorm` attachment for readback and currently
   support built-in mesh materials only.
 - Snapshot bytes can also be encoded into PNG for local inspection and regression workflows.
+- Cubemap capture returns per-face bytes plus view/projection metadata instead of committing to one
+  2D environment-map layout in the renderer itself.
 - Browser examples cover the minimal mesh-only path, a texture-backed built-in unlit path, and a
   custom WGSL path that samples texture residency through declared material bindings.
 - The native BYOW demo uses the same forward renderer/runtime residency path on an SDL2-backed
@@ -136,6 +140,8 @@ The initial renderer uses a lightweight pass graph:
 
 - Post-processing currently exposes a renderer-owned fullscreen pass contract only; scene IR does
   not declare effect graphs yet.
+- Cubemap capture currently rejects SDF and volume nodes because the current raymarch shaders still
+  assume one fixed camera instead of face-specific cubemap cameras.
 - Deferred rendering does not yet support textures on built-in lit materials.
 - Renderer-side picking currently targets mesh nodes only; SDF, volume, and per-triangle picking are
   still pending.

@@ -114,6 +114,38 @@ export type ForwardSnapshotResult = Readonly<{
 export type DeferredRenderResult = ForwardRenderResult;
 export type DeferredSnapshotResult = ForwardSnapshotResult;
 
+export type CubemapFace =
+  | 'positive-x'
+  | 'negative-x'
+  | 'positive-y'
+  | 'negative-y'
+  | 'positive-z'
+  | 'negative-z';
+
+export type CubemapCaptureOptions = Readonly<{
+  size: number;
+  format?: GPUTextureFormat;
+  position?: readonly [number, number, number];
+  znear?: number;
+  zfar?: number;
+}>;
+
+export type CubemapFaceSnapshotResult = Readonly<{
+  face: CubemapFace;
+  width: number;
+  height: number;
+  bytes: Uint8Array;
+  viewMatrix: readonly number[];
+  projectionMatrix: readonly number[];
+}>;
+
+export type CubemapSnapshotResult = Readonly<{
+  drawCount: number;
+  submittedCommandBufferCount: number;
+  size: number;
+  faces: readonly CubemapFaceSnapshotResult[];
+}>;
+
 export type NodePickItem = Readonly<{
   encodedId: number;
   nodeId: string;
@@ -269,6 +301,9 @@ const maxSdfPassItems = 16;
 const depthTextureFormat = 'depth24plus';
 const maxDirectionalLights = 4;
 const defaultAmbientLight = 0.2;
+const defaultCubemapFormat = 'rgba8unorm';
+const defaultCubemapZnear = 0.1;
+const defaultCubemapZfar = 100;
 const toBufferSource = (view: ArrayBuffer | ArrayBufferView): Uint8Array<ArrayBuffer> => {
   if (view instanceof ArrayBuffer) {
     return new Uint8Array(view.slice(0));
@@ -392,6 +427,91 @@ const createViewProjectionMatrix = (
 
   return multiplyMat4(projection, activeCamera.viewMatrix);
 };
+
+const subtractVector3 = (
+  [ax, ay, az]: readonly [number, number, number],
+  [bx, by, bz]: readonly [number, number, number],
+): readonly [number, number, number] => [ax - bx, ay - by, az - bz];
+
+const crossVector3 = (
+  [ax, ay, az]: readonly [number, number, number],
+  [bx, by, bz]: readonly [number, number, number],
+): readonly [number, number, number] => [
+  (ay * bz) - (az * by),
+  (az * bx) - (ax * bz),
+  (ax * by) - (ay * bx),
+];
+
+const dotVector3 = (
+  [ax, ay, az]: readonly [number, number, number],
+  [bx, by, bz]: readonly [number, number, number],
+): number => (ax * bx) + (ay * by) + (az * bz);
+
+const createLookAtViewMatrix = (
+  origin: readonly [number, number, number],
+  target: readonly [number, number, number],
+  up: readonly [number, number, number],
+): readonly number[] => {
+  const forward = normalizeVector3(...subtractVector3(target, origin));
+  const right = normalizeVector3(...crossVector3(forward, up));
+  const adjustedUp = normalizeVector3(...crossVector3(right, forward));
+
+  return [
+    right[0],
+    adjustedUp[0],
+    -forward[0],
+    0,
+    right[1],
+    adjustedUp[1],
+    -forward[1],
+    0,
+    right[2],
+    adjustedUp[2],
+    -forward[2],
+    0,
+    -dotVector3(right, origin),
+    -dotVector3(adjustedUp, origin),
+    dotVector3(forward, origin),
+    1,
+  ];
+};
+
+const cubemapFaceDescriptors: readonly Readonly<{
+  face: CubemapFace;
+  direction: readonly [number, number, number];
+  up: readonly [number, number, number];
+}>[] = [
+  {
+    face: 'positive-x',
+    direction: [1, 0, 0],
+    up: [0, -1, 0],
+  },
+  {
+    face: 'negative-x',
+    direction: [-1, 0, 0],
+    up: [0, -1, 0],
+  },
+  {
+    face: 'positive-y',
+    direction: [0, 1, 0],
+    up: [0, 0, 1],
+  },
+  {
+    face: 'negative-y',
+    direction: [0, -1, 0],
+    up: [0, 0, -1],
+  },
+  {
+    face: 'positive-z',
+    direction: [0, 0, 1],
+    up: [0, -1, 0],
+  },
+  {
+    face: 'negative-z',
+    direction: [0, 0, -1],
+    up: [0, -1, 0],
+  },
+];
 
 const builtInUnlitProgram: MaterialProgram = {
   id: builtInUnlitProgramId,
@@ -1153,6 +1273,14 @@ const normalizeVector3 = (
   }
 
   return [x / length, y / length, z / length];
+};
+
+const assertPositiveInteger = (name: string, value: number): number => {
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error(`"${name}" must be a positive integer`);
+  }
+
+  return value;
 };
 
 const getWorldToLocalRotation = (
@@ -1988,6 +2116,27 @@ export const renderForwardFrame = (
   evaluatedScene: EvaluatedScene,
   materialRegistry = createMaterialRegistry(),
   postProcessPasses: readonly PostProcessPass[] = [],
+): ForwardRenderResult =>
+  renderForwardFrameInternal(
+    context,
+    binding,
+    residency,
+    evaluatedScene,
+    materialRegistry,
+    postProcessPasses,
+  );
+
+const renderForwardFrameInternal = (
+  context: GpuRenderExecutionContext,
+  binding: RenderContextBinding,
+  residency: RuntimeResidency,
+  evaluatedScene: EvaluatedScene,
+  materialRegistry = createMaterialRegistry(),
+  postProcessPasses: readonly PostProcessPass[] = [],
+  options: Readonly<{
+    viewProjectionMatrix?: readonly number[];
+    includeRaymarchPasses?: boolean;
+  }> = {},
 ): ForwardRenderResult => {
   assertRendererSceneCapabilities(
     createForwardRenderer('forward', postProcessPasses),
@@ -2007,7 +2156,8 @@ export const renderForwardFrame = (
     : undefined;
   const sceneColorView = sceneColorTexture?.createView();
   const colorView = sceneColorView ?? acquireColorAttachmentView(binding);
-  const viewProjectionMatrix = createViewProjectionMatrix(binding, evaluatedScene.activeCamera);
+  const viewProjectionMatrix = options.viewProjectionMatrix ??
+    createViewProjectionMatrix(binding, evaluatedScene.activeCamera);
   const encoder = context.device.createCommandEncoder({
     label: 'forward-frame',
   });
@@ -2152,24 +2302,26 @@ export const renderForwardFrame = (
 
   pass.end();
 
-  drawCount += renderSdfRaymarchPass(
-    context,
-    encoder,
-    binding,
-    residency,
-    evaluatedScene,
-    colorView,
-    binding.target.format,
-  );
-  drawCount += renderVolumeRaymarchPass(
-    context,
-    encoder,
-    binding,
-    residency,
-    evaluatedScene,
-    colorView,
-    binding.target.format,
-  );
+  if (options.includeRaymarchPasses !== false) {
+    drawCount += renderSdfRaymarchPass(
+      context,
+      encoder,
+      binding,
+      residency,
+      evaluatedScene,
+      colorView,
+      binding.target.format,
+    );
+    drawCount += renderVolumeRaymarchPass(
+      context,
+      encoder,
+      binding,
+      residency,
+      evaluatedScene,
+      colorView,
+      binding.target.format,
+    );
+  }
   if (sceneColorView) {
     drawCount += renderPostProcessPasses(
       context,
@@ -2833,5 +2985,95 @@ export const renderDeferredSnapshot = async (
     width: snapshot.width,
     height: snapshot.height,
     bytes: snapshot.bytes,
+  };
+};
+
+const assertCubemapSceneCompatibility = (evaluatedScene: EvaluatedScene): void => {
+  const unsupportedNode = evaluatedScene.nodes.find((node) => node.sdf || node.volume);
+  if (!unsupportedNode) {
+    return;
+  }
+
+  throw new Error(
+    `cubemap capture currently supports mesh-only scenes; node "${unsupportedNode.node.id}" uses ` +
+      `${
+        unsupportedNode.sdf ? 'sdf' : 'volume'
+      } content that still relies on a fixed raymarch camera`,
+  );
+};
+
+export const renderForwardCubemapSnapshot = async (
+  context: GpuRenderExecutionContext & GpuReadbackContext,
+  residency: RuntimeResidency,
+  evaluatedScene: EvaluatedScene,
+  options: CubemapCaptureOptions,
+  materialRegistry = createMaterialRegistry(),
+  postProcessPasses: readonly PostProcessPass[] = [],
+): Promise<CubemapSnapshotResult> => {
+  assertCubemapSceneCompatibility(evaluatedScene);
+  const size = assertPositiveInteger('size', options.size);
+  const origin = options.position ??
+    (evaluatedScene.activeCamera
+      ? getMatrixTranslation(evaluatedScene.activeCamera.worldMatrix)
+      : [0, 0, 0] as const);
+  const cubemapCamera: EvaluatedCamera['camera'] & { type: 'perspective' } = {
+    id: 'cubemap-capture-camera',
+    type: 'perspective',
+    yfov: Math.PI / 2,
+    znear: options.znear ?? evaluatedScene.activeCamera?.camera.znear ?? defaultCubemapZnear,
+    zfar: options.zfar ?? evaluatedScene.activeCamera?.camera.zfar ?? defaultCubemapZfar,
+  };
+  const projectionMatrix = createPerspectiveProjection(cubemapCamera, 1);
+  const faces: CubemapFaceSnapshotResult[] = [];
+  let drawCount = 0;
+  let submittedCommandBufferCount = 0;
+
+  for (const descriptor of cubemapFaceDescriptors) {
+    const binding = createOffscreenContext({
+      device: context.device as GPUDevice,
+      target: {
+        kind: 'offscreen',
+        width: size,
+        height: size,
+        format: options.format ?? defaultCubemapFormat,
+        sampleCount: 1,
+      },
+    });
+    const target = [
+      origin[0] + descriptor.direction[0],
+      origin[1] + descriptor.direction[1],
+      origin[2] + descriptor.direction[2],
+    ] as const;
+    const viewMatrix = createLookAtViewMatrix(origin, target, descriptor.up);
+    const frame = renderForwardFrameInternal(
+      context,
+      binding,
+      residency,
+      evaluatedScene,
+      materialRegistry,
+      postProcessPasses,
+      {
+        viewProjectionMatrix: multiplyMat4(projectionMatrix, viewMatrix),
+        includeRaymarchPasses: false,
+      },
+    );
+    const snapshot = await readOffscreenSnapshot(context, binding);
+    faces.push({
+      face: descriptor.face,
+      width: snapshot.width,
+      height: snapshot.height,
+      bytes: snapshot.bytes,
+      viewMatrix,
+      projectionMatrix,
+    });
+    drawCount += frame.drawCount;
+    submittedCommandBufferCount += frame.submittedCommandBufferCount;
+  }
+
+  return {
+    drawCount,
+    submittedCommandBufferCount,
+    size,
+    faces,
   };
 };

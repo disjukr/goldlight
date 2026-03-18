@@ -107,6 +107,14 @@ const assertFiniteNumber = (name: string, value: number): number => {
   return value;
 };
 
+const assertPositiveFiniteNumber = (name: string, value: number): number => {
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new Error(`"${name}" must be a positive finite number`);
+  }
+
+  return value;
+};
+
 const assertPositiveInteger = (name: string, value: number): number => {
   if (!Number.isInteger(value) || value <= 0) {
     throw new Error(`"${name}" must be a positive integer`);
@@ -134,14 +142,26 @@ const getVec3Parameter = (
   return [value.x, value.y, value.z];
 };
 
+const getSphereRadius = (primitive: SdfPrimitive): number =>
+  assertPositiveFiniteNumber('radius', getScalarParameter(primitive, 'radius', 0.5));
+
+const getBoxHalfExtents = (primitive: SdfPrimitive): Vec3 => {
+  const halfExtents = getVec3Parameter(primitive, 'size', [0.5, 0.5, 0.5]);
+  return [
+    assertPositiveFiniteNumber('size.x', halfExtents[0]),
+    assertPositiveFiniteNumber('size.y', halfExtents[1]),
+    assertPositiveFiniteNumber('size.z', halfExtents[2]),
+  ];
+};
+
 const samplePrimitiveSdf = (primitive: SdfPrimitive, point: Vec3): number => {
   if (primitive.op === 'sphere') {
-    const radius = assertFiniteNumber('radius', getScalarParameter(primitive, 'radius', 0.5));
+    const radius = getSphereRadius(primitive);
     return lengthVec3(point) - radius;
   }
 
   if (primitive.op === 'box') {
-    const halfExtents = getVec3Parameter(primitive, 'size', [0.5, 0.5, 0.5]);
+    const halfExtents = getBoxHalfExtents(primitive);
     const q: Vec3 = [
       Math.abs(point[0]) - halfExtents[0],
       Math.abs(point[1]) - halfExtents[1],
@@ -168,7 +188,7 @@ export const inferSdfExtractionBounds = (
   const validatedPadding = assertFiniteNumber('padding', padding);
 
   if (primitive.op === 'sphere') {
-    const radius = assertFiniteNumber('radius', getScalarParameter(primitive, 'radius', 0.5));
+    const radius = getSphereRadius(primitive);
     const extent = radius + validatedPadding;
     return {
       min: [-extent, -extent, -extent],
@@ -177,7 +197,7 @@ export const inferSdfExtractionBounds = (
   }
 
   if (primitive.op === 'box') {
-    const size = getVec3Parameter(primitive, 'size', [0.5, 0.5, 0.5]);
+    const size = getBoxHalfExtents(primitive);
     return {
       min: [
         -(size[0] + validatedPadding),
@@ -214,6 +234,16 @@ const latticeIndex = (
 
 const cellIndex = (resolution: SdfExtractionResolution, x: number, y: number, z: number): number =>
   x + (resolution.x * (y + (resolution.y * z)));
+
+const isCellInBounds = (
+  resolution: SdfExtractionResolution,
+  x: number,
+  y: number,
+  z: number,
+): boolean =>
+  x >= 0 && x < resolution.x &&
+  y >= 0 && y < resolution.y &&
+  z >= 0 && z < resolution.z;
 
 const pointAt = (
   bounds: SdfExtractionBounds,
@@ -544,18 +574,19 @@ const buildSurfaceNetVertices = (
   return { vertices, indicesByCell, positions, normals, texcoords };
 };
 
-const maybeAddSurfaceNetQuad = (
+const maybeAddSurfaceNetFace = (
   indices: number[],
-  quad: readonly [number, number, number, number],
+  polygon: readonly number[],
   primitive: SdfPrimitive,
   grid: SampledGrid,
   positions: readonly number[],
 ): void => {
-  if (quad.some((index) => index < 0)) {
+  if (polygon.some((index) => index < 0)) {
     return;
   }
 
-  if (new Set(quad).size < 4) {
+  const orderedPolygon = [...new Set(polygon)];
+  if (orderedPolygon.length < 3) {
     return;
   }
 
@@ -565,21 +596,25 @@ const maybeAddSurfaceNetQuad = (
     positions[(index * 3) + 2],
   ];
 
-  const a = getPosition(quad[0]);
-  const b = getPosition(quad[1]);
-  const c = getPosition(quad[2]);
-  const d = getPosition(quad[3]);
-  const center = scaleVec3(addVec3(addVec3(a, b), addVec3(c, d)), 0.25);
+  const facePoints = orderedPolygon.map(getPosition);
+  const center = scaleVec3(
+    facePoints.reduce<Vec3>((acc, point) => addVec3(acc, point), [0, 0, 0]),
+    1 / facePoints.length,
+  );
   const normal = estimateNormal(
     primitive,
     center,
     Math.min(grid.step[0], grid.step[1], grid.step[2]),
   );
-  const faceNormal = crossVec3(subtractVec3(b, a), subtractVec3(c, a));
-  const ordered = dotVec3(faceNormal, normal) >= 0
-    ? quad
-    : [quad[0], quad[3], quad[2], quad[1]] as const;
-  indices.push(ordered[0], ordered[1], ordered[2], ordered[0], ordered[2], ordered[3]);
+  const faceNormal = crossVec3(
+    subtractVec3(facePoints[1], facePoints[0]),
+    subtractVec3(facePoints[2], facePoints[0]),
+  );
+  const ordered = dotVec3(faceNormal, normal) >= 0 ? orderedPolygon : [...orderedPolygon].reverse();
+
+  for (let index = 1; index < ordered.length - 1; index += 1) {
+    indices.push(ordered[0], ordered[index], ordered[index + 1]);
+  }
 };
 
 export const extractSurfaceNetMesh = (
@@ -591,12 +626,17 @@ export const extractSurfaceNetMesh = (
   const indices: number[] = [];
   const getCellVertexIndex = (x: number, y: number, z: number): number =>
     indicesByCell[cellIndex(grid.resolution, x, y, z)];
+  const getFaceVertexIndices = (
+    candidates: readonly (readonly [number, number, number])[],
+  ): readonly number[] =>
+    candidates.flatMap(([x, y, z]) =>
+      isCellInBounds(grid.resolution, x, y, z) ? [getCellVertexIndex(x, y, z)] : []
+    );
 
   for (let z = 0; z <= grid.resolution.z; z += 1) {
     for (let y = 0; y <= grid.resolution.y; y += 1) {
       for (let x = 0; x < grid.resolution.x; x += 1) {
         if (
-          y === 0 || y === grid.resolution.y || z === 0 || z === grid.resolution.z ||
           !crossesIsoLevel(
             grid.values[latticeIndex(grid.resolution, x, y, z)],
             grid.values[latticeIndex(grid.resolution, x + 1, y, z)],
@@ -606,14 +646,14 @@ export const extractSurfaceNetMesh = (
           continue;
         }
 
-        maybeAddSurfaceNetQuad(
+        maybeAddSurfaceNetFace(
           indices,
-          [
-            getCellVertexIndex(x, y - 1, z - 1),
-            getCellVertexIndex(x, y, z - 1),
-            getCellVertexIndex(x, y, z),
-            getCellVertexIndex(x, y - 1, z),
-          ],
+          getFaceVertexIndices([
+            [x, y - 1, z - 1],
+            [x, y, z - 1],
+            [x, y, z],
+            [x, y - 1, z],
+          ]),
           primitive,
           grid,
           positions,
@@ -626,7 +666,6 @@ export const extractSurfaceNetMesh = (
     for (let y = 0; y < grid.resolution.y; y += 1) {
       for (let x = 0; x <= grid.resolution.x; x += 1) {
         if (
-          x === 0 || x === grid.resolution.x || z === 0 || z === grid.resolution.z ||
           !crossesIsoLevel(
             grid.values[latticeIndex(grid.resolution, x, y, z)],
             grid.values[latticeIndex(grid.resolution, x, y + 1, z)],
@@ -636,14 +675,14 @@ export const extractSurfaceNetMesh = (
           continue;
         }
 
-        maybeAddSurfaceNetQuad(
+        maybeAddSurfaceNetFace(
           indices,
-          [
-            getCellVertexIndex(x - 1, y, z - 1),
-            getCellVertexIndex(x, y, z - 1),
-            getCellVertexIndex(x, y, z),
-            getCellVertexIndex(x - 1, y, z),
-          ],
+          getFaceVertexIndices([
+            [x - 1, y, z - 1],
+            [x, y, z - 1],
+            [x, y, z],
+            [x - 1, y, z],
+          ]),
           primitive,
           grid,
           positions,
@@ -656,7 +695,6 @@ export const extractSurfaceNetMesh = (
     for (let y = 0; y <= grid.resolution.y; y += 1) {
       for (let x = 0; x <= grid.resolution.x; x += 1) {
         if (
-          x === 0 || x === grid.resolution.x || y === 0 || y === grid.resolution.y ||
           !crossesIsoLevel(
             grid.values[latticeIndex(grid.resolution, x, y, z)],
             grid.values[latticeIndex(grid.resolution, x, y, z + 1)],
@@ -666,14 +704,14 @@ export const extractSurfaceNetMesh = (
           continue;
         }
 
-        maybeAddSurfaceNetQuad(
+        maybeAddSurfaceNetFace(
           indices,
-          [
-            getCellVertexIndex(x - 1, y - 1, z),
-            getCellVertexIndex(x, y - 1, z),
-            getCellVertexIndex(x, y, z),
-            getCellVertexIndex(x - 1, y, z),
-          ],
+          getFaceVertexIndices([
+            [x - 1, y - 1, z],
+            [x, y - 1, z],
+            [x, y, z],
+            [x - 1, y, z],
+          ]),
           primitive,
           grid,
           positions,

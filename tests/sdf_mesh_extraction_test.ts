@@ -146,12 +146,51 @@ Deno.test('surface-nets box extraction reaches each signed extent', () => {
   assert(Math.abs(maxZ - 0.75) < 0.12);
 });
 
-Deno.test('sdf extraction rejects unsupported ops and invalid resolutions', () => {
+Deno.test('surface-nets sphere extraction closes tight bounds at the poles', () => {
+  const mesh = extractSurfaceNetMesh(sphere, {
+    resolution: { x: 18, y: 18, z: 18 },
+    bounds: {
+      min: [-0.75, -0.75, -0.75],
+      max: [0.75, 0.75, 0.75],
+    },
+  });
+  const positions = getAttribute(mesh, 'POSITION');
+  let minY = Number.POSITIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+
+  for (let index = 0; index < positions.length; index += 3) {
+    minY = Math.min(minY, positions[index + 1]);
+    maxY = Math.max(maxY, positions[index + 1]);
+  }
+
+  assert(Math.abs(minY + 0.75) < 0.05);
+  assert(Math.abs(maxY - 0.75) < 0.05);
+});
+
+Deno.test('sdf extraction rejects unsupported ops, invalid dimensions, and invalid resolutions', () => {
   assertThrows(() =>
     extractSdfMesh({
       id: 'torus',
       op: 'torus',
       parameters: {},
+    })
+  );
+  assertThrows(() =>
+    extractSdfMesh({
+      id: 'bad-sphere',
+      op: 'sphere',
+      parameters: {
+        radius: { x: -1, y: 0, z: 0, w: 0 },
+      },
+    })
+  );
+  assertThrows(() =>
+    extractSdfMesh({
+      id: 'bad-box',
+      op: 'box',
+      parameters: {
+        size: { x: 0.5, y: 0, z: 0.75, w: 0 },
+      },
     })
   );
   assertThrows(() =>

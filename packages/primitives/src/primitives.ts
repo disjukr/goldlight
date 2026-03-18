@@ -160,6 +160,7 @@ const createGridMesh = (
     normal: Vec3;
     uv: Vec2;
   }>,
+  winding: 'default' | 'reverse' = 'default',
 ): MeshPrimitive => {
   const positions: number[] = [];
   const normals: number[] = [];
@@ -181,7 +182,11 @@ const createGridMesh = (
       const b = a + segmentCount;
       const c = b + 1;
       const d = a + 1;
-      indices.push(a, b, d, b, c, d);
+      if (winding === 'reverse') {
+        indices.push(a, d, b, b, d, c);
+      } else {
+        indices.push(a, b, d, b, c, d);
+      }
     }
   }
 
@@ -701,6 +706,7 @@ export const createTorusMesh = (options: CreateTorusMeshOptions): MeshPrimitive 
         uv: [u, v],
       };
     },
+    'reverse',
   );
 };
 

@@ -71,7 +71,8 @@ type PrimitiveEntry = Readonly<{
   materialId: string;
   color: readonly [number, number, number, number];
   translation: readonly [number, number, number];
-  rotation: Readonly<{ x: number; y: number; z: number; w: number }>;
+  baseRotationDegrees: readonly [number, number, number];
+  rotationRateDegrees: readonly [number, number, number];
   scale: readonly [number, number, number];
   mesh: ReturnType<
     | typeof createBoxMesh
@@ -93,7 +94,8 @@ const primitiveEntries: readonly PrimitiveEntry[] = [
     materialId: 'box-material',
     color: [0.94, 0.37, 0.29, 1],
     translation: [-3.6, 1.8, 0],
-    rotation: createQuatFromEulerDegrees(18, 24, -10),
+    baseRotationDegrees: [18, 24, -10],
+    rotationRateDegrees: [18, 42, 12],
     scale: [1, 1, 1],
     mesh: createBoxMesh({ id: 'box-mesh' }),
   },
@@ -102,7 +104,8 @@ const primitiveEntries: readonly PrimitiveEntry[] = [
     materialId: 'sphere-material',
     color: [0.97, 0.69, 0.24, 1],
     translation: [-1.8, 1.8, 0],
-    rotation: createQuatFromEulerDegrees(0, 32, 0),
+    baseRotationDegrees: [0, 32, 0],
+    rotationRateDegrees: [10, 54, 0],
     scale: [1, 1, 1],
     mesh: createSphereMesh({ id: 'sphere-mesh' }),
   },
@@ -111,7 +114,8 @@ const primitiveEntries: readonly PrimitiveEntry[] = [
     materialId: 'cylinder-material',
     color: [0.39, 0.75, 0.41, 1],
     translation: [0, 1.8, 0],
-    rotation: createQuatFromEulerDegrees(24, -18, 0),
+    baseRotationDegrees: [24, -18, 0],
+    rotationRateDegrees: [30, 28, 14],
     scale: [1, 1, 1],
     mesh: createCylinderMesh({ id: 'cylinder-mesh' }),
   },
@@ -120,7 +124,8 @@ const primitiveEntries: readonly PrimitiveEntry[] = [
     materialId: 'capsule-material',
     color: [0.19, 0.72, 0.73, 1],
     translation: [1.8, 1.8, 0],
-    rotation: createQuatFromEulerDegrees(-20, 26, 12),
+    baseRotationDegrees: [-20, 26, 12],
+    rotationRateDegrees: [26, 36, 18],
     scale: [1, 1, 1],
     mesh: createCapsuleMesh({ id: 'capsule-mesh' }),
   },
@@ -129,7 +134,8 @@ const primitiveEntries: readonly PrimitiveEntry[] = [
     materialId: 'torus-material',
     color: [0.23, 0.54, 0.96, 1],
     translation: [3.6, 1.8, 0],
-    rotation: createQuatFromEulerDegrees(62, 20, 12),
+    baseRotationDegrees: [62, 20, 12],
+    rotationRateDegrees: [44, 22, 36],
     scale: [1, 1, 1],
     mesh: createTorusMesh({ id: 'torus-mesh' }),
   },
@@ -138,7 +144,8 @@ const primitiveEntries: readonly PrimitiveEntry[] = [
     materialId: 'tetrahedron-material',
     color: [0.53, 0.44, 0.96, 1],
     translation: [-3.6, -1.8, 0],
-    rotation: createQuatFromEulerDegrees(18, -28, 16),
+    baseRotationDegrees: [18, -28, 16],
+    rotationRateDegrees: [34, 40, 26],
     scale: [1, 1, 1],
     mesh: createTetrahedronMesh({ id: 'tetrahedron-mesh' }),
   },
@@ -147,7 +154,8 @@ const primitiveEntries: readonly PrimitiveEntry[] = [
     materialId: 'octahedron-material',
     color: [0.78, 0.33, 0.78, 1],
     translation: [-1.8, -1.8, 0],
-    rotation: createQuatFromEulerDegrees(28, 24, -16),
+    baseRotationDegrees: [28, 24, -16],
+    rotationRateDegrees: [22, 48, 20],
     scale: [1, 1, 1],
     mesh: createOctahedronMesh({ id: 'octahedron-mesh' }),
   },
@@ -156,7 +164,8 @@ const primitiveEntries: readonly PrimitiveEntry[] = [
     materialId: 'hexahedron-material',
     color: [0.9, 0.36, 0.62, 1],
     translation: [0, -1.8, 0],
-    rotation: createQuatFromEulerDegrees(26, 30, 18),
+    baseRotationDegrees: [26, 30, 18],
+    rotationRateDegrees: [20, 32, 24],
     scale: [1, 1, 1],
     mesh: createHexahedronMesh({ id: 'hexahedron-mesh' }),
   },
@@ -165,7 +174,8 @@ const primitiveEntries: readonly PrimitiveEntry[] = [
     materialId: 'dodecahedron-material',
     color: [0.92, 0.55, 0.26, 1],
     translation: [1.8, -1.8, 0],
-    rotation: createQuatFromEulerDegrees(24, -24, 0),
+    baseRotationDegrees: [24, -24, 0],
+    rotationRateDegrees: [16, 38, 22],
     scale: [1, 1, 1],
     mesh: createDodecahedronMesh({ id: 'dodecahedron-mesh' }),
   },
@@ -174,75 +184,91 @@ const primitiveEntries: readonly PrimitiveEntry[] = [
     materialId: 'icosahedron-material',
     color: [0.35, 0.82, 0.57, 1],
     translation: [3.6, -1.8, 0],
-    rotation: createQuatFromEulerDegrees(-20, 34, -12),
+    baseRotationDegrees: [-20, 34, -12],
+    rotationRateDegrees: [28, 46, 18],
     scale: [1, 1, 1],
     mesh: createIcosahedronMesh({ id: 'icosahedron-mesh' }),
   },
 ];
 
-let scene = createSceneIr('byow-primitives-demo');
-scene = setActiveCamera(
-  appendCamera(
-    scene,
-    createPerspectiveCamera(cameraId, {
-      yfov: Math.PI / 3,
-      znear: 0.1,
-      zfar: 20,
-    }),
-  ),
-  cameraId,
-);
-scene = appendNode(
-  scene,
-  createNode('byow-primitives-camera-node', {
+const createPrimitiveScene = (timeMs: number) => {
+  let scene = createSceneIr('byow-primitives-demo');
+  scene = setActiveCamera(
+    appendCamera(
+      scene,
+      createPerspectiveCamera(cameraId, {
+        yfov: Math.PI / 3,
+        znear: 0.1,
+        zfar: 20,
+      }),
+    ),
     cameraId,
-    transform: {
-      translation: { x: 0, y: 0, z: 7.8 },
-      rotation: { x: 0, y: 0, z: 0, w: 1 },
-      scale: { x: 1, y: 1, z: 1 },
-    },
-  }),
-);
-
-for (const entry of primitiveEntries) {
-  scene = appendMaterial(scene, {
-    id: entry.materialId,
-    kind: 'custom',
-    shaderId,
-    textures: [],
-    parameters: {
-      color: {
-        x: entry.color[0],
-        y: entry.color[1],
-        z: entry.color[2],
-        w: entry.color[3],
-      },
-    },
-  });
-  scene = appendMesh(scene, {
-    ...entry.mesh,
-    materialId: entry.materialId,
-  });
+  );
   scene = appendNode(
     scene,
-    createNode(`${entry.meshId}-node`, {
-      meshId: entry.meshId,
+    createNode('byow-primitives-camera-node', {
+      cameraId,
       transform: {
-        translation: {
-          x: entry.translation[0],
-          y: entry.translation[1],
-          z: entry.translation[2],
-        },
-        rotation: entry.rotation,
-        scale: {
-          x: entry.scale[0],
-          y: entry.scale[1],
-          z: entry.scale[2],
-        },
+        translation: { x: 0, y: 0, z: 7.8 },
+        rotation: { x: 0, y: 0, z: 0, w: 1 },
+        scale: { x: 1, y: 1, z: 1 },
       },
     }),
   );
-}
+
+  const elapsedSeconds = timeMs / 1000;
+
+  for (const entry of primitiveEntries) {
+    scene = appendMaterial(scene, {
+      id: entry.materialId,
+      kind: 'custom',
+      shaderId,
+      textures: [],
+      parameters: {
+        color: {
+          x: entry.color[0],
+          y: entry.color[1],
+          z: entry.color[2],
+          w: entry.color[3],
+        },
+      },
+    });
+    scene = appendMesh(scene, {
+      ...entry.mesh,
+      materialId: entry.materialId,
+    });
+
+    const rotation = createQuatFromEulerDegrees(
+      entry.baseRotationDegrees[0] + (entry.rotationRateDegrees[0] * elapsedSeconds),
+      entry.baseRotationDegrees[1] + (entry.rotationRateDegrees[1] * elapsedSeconds),
+      entry.baseRotationDegrees[2] + (entry.rotationRateDegrees[2] * elapsedSeconds),
+    );
+
+    scene = appendNode(
+      scene,
+      createNode(`${entry.meshId}-node`, {
+        meshId: entry.meshId,
+        transform: {
+          translation: {
+            x: entry.translation[0],
+            y: entry.translation[1],
+            z: entry.translation[2],
+          },
+          rotation,
+          scale: {
+            x: entry.scale[0],
+            y: entry.scale[1],
+            z: entry.scale[2],
+          },
+        },
+      }),
+    );
+  }
+
+  return scene;
+};
+
+const scene = createPrimitiveScene(0);
 
 const window = new WindowBuilder('rieul3d byow primitives demo', width, height).build();
 const target = createDenoSurfaceTarget(
@@ -286,11 +312,15 @@ const materialRegistry = registerWgslMaterial(createMaterialRegistry(), {
     },
   ],
 });
-const evaluatedScene = evaluateScene(scene, { timeMs: 0 });
+let evaluatedScene = evaluateScene(scene, { timeMs: 0 });
+const startTime = performance.now();
 
 ensureSceneMeshResidency(gpuContext, residency, scene, evaluatedScene);
 
 const drawFrame = () => {
+  const timeMs = performance.now() - startTime;
+  const animatedScene = createPrimitiveScene(timeMs);
+  evaluatedScene = evaluateScene(animatedScene, { timeMs });
   renderForwardFrame(gpuContext, surfaceBinding, residency, evaluatedScene, materialRegistry);
   windowSurface.present();
 };

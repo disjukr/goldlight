@@ -85,6 +85,54 @@ const assertApproxArrayEquals = (
   }
 };
 
+const assertTriangleWindingMatchesNormals = (mesh: MeshPrimitive) => {
+  const positions = getAttribute(mesh, 'POSITION').values;
+  const normals = getAttribute(mesh, 'NORMAL').values;
+  const indices = mesh.indices ?? [];
+
+  for (let index = 0; index < indices.length; index += 3) {
+    const aIndex = indices[index] * 3;
+    const bIndex = indices[index + 1] * 3;
+    const cIndex = indices[index + 2] * 3;
+
+    const ax = positions[aIndex];
+    const ay = positions[aIndex + 1];
+    const az = positions[aIndex + 2];
+    const bx = positions[bIndex];
+    const by = positions[bIndex + 1];
+    const bz = positions[bIndex + 2];
+    const cx = positions[cIndex];
+    const cy = positions[cIndex + 1];
+    const cz = positions[cIndex + 2];
+
+    const abx = bx - ax;
+    const aby = by - ay;
+    const abz = bz - az;
+    const acx = cx - ax;
+    const acy = cy - ay;
+    const acz = cz - az;
+
+    const faceX = (aby * acz) - (abz * acy);
+    const faceY = (abz * acx) - (abx * acz);
+    const faceZ = (abx * acy) - (aby * acx);
+    const faceLength = Math.hypot(faceX, faceY, faceZ);
+
+    if (faceLength < 1e-6) {
+      continue;
+    }
+
+    const averageNormalX = (normals[aIndex] + normals[bIndex] + normals[cIndex]) / 3;
+    const averageNormalY = (normals[aIndex + 1] + normals[bIndex + 1] + normals[cIndex + 1]) / 3;
+    const averageNormalZ = (normals[aIndex + 2] + normals[bIndex + 2] + normals[cIndex + 2]) / 3;
+    const orientation = (faceX * averageNormalX) + (faceY * averageNormalY) + (faceZ * averageNormalZ);
+
+    assert(
+      orientation > 0,
+      `triangle ${index / 3} winding opposes its vertex normals`,
+    );
+  }
+};
+
 const assertMeshShape = (
   mesh: MeshPrimitive,
   expectedVertexCount: number,
@@ -163,6 +211,10 @@ Deno.test('torus and capsule duplicate seam vertices with matching attributes', 
       capsulePositions.slice(last * 3, (last * 3) + 3),
     );
   }
+});
+
+Deno.test('torus triangle winding matches outward normals', () => {
+  assertTriangleWindingMatchesNormals(createTorusMesh({ id: 'torus' }));
 });
 
 Deno.test('generated meshes integrate with scene evaluation and residency upload', () => {

@@ -3337,9 +3337,27 @@ const exportCubemapCross = (snapshot: CubemapSnapshotResult): CubemapExportResul
   copyCubemapFace(lookup.faceMap.get('negative-y')!, bytes, width, snapshot.size, 0);
   copyCubemapFace(lookup.faceMap.get('negative-x')!, bytes, width, 0, snapshot.size);
   copyCubemapFace(lookup.faceMap.get('positive-z')!, bytes, width, snapshot.size, snapshot.size);
-  copyCubemapFace(lookup.faceMap.get('positive-x')!, bytes, width, snapshot.size * 2, snapshot.size);
-  copyCubemapFace(lookup.faceMap.get('negative-z')!, bytes, width, snapshot.size * 3, snapshot.size);
-  copyCubemapFace(lookup.faceMap.get('positive-y')!, bytes, width, snapshot.size, snapshot.size * 2);
+  copyCubemapFace(
+    lookup.faceMap.get('positive-x')!,
+    bytes,
+    width,
+    snapshot.size * 2,
+    snapshot.size,
+  );
+  copyCubemapFace(
+    lookup.faceMap.get('negative-z')!,
+    bytes,
+    width,
+    snapshot.size * 3,
+    snapshot.size,
+  );
+  copyCubemapFace(
+    lookup.faceMap.get('positive-y')!,
+    bytes,
+    width,
+    snapshot.size,
+    snapshot.size * 2,
+  );
 
   return {
     layout: 'cross',

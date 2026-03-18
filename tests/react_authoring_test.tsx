@@ -80,19 +80,30 @@ Deno.test('node transform shorthands override matching fields on transform', () 
 });
 
 Deno.test('node transform shorthands reject invalid tuple lengths', () => {
-  assertThrows(() =>
-    authoringTreeToSceneIr(
-      <scene id='jsx-scene'>
-        <group id='bad-rotation' rotation={[0, 0, 1] as unknown as [number, number, number, number]} />
-      </scene>,
-    ), Error, 'rotation shorthand must contain exactly 4 numbers');
+  assertThrows(
+    () =>
+      authoringTreeToSceneIr(
+        <scene id='jsx-scene'>
+          <group
+            id='bad-rotation'
+            rotation={[0, 0, 1] as unknown as [number, number, number, number]}
+          />
+        </scene>,
+      ),
+    Error,
+    'rotation shorthand must contain exactly 4 numbers',
+  );
 
-  assertThrows(() =>
-    authoringTreeToSceneIr(
-      <scene id='jsx-scene'>
-        <group id='bad-position' position={[1, 2] as unknown as [number, number, number]} />
-      </scene>,
-    ), Error, 'position/scale shorthand must contain exactly 3 numbers');
+  assertThrows(
+    () =>
+      authoringTreeToSceneIr(
+        <scene id='jsx-scene'>
+          <group id='bad-position' position={[1, 2] as unknown as [number, number, number]} />
+        </scene>,
+      ),
+    Error,
+    'position/scale shorthand must contain exactly 3 numbers',
+  );
 });
 
 Deno.test('authoringTreeToSceneIr lowers JSX-authored trees with component and fragment composition', () => {

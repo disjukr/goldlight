@@ -82,12 +82,12 @@ Deno.test('exportCubemapSnapshot lays faces out in horizontal cross order', () =
 
   assertEquals(result.width, 8);
   assertEquals(result.height, 6);
-  assertEquals(readPixel(result.bytes, result.width, 3, 1), faceColors['positive-y']);
+  assertEquals(readPixel(result.bytes, result.width, 3, 1), faceColors['negative-y']);
   assertEquals(readPixel(result.bytes, result.width, 1, 3), faceColors['negative-x']);
   assertEquals(readPixel(result.bytes, result.width, 3, 3), faceColors['positive-z']);
   assertEquals(readPixel(result.bytes, result.width, 5, 3), faceColors['positive-x']);
   assertEquals(readPixel(result.bytes, result.width, 7, 3), faceColors['negative-z']);
-  assertEquals(readPixel(result.bytes, result.width, 3, 5), faceColors['negative-y']);
+  assertEquals(readPixel(result.bytes, result.width, 3, 5), faceColors['positive-y']);
 });
 
 Deno.test('exportCubemapSnapshot reprojects cubemap faces into equirectangular layout', () => {

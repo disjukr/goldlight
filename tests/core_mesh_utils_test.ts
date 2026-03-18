@@ -56,6 +56,12 @@ Deno.test('getMeshBounds rejects meshes without valid POSITION data', () => {
       attributes: [{ semantic: 'POSITION', itemSize: 3, values: [0, 1] }],
     }))
   );
+  assertThrows(() =>
+    getMeshBounds(createMesh({
+      id: 'mesh-nan',
+      attributes: [{ semantic: 'POSITION', itemSize: 3, values: [0, 1, Number.NaN] }],
+    }))
+  );
 });
 
 Deno.test('createMeshNormalsAttribute builds normalized indexed normals', () => {
@@ -126,8 +132,29 @@ Deno.test('createMeshNormalsAttribute rejects invalid triangle topology', () => 
   );
   assertThrows(() =>
     createMeshNormalsAttribute(createMesh({
+      id: 'mesh-fractional-index',
+      indices: [0, 1.5, 2],
+      attributes: [{ semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0, 0, 1, 0] }],
+    }))
+  );
+  assertThrows(() =>
+    createMeshNormalsAttribute(createMesh({
+      id: 'mesh-nan-index',
+      indices: [0, Number.NaN, 2],
+      attributes: [{ semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0, 0, 1, 0] }],
+    }))
+  );
+  assertThrows(() =>
+    createMeshNormalsAttribute(createMesh({
       id: 'mesh-non-indexed',
       attributes: [{ semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0] }],
+    }))
+  );
+  assertThrows(() =>
+    createMeshNormalsAttribute(createMesh({
+      id: 'mesh-nan-position',
+      indices: [0, 1, 2],
+      attributes: [{ semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0, 0, Number.NaN, 0] }],
     }))
   );
 });

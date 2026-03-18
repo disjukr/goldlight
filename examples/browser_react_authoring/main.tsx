@@ -7,6 +7,7 @@ import {
   configureSurfaceContext,
   createRuntimeResidency,
   ensureSceneMeshResidency,
+  invalidateResidency,
   requestGpuContext,
 } from '../../packages/gpu/mod.ts';
 import { createBrowserSurfaceTarget } from '../../packages/platform/mod.ts';
@@ -59,9 +60,11 @@ const TriangleScene = () => (
 
 const sceneRoot = createSceneRoot();
 let scene = sceneRoot.getScene();
+let residency = createRuntimeResidency();
 
 sceneRoot.subscribe((commit) => {
   scene = commit.scene;
+  invalidateResidency(residency);
 });
 sceneRoot.render(<TriangleScene />);
 
@@ -77,7 +80,6 @@ if (!canvasContext) {
 }
 
 const surface = configureSurfaceContext(gpuContext, canvasContext as unknown as GPUCanvasContext);
-const residency = createRuntimeResidency();
 const materialRegistry = createMaterialRegistry();
 
 const drawFrame = () => {

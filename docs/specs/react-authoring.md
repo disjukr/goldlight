@@ -69,6 +69,8 @@ discussion `#85` receives a decision.
   the same TSX surface before lowering.
 - `createSceneRoot()` now provides a data-only commit bridge that publishes full `SceneIr` snapshots
   plus previous-scene/revision metadata to caller-owned subscribers.
+- Integrations that cache GPU residency against scene/resource IDs must invalidate or rebuild that
+  residency when a new committed snapshot replaces resource contents under stable IDs.
 - Rendering, residency preparation, and execution continue to live in the core/gpu/renderer layers.
 - The browser example now demonstrates full-scene JSX authoring plus scene-root snapshot commits,
   not a live React reconciler.

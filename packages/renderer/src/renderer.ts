@@ -3,6 +3,7 @@ import type { Material } from '@rieul3d/ir';
 import {
   acquireColorAttachmentView,
   acquireDepthAttachmentView,
+  createOffscreenContext,
   ensureMaterialResidency,
   type GpuReadbackContext,
   readOffscreenSnapshot,
@@ -238,6 +239,7 @@ const builtInDeferredLightingProgramId = 'built-in:deferred-lighting';
 const builtInSdfRaymarchProgramId = 'built-in:sdf-raymarch';
 const builtInVolumeRaymarchProgramId = 'built-in:volume-raymarch';
 const builtInNodePickProgramId = 'built-in:node-pick';
+const nodePickTargetFormat = 'rgba8unorm';
 const textureBindingUsage = 0x04;
 const renderAttachmentUsage = 0x10;
 const uniformUsage = 0x40;
@@ -1644,6 +1646,27 @@ export const decodePickId = (pixel: ArrayLike<number>): number =>
   ((pixel[2] ?? 0) << 16) +
   ((pixel[3] ?? 0) << 24);
 
+const assertNodePickBindingFormat = (binding: RenderContextBinding): void => {
+  if (binding.target.format !== nodePickTargetFormat) {
+    throw new Error(
+      `node picking requires a ${nodePickTargetFormat} render target, received "${binding.target.format}"`,
+    );
+  }
+};
+
+const assertNodePickSceneCompatibility = (evaluatedScene: EvaluatedScene): void => {
+  for (const node of evaluatedScene.nodes) {
+    const material = node.material;
+    if (!node.mesh || !material?.shaderId) {
+      continue;
+    }
+
+    throw new Error(
+      `node picking does not support custom shader material "${material.id}" on node "${node.node.id}"`,
+    );
+  }
+};
+
 const createWorldTransformUniformData = (worldMatrix: readonly number[]): Float32Array =>
   Float32Array.from(worldMatrix.slice(0, 16));
 
@@ -2294,6 +2317,8 @@ export const renderNodePickFrame = (
   residency: RuntimeResidency,
   evaluatedScene: EvaluatedScene,
 ): NodePickRenderResult => {
+  assertNodePickBindingFormat(binding);
+  assertNodePickSceneCompatibility(evaluatedScene);
   const pipeline = ensureNodePickPipeline(context, residency, binding.target.format);
   const viewProjectionMatrix = createViewProjectionMatrix(binding, evaluatedScene.activeCamera);
   const picks = createNodePickItems(evaluatedScene);
@@ -2415,8 +2440,18 @@ export const renderNodePickSnapshot = async (
   residency: RuntimeResidency,
   evaluatedScene: EvaluatedScene,
 ): Promise<NodePickSnapshotResult> => {
-  const frame = renderNodePickFrame(context, binding, residency, evaluatedScene);
-  const snapshot = await readOffscreenSnapshot(context, binding);
+  const pickBinding = createOffscreenContext({
+    device: context.device as GPUDevice,
+    target: {
+      kind: 'offscreen',
+      width: binding.target.width,
+      height: binding.target.height,
+      format: nodePickTargetFormat,
+      sampleCount: 1,
+    },
+  });
+  const frame = renderNodePickFrame(context, pickBinding, residency, evaluatedScene);
+  const snapshot = await readOffscreenSnapshot(context, pickBinding);
 
   return {
     ...frame,

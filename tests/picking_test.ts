@@ -6,7 +6,7 @@ import {
 } from 'jsr:@std/assert@^1.0.14';
 import { evaluateScene } from '@rieul3d/core';
 import { createOffscreenContext, createRuntimeResidency } from '@rieul3d/gpu';
-import { appendMesh, appendNode, createNode, createSceneIr } from '@rieul3d/ir';
+import { appendMaterial, appendMesh, appendNode, createNode, createSceneIr } from '@rieul3d/ir';
 import {
   createNodePickItems,
   decodePickId,
@@ -225,6 +225,67 @@ Deno.test('renderNodePickFrame draws mesh nodes and uploads encoded id colors', 
   });
 });
 
+Deno.test('renderNodePickFrame rejects non-rgba8unorm targets', () => {
+  const mocks = createRenderMocks();
+  const runtimeResidency = createRuntimeResidency();
+
+  assertThrows(() =>
+    renderNodePickFrame(
+      mocks as unknown as GpuRenderExecutionContext,
+      createOffscreenContext({
+        device: mocks.device as unknown as GPUDevice,
+        target: {
+          kind: 'offscreen',
+          width: 16,
+          height: 16,
+          format: 'bgra8unorm',
+          sampleCount: 1,
+        },
+      }),
+      runtimeResidency,
+      evaluateScene(createSceneIr('scene'), { timeMs: 0 }),
+    )
+  );
+});
+
+Deno.test('renderNodePickFrame rejects custom shader materials', () => {
+  const mocks = createRenderMocks();
+  const runtimeResidency = createRuntimeResidency();
+  let scene = createSceneIr('scene');
+  scene = appendMaterial(scene, {
+    id: 'custom-material',
+    kind: 'custom',
+    shaderId: 'custom:shader',
+    textures: [],
+    parameters: {},
+  });
+  scene = appendMesh(scene, {
+    id: 'mesh',
+    materialId: 'custom-material',
+    attributes: [{ semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0, 0, 1, 0] }],
+  });
+  scene = appendNode(scene, createNode('node', { meshId: 'mesh' }));
+
+  runtimeResidency.geometry.set('mesh', {
+    meshId: 'mesh',
+    attributeBuffers: { POSITION: { id: 0 } as unknown as GPUBuffer },
+    vertexCount: 3,
+    indexCount: 0,
+  });
+
+  assertThrows(() =>
+    renderNodePickFrame(
+      mocks as unknown as GpuRenderExecutionContext,
+      createOffscreenContext({
+        device: mocks.device as unknown as GPUDevice,
+        target: createHeadlessTarget(16, 16),
+      }),
+      runtimeResidency,
+      evaluateScene(scene, { timeMs: 0 }),
+    )
+  );
+});
+
 Deno.test('decodePickId and readNodePickHit map snapshot pixels back to node ids', () => {
   const snapshot = {
     width: 2,
@@ -307,6 +368,52 @@ Deno.test('renderNodePickSnapshot returns compact offscreen bytes and pick metad
     [...snapshot.bytes],
     [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
   );
+  assertEquals(readNodePickHit(snapshot, 0, 0), {
+    encodedId: 1,
+    nodeId: 'node',
+    meshId: 'mesh',
+  });
+});
+
+Deno.test('renderNodePickSnapshot uses an internal rgba8unorm target for readback', async () => {
+  const mocks = createRenderMocks([
+    [1, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0],
+  ]);
+  const runtimeResidency = createRuntimeResidency();
+  let scene = createSceneIr('scene');
+  scene = appendMesh(scene, {
+    id: 'mesh',
+    attributes: [{ semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0, 0, 1, 0] }],
+  });
+  scene = appendNode(scene, createNode('node', { meshId: 'mesh' }));
+
+  runtimeResidency.geometry.set('mesh', {
+    meshId: 'mesh',
+    attributeBuffers: { POSITION: { id: 0 } as unknown as GPUBuffer },
+    vertexCount: 3,
+    indexCount: 0,
+  });
+
+  const snapshot = await renderNodePickSnapshot(
+    mocks as unknown as Parameters<typeof renderNodePickSnapshot>[0],
+    createOffscreenContext({
+      device: mocks.device as unknown as GPUDevice,
+      target: {
+        kind: 'offscreen',
+        width: 2,
+        height: 2,
+        format: 'bgra8unorm',
+        sampleCount: 1,
+      },
+    }),
+    runtimeResidency,
+    evaluateScene(scene, { timeMs: 0 }),
+  );
+
+  assertEquals(snapshot.width, 2);
+  assertEquals(snapshot.height, 2);
+  assertEquals(snapshot.picks, [{ encodedId: 1, nodeId: 'node', meshId: 'mesh' }]);
   assertEquals(readNodePickHit(snapshot, 0, 0), {
     encodedId: 1,
     nodeId: 'node',

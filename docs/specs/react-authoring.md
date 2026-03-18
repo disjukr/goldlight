@@ -9,10 +9,12 @@ React integration is a separate package. It must not become the source of truth 
 - JSX authoring trees are built through `@rieul3d/react` primitives such as `<scene>` and `<node>`.
 - Authored trees may also declare scene resources such as `<camera>`, `<mesh>`, `<material>`,
   `<light>`, `<texture>`, and `<asset>`.
-- The JSX surface may expose React-style aliases such as `<group>`, `<perspectiveCamera>`,
-  `<orthographicCamera>`, and `<directionalLight>` when they lower cleanly into the same Scene IR.
-  Camera/light aliases stay resource-only by default and synthesize an initial bound node only when
-  authors provide node intent such as children or node transform/id props.
+- Node-like authoring elements may expose React-style shorthands such as `<group>` plus transform
+  props such as `position`, `rotation`, and `scale` when they still lower cleanly into the same
+  node-oriented Scene IR structure.
+- Higher-level camera/light composition should prefer React convenience components built from
+  `<camera>`, `<light>`, and `<node>` instead of expanding the primitive JSX surface with more
+  built-in combined object tags.
 - Node-like authoring elements may use transform shorthands such as `position`, `rotation`, and
   `scale`; these fold into the existing Scene IR transform object during lowering.
 - Authored trees are lowered into complete Scene IR or evaluated scene inputs.
@@ -20,8 +22,9 @@ React integration is a separate package. It must not become the source of truth 
 
 ## Scope
 
-The current package owns JSX authoring, lowering, and a first scene-root bridge that publishes
-committed `SceneIr` snapshots. It does not define a live React renderer or custom reconciler yet.
+The current package owns JSX authoring, lowering, and a first `createSceneRoot()` implementation
+that publishes committed `SceneIr` snapshots. It does not define a live React renderer or custom
+reconciler yet.
 
 ## Direction
 
@@ -43,24 +46,19 @@ Core scene/runtime packages must still remain usable without React. A React-faci
 be an adapter layer over the existing IR, evaluation, and rendering systems, not a replacement for
 them.
 
-The current camera/light alias surface follows the proposed boundary in
-[`../adr/0005-react-scene-object-aliases.md`](../adr/0005-react-scene-object-aliases.md): combined
-aliases can synthesize a default resource plus its first bound node when authors ask for node
-behavior, while explicit `<camera>`, `<light>`, and `<node>` authoring stays available for
-resource-only and multi-bind scenes. The remaining open question is whether broader object
-composition such as mesh/material authoring should join that same combined surface.
+The current repository still exposes some built-in combined camera/light aliases, but the proposed
+boundary in [`../adr/0005-react-scene-object-aliases.md`](../adr/0005-react-scene-object-aliases.md)
+now prefers moving that convenience into React components while keeping primitive JSX authoring
+aligned with explicit `<camera>`, `<light>`, and `<node>` concepts. That avoids turning each new
+combined scene object into another primitive-surface decision.
 
-The next proposed step for issue `#64` was captured in
-[`../adr/0006-react-scene-root-bridge.md`](../adr/0006-react-scene-root-bridge.md), and the
-repository now has a first implementation of that bridge: `createSceneRoot()` commits authored trees
-into `SceneIr` snapshots and lets caller-owned integrations subscribe to commit events without
-moving residency or renderer ownership into the React package. ADR 0006 still remains Proposed until
-discussion `#85` receives a decision.
-
-The next blocker after that first bridge is now captured in
-[`../adr/0007-react-scene-root-diff-contract.md`](../adr/0007-react-scene-root-diff-contract.md):
-should the public live-update contract remain full-scene snapshots for now, or should React expose a
-diff/apply payload for committed changes? That follow-up remains Proposed pending discussion `#90`.
+The next proposed step for issue `#64` is now captured in
+[`../adr/0006-react-scene-root-bridge.md`](../adr/0006-react-scene-root-bridge.md): move from the
+current provisional snapshot bridge toward a scene update boundary that can apply high-frequency node
+changes without whole-scene residency rebuilds, while still keeping residency, rendering, offscreen
+targets, and multi-scene orchestration outside the React package. The repository currently has a
+first implementation waypoint in `createSceneRoot()`, but ADR 0006 does not treat that full-snapshot
+publication shape as the final contract.
 
 ## Current Status
 
@@ -68,15 +66,18 @@ diff/apply payload for committed changes? That follow-up remains Proposed pendin
 - The package now exposes a JSX runtime so TSX can author scene trees directly.
 - Authoring nodes lower core node metadata such as names, mesh/camera/light bindings, and transforms
   into Scene IR, including React-style `position`/`rotation`/`scale` shorthands.
-- The JSX surface now includes combined camera/light aliases plus group-style node aliases so TSX
-  can read closer to react-three-fiber while still lowering into the same IR.
+- The JSX surface currently includes group-style node aliases and still carries some built-in
+  combined camera/light aliases from the first authoring pass.
 - Root scene trees can now also declare cameras, meshes, materials, lights, textures, and assets in
   the same TSX surface before lowering.
+- The preferred long-term direction is to move camera/light convenience toward reusable React
+  components while keeping primitive JSX authoring tied to explicit IR concepts.
 - `createSceneRoot()` now provides a data-only commit bridge that publishes full `SceneIr` snapshots
-  plus previous-scene/revision metadata to caller-owned subscribers.
+  plus previous-scene/revision metadata to caller-owned subscribers as a current implementation
+  waypoint.
 - `summarizeSceneRootCommit()` can derive resource-level added/removed/updated/unchanged ID sets
-  from snapshot commits so integrations can make selective invalidation decisions without a separate
-  public diff/apply contract.
+  from snapshot commits so integrations can make selective invalidation decisions while a finer
+  runtime-facing partial-apply contract is designed.
 - `commitSummaryNeedsResidencyReset()` captures the current safe residency-reset boundary for
   snapshot consumers: resource changes plus node/topology changes still require a full reset until
   finer-grained residency pruning exists.
@@ -85,12 +86,13 @@ diff/apply payload for committed changes? That follow-up remains Proposed pendin
   summaries now let them scope that rebuild without missing node-only changes that can remap which
   stable resources remain live.
 - Rendering, residency preparation, and execution continue to live in the core/gpu/renderer layers.
-- The browser example now demonstrates full-scene JSX authoring plus scene-root snapshot commits,
-  not a live React reconciler.
-- The next unresolved architecture question is whether this full-snapshot scene-root bridge should
-  remain the long-term boundary or evolve toward a finer-grained diff/apply contract.
-- Issue `#89` now tracks the implementation follow-up once discussion `#90` resolves that contract
-  question.
+- The browser example now demonstrates full-scene JSX authoring plus the current snapshot-based
+  `createSceneRoot()` flow, not a live React reconciler.
+- The next unresolved architecture question is how React-authored changes should cross into runtime
+  update planning so frequent node changes can avoid whole-scene resets while multi-scene composition
+  remains outside React ownership.
+- Issue `#89` now tracks follow-up implementation work around the next runtime-facing update
+  contract.
 - [`../../examples/browser_react_authoring/README.md`](../../examples/browser_react_authoring/README.md)
   shows the reference browser flow: author a tree with `@rieul3d/react` TSX, commit it through
   `createSceneRoot()`, summarize that commit, apply `commitSummaryNeedsResidencyReset()` for the

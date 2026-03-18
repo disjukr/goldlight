@@ -10,17 +10,12 @@ supersedes them.
   types
 - [`0003-functional-first.md`](./0003-functional-first.md): public APIs stay data-oriented and
   functional-first
-
-## Proposed Decisions
-
 - [`0004-react-jsx-authoring.md`](./0004-react-jsx-authoring.md): React package owns JSX authoring
   while core runtime state stays outside React
 - [`0005-react-scene-object-aliases.md`](./0005-react-scene-object-aliases.md): React authoring may
-  add combined camera/light-style JSX aliases without changing core ownership
+  provide convenience scene-object components without changing primitive IR ownership
 - [`0006-react-scene-root-bridge.md`](./0006-react-scene-root-bridge.md): React should publish
-  committed scene snapshots through a scene-root bridge before it owns a full live reconciler
-- [`0007-react-scene-root-diff-contract.md`](./0007-react-scene-root-diff-contract.md): decide
-  whether React scene-root commits should stay snapshot-only or expose diff/apply data
+  scene updates through a partial-apply boundary without taking renderer ownership
 
 ## Related References
 

@@ -204,6 +204,35 @@ const nodeResourceBindingsChanged = (currentNode: Node, previousNode: Node): boo
     currentNode.lightId !== previousNode.lightId;
 };
 
+const buildChildNodeIdsByParentId = (nodes: readonly Node[]): Map<string | undefined, string[]> => {
+  const childNodeIdsByParentId = new Map<string | undefined, string[]>();
+  for (const node of nodes) {
+    const siblingIds = childNodeIdsByParentId.get(node.parentId) ?? [];
+    siblingIds.push(node.id);
+    childNodeIdsByParentId.set(node.parentId, siblingIds);
+  }
+  return childNodeIdsByParentId;
+};
+
+const collectDescendantNodeIds = (
+  nodeIds: Iterable<string>,
+  childNodeIdsByParentId: ReadonlyMap<string | undefined, readonly string[]>,
+): string[] => {
+  const descendantNodeIds: string[] = [];
+  const queuedNodeIds = [...nodeIds];
+
+  for (let index = 0; index < queuedNodeIds.length; index += 1) {
+    const nodeId = queuedNodeIds[index];
+    const childNodeIds = childNodeIdsByParentId.get(nodeId) ?? [];
+    for (const childNodeId of childNodeIds) {
+      descendantNodeIds.push(childNodeId);
+      queuedNodeIds.push(childNodeId);
+    }
+  }
+
+  return descendantNodeIds;
+};
+
 const compareSceneRootNodes = (
   currentNodes: readonly Node[],
   previousNodes: readonly Node[] | undefined,
@@ -211,7 +240,7 @@ const compareSceneRootNodes = (
   const summary = compareSceneRootCollection(currentNodes, previousNodes);
   const currentById = new Map(currentNodes.map((node) => [node.id, node]));
   const previousById = new Map((previousNodes ?? []).map((node) => [node.id, node]));
-  const transformIds: string[] = [];
+  const directlyChangedTransformIds: string[] = [];
   const parentingIds: string[] = [];
   const resourceBindingIds: string[] = [];
   const metadataIds: string[] = [];
@@ -223,11 +252,11 @@ const compareSceneRootNodes = (
       continue;
     }
 
-    if (fingerprintValue(currentNode.transform) !== fingerprintValue(previousNode.transform)) {
-      transformIds.push(nodeId);
-    }
     if (currentNode.parentId !== previousNode.parentId) {
       parentingIds.push(nodeId);
+    }
+    if (fingerprintValue(currentNode.transform) !== fingerprintValue(previousNode.transform)) {
+      directlyChangedTransformIds.push(nodeId);
     }
     if (nodeResourceBindingsChanged(currentNode, previousNode)) {
       resourceBindingIds.push(nodeId);
@@ -236,6 +265,18 @@ const compareSceneRootNodes = (
       metadataIds.push(nodeId);
     }
   }
+
+  const childNodeIdsByParentId = buildChildNodeIdsByParentId(currentNodes);
+  const transformIds = [
+    ...new Set([
+      ...directlyChangedTransformIds,
+      ...parentingIds,
+      ...collectDescendantNodeIds(
+        [...directlyChangedTransformIds, ...parentingIds],
+        childNodeIdsByParentId,
+      ),
+    ]),
+  ];
 
   const classifiedUpdatedIds = new Set([
     ...transformIds,

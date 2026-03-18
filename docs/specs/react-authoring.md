@@ -85,7 +85,9 @@ full-snapshot publication shape as the final contract.
 - `planSceneRootCommitUpdates()` now derives a data-only update plan from snapshot commits that
   separates node transform-only changes from parenting, resource-binding, and metadata changes so
   integrations can avoid full residency resets for high-frequency transform updates without pulling
-  GPU ownership into `@rieul3d/react`.
+  GPU ownership into `@rieul3d/react`; descendant nodes whose world transforms move because an
+  ancestor changed are included in the transform buckets even when their local node data is
+  otherwise unchanged.
 - `@rieul3d/gpu` now exposes ID-keyed targeted invalidation helpers, so snapshot consumers can drop
   changed mesh/material/texture/volume residency entries before falling back to a full reset for
   scene-topology changes.

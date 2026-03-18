@@ -773,9 +773,14 @@ Deno.test('planSceneRootCommitUpdates classifies node mutations by update kind',
         <node id='binding-node' meshId='triangle-a' />
         <node id='metadata-node' name='Before' />
         <node id='parent-a'>
-          <node id='reparent-target' />
+          <node id='reparent-target'>
+            <node id='reparent-child' />
+          </node>
         </node>
         <node id='parent-b' />
+        <node id='transform-parent' position={[0, 0, 0]}>
+          <node id='transform-child' />
+        </node>
       </group>
     </scene>,
   );
@@ -804,7 +809,12 @@ Deno.test('planSceneRootCommitUpdates classifies node mutations by update kind',
         <node id='metadata-node' name='After' />
         <node id='parent-a' />
         <node id='parent-b'>
-          <node id='reparent-target' />
+          <node id='reparent-target'>
+            <node id='reparent-child' />
+          </node>
+        </node>
+        <node id='transform-parent' position={[4, 5, 6]}>
+          <node id='transform-child' />
         </node>
       </group>
     </scene>,
@@ -813,15 +823,70 @@ Deno.test('planSceneRootCommitUpdates classifies node mutations by update kind',
   assertEquals(plans[1]?.nodes, {
     addedIds: [],
     removedIds: [],
-    updatedIds: ['transform-node', 'binding-node', 'metadata-node', 'reparent-target'],
-    unchangedIds: ['scene-root', 'parent-a', 'parent-b'],
-    transformIds: ['transform-node'],
-    transformOnlyIds: ['transform-node'],
+    updatedIds: [
+      'transform-node',
+      'binding-node',
+      'metadata-node',
+      'reparent-target',
+      'transform-parent',
+    ],
+    unchangedIds: [
+      'scene-root',
+      'parent-a',
+      'parent-b',
+      'reparent-child',
+      'transform-child',
+    ],
+    transformIds: [
+      'transform-node',
+      'transform-parent',
+      'reparent-target',
+      'transform-child',
+      'reparent-child',
+    ],
+    transformOnlyIds: ['transform-node', 'transform-parent', 'transform-child', 'reparent-child'],
     parentingIds: ['reparent-target'],
     resourceBindingIds: ['binding-node'],
     metadataIds: ['metadata-node'],
     otherUpdatedIds: [],
   });
+});
+
+Deno.test('planSceneRootCommitUpdates propagates ancestor transform changes to unchanged descendants', () => {
+  const root = createSceneRoot();
+  const plans: ReturnType<typeof planSceneRootCommitUpdates>[] = [];
+
+  root.subscribe((commit) => {
+    plans.push(planSceneRootCommitUpdates(commit));
+  });
+
+  root.render(
+    <scene id='jsx-scene'>
+      <group id='scene-root'>
+        <node id='ancestor' position={[0, 0, 0]}>
+          <node id='child'>
+            <node id='grandchild' />
+          </node>
+        </node>
+      </group>
+    </scene>,
+  );
+
+  root.render(
+    <scene id='jsx-scene'>
+      <group id='scene-root'>
+        <node id='ancestor' position={[1, 2, 3]}>
+          <node id='child'>
+            <node id='grandchild' />
+          </node>
+        </node>
+      </group>
+    </scene>,
+  );
+
+  assertEquals(plans[1]?.nodes.updatedIds, ['ancestor']);
+  assertEquals(plans[1]?.nodes.transformIds, ['ancestor', 'child', 'grandchild']);
+  assertEquals(plans[1]?.nodes.transformOnlyIds, ['ancestor', 'child', 'grandchild']);
 });
 
 Deno.test('planSceneRootCommitUpdates keeps transform-only ids separate from binding updates', () => {

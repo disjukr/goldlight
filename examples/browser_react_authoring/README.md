@@ -7,8 +7,8 @@ the published `SceneIr` snapshot through the browser forward pipeline. Because t
 whole-scene snapshots, the example also uses `planSceneRootCommitUpdates()` and
 `summarizeSceneRootCommit()` together with `@rieul3d/gpu` targeted invalidation helpers so cached
 GPU residency can drop changed mesh/material/texture/volume entries by ID, keep transform-only node
-updates on the lighter path, and still fall back to a full reset for node topology or binding
-changes.
+updates on the lighter path, include unchanged descendants whose world transforms moved under an
+updated ancestor, and still fall back to a full reset for node topology or binding changes.
 
 The example now follows ADR 0005's preferred direction: camera/light convenience lives in reusable
 React components while primitive JSX authoring stays closer to explicit Scene IR concepts such as

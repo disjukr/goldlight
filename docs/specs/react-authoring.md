@@ -50,6 +50,12 @@ behavior, while explicit `<camera>`, `<light>`, and `<node>` authoring stays ava
 resource-only and multi-bind scenes. The remaining open question is whether broader object
 composition such as mesh/material authoring should join that same combined surface.
 
+The next proposed step for issue `#64` is captured in
+[`../adr/0006-react-scene-root-bridge.md`](../adr/0006-react-scene-root-bridge.md): introduce a
+React scene-root bridge that publishes committed `SceneIr` snapshots without moving residency or
+renderer ownership into the React package. That decision is still pending discussion and should not
+be treated as accepted yet.
+
 ## Current Status
 
 - The React package currently lowers declarative authoring structures into SceneIr-friendly data.
@@ -63,6 +69,8 @@ composition such as mesh/material authoring should join that same combined surfa
 - Rendering, residency preparation, and execution continue to live in the core/gpu/renderer layers.
 - The browser example now demonstrates full-scene JSX authoring plus lowering, not a live React
   reconciler.
+- The next unresolved architecture question is how a live React scene root should hand committed
+  scene updates to caller-owned runtime integrations.
 - [`../../examples/browser_react_authoring/README.md`](../../examples/browser_react_authoring/README.md)
   shows the reference browser flow: author a tree with `@rieul3d/react` TSX, lower node data into
   Scene IR, then hand the result to the existing runtime and renderer layers.

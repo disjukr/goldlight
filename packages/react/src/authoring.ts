@@ -125,19 +125,16 @@ export type NodeJsxProps = Readonly<
 export type PerspectiveCameraJsxProps = Readonly<
   {
     id: string;
-    children?: AuthoringRenderable;
   } & Partial<Omit<CameraPerspective, 'id' | 'type'>>
 >;
 export type OrthographicCameraJsxProps = Readonly<
   {
     id: string;
-    children?: AuthoringRenderable;
   } & Partial<Omit<CameraOrthographic, 'id' | 'type'>>
 >;
 export type DirectionalLightJsxProps = Readonly<
   {
     id: string;
-    children?: AuthoringRenderable;
   } & Omit<Light, 'id' | 'kind'>
 >;
 
@@ -338,24 +335,23 @@ export const jsx = (
   }
 
   if (type === 'perspectiveCamera') {
-    const { id, children: _children, ...cameraProps } = authoringProps as PerspectiveCameraJsxProps;
-    return createAuthoringElement('camera', id, { type: 'perspective', ...cameraProps }, children);
+    const { id, ...cameraProps } = authoringProps as PerspectiveCameraJsxProps;
+    return createAuthoringElement('camera', id, { ...cameraProps, type: 'perspective' }, children);
   }
 
   if (type === 'orthographicCamera') {
-    const { id, children: _children, ...cameraProps } =
-      authoringProps as OrthographicCameraJsxProps;
+    const { id, ...cameraProps } = authoringProps as OrthographicCameraJsxProps;
     return createAuthoringElement(
       'camera',
       id,
-      { type: 'orthographic', ...cameraProps },
+      { ...cameraProps, type: 'orthographic' },
       children,
     );
   }
 
   if (type === 'directionalLight') {
-    const { id, children: _children, ...lightProps } = authoringProps as DirectionalLightJsxProps;
-    return createAuthoringElement('light', id, { kind: 'directional', ...lightProps }, children);
+    const { id, ...lightProps } = authoringProps as DirectionalLightJsxProps;
+    return createAuthoringElement('light', id, { ...lightProps, kind: 'directional' }, children);
   }
 
   if (

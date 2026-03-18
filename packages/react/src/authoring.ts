@@ -293,7 +293,9 @@ const normalizeVec3Like = (value: Vec3Like): Vec3 => {
     return value as Vec3;
   }
   if (value.length !== 3) {
-    throw new Error(`position/scale shorthand must contain exactly 3 numbers, received ${value.length}`);
+    throw new Error(
+      `position/scale shorthand must contain exactly 3 numbers, received ${value.length}`,
+    );
   }
   return { x: value[0], y: value[1], z: value[2] };
 };

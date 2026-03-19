@@ -16,6 +16,12 @@ supersedes them.
   provide convenience scene-object components without changing primitive IR ownership
 - [`0006-react-scene-root-bridge.md`](./0006-react-scene-root-bridge.md): React should publish scene
   updates through a partial-apply boundary without taking renderer ownership
+- [`0007-post-processing-execution-model.md`](./0007-post-processing-execution-model.md):
+  post-processing is an explicit scene-color to post-process to present execution stage
+- [`0008-react-reconciler-scene-document.md`](./0008-react-reconciler-scene-document.md): React
+  reconciler should target an internal scene document before publishing scene data updates
+- [`0009-cubemap-capture-boundary.md`](./0009-cubemap-capture-boundary.md): cubemap capture
+  should be a renderer output boundary before reprojection or export layouts
 
 ## Related References
 

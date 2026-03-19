@@ -244,12 +244,34 @@ const applyAnimation = (scene: SceneIr, options: EvaluateSceneOptions): readonly
 
 export const evaluateScene = (scene: SceneIr, options: EvaluateSceneOptions): EvaluatedScene => {
   const nodes = applyAnimation(scene, options);
-  const nodeById = new Map(nodes.map((node) => [node.id, node]));
   const meshById = new Map(scene.meshes.map((mesh) => [mesh.id, mesh]));
   const materialById = new Map(scene.materials.map((material) => [material.id, material]));
   const sdfById = new Map(scene.sdfPrimitives.map((primitive) => [primitive.id, primitive]));
   const volumeById = new Map(scene.volumePrimitives.map((primitive) => [primitive.id, primitive]));
   const lightById = new Map(scene.lights.map((light) => [light.id, light]));
+  return evaluateResolvedScene(
+    scene,
+    nodes,
+    options,
+    meshById,
+    materialById,
+    sdfById,
+    volumeById,
+    lightById,
+  );
+};
+
+const evaluateResolvedScene = (
+  scene: SceneIr,
+  nodes: readonly Node[],
+  options: EvaluateSceneOptions,
+  meshById: ReadonlyMap<string, MeshPrimitive>,
+  materialById: ReadonlyMap<string, Material>,
+  sdfById: ReadonlyMap<string, SdfPrimitive>,
+  volumeById: ReadonlyMap<string, VolumePrimitive>,
+  lightById: ReadonlyMap<string, Light>,
+): EvaluatedScene => {
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
   const worldById = new Map<string, Mat4>();
 
   const getWorldMatrix = (node: Node): Mat4 => {
@@ -299,6 +321,48 @@ export const evaluateScene = (scene: SceneIr, options: EvaluateSceneOptions): Ev
       };
     }),
   };
+};
+
+export const reevaluateSceneTransforms = (
+  scene: SceneIr,
+  previousEvaluatedScene: EvaluatedScene,
+  options: EvaluateSceneOptions,
+): EvaluatedScene => {
+  const nodes = applyAnimation(scene, options);
+  const previousByNodeId = new Map(previousEvaluatedScene.nodes.map((entry) => [entry.node.id, entry]));
+  const meshById = new Map(scene.meshes.map((mesh) => [mesh.id, mesh]));
+  const materialById = new Map(scene.materials.map((material) => [material.id, material]));
+  const sdfById = new Map(scene.sdfPrimitives.map((primitive) => [primitive.id, primitive]));
+  const volumeById = new Map(scene.volumePrimitives.map((primitive) => [primitive.id, primitive]));
+  const lightById = new Map(scene.lights.map((light) => [light.id, light]));
+
+  for (const node of nodes) {
+    const previous = previousByNodeId.get(node.id);
+    if (!previous) {
+      return evaluateScene(scene, options);
+    }
+    if (
+      previous.node.parentId !== node.parentId ||
+      previous.node.meshId !== node.meshId ||
+      previous.node.cameraId !== node.cameraId ||
+      previous.node.sdfId !== node.sdfId ||
+      previous.node.volumeId !== node.volumeId ||
+      previous.node.lightId !== node.lightId
+    ) {
+      return evaluateScene(scene, options);
+    }
+  }
+
+  return evaluateResolvedScene(
+    scene,
+    nodes,
+    options,
+    meshById,
+    materialById,
+    sdfById,
+    volumeById,
+    lightById,
+  );
 };
 
 export const createScratchMatrixBuffer = (size: number): Float32Array =>

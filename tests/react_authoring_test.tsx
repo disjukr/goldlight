@@ -16,6 +16,7 @@ import {
   planSceneRootCommitUpdates,
   planSceneRootResidencyInvalidation,
   summarizeSceneRootCommit,
+  canApplySceneRootTransformUpdates,
   type SceneRootCommit,
 } from '@rieul3d/react';
 import {
@@ -774,6 +775,41 @@ Deno.test('planSceneRootResidencyInvalidation requests full reset for topology c
   const invalidation = latestCommit ? planSceneRootResidencyInvalidation(latestCommit) : undefined;
   assertEquals(invalidation?.reset, true);
   assertEquals(invalidation?.reasons.includes('nodeAdded'), true);
+});
+
+Deno.test('canApplySceneRootTransformUpdates is true only for transform-only commits', () => {
+  const root = createSceneRoot();
+  const results: boolean[] = [];
+
+  root.subscribe((commit) => {
+    results.push(canApplySceneRootTransformUpdates(commit));
+  });
+
+  root.render(
+    <scene id='transform-scene'>
+      <group id='root'>
+        <node id='animated-node' position={[0, 0, 0]} />
+      </group>
+    </scene>,
+  );
+
+  root.render(
+    <scene id='transform-scene'>
+      <group id='root'>
+        <node id='animated-node' position={[1, 2, 3]} />
+      </group>
+    </scene>,
+  );
+
+  root.render(
+    <scene id='transform-scene'>
+      <group id='root'>
+        <node id='animated-node' name='Renamed' position={[1, 2, 3]} />
+      </group>
+    </scene>,
+  );
+
+  assertEquals(results, [false, true, false]);
 });
 
 Deno.test('createReactSceneRoot rejects unsupported intrinsic tags', () => {

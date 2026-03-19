@@ -1,5 +1,5 @@
 import { assertAlmostEquals, assertEquals, assertThrows } from 'jsr:@std/assert@^1.0.14';
-import { createScreenWorldRay, evaluateScene } from '@rieul3d/core';
+import { createScreenWorldRay, evaluateScene, reevaluateSceneTransforms } from '@rieul3d/core';
 import {
   appendAnimationClip,
   appendCamera,
@@ -97,6 +97,53 @@ Deno.test('evaluateScene samples animation channels', () => {
 
   const evaluated = evaluateScene(scene, { timeMs: 500, clipId: 'clip-0' });
   assertEquals(evaluated.nodes[0].node.transform.translation.x, 5);
+});
+
+Deno.test('reevaluateSceneTransforms recomputes world matrices for transform-only scene changes', () => {
+  let scene = createSceneIr('scene');
+  scene = appendNode(
+    scene,
+    createNode('root', {
+      transform: {
+        translation: { x: 1, y: 0, z: 0 },
+        rotation: { x: 0, y: 0, z: 0, w: 1 },
+        scale: { x: 1, y: 1, z: 1 },
+      },
+    }),
+  );
+  scene = appendNode(
+    scene,
+    createNode('child', {
+      parentId: 'root',
+      transform: {
+        translation: { x: 0, y: 2, z: 0 },
+        rotation: { x: 0, y: 0, z: 0, w: 1 },
+        scale: { x: 1, y: 1, z: 1 },
+      },
+    }),
+  );
+
+  const firstEvaluated = evaluateScene(scene, { timeMs: 0 });
+  const nextScene = {
+    ...scene,
+    nodes: scene.nodes.map((node) =>
+      node.id === 'root'
+        ? {
+          ...node,
+          transform: {
+            ...node.transform,
+            translation: { x: 4, y: 0, z: 0 },
+          },
+        }
+        : node
+    ),
+  };
+
+  const nextEvaluated = reevaluateSceneTransforms(nextScene, firstEvaluated, { timeMs: 0 });
+  const child = nextEvaluated.nodes.find((node) => node.node.id === 'child');
+
+  assertEquals(child?.worldMatrix[12], 4);
+  assertEquals(child?.worldMatrix[13], 2);
 });
 
 Deno.test('evaluateScene resolves the active camera and its view matrix', () => {

@@ -503,6 +503,28 @@ export const commitSummaryNeedsResidencyReset = (summary: SceneRootCommitSummary
     collectionHasChanges(summary.nodes);
 };
 
+export const canApplySceneRootTransformUpdates = (commit: SceneRootCommit): boolean => {
+  const { updatePlan } = commit;
+  return !updatePlan.sceneIdChanged &&
+    !updatePlan.activeCameraChanged &&
+    !updatePlan.rootNodeIdsChanged &&
+    !collectionHasChanges(updatePlan.assets) &&
+    !collectionHasChanges(updatePlan.textures) &&
+    !collectionHasChanges(updatePlan.materials) &&
+    !collectionHasChanges(updatePlan.lights) &&
+    !collectionHasChanges(updatePlan.meshes) &&
+    !collectionHasChanges(updatePlan.cameras) &&
+    !collectionHasChanges(updatePlan.sdfPrimitives) &&
+    !collectionHasChanges(updatePlan.volumePrimitives) &&
+    !collectionHasChanges(updatePlan.animationClips) &&
+    updatePlan.nodes.addedIds.length === 0 &&
+    updatePlan.nodes.removedIds.length === 0 &&
+    updatePlan.nodes.parentingIds.length === 0 &&
+    updatePlan.nodes.resourceBindingIds.length === 0 &&
+    updatePlan.nodes.metadataIds.length === 0 &&
+    updatePlan.nodes.otherUpdatedIds.length === 0;
+};
+
 export const createSceneRootCommit = (
   scene: SceneIr,
   previousScene: SceneIr | undefined,

@@ -148,8 +148,13 @@ export type CubemapSnapshotResult = Readonly<{
 
 export type CubemapExportLayout = 'equirectangular' | 'angular' | 'cross' | 'strip';
 
+export type CubemapExportSampling = 'nearest' | 'linear';
+
 export type CubemapExportOptions = Readonly<{
   layout: CubemapExportLayout;
+  width?: number;
+  height?: number;
+  sampling?: CubemapExportSampling;
 }>;
 
 export type CubemapExportResult = Readonly<{
@@ -601,16 +606,95 @@ const readRgbaPixel = (
   ];
 };
 
-const copyCubemapFace = (
+const lerpNumber = (start: number, end: number, t: number): number => start + ((end - start) * t);
+
+const sampleFaceNearest = (
+  face: CubemapFaceSnapshotResult,
+  u: number,
+  v: number,
+): readonly [number, number, number, number] => {
+  const x = clampNumber(Math.round(u * (face.width - 1)), 0, face.width - 1);
+  const y = clampNumber(Math.round(v * (face.height - 1)), 0, face.height - 1);
+
+  return readRgbaPixel(face.bytes, face.width, x, y);
+};
+
+const sampleFaceLinear = (
+  face: CubemapFaceSnapshotResult,
+  u: number,
+  v: number,
+): readonly [number, number, number, number] => {
+  const x = clampNumber(u * (face.width - 1), 0, face.width - 1);
+  const y = clampNumber(v * (face.height - 1), 0, face.height - 1);
+  const x0 = Math.floor(x);
+  const y0 = Math.floor(y);
+  const x1 = Math.min(x0 + 1, face.width - 1);
+  const y1 = Math.min(y0 + 1, face.height - 1);
+  const tx = x - x0;
+  const ty = y - y0;
+  const topLeft = readRgbaPixel(face.bytes, face.width, x0, y0);
+  const topRight = readRgbaPixel(face.bytes, face.width, x1, y0);
+  const bottomLeft = readRgbaPixel(face.bytes, face.width, x0, y1);
+  const bottomRight = readRgbaPixel(face.bytes, face.width, x1, y1);
+
+  return [
+    Math.round(
+      lerpNumber(
+        lerpNumber(topLeft[0], topRight[0], tx),
+        lerpNumber(bottomLeft[0], bottomRight[0], tx),
+        ty,
+      ),
+    ),
+    Math.round(
+      lerpNumber(
+        lerpNumber(topLeft[1], topRight[1], tx),
+        lerpNumber(bottomLeft[1], bottomRight[1], tx),
+        ty,
+      ),
+    ),
+    Math.round(
+      lerpNumber(
+        lerpNumber(topLeft[2], topRight[2], tx),
+        lerpNumber(bottomLeft[2], bottomRight[2], tx),
+        ty,
+      ),
+    ),
+    Math.round(
+      lerpNumber(
+        lerpNumber(topLeft[3], topRight[3], tx),
+        lerpNumber(bottomLeft[3], bottomRight[3], tx),
+        ty,
+      ),
+    ),
+  ];
+};
+
+const sampleFacePixel = (
+  face: CubemapFaceSnapshotResult,
+  u: number,
+  v: number,
+  sampling: CubemapExportSampling,
+): readonly [number, number, number, number] =>
+  sampling === 'linear' ? sampleFaceLinear(face, u, v) : sampleFaceNearest(face, u, v);
+
+const blitCubemapFace = (
   source: CubemapFaceSnapshotResult,
   destination: Uint8Array,
   destinationWidth: number,
+  destinationHeight: number,
   offsetX: number,
   offsetY: number,
+  outputSize: number,
+  sampling: CubemapExportSampling,
 ): void => {
-  for (let y = 0; y < source.height; y += 1) {
-    for (let x = 0; x < source.width; x += 1) {
-      const color = readRgbaPixel(source.bytes, source.width, x, y);
+  for (let y = 0; y < outputSize; y += 1) {
+    const v = outputSize === 1 ? 0.5 : y / (outputSize - 1);
+    for (let x = 0; x < outputSize; x += 1) {
+      const u = outputSize === 1 ? 0.5 : x / (outputSize - 1);
+      const color = sampleFacePixel(source, u, v, sampling);
+      if (offsetX + x >= destinationWidth || offsetY + y >= destinationHeight) {
+        continue;
+      }
       writeRgbaPixel(destination, destinationWidth, offsetX + x, offsetY + y, color);
     }
   }
@@ -660,6 +744,12 @@ type CubemapFaceLookup = Readonly<{
   faceMap: ReadonlyMap<CubemapFace, CubemapFaceSnapshotResult>;
 }>;
 
+type CubemapExportDimensions = Readonly<{
+  width: number;
+  height: number;
+  faceSize?: number;
+}>;
+
 const createCubemapFaceLookup = (snapshot: CubemapSnapshotResult): CubemapFaceLookup => {
   const orderedFaces = getOrderedCubemapFaces(snapshot);
 
@@ -667,6 +757,79 @@ const createCubemapFaceLookup = (snapshot: CubemapSnapshotResult): CubemapFaceLo
     orderedFaces,
     faceMap: new Map(orderedFaces.map((face) => [face.face, face] as const)),
   };
+};
+
+const assertPositiveExportInteger = (value: number, label: string): number => {
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error(`${label} must be a positive integer, received ${value}`);
+  }
+
+  return value;
+};
+
+const resolveCubemapExportDimensions = (
+  snapshot: CubemapSnapshotResult,
+  options: CubemapExportOptions,
+): CubemapExportDimensions => {
+  const requestedWidth = options.width === undefined
+    ? undefined
+    : assertPositiveExportInteger(options.width, 'cubemap export width');
+  const requestedHeight = options.height === undefined
+    ? undefined
+    : assertPositiveExportInteger(options.height, 'cubemap export height');
+
+  switch (options.layout) {
+    case 'equirectangular': {
+      const width = requestedWidth ??
+        (requestedHeight === undefined ? snapshot.size * 4 : requestedHeight * 2);
+      const height = requestedHeight ??
+        (requestedWidth === undefined ? snapshot.size * 2 : requestedWidth / 2);
+      assertPositiveExportInteger(width, 'cubemap export width');
+      assertPositiveExportInteger(height, 'cubemap export height');
+      if (width !== height * 2) {
+        throw new Error('equirectangular exports require a 2:1 width/height ratio');
+      }
+      return { width, height };
+    }
+    case 'angular': {
+      const width = requestedWidth ?? requestedHeight ?? snapshot.size * 2;
+      const height = requestedHeight ?? requestedWidth ?? snapshot.size * 2;
+      assertPositiveExportInteger(width, 'cubemap export width');
+      assertPositiveExportInteger(height, 'cubemap export height');
+      if (width !== height) {
+        throw new Error('angular exports require matching width and height');
+      }
+      return { width, height };
+    }
+    case 'cross': {
+      const faceSize = requestedWidth === undefined
+        ? requestedHeight === undefined ? snapshot.size : requestedHeight / 3
+        : requestedWidth / 4;
+      if (!Number.isInteger(faceSize) || faceSize <= 0) {
+        throw new Error('cross exports require dimensions that resolve to an integer face size');
+      }
+      const width = requestedWidth ?? faceSize * 4;
+      const height = requestedHeight ?? faceSize * 3;
+      if (width !== faceSize * 4 || height !== faceSize * 3) {
+        throw new Error('cross exports require a 4:3 layout with square face regions');
+      }
+      return { width, height, faceSize };
+    }
+    case 'strip': {
+      const faceSize = requestedWidth === undefined
+        ? requestedHeight === undefined ? snapshot.size : requestedHeight
+        : requestedWidth / 6;
+      if (!Number.isInteger(faceSize) || faceSize <= 0) {
+        throw new Error('strip exports require dimensions that resolve to an integer face size');
+      }
+      const width = requestedWidth ?? faceSize * 6;
+      const height = requestedHeight ?? faceSize;
+      if (width !== faceSize * 6 || height !== faceSize) {
+        throw new Error('strip exports require a 6:1 layout with square face regions');
+      }
+      return { width, height, faceSize };
+    }
+  }
 };
 
 const createFaceBasis = (
@@ -691,6 +854,7 @@ const createFaceBasis = (
 const sampleCubemapDirection = (
   lookup: CubemapFaceLookup,
   direction: readonly [number, number, number],
+  sampling: CubemapExportSampling,
 ): readonly [number, number, number, number] => {
   const [dx, dy, dz] = normalizeVector3(...direction);
   const absX = Math.abs(dx);
@@ -717,10 +881,8 @@ const sampleCubemapDirection = (
   const sy = clampNumber(dotVector3([dx, dy, dz], basis.up) / majorAxis, -1, 1);
   const u = (sx + 1) * 0.5;
   const v = (1 - sy) * 0.5;
-  const x = clampNumber(Math.round(u * (selectedFace.width - 1)), 0, selectedFace.width - 1);
-  const y = clampNumber(Math.round(v * (selectedFace.height - 1)), 0, selectedFace.height - 1);
 
-  return readRgbaPixel(selectedFace.bytes, selectedFace.width, x, y);
+  return sampleFacePixel(selectedFace, u, v, sampling);
 };
 
 const builtInUnlitProgram: MaterialProgram = {
@@ -3310,14 +3472,19 @@ export const renderForwardCubemapSnapshot = async (
   };
 };
 
-const exportCubemapStrip = (snapshot: CubemapSnapshotResult): CubemapExportResult => {
+const exportCubemapStrip = (
+  snapshot: CubemapSnapshotResult,
+  dimensions: CubemapExportDimensions,
+  sampling: CubemapExportSampling,
+): CubemapExportResult => {
   const lookup = createCubemapFaceLookup(snapshot);
-  const width = snapshot.size * lookup.orderedFaces.length;
-  const height = snapshot.size;
+  const faceSize = dimensions.faceSize ?? snapshot.size;
+  const width = dimensions.width;
+  const height = dimensions.height;
   const bytes = createRgbaBuffer(width, height);
 
   lookup.orderedFaces.forEach((face, index) => {
-    copyCubemapFace(face, bytes, width, index * snapshot.size, 0);
+    blitCubemapFace(face, bytes, width, height, index * faceSize, 0, faceSize, sampling);
   });
 
   return {
@@ -3328,35 +3495,76 @@ const exportCubemapStrip = (snapshot: CubemapSnapshotResult): CubemapExportResul
   };
 };
 
-const exportCubemapCross = (snapshot: CubemapSnapshotResult): CubemapExportResult => {
+const exportCubemapCross = (
+  snapshot: CubemapSnapshotResult,
+  dimensions: CubemapExportDimensions,
+  sampling: CubemapExportSampling,
+): CubemapExportResult => {
   const lookup = createCubemapFaceLookup(snapshot);
-  const width = snapshot.size * 4;
-  const height = snapshot.size * 3;
+  const faceSize = dimensions.faceSize ?? snapshot.size;
+  const width = dimensions.width;
+  const height = dimensions.height;
   const bytes = createRgbaBuffer(width, height);
 
-  copyCubemapFace(lookup.faceMap.get('negative-y')!, bytes, width, snapshot.size, 0);
-  copyCubemapFace(lookup.faceMap.get('negative-x')!, bytes, width, 0, snapshot.size);
-  copyCubemapFace(lookup.faceMap.get('positive-z')!, bytes, width, snapshot.size, snapshot.size);
-  copyCubemapFace(
+  blitCubemapFace(
+    lookup.faceMap.get('negative-y')!,
+    bytes,
+    width,
+    height,
+    faceSize,
+    0,
+    faceSize,
+    sampling,
+  );
+  blitCubemapFace(
+    lookup.faceMap.get('negative-x')!,
+    bytes,
+    width,
+    height,
+    0,
+    faceSize,
+    faceSize,
+    sampling,
+  );
+  blitCubemapFace(
+    lookup.faceMap.get('positive-z')!,
+    bytes,
+    width,
+    height,
+    faceSize,
+    faceSize,
+    faceSize,
+    sampling,
+  );
+  blitCubemapFace(
     lookup.faceMap.get('positive-x')!,
     bytes,
     width,
-    snapshot.size * 2,
-    snapshot.size,
+    height,
+    faceSize * 2,
+    faceSize,
+    faceSize,
+    sampling,
   );
-  copyCubemapFace(
+  blitCubemapFace(
     lookup.faceMap.get('negative-z')!,
     bytes,
     width,
-    snapshot.size * 3,
-    snapshot.size,
+    height,
+    faceSize * 3,
+    faceSize,
+    faceSize,
+    sampling,
   );
-  copyCubemapFace(
+  blitCubemapFace(
     lookup.faceMap.get('positive-y')!,
     bytes,
     width,
-    snapshot.size,
-    snapshot.size * 2,
+    height,
+    faceSize,
+    faceSize * 2,
+    faceSize,
+    sampling,
   );
 
   return {
@@ -3367,10 +3575,14 @@ const exportCubemapCross = (snapshot: CubemapSnapshotResult): CubemapExportResul
   };
 };
 
-const exportCubemapEquirectangular = (snapshot: CubemapSnapshotResult): CubemapExportResult => {
+const exportCubemapEquirectangular = (
+  snapshot: CubemapSnapshotResult,
+  dimensions: CubemapExportDimensions,
+  sampling: CubemapExportSampling,
+): CubemapExportResult => {
   const lookup = createCubemapFaceLookup(snapshot);
-  const width = snapshot.size * 4;
-  const height = snapshot.size * 2;
+  const width = dimensions.width;
+  const height = dimensions.height;
   const bytes = createRgbaBuffer(width, height);
 
   for (let y = 0; y < height; y += 1) {
@@ -3387,7 +3599,7 @@ const exportCubemapEquirectangular = (snapshot: CubemapSnapshotResult): CubemapE
         sinLatitude,
         cosLatitude * Math.cos(longitude),
       ];
-      writeRgbaPixel(bytes, width, x, y, sampleCubemapDirection(lookup, direction));
+      writeRgbaPixel(bytes, width, x, y, sampleCubemapDirection(lookup, direction, sampling));
     }
   }
 
@@ -3399,10 +3611,14 @@ const exportCubemapEquirectangular = (snapshot: CubemapSnapshotResult): CubemapE
   };
 };
 
-const exportCubemapAngular = (snapshot: CubemapSnapshotResult): CubemapExportResult => {
+const exportCubemapAngular = (
+  snapshot: CubemapSnapshotResult,
+  dimensions: CubemapExportDimensions,
+  sampling: CubemapExportSampling,
+): CubemapExportResult => {
   const lookup = createCubemapFaceLookup(snapshot);
-  const width = snapshot.size * 2;
-  const height = snapshot.size * 2;
+  const width = dimensions.width;
+  const height = dimensions.height;
   const bytes = createRgbaBuffer(width, height);
 
   for (let y = 0; y < height; y += 1) {
@@ -3424,7 +3640,7 @@ const exportCubemapAngular = (snapshot: CubemapSnapshotResult): CubemapExportRes
         sinPolar * Math.sin(azimuth),
         Math.cos(polar),
       ];
-      writeRgbaPixel(bytes, width, x, y, sampleCubemapDirection(lookup, direction));
+      writeRgbaPixel(bytes, width, x, y, sampleCubemapDirection(lookup, direction, sampling));
     }
   }
 
@@ -3440,14 +3656,17 @@ export const exportCubemapSnapshot = (
   snapshot: CubemapSnapshotResult,
   options: CubemapExportOptions,
 ): CubemapExportResult => {
+  const dimensions = resolveCubemapExportDimensions(snapshot, options);
+  const sampling = options.sampling ?? 'nearest';
+
   switch (options.layout) {
     case 'strip':
-      return exportCubemapStrip(snapshot);
+      return exportCubemapStrip(snapshot, dimensions, sampling);
     case 'cross':
-      return exportCubemapCross(snapshot);
+      return exportCubemapCross(snapshot, dimensions, sampling);
     case 'equirectangular':
-      return exportCubemapEquirectangular(snapshot);
+      return exportCubemapEquirectangular(snapshot, dimensions, sampling);
     case 'angular':
-      return exportCubemapAngular(snapshot);
+      return exportCubemapAngular(snapshot, dimensions, sampling);
   }
 };

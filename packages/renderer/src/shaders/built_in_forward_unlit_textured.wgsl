@@ -27,5 +27,14 @@ fn vsMain(@location(0) position: vec3<f32>, @location(1) texCoord: vec2<f32>) ->
 
 @fragment
 fn fsMain(in: VsOut) -> @location(0) vec4<f32> {
-  return material.values[0] * textureSample(baseColorTexture, baseColorSampler, in.texCoord);
+  let baseColor = material.values[0] * textureSample(baseColorTexture, baseColorSampler, in.texCoord);
+  let alphaPolicy = material.values[1];
+  if (alphaPolicy.y > 0.5 && alphaPolicy.y < 1.5 && baseColor.a < alphaPolicy.x) {
+    discard;
+  }
+  if (alphaPolicy.y < 1.5 && baseColor.a <= 0.0) {
+    discard;
+  }
+
+  return baseColor;
 }

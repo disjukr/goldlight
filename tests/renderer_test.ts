@@ -1211,3 +1211,36 @@ Deno.test('deferred renderer rejects textured unlit scenes that omit normals or 
     },
   ]);
 });
+
+Deno.test('deferred renderer rejects transparent meshes that require forward composition', () => {
+  let scene = createSceneIr('scene');
+  scene = appendMaterial(scene, {
+    id: 'material-transparent',
+    kind: 'unlit',
+    alphaMode: 'blend',
+    renderQueue: 'transparent',
+    textures: [],
+    parameters: {
+      color: { x: 1, y: 1, z: 1, w: 0.5 },
+    },
+  });
+  scene = appendMesh(scene, {
+    id: 'mesh-0',
+    materialId: 'material-transparent',
+    attributes: [{ semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0, 0, 1, 0] }],
+  });
+  scene = appendNode(scene, createNode('mesh-node', { meshId: 'mesh-0' }));
+
+  const issues = collectRendererCapabilityIssues(
+    createDeferredRenderer(),
+    evaluateScene(scene, { timeMs: 0 }),
+  );
+
+  assertEquals(issues[0], {
+    nodeId: 'mesh-node',
+    feature: 'material-binding',
+    requirement: 'render-queue:transparent',
+    message:
+      'renderer "deferred" cannot render transparent node "mesh-node" without the hybrid forward composition path',
+  });
+});

@@ -36,6 +36,13 @@ fn fsMain(in: VsOut) -> @location(0) vec4<f32> {
   let lightCount = i32(lighting.settings.x);
   let ambient = lighting.settings.y;
   let baseColor = material.values[0];
+  let alphaPolicy = material.values[1];
+  if (alphaPolicy.y > 0.5 && alphaPolicy.y < 1.5 && baseColor.a < alphaPolicy.x) {
+    discard;
+  }
+  if (alphaPolicy.y < 1.5 && baseColor.a <= 0.0) {
+    discard;
+  }
   let surfaceNormal = normalize(in.worldNormal);
   var litColor = baseColor.rgb * ambient;
 

@@ -5,6 +5,7 @@
 
 custom Id = string
 custom Scalar = float64
+custom Boolean = boolean
 
 struct Vec2 {
   x: Scalar,
@@ -55,6 +56,11 @@ struct Material {
   id: Id,
   kind: string,
   shaderId?: Id,
+  alphaMode?: string,
+  alphaCutoff?: Scalar,
+  depthWrite?: Boolean,
+  doubleSided?: Boolean,
+  renderQueue?: string,
   textures: TextureRef[],
   parameters: Vec4[string],
 }

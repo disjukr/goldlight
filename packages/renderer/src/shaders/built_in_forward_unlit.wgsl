@@ -23,5 +23,14 @@ fn vsMain(@location(0) position: vec3<f32>) -> VsOut {
 
 @fragment
 fn fsMain() -> @location(0) vec4<f32> {
-  return material.values[0];
+  let baseColor = material.values[0];
+  let alphaPolicy = material.values[1];
+  if (alphaPolicy.y > 0.5 && alphaPolicy.y < 1.5 && baseColor.a < alphaPolicy.x) {
+    discard;
+  }
+  if (alphaPolicy.y < 1.5 && baseColor.a <= 0.0) {
+    discard;
+  }
+
+  return baseColor;
 }

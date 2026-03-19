@@ -58,6 +58,9 @@ type GltfTexture = Readonly<{
 
 type GltfMaterial = Readonly<{
   name?: string;
+  alphaMode?: 'OPAQUE' | 'MASK' | 'BLEND';
+  alphaCutoff?: number;
+  doubleSided?: boolean;
   pbrMetallicRoughness?: Readonly<{
     baseColorTexture?: Readonly<{ index: number }>;
     baseColorFactor?: readonly number[];
@@ -661,6 +664,10 @@ const createMaterials = (
     return {
       id: `${sceneId}-material-${materialIndex}`,
       kind: 'unlit',
+      alphaMode: material.alphaMode?.toLowerCase(),
+      alphaCutoff: material.alphaMode === 'MASK' ? material.alphaCutoff ?? 0.5 : undefined,
+      doubleSided: material.doubleSided,
+      renderQueue: material.alphaMode === 'BLEND' ? 'transparent' : 'opaque',
       textures,
       parameters: {
         color: toVec4(baseColor),

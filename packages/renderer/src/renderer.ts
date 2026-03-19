@@ -43,7 +43,7 @@ import builtInPostProcessBlitShader from './shaders/built_in_post_process_blit.w
   type: 'text',
 };
 
-export type RendererKind = 'forward' | 'deferred';
+export type RendererKind = 'forward' | 'deferred' | 'hybrid';
 export type PassKind =
   | 'depth-prepass'
   | 'gbuffer'
@@ -116,6 +116,8 @@ export type ForwardSnapshotResult = Readonly<{
 
 export type DeferredRenderResult = ForwardRenderResult;
 export type DeferredSnapshotResult = ForwardSnapshotResult;
+export type HybridRenderResult = ForwardRenderResult;
+export type HybridSnapshotResult = ForwardSnapshotResult;
 
 export type CubemapFace =
   | 'positive-x'
@@ -333,6 +335,18 @@ const defaultAmbientLight = 0.2;
 const defaultCubemapFormat = 'rgba8unorm';
 const defaultCubemapZnear = 0.1;
 const defaultCubemapZfar = 100;
+const alphaBlendState: GPUBlendState = {
+  color: {
+    srcFactor: 'src-alpha',
+    dstFactor: 'one-minus-src-alpha',
+    operation: 'add',
+  },
+  alpha: {
+    srcFactor: 'one',
+    dstFactor: 'one-minus-src-alpha',
+    operation: 'add',
+  },
+};
 const defaultRaymarchCamera: RaymarchCamera = {
   origin: [0, 0, 2.5],
   right: [1, 0, 0],
@@ -1252,6 +1266,37 @@ const getMaterialTextureResidency = (
   return textureRef ? residency.textures.get(textureRef.id) : undefined;
 };
 
+type MaterialRenderPolicy = Readonly<{
+  alphaMode: 'opaque' | 'mask' | 'blend';
+  alphaCutoff: number;
+  depthWrite: boolean;
+  doubleSided: boolean;
+  renderQueue: 'opaque' | 'transparent';
+}>;
+
+type MaterialPipelineOptions = Readonly<{
+  blend?: GPUBlendState;
+  depthWriteEnabled?: boolean;
+  cullMode?: GPUCullMode | 'none';
+}>;
+
+const resolveMaterialRenderPolicy = (material?: Material): MaterialRenderPolicy => {
+  const alphaMode = material?.alphaMode === 'mask' || material?.alphaMode === 'blend'
+    ? material.alphaMode
+    : 'opaque';
+  const renderQueue = material?.renderQueue === 'transparent' || alphaMode === 'blend'
+    ? 'transparent'
+    : 'opaque';
+
+  return {
+    alphaMode,
+    alphaCutoff: material?.alphaCutoff ?? 0.5,
+    depthWrite: material?.depthWrite ?? (alphaMode !== 'blend'),
+    doubleSided: material?.doubleSided ?? false,
+    renderQueue,
+  };
+};
+
 const defaultMaterialBindings = [{
   kind: 'uniform',
   binding: 0,
@@ -1419,6 +1464,57 @@ export const createDeferredRenderer = (
   ],
 });
 
+export const createHybridRenderer = (
+  label = 'hybrid',
+  postProcessPasses: readonly PostProcessPass[] = [],
+): Renderer => ({
+  kind: 'hybrid',
+  label,
+  capabilities: {
+    mesh: 'supported',
+    sdf: 'supported',
+    volume: 'supported',
+    light: 'supported',
+    builtInMaterialKinds: ['unlit', 'lit'],
+    customShaders: 'supported',
+  },
+  passes: [
+    { id: 'depth-prepass', kind: 'depth-prepass', reads: ['scene'], writes: ['depth'] },
+    { id: 'gbuffer', kind: 'gbuffer', reads: ['scene', 'depth'], writes: ['gbuffer'] },
+    {
+      id: 'lighting',
+      kind: 'lighting',
+      reads: ['gbuffer', 'depth'],
+      writes: [postProcessPasses.length > 0 ? 'scene-color' : 'color'],
+    },
+    {
+      id: 'mesh-opaque',
+      kind: 'mesh',
+      reads: ['scene', 'depth', postProcessPasses.length > 0 ? 'scene-color' : 'color'],
+      writes: [postProcessPasses.length > 0 ? 'scene-color' : 'color', 'depth'],
+    },
+    {
+      id: 'mesh-transparent',
+      kind: 'mesh',
+      reads: ['scene', 'depth', postProcessPasses.length > 0 ? 'scene-color' : 'color'],
+      writes: [postProcessPasses.length > 0 ? 'scene-color' : 'color'],
+    },
+    {
+      id: 'raymarch',
+      kind: 'raymarch',
+      reads: ['scene', 'depth', postProcessPasses.length > 0 ? 'scene-color' : 'color'],
+      writes: [postProcessPasses.length > 0 ? 'scene-color' : 'color'],
+    },
+    ...createPostProcessPassPlans('scene-color', postProcessPasses),
+    {
+      id: 'present',
+      kind: 'present',
+      reads: [getFinalPresentInputResource('color', postProcessPasses)],
+      writes: ['target'],
+    },
+  ],
+});
+
 export const planFrame = (
   renderer: Renderer,
   evaluatedScene: EvaluatedScene,
@@ -1450,6 +1546,7 @@ export const collectRendererCapabilityIssues = (
       node.mesh?.attributes.some((attribute) => attribute.semantic === 'TEXCOORD_0'),
     );
     const material = node.material;
+    const materialPolicy = resolveMaterialRenderPolicy(material);
     const materialTextures = material?.textures ?? [];
     const issueKeys = new Set<string>();
     const pushIssue = (
@@ -1480,6 +1577,13 @@ export const collectRendererCapabilityIssues = (
     }
 
     if (renderer.kind === 'deferred' && node.mesh) {
+      if (materialPolicy.renderQueue === 'transparent') {
+        pushIssue(
+          'material-binding',
+          'render-queue:transparent',
+          `renderer "${renderer.label}" cannot render transparent node "${node.node.id}" without the hybrid forward composition path`,
+        );
+      }
       if (!node.mesh.attributes.some((attribute) => attribute.semantic === 'NORMAL')) {
         pushIssue(
           'mesh',
@@ -1953,6 +2057,86 @@ const prefersTexturedMaterialProgram = (
   return {};
 };
 
+const createMaterialPipelineOptions = (
+  material: Material | undefined,
+  passKind: 'opaque' | 'transparent',
+): MaterialPipelineOptions => {
+  const policy = resolveMaterialRenderPolicy(material);
+  return {
+    blend: passKind === 'transparent' ? alphaBlendState : undefined,
+    depthWriteEnabled: passKind === 'transparent' ? policy.depthWrite : true,
+    cullMode: policy.doubleSided ? 'none' : 'back',
+  };
+};
+
+const isDeferredEligibleMeshNode = (
+  node: EvaluatedScene['nodes'][number],
+  residency: RuntimeResidency,
+): boolean => {
+  if (!node.mesh) {
+    return false;
+  }
+
+  const material = node.material;
+  const policy = resolveMaterialRenderPolicy(material);
+  if (policy.renderQueue !== 'opaque' || policy.alphaMode === 'blend') {
+    return false;
+  }
+
+  const geometry = residency.geometry.get(node.mesh.id);
+  if (!geometry) {
+    return false;
+  }
+
+  if (material?.shaderId && policy.alphaMode !== 'opaque') {
+    return false;
+  }
+
+  return !(
+    material?.kind === 'lit' &&
+    getBaseColorTextureResidency(residency, material) &&
+    geometry.attributeBuffers.TEXCOORD_0
+  );
+};
+
+const partitionHybridMeshNodes = (
+  evaluatedScene: EvaluatedScene,
+  residency: RuntimeResidency,
+): Readonly<{
+  deferredOpaque: readonly EvaluatedScene['nodes'][number][];
+  forwardOpaque: readonly EvaluatedScene['nodes'][number][];
+  forwardTransparent: readonly EvaluatedScene['nodes'][number][];
+}> => {
+  const deferredOpaque: EvaluatedScene['nodes'][number][] = [];
+  const forwardOpaque: EvaluatedScene['nodes'][number][] = [];
+  const forwardTransparent: EvaluatedScene['nodes'][number][] = [];
+
+  for (const node of evaluatedScene.nodes) {
+    if (!node.mesh) {
+      continue;
+    }
+
+    const policy = resolveMaterialRenderPolicy(node.material);
+    if (policy.renderQueue === 'transparent') {
+      forwardTransparent.push(node);
+      continue;
+    }
+
+    if (isDeferredEligibleMeshNode(node, residency)) {
+      deferredOpaque.push(node);
+      continue;
+    }
+
+    forwardOpaque.push(node);
+  }
+
+  return {
+    deferredOpaque,
+    forwardOpaque,
+    forwardTransparent,
+  };
+};
+
 const renderForwardMeshPass = (
   context: GpuRenderExecutionContext,
   pass: GPURenderPassEncoder,
@@ -1962,6 +2146,7 @@ const renderForwardMeshPass = (
   format: GPUTextureFormat,
   viewProjectionMatrix: readonly number[],
   directionalLights: readonly DirectionalLightItem[],
+  passKind: 'opaque' | 'transparent' = 'opaque',
 ): number => {
   let drawCount = 0;
 
@@ -1987,7 +2172,13 @@ const renderForwardMeshPass = (
     const program = Object.keys(programOptions).length > 0
       ? resolveMaterialProgram(materialRegistry, node.material, programOptions)
       : resolvedProgram;
-    const pipeline = ensureMaterialPipeline(context, residency, program, format);
+    const pipeline = ensureMaterialPipeline(
+      context,
+      residency,
+      program,
+      format,
+      createMaterialPipelineOptions(material, passKind),
+    );
 
     let isDrawable = true;
     for (let index = 0; index < program.vertexAttributes.length; index += 1) {
@@ -2150,8 +2341,10 @@ export const ensureNodePickPipeline = (
 export const ensureDeferredDepthPrepassPipeline = (
   context: GpuRenderExecutionContext,
   residency: RuntimeResidency,
+  options: MaterialPipelineOptions = {},
 ): GPURenderPipeline => {
-  const cacheKey = `${builtInDeferredDepthPrepassProgramId}:${deferredDepthFormat}`;
+  const cullMode = options.cullMode === 'none' ? 'none' : options.cullMode ?? 'back';
+  const cacheKey = `${builtInDeferredDepthPrepassProgramId}:${deferredDepthFormat}:${cullMode}`;
   const cached = residency.pipelines.get(cacheKey);
   if (cached) {
     return cached as GPURenderPipeline;
@@ -2177,6 +2370,7 @@ export const ensureDeferredDepthPrepassPipeline = (
     },
     primitive: {
       topology: 'triangle-list',
+      cullMode: cullMode === 'none' ? undefined : cullMode,
     },
     depthStencil: {
       format: deferredDepthFormat,
@@ -2194,8 +2388,10 @@ export const ensureDeferredGbufferPipeline = (
   residency: RuntimeResidency,
   format: GPUTextureFormat,
   program: MaterialProgram = builtInDeferredGbufferUnlitProgram,
+  options: MaterialPipelineOptions = {},
 ): GPURenderPipeline => {
-  const cacheKey = `${program.id}:${format}`;
+  const cullMode = options.cullMode === 'none' ? 'none' : options.cullMode ?? 'back';
+  const cacheKey = `${program.id}:${format}:${cullMode}`;
   const cached = residency.pipelines.get(cacheKey);
   if (cached) {
     return cached as GPURenderPipeline;
@@ -2220,6 +2416,7 @@ export const ensureDeferredGbufferPipeline = (
     },
     primitive: {
       topology: 'triangle-list',
+      cullMode: cullMode === 'none' ? undefined : cullMode,
     },
     depthStencil: {
       format: deferredDepthFormat,
@@ -2273,8 +2470,14 @@ export const ensureMaterialPipeline = (
   residency: RuntimeResidency,
   program: MaterialProgram,
   format: GPUTextureFormat,
+  options: MaterialPipelineOptions = {},
 ): GPURenderPipeline => {
-  const cacheKey = `${program.id}:${format}`;
+  const blendKey = options.blend ? 'alpha-blend' : 'opaque';
+  const depthWriteEnabled = options.depthWriteEnabled ?? true;
+  const cullMode = options.cullMode === 'none' ? 'none' : options.cullMode ?? 'back';
+  const cacheKey = `${program.id}:${format}:${blendKey}:${
+    depthWriteEnabled ? 'depth' : 'nodepth'
+  }:${cullMode}`;
   const cached = residency.pipelines.get(cacheKey);
   if (cached) {
     return cached as GPURenderPipeline;
@@ -2295,15 +2498,18 @@ export const ensureMaterialPipeline = (
     fragment: {
       module: shader,
       entryPoint: program.fragmentEntryPoint,
-      targets: [{ format }],
+      targets: [{
+        format,
+        blend: options.blend,
+      }],
     },
     primitive: {
       topology: 'triangle-list',
-      cullMode: 'back',
+      cullMode: cullMode === 'none' ? undefined : cullMode,
     },
     depthStencil: {
       format: depthTextureFormat,
-      depthWriteEnabled: true,
+      depthWriteEnabled,
       depthCompare: 'less',
     },
   });
@@ -2818,6 +3024,12 @@ const renderForwardFrameInternal = (
   const encoder = context.device.createCommandEncoder({
     label: 'forward-frame',
   });
+  const forwardOpaqueNodes = evaluatedScene.nodes.filter((node) =>
+    node.mesh && resolveMaterialRenderPolicy(node.material).renderQueue === 'opaque'
+  );
+  const forwardTransparentNodes = evaluatedScene.nodes.filter((node) =>
+    node.mesh && resolveMaterialRenderPolicy(node.material).renderQueue === 'transparent'
+  );
   const pass = encoder.beginRenderPass({
     colorAttachments: [{
       view: colorView,
@@ -2838,14 +3050,42 @@ const renderForwardFrameInternal = (
     context,
     pass,
     residency,
-    evaluatedScene.nodes,
+    forwardOpaqueNodes,
     materialRegistry,
     binding.target.format,
     viewProjectionMatrix,
     directionalLights,
+    'opaque',
   );
 
   pass.end();
+
+  if (forwardTransparentNodes.length > 0) {
+    const transparentPass = encoder.beginRenderPass({
+      colorAttachments: [{
+        view: colorView,
+        loadOp: 'load',
+        storeOp: 'store',
+      }],
+      depthStencilAttachment: {
+        view: acquireDepthAttachmentView(binding),
+        depthLoadOp: 'load',
+        depthStoreOp: 'store',
+      },
+    });
+    drawCount += renderForwardMeshPass(
+      context,
+      transparentPass,
+      residency,
+      forwardTransparentNodes,
+      materialRegistry,
+      binding.target.format,
+      viewProjectionMatrix,
+      directionalLights,
+      'transparent',
+    );
+    transparentPass.end();
+  }
 
   if (options.includeRaymarchPasses !== false) {
     drawCount += renderSdfRaymarchPass(
@@ -3058,7 +3298,6 @@ export const renderDeferredFrame = (
   const encoder = context.device.createCommandEncoder({
     label: 'deferred-frame',
   });
-  const depthPipeline = ensureDeferredDepthPrepassPipeline(context, residency);
   const lightingPipeline = ensureDeferredLightingPipeline(
     context,
     residency,
@@ -3094,7 +3333,6 @@ export const renderDeferredFrame = (
       depthStoreOp: 'store',
     },
   });
-  depthPass.setPipeline(depthPipeline);
   for (const node of evaluatedScene.nodes) {
     const mesh = node.mesh;
     if (!mesh) {
@@ -3107,6 +3345,10 @@ export const renderDeferredFrame = (
       continue;
     }
 
+    const depthPipeline = ensureDeferredDepthPrepassPipeline(context, residency, {
+      cullMode: resolveMaterialRenderPolicy(node.material).doubleSided ? 'none' : 'back',
+    });
+    depthPass.setPipeline(depthPipeline);
     depthPass.setVertexBuffer(0, positionBuffer);
     const transformData = createWorldTransformUniformData(node.worldMatrix);
     const transformBuffer = context.device.createBuffer({
@@ -3182,6 +3424,9 @@ export const renderDeferredFrame = (
       residency,
       binding.target.format,
       gbufferProgram,
+      {
+        cullMode: resolveMaterialRenderPolicy(material).doubleSided ? 'none' : 'back',
+      },
     );
 
     let isDrawable = true;
@@ -3336,6 +3581,412 @@ export const renderDeferredFrame = (
       directionalLights,
     );
     forwardLitPass.end();
+  }
+
+  drawCount += renderSdfRaymarchPass(
+    context,
+    encoder,
+    binding,
+    residency,
+    evaluatedScene,
+    lightingOutputView,
+    binding.target.format,
+  );
+  drawCount += renderVolumeRaymarchPass(
+    context,
+    encoder,
+    binding,
+    residency,
+    evaluatedScene,
+    lightingOutputView,
+    binding.target.format,
+  );
+  if (sceneColorView) {
+    drawCount += renderPostProcessPasses(
+      context,
+      encoder,
+      binding,
+      residency,
+      postProcessPasses,
+      sceneColorView,
+    );
+  }
+
+  const commandBuffer = encoder.finish();
+  context.queue.submit([commandBuffer]);
+
+  return {
+    drawCount,
+    submittedCommandBufferCount: 1,
+  };
+};
+
+export const renderHybridFrame = (
+  context: GpuRenderExecutionContext,
+  binding: RenderContextBinding,
+  residency: RuntimeResidency,
+  evaluatedScene: EvaluatedScene,
+  materialRegistry = createMaterialRegistry(),
+  postProcessPasses: readonly PostProcessPass[] = [],
+): HybridRenderResult => {
+  const partitions = partitionHybridMeshNodes(evaluatedScene, residency);
+  const deferredNodeIds = new Set(partitions.deferredOpaque.map((node) => node.node.id));
+  const forwardNodeIds = new Set(
+    [...partitions.forwardOpaque, ...partitions.forwardTransparent].map((node) => node.node.id),
+  );
+  const deferredScene = {
+    ...evaluatedScene,
+    nodes: evaluatedScene.nodes.filter((node) => !node.mesh || deferredNodeIds.has(node.node.id)),
+  };
+  const forwardScene = {
+    ...evaluatedScene,
+    nodes: evaluatedScene.nodes.filter((node) => !node.mesh || forwardNodeIds.has(node.node.id)),
+  };
+
+  assertRendererSceneCapabilities(
+    createDeferredRenderer('hybrid-deferred'),
+    deferredScene,
+    materialRegistry,
+    residency,
+  );
+  assertRendererSceneCapabilities(
+    createForwardRenderer('hybrid-forward'),
+    forwardScene,
+    materialRegistry,
+    residency,
+  );
+
+  const depthTexture = createTransientRenderTexture(
+    context,
+    binding,
+    'hybrid-depth',
+    deferredDepthFormat,
+    renderAttachmentUsage | textureBindingUsage,
+  );
+  const depthView = depthTexture.createView();
+  const gbufferAlbedoTexture = createTransientRenderTexture(
+    context,
+    binding,
+    'hybrid-gbuffer-albedo',
+    binding.target.format,
+  );
+  const gbufferNormalTexture = createTransientRenderTexture(
+    context,
+    binding,
+    'hybrid-gbuffer-normal',
+    binding.target.format,
+  );
+  const gbufferAlbedoView = gbufferAlbedoTexture.createView();
+  const gbufferNormalView = gbufferNormalTexture.createView();
+  const sceneColorTexture = postProcessPasses.length > 0
+    ? createTransientRenderTexture(
+      context,
+      binding,
+      'hybrid-scene-color',
+      binding.target.format,
+      renderAttachmentUsage | textureBindingUsage,
+      getRenderTargetSampleCount(binding),
+    )
+    : undefined;
+  const sceneColorView = sceneColorTexture?.createView();
+  const lightingOutputView = sceneColorView ?? acquireColorAttachmentView(binding);
+  const encoder = context.device.createCommandEncoder({
+    label: 'hybrid-frame',
+  });
+  const lightingPipeline = ensureDeferredLightingPipeline(
+    context,
+    residency,
+    binding.target.format,
+  );
+  const directionalLights = extractDirectionalLightItems(evaluatedScene);
+  const viewProjectionMatrix = createViewProjectionMatrix(binding, evaluatedScene.activeCamera);
+  let drawCount = 0;
+
+  const depthPass = encoder.beginRenderPass({
+    colorAttachments: [],
+    depthStencilAttachment: {
+      view: depthView,
+      depthClearValue: 1,
+      depthLoadOp: 'clear',
+      depthStoreOp: 'store',
+    },
+  });
+  for (const node of partitions.deferredOpaque) {
+    const mesh = node.mesh;
+    if (!mesh) {
+      continue;
+    }
+
+    const geometry = residency.geometry.get(mesh.id);
+    const positionBuffer = geometry?.attributeBuffers.POSITION;
+    if (!geometry || !positionBuffer) {
+      continue;
+    }
+
+    const depthPipeline = ensureDeferredDepthPrepassPipeline(context, residency, {
+      cullMode: resolveMaterialRenderPolicy(node.material).doubleSided ? 'none' : 'back',
+    });
+    depthPass.setPipeline(depthPipeline);
+    depthPass.setVertexBuffer(0, positionBuffer);
+    const transformData = createWorldTransformUniformData(node.worldMatrix);
+    const transformBuffer = context.device.createBuffer({
+      label: `${node.node.id}:hybrid-depth-transform`,
+      size: transformData.byteLength,
+      usage: uniformUsage | bufferCopyDstUsage,
+    });
+    context.queue.writeBuffer(transformBuffer, 0, toBufferSource(transformData));
+    depthPass.setBindGroup(
+      0,
+      context.device.createBindGroup({
+        layout: depthPipeline.getBindGroupLayout(0),
+        entries: [{
+          binding: 0,
+          resource: {
+            buffer: transformBuffer,
+          },
+        }],
+      }),
+    );
+
+    if (geometry.indexBuffer && geometry.indexCount > 0) {
+      depthPass.setIndexBuffer(geometry.indexBuffer, 'uint32');
+      depthPass.drawIndexed(geometry.indexCount, 1, 0, 0, 0);
+    } else {
+      depthPass.draw(geometry.vertexCount, 1, 0, 0);
+    }
+    drawCount += 1;
+  }
+  depthPass.end();
+
+  const gbufferPass = encoder.beginRenderPass({
+    colorAttachments: [
+      {
+        view: gbufferAlbedoView,
+        clearValue: { r: 0, g: 0, b: 0, a: 0 },
+        loadOp: 'clear',
+        storeOp: 'store',
+      },
+      {
+        view: gbufferNormalView,
+        clearValue: { r: 0.5, g: 0.5, b: 1, a: 0 },
+        loadOp: 'clear',
+        storeOp: 'store',
+      },
+    ],
+    depthStencilAttachment: {
+      view: depthView,
+      depthLoadOp: 'load',
+      depthStoreOp: 'store',
+    },
+  });
+  for (const node of partitions.deferredOpaque) {
+    const mesh = node.mesh;
+    if (!mesh) {
+      continue;
+    }
+
+    const geometry = residency.geometry.get(mesh.id);
+    if (!geometry) {
+      continue;
+    }
+
+    const material = node.material ?? createDefaultMaterial();
+    const gbufferProgram = resolveDeferredGbufferProgram(
+      materialRegistry,
+      material,
+      geometry,
+      residency,
+    );
+    const gbufferPipeline = ensureDeferredGbufferPipeline(
+      context,
+      residency,
+      binding.target.format,
+      gbufferProgram,
+      {
+        cullMode: resolveMaterialRenderPolicy(material).doubleSided ? 'none' : 'back',
+      },
+    );
+
+    let isDrawable = true;
+    for (let index = 0; index < gbufferProgram.vertexAttributes.length; index += 1) {
+      const attribute = gbufferProgram.vertexAttributes[index];
+      if (attribute.offset !== 0) {
+        isDrawable = false;
+        break;
+      }
+
+      const buffer = geometry.attributeBuffers[attribute.semantic];
+      if (!buffer) {
+        isDrawable = false;
+        break;
+      }
+
+      gbufferPass.setVertexBuffer(index, buffer);
+    }
+    if (!isDrawable) {
+      continue;
+    }
+
+    gbufferPass.setPipeline(gbufferPipeline);
+
+    const transformData = createDeferredMeshTransformUniformData(node.worldMatrix);
+    const transformBuffer = context.device.createBuffer({
+      label: `${node.node.id}:hybrid-gbuffer-transform`,
+      size: transformData.byteLength,
+      usage: uniformUsage | bufferCopyDstUsage,
+    });
+    context.queue.writeBuffer(transformBuffer, 0, toBufferSource(transformData));
+    gbufferPass.setBindGroup(
+      0,
+      context.device.createBindGroup({
+        layout: gbufferPipeline.getBindGroupLayout(0),
+        entries: [{
+          binding: 0,
+          resource: {
+            buffer: transformBuffer,
+          },
+        }],
+      }),
+    );
+
+    const materialBindings = getMaterialBindingDescriptors(gbufferProgram);
+    const materialResidency = {
+      current: undefined as ReturnType<typeof ensureMaterialResidency> | undefined,
+    };
+    gbufferPass.setBindGroup(
+      1,
+      context.device.createBindGroup({
+        layout: gbufferPipeline.getBindGroupLayout(1),
+        entries: materialBindings.map((descriptor) =>
+          resolveMaterialBindingResource(
+            context,
+            residency,
+            material,
+            descriptor,
+            materialResidency,
+          )
+        ),
+      }),
+    );
+
+    if (geometry.indexBuffer && geometry.indexCount > 0) {
+      gbufferPass.setIndexBuffer(geometry.indexBuffer, 'uint32');
+      gbufferPass.drawIndexed(geometry.indexCount, 1, 0, 0, 0);
+    } else {
+      gbufferPass.draw(geometry.vertexCount, 1, 0, 0);
+    }
+    drawCount += 1;
+  }
+  gbufferPass.end();
+
+  const lightingSampler = context.device.createSampler({
+    magFilter: 'linear',
+    minFilter: 'linear',
+  });
+  const lightingPass = encoder.beginRenderPass({
+    colorAttachments: [{
+      view: lightingOutputView,
+      clearValue: { r: 0.02, g: 0.02, b: 0.03, a: 1 },
+      loadOp: 'clear',
+      storeOp: 'store',
+    }],
+  });
+  lightingPass.setPipeline(lightingPipeline);
+  lightingPass.setBindGroup(
+    0,
+    context.device.createBindGroup({
+      layout: lightingPipeline.getBindGroupLayout(0),
+      entries: [
+        {
+          binding: 0,
+          resource: gbufferAlbedoView,
+        },
+        {
+          binding: 1,
+          resource: lightingSampler,
+        },
+        {
+          binding: 2,
+          resource: gbufferNormalView,
+        },
+      ],
+    }),
+  );
+  const lightingData = createDirectionalLightUniformData(directionalLights);
+  const lightingBuffer = context.device.createBuffer({
+    label: 'hybrid-lighting',
+    size: lightingData.byteLength,
+    usage: uniformUsage | bufferCopyDstUsage,
+  });
+  context.queue.writeBuffer(lightingBuffer, 0, toBufferSource(lightingData));
+  lightingPass.setBindGroup(
+    1,
+    context.device.createBindGroup({
+      layout: lightingPipeline.getBindGroupLayout(1),
+      entries: [{
+        binding: 0,
+        resource: {
+          buffer: lightingBuffer,
+        },
+      }],
+    }),
+  );
+  lightingPass.draw(3, 1, 0, 0);
+  lightingPass.end();
+  drawCount += 1;
+
+  if (partitions.forwardOpaque.length > 0) {
+    const forwardOpaquePass = encoder.beginRenderPass({
+      colorAttachments: [{
+        view: lightingOutputView,
+        loadOp: 'load',
+        storeOp: 'store',
+      }],
+      depthStencilAttachment: {
+        view: depthView,
+        depthLoadOp: 'load',
+        depthStoreOp: 'store',
+      },
+    });
+    drawCount += renderForwardMeshPass(
+      context,
+      forwardOpaquePass,
+      residency,
+      partitions.forwardOpaque,
+      materialRegistry,
+      binding.target.format,
+      viewProjectionMatrix,
+      directionalLights,
+      'opaque',
+    );
+    forwardOpaquePass.end();
+  }
+
+  if (partitions.forwardTransparent.length > 0) {
+    const forwardTransparentPass = encoder.beginRenderPass({
+      colorAttachments: [{
+        view: lightingOutputView,
+        loadOp: 'load',
+        storeOp: 'store',
+      }],
+      depthStencilAttachment: {
+        view: depthView,
+        depthLoadOp: 'load',
+        depthStoreOp: 'store',
+      },
+    });
+    drawCount += renderForwardMeshPass(
+      context,
+      forwardTransparentPass,
+      residency,
+      partitions.forwardTransparent,
+      materialRegistry,
+      binding.target.format,
+      viewProjectionMatrix,
+      directionalLights,
+      'transparent',
+    );
+    forwardTransparentPass.end();
   }
 
   drawCount += renderSdfRaymarchPass(
@@ -3561,6 +4212,32 @@ export const renderDeferredSnapshot = async (
   postProcessPasses: readonly PostProcessPass[] = [],
 ): Promise<DeferredSnapshotResult> => {
   const frame = renderDeferredFrame(
+    context,
+    binding,
+    residency,
+    evaluatedScene,
+    materialRegistry,
+    postProcessPasses,
+  );
+  const snapshot = await readOffscreenSnapshot(context, binding);
+
+  return {
+    ...frame,
+    width: snapshot.width,
+    height: snapshot.height,
+    bytes: snapshot.bytes,
+  };
+};
+
+export const renderHybridSnapshot = async (
+  context: GpuRenderExecutionContext & GpuReadbackContext,
+  binding: RenderContextBinding,
+  residency: RuntimeResidency,
+  evaluatedScene: EvaluatedScene,
+  materialRegistry = createMaterialRegistry(),
+  postProcessPasses: readonly PostProcessPass[] = [],
+): Promise<HybridSnapshotResult> => {
+  const frame = renderHybridFrame(
     context,
     binding,
     residency,

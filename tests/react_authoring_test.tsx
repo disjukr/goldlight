@@ -12,6 +12,7 @@ import {
   createSceneRoot,
   createSceneRootForwardRenderer,
   createSceneRootFrameDriver,
+  createSceneRootHybridRenderer,
   DirectionalLight,
   Fragment,
   OrthographicCamera,
@@ -1609,6 +1610,46 @@ Deno.test('createSceneRootForwardRenderer encapsulates frame advance and forward
   assertEquals(frame.evaluationMode, 'none');
   assertEquals(frame.renderResult, {
     drawCount: 2,
+    submittedCommandBufferCount: 1,
+  });
+});
+
+Deno.test('createSceneRootHybridRenderer encapsulates frame advance and hybrid rendering', () => {
+  const root = createSceneRoot(
+    <scene id='hybrid-driver-scene'>
+      <group id='root'>
+        <node id='mesh-node' position={[3, 0, 0]} />
+      </group>
+    </scene>,
+  );
+  const calls: string[] = [];
+  const renderer = createSceneRootHybridRenderer(root, {
+    context: {} as never,
+    binding: {} as never,
+    residency: createRuntimeResidency(),
+    initialTimeMs: 0,
+    hooks: {
+      ensureSceneMeshResidency: (_context, _residency, scene, evaluatedScene) => {
+        calls.push(`ensure:${scene.id}:${evaluatedScene.nodes.length}`);
+        return createRuntimeResidency();
+      },
+      renderHybridFrame: (_context, _binding, _residency, evaluatedScene) => {
+        const meshNode = evaluatedScene.nodes.find((entry) => entry.node.id === 'mesh-node');
+        calls.push(`render:${meshNode?.worldMatrix[12] ?? -1}`);
+        return {
+          drawCount: evaluatedScene.nodes.length + 1,
+          submittedCommandBufferCount: 1,
+        };
+      },
+    },
+  });
+
+  const frame = renderer.renderFrame(16);
+
+  assertEquals(calls, ['ensure:hybrid-driver-scene:2', 'render:3']);
+  assertEquals(frame.evaluationMode, 'none');
+  assertEquals(frame.renderResult, {
+    drawCount: 3,
     submittedCommandBufferCount: 1,
   });
 });

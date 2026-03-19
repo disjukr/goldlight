@@ -58,8 +58,9 @@ The initial renderer uses a lightweight pass graph:
 - Built-in deferred unlit shading supports the same optional base-color texture sampling when
   `NORMAL` and `TEXCOORD_0` data plus texture residency are available, and bypasses the lighting
   resolve so color-only materials stay unlit.
-- Built-in deferred lit shading consumes the same material color uniform plus first-class
-  directional light nodes during the fullscreen lighting resolve.
+- Built-in deferred lit shading consumes the same material color uniform, optionally multiplies in a
+  resident base-color texture when `TEXCOORD_0` data is available, and uses first-class directional
+  light nodes during the fullscreen lighting resolve.
 - Deferred custom WGSL programs may also target the G-buffer path when they write the same two
   render targets and match the deferred transform/material binding contract.
 - Deferred frames now reuse the existing SDF sphere/box and volume raymarch passes after lighting,
@@ -73,7 +74,8 @@ The initial renderer uses a lightweight pass graph:
   directional-light uniform block.
 - Material parameter uploads and bind group creation are implemented for built-in unlit shading.
 - The minimal deferred path currently requires `NORMAL` vertex data and supports built-in `unlit`
-  plus non-textured built-in `lit` materials, with optional base-color textures on `unlit`.
+  plus built-in `lit` materials, with optional base-color textures on both when residency and
+  `TEXCOORD_0` data are available.
 - Custom WGSL programs can be registered and cached through the material registry.
 - Headless/offscreen rendering supports compact byte readback for snapshot testing.
 - Headless/offscreen rendering also supports forward-renderer cubemap capture as six ordered
@@ -143,7 +145,6 @@ The initial renderer uses a lightweight pass graph:
 
 - Post-processing currently exposes a renderer-owned fullscreen pass contract only; scene IR does
   not declare effect graphs yet.
-- Deferred rendering does not yet support textures on built-in lit materials.
 - Renderer-side picking currently targets mesh nodes only; SDF, volume, and per-triangle picking are
   still pending.
 - SDF execution currently supports sphere and box primitives only; broader graph/operator coverage

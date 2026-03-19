@@ -28,6 +28,9 @@ import builtInDeferredGbufferTexturedUnlitShader from './shaders/built_in_deferr
 import builtInDeferredGbufferLitShader from './shaders/built_in_deferred_gbuffer_lit.wgsl' with {
   type: 'text',
 };
+import builtInDeferredGbufferTexturedLitShader from './shaders/built_in_deferred_gbuffer_lit_textured.wgsl' with {
+  type: 'text',
+};
 import builtInDeferredLightingShader from './shaders/built_in_deferred_lighting.wgsl' with {
   type: 'text',
 };
@@ -311,6 +314,7 @@ const builtInDeferredDepthPrepassProgramId = 'built-in:deferred-depth-prepass';
 const builtInDeferredGbufferUnlitProgramId = 'built-in:deferred-gbuffer-unlit';
 const builtInDeferredGbufferTexturedUnlitProgramId = 'built-in:deferred-gbuffer-unlit-textured';
 const builtInDeferredGbufferLitProgramId = 'built-in:deferred-gbuffer-lit';
+const builtInDeferredGbufferTexturedLitProgramId = 'built-in:deferred-gbuffer-lit-textured';
 const builtInDeferredLightingProgramId = 'built-in:deferred-lighting';
 const builtInSdfRaymarchProgramId = 'built-in:sdf-raymarch';
 const builtInVolumeRaymarchProgramId = 'built-in:volume-raymarch';
@@ -1098,6 +1102,55 @@ const builtInDeferredGbufferLitProgram: MaterialProgram = {
   ],
 };
 
+const builtInDeferredGbufferTexturedLitProgram: MaterialProgram = {
+  id: builtInDeferredGbufferTexturedLitProgramId,
+  label: 'Built-in Deferred G-buffer Lit (Textured)',
+  wgsl: builtInDeferredGbufferTexturedLitShader,
+  vertexEntryPoint: 'vsMain',
+  fragmentEntryPoint: 'fsMain',
+  usesMaterialBindings: true,
+  usesTransformBindings: true,
+  materialBindings: [
+    {
+      kind: 'uniform',
+      binding: 0,
+    },
+    {
+      kind: 'texture',
+      binding: 1,
+      textureSemantic: 'baseColor',
+    },
+    {
+      kind: 'sampler',
+      binding: 2,
+      textureSemantic: 'baseColor',
+    },
+  ],
+  vertexAttributes: [
+    {
+      semantic: 'POSITION',
+      shaderLocation: 0,
+      format: 'float32x3',
+      offset: 0,
+      arrayStride: 12,
+    },
+    {
+      semantic: 'NORMAL',
+      shaderLocation: 1,
+      format: 'float32x3',
+      offset: 0,
+      arrayStride: 12,
+    },
+    {
+      semantic: 'TEXCOORD_0',
+      shaderLocation: 2,
+      format: 'float32x2',
+      offset: 0,
+      arrayStride: 8,
+    },
+  ],
+};
+
 const builtInPostProcessBlitProgram: PostProcessProgram = {
   id: builtInPostProcessBlitProgramId,
   label: 'Built-in Post-Process Blit',
@@ -1564,11 +1617,14 @@ export const collectRendererCapabilityIssues = (
         );
       }
 
-      if (materialTextures.length > 0) {
+      const unsupportedLitTexture = materialTextures.find((texture) =>
+        texture.semantic !== 'baseColor'
+      );
+      if (unsupportedLitTexture) {
         pushIssue(
           'material-binding',
-          'light-material:textures-unsupported',
-          `renderer "${renderer.label}" does not yet support textures on built-in lit material "${material.id}"`,
+          `texture-semantic:${unsupportedLitTexture.semantic}`,
+          `renderer "${renderer.label}" does not support "${unsupportedLitTexture.semantic}" textures on built-in lit material "${material.id}"`,
         );
       }
 
@@ -1578,6 +1634,29 @@ export const collectRendererCapabilityIssues = (
           'vertex-attribute:NORMAL',
           `renderer "${renderer.label}" cannot light node "${node.node.id}" because mesh "${node.mesh.id}" is missing NORMAL`,
         );
+      }
+
+      const baseColorTexture = materialTextures.find((texture) => texture.semantic === 'baseColor');
+      if (baseColorTexture) {
+        if (renderer.kind !== 'deferred') {
+          pushIssue(
+            'material-binding',
+            'light-material:textures-unsupported',
+            `renderer "${renderer.label}" does not yet support textures on built-in lit material "${material.id}"`,
+          );
+        } else if (node.mesh && !hasTexcoord0) {
+          pushIssue(
+            'material-binding',
+            'vertex-attribute:TEXCOORD_0',
+            `renderer "${renderer.label}" cannot sample baseColor textures on lit node "${node.node.id}" because mesh "${node.mesh.id}" is missing TEXCOORD_0`,
+          );
+        } else if (residency && !residency.textures.get(baseColorTexture.id)) {
+          pushIssue(
+            'material-binding',
+            'texture-residency:baseColor:texture',
+            `renderer "${renderer.label}" cannot sample baseColor textures for material "${material.id}" because texture "${baseColorTexture.id}" is not resident`,
+          );
+        }
       }
     }
 
@@ -2520,7 +2599,10 @@ const resolveDeferredGbufferProgram = (
   }
 
   if (material.kind === 'lit') {
-    return builtInDeferredGbufferLitProgram;
+    const baseColorTexture = getBaseColorTextureResidency(residency, material);
+    return baseColorTexture && geometry.attributeBuffers.TEXCOORD_0
+      ? builtInDeferredGbufferTexturedLitProgram
+      : builtInDeferredGbufferLitProgram;
   }
 
   const baseColorTexture = getBaseColorTextureResidency(residency, material);

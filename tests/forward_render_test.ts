@@ -808,6 +808,94 @@ Deno.test('renderDeferredFrame binds base-color textures for textured deferred u
   assertEquals(mocks.bindGroupEntries[4].map((entry) => entry.binding), [0]);
 });
 
+Deno.test('renderDeferredFrame binds base-color textures for textured deferred lit materials', () => {
+  const mocks = createRenderMocks();
+  const runtimeResidency = createRuntimeResidency();
+  let scene = createSceneIr('scene');
+  scene = appendLight(scene, {
+    id: 'light-directional',
+    kind: 'directional',
+    color: { x: 1, y: 0.95, z: 0.9 },
+    intensity: 1.5,
+  });
+  scene = appendMaterial(scene, {
+    id: 'material-textured-lit',
+    kind: 'lit',
+    textures: [{
+      id: 'texture-0',
+      assetId: 'image-0',
+      semantic: 'baseColor',
+      colorSpace: 'srgb',
+      sampler: 'linear-repeat',
+    }],
+    parameters: {
+      color: { x: 0.8, y: 0.4, z: 0.2, w: 1 },
+    },
+  });
+  scene = appendMesh(scene, {
+    id: 'mesh-textured-lit-deferred',
+    materialId: 'material-textured-lit',
+    attributes: [
+      { semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0, 0, 1, 0] },
+      { semantic: 'NORMAL', itemSize: 3, values: [0, 0, 1, 0, 0, 1, 0, 0, 1] },
+      { semantic: 'TEXCOORD_0', itemSize: 2, values: [0, 0, 1, 0, 0, 1] },
+    ],
+  });
+  scene = appendNode(scene, createNode('light-node', { lightId: 'light-directional' }));
+  scene = appendNode(
+    scene,
+    createNode('node-textured-lit-deferred', { meshId: 'mesh-textured-lit-deferred' }),
+  );
+
+  runtimeResidency.geometry.set('mesh-textured-lit-deferred', {
+    meshId: 'mesh-textured-lit-deferred',
+    attributeBuffers: {
+      POSITION: { id: 0 } as unknown as GPUBuffer,
+      NORMAL: { id: 1 } as unknown as GPUBuffer,
+      TEXCOORD_0: { id: 2 } as unknown as GPUBuffer,
+    },
+    vertexCount: 3,
+    indexCount: 0,
+  });
+  runtimeResidency.textures.set('texture-0', {
+    textureId: 'texture-0',
+    texture: { id: 0 } as unknown as GPUTexture,
+    view: { id: 0 } as unknown as GPUTextureView,
+    sampler: { id: 0 } as unknown as GPUSampler,
+    width: 2,
+    height: 2,
+    format: 'rgba8unorm-srgb',
+  });
+
+  const binding = createOffscreenContext({
+    device: mocks.device as unknown as GPUDevice,
+    target: createHeadlessTarget(64, 64),
+  });
+
+  const result = renderDeferredFrame(
+    mocks as unknown as GpuRenderExecutionContext,
+    binding,
+    runtimeResidency,
+    evaluateScene(scene, { timeMs: 0 }),
+  );
+
+  assertEquals(result.drawCount, 3);
+  assertEquals(mocks.pipelines.length, 3);
+  const deferredGbufferPipeline = mocks.pipelines.find((pipeline) =>
+    pipeline.descriptor.fragment?.targets?.length === 2
+  );
+  assertEquals(deferredGbufferPipeline?.descriptor.fragment?.targets?.length, 2);
+  const deferredVertexBuffers = deferredGbufferPipeline?.descriptor.vertex?.buffers ?? [];
+  assertEquals(deferredVertexBuffers.length, 3);
+  assertEquals(
+    deferredVertexBuffers.map((buffer) => buffer?.attributes[0]?.shaderLocation ?? -1),
+    [0, 1, 2],
+  );
+  assertEquals(mocks.bindGroupEntries.length, 5);
+  assertEquals(mocks.bindGroupEntries[2].map((entry) => entry.binding), [0, 1, 2]);
+  assertEquals(mocks.bindGroupEntries[4].map((entry) => entry.binding), [0]);
+});
+
 Deno.test('renderDeferredFrame uses registered custom WGSL gbuffer programs', () => {
   const mocks = createRenderMocks();
   const runtimeResidency = createRuntimeResidency();

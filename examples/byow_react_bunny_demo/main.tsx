@@ -10,20 +10,19 @@ import {
 import {
   configureSurfaceContext,
   createRuntimeResidency,
-  ensureSceneMeshResidency,
   requestGpuContext,
 } from '../../packages/gpu/mod.ts';
 import type { MeshPrimitive } from '../../packages/ir/mod.ts';
 import { loadPlyFromText } from '../../packages/loaders/mod.ts';
 import { createDenoSurfaceTarget } from '../../packages/platform/mod.ts';
 import {
-  createSceneRootFrameDriver,
+  createSceneRootForwardRenderer,
   createReactSceneRoot,
   DirectionalLight,
   flushReactSceneUpdates,
   PerspectiveCamera,
 } from '../../packages/react/reconciler.ts';
-import { createMaterialRegistry, renderForwardFrame } from '../../packages/renderer/mod.ts';
+import { createMaterialRegistry } from '../../packages/renderer/mod.ts';
 
 const width = 1280;
 const height = 720;
@@ -128,19 +127,17 @@ const surfaceBinding = configureSurfaceContext(
 );
 const residency = createRuntimeResidency();
 const materialRegistry = createMaterialRegistry();
-const frameDriver = createSceneRootFrameDriver(sceneRoot, {
+const forwardRenderer = createSceneRootForwardRenderer(sceneRoot, {
+  context: gpuContext,
+  binding: surfaceBinding,
   flushUpdates: () => flushReactSceneUpdates(),
   residency,
+  materialRegistry,
   initialTimeMs: performance.now(),
 });
 
 const drawFrame = () => {
-  const timeMs = performance.now();
-  const frame = frameDriver.advanceFrame(timeMs);
-  const currentScene = frame.scene;
-  const evaluatedScene = frame.evaluatedScene;
-  ensureSceneMeshResidency(gpuContext, residency, currentScene, evaluatedScene);
-  renderForwardFrame(gpuContext, surfaceBinding, residency, evaluatedScene, materialRegistry);
+  forwardRenderer.renderFrame(performance.now());
   windowSurface.present();
 };
 

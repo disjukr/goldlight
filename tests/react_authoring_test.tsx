@@ -8,6 +8,7 @@ import {
   authoringTreeToSceneIr,
   commitSummaryNeedsResidencyReset,
   createAuthoringElement,
+  createSceneRootForwardRenderer,
   createSceneRootFrameDriver,
   createSceneRoot,
   DirectionalLight,
@@ -1565,6 +1566,46 @@ Deno.test('createSceneRootFrameDriver falls back to full evaluation for topology
     fullUpdateCount: 2,
     targetedInvalidationCount: 0,
     resetInvalidationCount: 1,
+  });
+});
+
+Deno.test('createSceneRootForwardRenderer encapsulates frame advance and forward rendering', () => {
+  const root = createSceneRoot(
+    <scene id='forward-driver-scene'>
+      <group id='root'>
+        <node id='mesh-node' position={[2, 0, 0]} />
+      </group>
+    </scene>,
+  );
+  const calls: string[] = [];
+  const renderer = createSceneRootForwardRenderer(root, {
+    context: {} as never,
+    binding: {} as never,
+    residency: createRuntimeResidency(),
+    initialTimeMs: 0,
+    hooks: {
+      ensureSceneMeshResidency: (_context, _residency, scene, evaluatedScene) => {
+        calls.push(`ensure:${scene.id}:${evaluatedScene.nodes.length}`);
+        return createRuntimeResidency();
+      },
+      renderForwardFrame: (_context, _binding, _residency, evaluatedScene) => {
+        const meshNode = evaluatedScene.nodes.find((entry) => entry.node.id === 'mesh-node');
+        calls.push(`render:${meshNode?.worldMatrix[12] ?? -1}`);
+        return {
+          drawCount: evaluatedScene.nodes.length,
+          submittedCommandBufferCount: 1,
+        };
+      },
+    },
+  });
+
+  const frame = renderer.renderFrame(16);
+
+  assertEquals(calls, ['ensure:forward-driver-scene:2', 'render:2']);
+  assertEquals(frame.evaluationMode, 'none');
+  assertEquals(frame.renderResult, {
+    drawCount: 2,
+    submittedCommandBufferCount: 1,
   });
 });
 

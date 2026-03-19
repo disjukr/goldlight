@@ -80,7 +80,7 @@ const createCornellScene = () => {
         op: 'box' as const,
         parameters: {
           size: { x: 0.45, y: 0.02, z: 0.45, w: 0 },
-          color: { x: 1, y: 0.97, z: 0.92, w: 18 },
+          color: { x: 1, y: 0.97, z: 0.92, w: 5 },
         },
       },
       nodeId: 'light-panel-node',

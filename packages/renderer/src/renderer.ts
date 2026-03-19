@@ -44,6 +44,9 @@ import builtInPathtracedSdfShader from './shaders/built_in_pathtraced_sdf.wgsl' 
 import builtInPathtracedMeshShader from './shaders/built_in_pathtraced_mesh.wgsl' with {
   type: 'text',
 };
+import builtInPathtracedPresentShader from './shaders/built_in_pathtraced_present.wgsl' with {
+  type: 'text',
+};
 import builtInSdfRaymarchShader from './shaders/built_in_sdf_raymarch.wgsl' with { type: 'text' };
 import builtInVolumeRaymarchShader from './shaders/built_in_volume_raymarch.wgsl' with {
   type: 'text',
@@ -380,6 +383,7 @@ const builtInDeferredGbufferLitProgramId = 'built-in:deferred-gbuffer-lit';
 const builtInDeferredLightingProgramId = 'built-in:deferred-lighting';
 const builtInPathtracedAccumulateProgramId = 'built-in:pathtraced-accumulate';
 const builtInPathtracedMeshProgramId = 'built-in:pathtraced-mesh';
+const builtInPathtracedPresentProgramId = 'built-in:pathtraced-present';
 const builtInPathtracedSdfProgramId = 'built-in:pathtraced-sdf';
 const builtInSdfRaymarchProgramId = 'built-in:sdf-raymarch';
 const builtInVolumeRaymarchProgramId = 'built-in:volume-raymarch';
@@ -393,6 +397,7 @@ const storageUsage = 0x80;
 const bufferCopyDstUsage = 0x08;
 const deferredDepthFormat = 'depth24plus';
 const maxSdfPassItems = 16;
+const pathtracedAccumulationFormat = 'rgba16float';
 const depthTextureFormat = 'depth24plus';
 const maxDirectionalLights = 4;
 const defaultAmbientLight = 0.2;
@@ -2940,6 +2945,42 @@ export const ensurePathtracedAccumulatePipeline = (
   return pipeline;
 };
 
+export const ensurePathtracedPresentPipeline = (
+  context: GpuRenderExecutionContext,
+  residency: RuntimeResidency,
+  format: GPUTextureFormat,
+): GPURenderPipeline => {
+  const cacheKey = `${builtInPathtracedPresentProgramId}:${format}`;
+  const cached = residency.pipelines.get(cacheKey);
+  if (cached) {
+    return cached as GPURenderPipeline;
+  }
+
+  const shader = context.device.createShaderModule({
+    label: cacheKey,
+    code: builtInPathtracedPresentShader,
+  });
+  const pipeline = context.device.createRenderPipeline({
+    label: cacheKey,
+    layout: 'auto',
+    vertex: {
+      module: shader,
+      entryPoint: 'vsMain',
+    },
+    fragment: {
+      module: shader,
+      entryPoint: 'fsMain',
+      targets: [{ format }],
+    },
+    primitive: {
+      topology: 'triangle-list',
+    },
+  });
+
+  residency.pipelines.set(cacheKey, pipeline);
+  return pipeline;
+};
+
 export const ensureVolumeRaymarchPipeline = (
   context: GpuRenderExecutionContext,
   residency: RuntimeResidency,
@@ -3276,21 +3317,36 @@ export const renderPathtracedSdfPass = (
 
   const pipeline = ensurePathtracedSdfPipeline(context, residency, targetFormat);
   const uniformData = createSdfUniformData(items, camera, frameIndex);
+  const lightingData = createDirectionalLightUniformData(extractDirectionalLightItems(evaluatedScene));
   const uniformBuffer = context.device.createBuffer({
     label: 'pathtraced-sdf-uniforms',
     size: uniformData.byteLength,
     usage: uniformUsage | bufferCopyDstUsage,
   });
   context.queue.writeBuffer(uniformBuffer, 0, toBufferSource(uniformData));
+  const lightingBuffer = context.device.createBuffer({
+    label: 'pathtraced-sdf-lighting',
+    size: lightingData.byteLength,
+    usage: uniformUsage | bufferCopyDstUsage,
+  });
+  context.queue.writeBuffer(lightingBuffer, 0, toBufferSource(lightingData));
 
   const bindGroup = context.device.createBindGroup({
     layout: pipeline.getBindGroupLayout(0),
-    entries: [{
-      binding: 0,
-      resource: {
-        buffer: uniformBuffer,
+    entries: [
+      {
+        binding: 0,
+        resource: {
+          buffer: uniformBuffer,
+        },
       },
-    }],
+      {
+        binding: 1,
+        resource: {
+          buffer: lightingBuffer,
+        },
+      },
+    ],
   });
 
   const pass = encoder.beginRenderPass({
@@ -3538,6 +3594,7 @@ export const renderPathtracedMeshPass = (
   const uniformData = createPathtracedMeshUniformData(instances.length, camera, frameIndex);
   const sdfItems = extractSdfPassItems(evaluatedScene);
   const sdfUniformData = createSdfUniformData(sdfItems, camera, frameIndex);
+  const lightingData = createDirectionalLightUniformData(extractDirectionalLightItems(evaluatedScene));
   const uniformBuffer = context.device.createBuffer({
     label: 'pathtraced-mesh-uniforms',
     size: uniformData.byteLength,
@@ -3550,6 +3607,12 @@ export const renderPathtracedMeshPass = (
     usage: uniformUsage | bufferCopyDstUsage,
   });
   context.queue.writeBuffer(sdfUniformBuffer, 0, toBufferSource(sdfUniformData));
+  const lightingBuffer = context.device.createBuffer({
+    label: 'pathtraced-mesh-lighting',
+    size: lightingData.byteLength,
+    usage: uniformUsage | bufferCopyDstUsage,
+  });
+  context.queue.writeBuffer(lightingBuffer, 0, toBufferSource(lightingData));
   const instanceData = createPathtracedMeshInstanceBufferData(instances);
   const instanceBuffer = context.device.createBuffer({
     label: 'pathtraced-mesh-instances',
@@ -3591,6 +3654,12 @@ export const renderPathtracedMeshPass = (
           buffer: sdfUniformBuffer,
         },
       },
+      {
+        binding: 5,
+        resource: {
+          buffer: lightingBuffer,
+        },
+      },
     ],
   });
 
@@ -3615,17 +3684,16 @@ const renderPathtracedAccumulationPass = (
   context: GpuRenderExecutionContext,
   encoder: GPUCommandEncoder,
   residency: RuntimeResidency,
-  format: GPUTextureFormat,
   currentSampleView: GPUTextureView,
   previousAccumulationView: GPUTextureView,
   targetView: GPUTextureView,
   sampleCount: number,
 ): number => {
-  const pipeline = ensurePathtracedAccumulatePipeline(context, residency, format);
+  const pipeline = ensurePathtracedAccumulatePipeline(context, residency, pathtracedAccumulationFormat);
   const sampler = context.device.createSampler({
     label: 'pathtraced-accumulation-sampler',
-    magFilter: 'linear',
-    minFilter: 'linear',
+    magFilter: 'nearest',
+    minFilter: 'nearest',
   });
   const uniformData = new Float32Array([sampleCount, 0, 0, 0]);
   const uniformBuffer = context.device.createBuffer({
@@ -3655,6 +3723,63 @@ const renderPathtracedAccumulationPass = (
       },
       {
         binding: 4,
+        resource: {
+          buffer: uniformBuffer,
+        },
+      },
+    ],
+  });
+  const pass = encoder.beginRenderPass({
+    colorAttachments: [{
+      view: targetView,
+      clearValue: { r: 0, g: 0, b: 0, a: 1 },
+      loadOp: 'clear',
+      storeOp: 'store',
+    }],
+  });
+
+  pass.setPipeline(pipeline);
+  pass.setBindGroup(0, bindGroup);
+  pass.draw(6, 1, 0, 0);
+  pass.end();
+
+  return 1;
+};
+
+const renderPathtracedPresentPass = (
+  context: GpuRenderExecutionContext,
+  encoder: GPUCommandEncoder,
+  residency: RuntimeResidency,
+  format: GPUTextureFormat,
+  inputView: GPUTextureView,
+  targetView: GPUTextureView,
+): number => {
+  const pipeline = ensurePathtracedPresentPipeline(context, residency, format);
+  const sampler = context.device.createSampler({
+    label: 'pathtraced-present-sampler',
+    magFilter: 'nearest',
+    minFilter: 'nearest',
+  });
+  const uniformData = new Float32Array([1.0, 0, 0, 0, 0, 0, 0, 0]);
+  const uniformBuffer = context.device.createBuffer({
+    label: 'pathtraced-present-uniforms',
+    size: uniformData.byteLength,
+    usage: uniformUsage | bufferCopyDstUsage,
+  });
+  context.queue.writeBuffer(uniformBuffer, 0, toBufferSource(uniformData));
+  const bindGroup = context.device.createBindGroup({
+    layout: pipeline.getBindGroupLayout(0),
+    entries: [
+      {
+        binding: 0,
+        resource: inputView,
+      },
+      {
+        binding: 1,
+        resource: sampler,
+      },
+      {
+        binding: 2,
         resource: {
           buffer: uniformBuffer,
         },
@@ -3959,7 +4084,7 @@ const createPathtracedAccumulationTexture = (
       height: binding.target.height,
       depthOrArrayLayers: 1,
     },
-    format: binding.target.format,
+    format: pathtracedAccumulationFormat,
     sampleCount: 1,
     usage: renderAttachmentUsage | textureBindingUsage,
   });
@@ -4566,9 +4691,16 @@ export const renderPathtracedFrame = (
     : accumulationState.accumulationB;
   const previousAccumulationView = previousAccumulationTexture.createView();
   const nextAccumulationView = nextAccumulationTexture.createView();
-  const presentPasses = postProcessPasses.length > 0
-    ? postProcessPasses
-    : [createBlitPostProcessPass()];
+  const resolvedSceneTexture = postProcessPasses.length > 0
+    ? createTransientRenderTexture(
+      context,
+      binding,
+      'pathtraced-resolved-scene',
+      binding.target.format,
+    )
+    : undefined;
+  const resolvedSceneView = resolvedSceneTexture?.createView();
+  const presentPasses = postProcessPasses.length > 0 ? postProcessPasses : [];
   const encoder = context.device.createCommandEncoder({
     label: 'pathtraced-frame',
   });
@@ -4587,7 +4719,7 @@ export const renderPathtracedFrame = (
       evaluatedScene,
       meshCacheKey,
       currentSampleView,
-      binding.target.format,
+      pathtracedAccumulationFormat,
       raymarchCamera,
       accumulationState.frameIndex,
     )
@@ -4598,7 +4730,7 @@ export const renderPathtracedFrame = (
       residency,
       evaluatedScene,
       currentSampleView,
-      binding.target.format,
+      pathtracedAccumulationFormat,
       raymarchCamera,
       accumulationState.frameIndex,
     );
@@ -4606,20 +4738,29 @@ export const renderPathtracedFrame = (
     context,
     encoder,
     residency,
-    binding.target.format,
     currentSampleView,
     previousAccumulationView,
     nextAccumulationView,
     accumulationState.sampleCount,
   );
-  drawCount += renderPostProcessPasses(
+  drawCount += renderPathtracedPresentPass(
     context,
     encoder,
-    binding,
     residency,
-    presentPasses,
+    binding.target.format,
     nextAccumulationView,
+    resolvedSceneView ?? acquireColorAttachmentView(context, binding),
   );
+  if (resolvedSceneView) {
+    drawCount += renderPostProcessPasses(
+      context,
+      encoder,
+      binding,
+      residency,
+      presentPasses,
+      resolvedSceneView,
+    );
+  }
 
   const commandBuffer = encoder.finish();
   context.queue.submit([commandBuffer]);

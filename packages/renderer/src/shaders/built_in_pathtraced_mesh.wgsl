@@ -53,6 +53,12 @@ struct SdfUniforms {
   items: array<SdfItem, 16>,
 };
 
+struct LightingUniforms {
+  directions: array<vec4<f32>, 4>,
+  colors: array<vec4<f32>, 4>,
+  settings: vec4<f32>,
+};
+
 struct TriangleBuffer {
   values: array<MeshTriangle>,
 };
@@ -104,12 +110,15 @@ const sdfRayOriginEpsilon = 0.03;
 const sdfHitEpsilon = 0.0015;
 const sdfTravelClampMin = 0.008;
 const maxSdfTravel = 16.0;
+const fireflyClampLuminance = 12.0;
+const minRussianRouletteProbability = 0.1;
 
 @group(0) @binding(0) var<uniform> uniforms: PathtracedMeshUniforms;
 @group(0) @binding(1) var<storage, read> triangles: TriangleBuffer;
 @group(0) @binding(2) var<storage, read> bvh: BvhBuffer;
 @group(0) @binding(3) var<storage, read> instances: InstanceBuffer;
 @group(0) @binding(4) var<uniform> sdf: SdfUniforms;
+@group(0) @binding(5) var<uniform> lighting: LightingUniforms;
 
 @vertex
 fn vsMain(@builtin(vertex_index) vertexIndex: u32) -> VsOut {
@@ -129,44 +138,56 @@ fn vsMain(@builtin(vertex_index) vertexIndex: u32) -> VsOut {
   return out;
 }
 
-fn random(seed: ptr<function, f32>) -> f32 {
-  let value = fract(sin(*seed) * 43758.5453123);
-  *seed = value + 0.61803398875;
+fn initRandomState(pixel: vec2<f32>, frameIndex: f32) -> vec2<f32> {
+  return vec2<f32>(
+    fract(sin(dot(pixel + vec2<f32>(frameIndex * 0.37, frameIndex * 1.13), vec2<f32>(127.1, 311.7))) * 43758.5453123),
+    fract(sin(dot(pixel + vec2<f32>(frameIndex * 1.79, frameIndex * 0.53), vec2<f32>(269.5, 183.3))) * 43758.5453123),
+  );
+}
+
+fn random(state: ptr<function, vec2<f32>>) -> f32 {
+  let value = fract(52.9829189 * fract(dot(*state, vec2<f32>(0.06711056, 0.00583715))));
+  *state = fract(vec2<f32>(value, value + 0.38196601125) + (*state * 1.61803398875));
   return value;
 }
 
-fn randomUnitVector(seed: ptr<function, f32>) -> vec3<f32> {
-  let z = (random(seed) * 2.0) - 1.0;
-  let angle = random(seed) * 6.28318530718;
-  let radius = sqrt(max(1.0 - (z * z), 0.0));
-  return vec3<f32>(radius * cos(angle), radius * sin(angle), z);
+fn orthonormalBasis(normal: vec3<f32>) -> mat3x3<f32> {
+  let signValue = select(-1.0, 1.0, normal.z >= 0.0);
+  let a = -1.0 / (signValue + normal.z);
+  let b = normal.x * normal.y * a;
+  let tangent = vec3<f32>(1.0 + (signValue * normal.x * normal.x * a), signValue * b, -signValue * normal.x);
+  let bitangent = vec3<f32>(b, signValue + (normal.y * normal.y * a), -normal.y);
+  return mat3x3<f32>(normalize(tangent), normalize(bitangent), normal);
 }
 
-fn sampleHemisphere(normal: vec3<f32>, seed: ptr<function, f32>) -> vec3<f32> {
-  let direction = randomUnitVector(seed);
-  return normalize(select(-direction, direction, dot(direction, normal) >= 0.0));
+fn sampleCosineHemisphere(normal: vec3<f32>, state: ptr<function, vec2<f32>>) -> vec3<f32> {
+  let u1 = random(state);
+  let u2 = random(state);
+  let radius = sqrt(u1);
+  let angle = 6.28318530718 * u2;
+  let localDirection = vec3<f32>(
+    radius * cos(angle),
+    radius * sin(angle),
+    sqrt(max(1.0 - u1, 0.0)),
+  );
+  return normalize(orthonormalBasis(normal) * localDirection);
 }
 
 fn sampleSky(direction: vec3<f32>) -> vec3<f32> {
   let horizon = clamp((direction.y * 0.5) + 0.5, 0.0, 1.0);
-  let sky = mix(vec3<f32>(0.04, 0.05, 0.08), vec3<f32>(0.55, 0.72, 0.98), horizon);
-  let sunDirection = normalize(vec3<f32>(0.35, 0.88, 0.18));
-  let sunAmount = pow(max(dot(direction, sunDirection), 0.0), 128.0);
-  return sky + (vec3<f32>(1.6, 1.45, 1.25) * sunAmount);
+  return mix(vec3<f32>(0.025, 0.03, 0.05), vec3<f32>(0.38, 0.5, 0.68), horizon);
 }
 
-fn toneMapAces(color: vec3<f32>) -> vec3<f32> {
-  let a = 2.51;
-  let b = 0.03;
-  let c = 2.43;
-  let d = 0.59;
-  let e = 0.14;
-  return clamp(
-    (color * ((a * color) + vec3<f32>(b))) /
-      (color * ((c * color) + vec3<f32>(d)) + vec3<f32>(e)),
-    vec3<f32>(0.0),
-    vec3<f32>(1.0),
-  );
+fn luminance(color: vec3<f32>) -> f32 {
+  return dot(color, vec3<f32>(0.2126, 0.7152, 0.0722));
+}
+
+fn clampFireflies(color: vec3<f32>) -> vec3<f32> {
+  let value = luminance(color);
+  if (value <= fireflyClampLuminance) {
+    return color;
+  }
+  return color * (fireflyClampLuminance / max(value, 1e-4));
 }
 
 fn transformPoint(
@@ -585,12 +606,12 @@ fn hitOffset(hit: WorldHitRecord) -> f32 {
   return select(rayOriginEpsilon, sdfRayOriginEpsilon, hit.isSdf);
 }
 
-fn sampleEmissiveBox(item: SdfItem, seed: ptr<function, f32>) -> vec4<f32> {
+fn sampleEmissiveBox(item: SdfItem, state: ptr<function, vec2<f32>>) -> vec4<f32> {
   let axisX = item.worldToLocalRow0.xyz;
   let axisY = item.worldToLocalRow1.xyz;
   let axisZ = item.worldToLocalRow2.xyz;
-  let u = (random(seed) * 2.0) - 1.0;
-  let v = (random(seed) * 2.0) - 1.0;
+  let u = (random(state) * 2.0) - 1.0;
+  let v = (random(state) * 2.0) - 1.0;
   let point = item.centerOp.xyz -
     (axisY * item.halfExtentsRadius.y) +
     (axisX * item.halfExtentsRadius.x * u) +
@@ -604,7 +625,7 @@ fn sampleDirectAreaLight(
   geometricNormal: vec3<f32>,
   isSdf: bool,
   albedo: vec3<f32>,
-  seed: ptr<function, f32>,
+  state: ptr<function, vec2<f32>>,
 ) -> vec3<f32> {
   let itemCount = u32(sdf.itemCount);
   var contribution = vec3<f32>(0.0);
@@ -615,7 +636,7 @@ fn sampleDirectAreaLight(
       continue;
     }
 
-    let sampledPoint = sampleEmissiveBox(item, seed).xyz;
+    let sampledPoint = sampleEmissiveBox(item, state).xyz;
     let lightNormal = -item.worldToLocalRow1.xyz;
     let toLight = sampledPoint - point;
     let distanceSquared = max(dot(toLight, toLight), 1e-4);
@@ -650,39 +671,52 @@ fn sampleDirectAreaLight(
       (lightArea / distanceSquared);
   }
 
-  return contribution;
+  return clampFireflies(contribution);
 }
 
-fn sampleDirectSun(
+fn sampleDirectDirectionalLights(
   point: vec3<f32>,
   shadingNormal: vec3<f32>,
   geometricNormal: vec3<f32>,
   isSdf: bool,
   albedo: vec3<f32>,
 ) -> vec3<f32> {
-  let sunDirection = normalize(vec3<f32>(0.35, 0.88, 0.18));
-  let geometricCosine = dot(geometricNormal, sunDirection);
-  if (geometricCosine <= 0.0) {
-    return vec3<f32>(0.0);
-  }
-  let cosine = max(dot(shadingNormal, sunDirection), 0.0);
-  if (cosine <= 0.0) {
+  let lightCount = i32(lighting.settings.x);
+  if (lightCount <= 0) {
     return vec3<f32>(0.0);
   }
 
+  var contribution = vec3<f32>(0.0);
   let offset = select(rayOriginEpsilon, sdfRayOriginEpsilon, isSdf);
-  let visibility = traceShadow(
-    point + (geometricNormal * offset),
-    sunDirection,
-    select(0.005, 0.05, isSdf),
-    1000.0,
-  );
-  return albedo * vec3<f32>(0.95, 0.88, 0.78) * cosine * visibility;
+  let minDistance = select(0.005, 0.05, isSdf);
+
+  for (var index: i32 = 0; index < lightCount; index = index + 1) {
+    let lightDirection = normalize(-lighting.directions[index].xyz);
+    let geometricCosine = dot(geometricNormal, lightDirection);
+    if (geometricCosine <= 0.0) {
+      continue;
+    }
+
+    let cosine = max(dot(shadingNormal, lightDirection), 0.0);
+    if (cosine <= 0.0) {
+      continue;
+    }
+
+    let visibility = traceShadow(
+      point + (geometricNormal * offset),
+      lightDirection,
+      minDistance,
+      1000.0,
+    );
+    contribution += albedo * lighting.colors[index].xyz * lighting.colors[index].w * cosine * visibility;
+  }
+
+  return clampFireflies(contribution);
 }
 
 @fragment
 fn fsMain(in: VsOut) -> @location(0) vec4<f32> {
-  var seed = (in.position.x * 12.9898) + (in.position.y * 78.233) + (uniforms.counts.y * 37.719);
+  var randomState = initRandomState(in.position.xy, uniforms.counts.y);
   let isOrthographic = uniforms.cameraForward.w > 0.5;
   var rayOrigin = uniforms.cameraOrigin.xyz;
   var rayDirection = normalize(
@@ -702,15 +736,15 @@ fn fsMain(in: VsOut) -> @location(0) vec4<f32> {
   var origin = rayOrigin;
   var direction = rayDirection;
 
-  for (var bounce: u32 = 0u; bounce < 3u; bounce = bounce + 1u) {
+  for (var bounce: u32 = 0u; bounce < 6u; bounce = bounce + 1u) {
     let hit = traceScene(origin, direction, bounce == 0u);
     if (!hit.hit) {
-      radiance += throughput * sampleSky(direction);
+      radiance += clampFireflies(throughput * sampleSky(direction));
       break;
     }
 
     if (hit.emission > 0.0) {
-      radiance += throughput * hit.albedo * hit.emission;
+      radiance += clampFireflies(throughput * hit.albedo * hit.emission);
     }
 
     let shadingNormal = normalize(select(
@@ -719,7 +753,13 @@ fn fsMain(in: VsOut) -> @location(0) vec4<f32> {
       dot(hit.shadingNormal, hit.geometricNormal) >= 0.0,
     ));
     radiance += throughput *
-      sampleDirectSun(hit.position, shadingNormal, hit.geometricNormal, hit.isSdf, hit.albedo);
+      sampleDirectDirectionalLights(
+        hit.position,
+        shadingNormal,
+        hit.geometricNormal,
+        hit.isSdf,
+        hit.albedo,
+      );
     radiance += throughput *
       sampleDirectAreaLight(
         hit.position,
@@ -727,14 +767,25 @@ fn fsMain(in: VsOut) -> @location(0) vec4<f32> {
         hit.geometricNormal,
         hit.isSdf,
         hit.albedo,
-        &seed,
+        &randomState,
       );
-    throughput *= hit.albedo * 0.82;
+
+    throughput *= hit.albedo;
+    if (bounce >= 2u) {
+      let survivalProbability = clamp(
+        max(throughput.x, max(throughput.y, throughput.z)),
+        minRussianRouletteProbability,
+        0.95,
+      );
+      if (random(&randomState) > survivalProbability) {
+        break;
+      }
+      throughput = throughput / survivalProbability;
+    }
+
     origin = hit.position + (hit.geometricNormal * hitOffset(hit));
-    direction = sampleHemisphere(hit.geometricNormal, &seed);
+    direction = sampleCosineHemisphere(hit.geometricNormal, &randomState);
   }
 
-  let mapped = toneMapAces(radiance);
-  let gammaCorrected = pow(mapped, vec3<f32>(1.0 / 2.2));
-  return vec4<f32>(gammaCorrected, 1.0);
+  return vec4<f32>(clampFireflies(radiance), 1.0);
 }

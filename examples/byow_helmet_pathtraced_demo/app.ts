@@ -11,6 +11,7 @@ import {
 } from '@rieul3d/gpu';
 import {
   appendCamera,
+  appendLight,
   appendMaterial,
   appendMesh,
   appendNode,
@@ -79,6 +80,12 @@ const createHelmetScene = () => {
       color: { x: 0.63, y: 0.64, z: 0.66, w: 1 },
     },
   });
+  scene = appendLight(scene, {
+    id: 'helmet-pathtraced-sun',
+    kind: 'directional',
+    color: { x: 0.95, y: 0.9, z: 0.84 },
+    intensity: 0.65,
+  });
   scene = appendMesh(scene, helmetMesh);
   scene = appendMesh(scene, floorMesh);
   scene = appendNode(
@@ -114,6 +121,17 @@ const createHelmetScene = () => {
       transform: {
         translation: { x: 0, y: -1.02, z: -0.8 },
         rotation: { x: 0, y: 0, z: 0, w: 1 },
+        scale: { x: 1, y: 1, z: 1 },
+      },
+    }),
+  );
+  scene = appendNode(
+    scene,
+    createNode('sun-node', {
+      lightId: 'helmet-pathtraced-sun',
+      transform: {
+        translation: { x: 0, y: 0, z: 0 },
+        rotation: createQuaternionFromEulerDegrees(-62, 24, 0),
         scale: { x: 1, y: 1, z: 1 },
       },
     }),

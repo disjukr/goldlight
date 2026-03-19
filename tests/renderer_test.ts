@@ -924,7 +924,7 @@ Deno.test('collectRendererCapabilityIssues accepts deferred mixed sdf and volume
   assertEquals(issues, []);
 });
 
-Deno.test('collectRendererCapabilityIssues rejects mesh execution on the pathtraced renderer slice', () => {
+Deno.test('collectRendererCapabilityIssues accepts mesh execution on the pathtraced renderer slice', () => {
   let scene = createSceneIr('scene');
   scene = appendMesh(scene, {
     id: 'mesh-0',
@@ -937,12 +937,7 @@ Deno.test('collectRendererCapabilityIssues rejects mesh execution on the pathtra
     evaluateScene(scene, { timeMs: 0 }),
   );
 
-  assertEquals(issues[0], {
-    nodeId: 'mesh-node',
-    feature: 'mesh',
-    requirement: 'mesh-execution',
-    message: 'renderer "pathtraced" does not support mesh execution',
-  });
+  assertEquals(issues, []);
 });
 
 Deno.test('collectRendererCapabilityIssues reports binding-specific failures in one pass', () => {

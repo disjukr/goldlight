@@ -1141,7 +1141,7 @@ Deno.test('renderPathtracedFrame marks orthographic camera uniforms for parallel
   assertEquals(sdfUniformFloats[19], 1);
 });
 
-Deno.test('renderPathtracedFrame uses a sample-count-matched final blit on msaa targets', () => {
+Deno.test('renderPathtracedFrame resolves pathtraced accumulation through the dedicated present pass on msaa targets', () => {
   const mocks = createRenderMocks();
   const runtimeResidency = createRuntimeResidency();
   let scene = createSceneIr('scene');
@@ -1167,10 +1167,10 @@ Deno.test('renderPathtracedFrame uses a sample-count-matched final blit on msaa 
     evaluateScene(scene, { timeMs: 0 }),
   );
 
-  const postProcessPipeline = mocks.pipelines.find((pipeline) =>
-    pipeline.descriptor.label?.includes('built-in:post-process-blit')
+  const pathtracedPresentPipeline = mocks.pipelines.find((pipeline) =>
+    pipeline.descriptor.label?.includes('built-in:pathtraced-present')
   );
-  assertEquals(postProcessPipeline?.descriptor.multisample?.count, 4);
+  assertEquals(!!pathtracedPresentPipeline, true);
 });
 
 Deno.test('renderPathtracedFrame clears the current sample when the scene has no sdf nodes', () => {

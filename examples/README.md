@@ -15,7 +15,7 @@ Runnable examples live here. Each example should document how to build, serve, o
   including the Stanford Bunny PLY source mesh
 - [`browser_forward/README.md`](./browser_forward/README.md): browser-based forward rendering flow
 - [`browser_react_authoring/README.md`](./browser_react_authoring/README.md): browser forward flow
-  with scene nodes authored through `@rieul3d/react` TSX
+  with scene nodes authored through `@rieul3d/react` TSX and committed through the snapshot bridge
 - [`browser_textured_forward/README.md`](./browser_textured_forward/README.md): browser forward flow
   with uploaded texture residency and built-in unlit sampling
 - [`browser_custom_textured_forward/README.md`](./browser_custom_textured_forward/README.md):
@@ -64,6 +64,13 @@ The BYOW primitives demo and the BYOW React Bunny demo both show the current cam
 attach a perspective camera to a node, mark it as the scene's active camera, and render through the
 standard forward renderer. The React Bunny demo now drives that scene path through the experimental
 reconciler host instead of the snapshot-only JSX lowering helper.
+
+For React integrations, read the examples in this order:
+
+- [`browser_react_authoring/README.md`](./browser_react_authoring/README.md) for the data-only
+  `createSceneRoot()` snapshot bridge
+- [`byow_react_bunny_demo/README.md`](./byow_react_bunny_demo/README.md) for the experimental
+  `@rieul3d/react/reconciler` live host
 
 ## Related Docs
 

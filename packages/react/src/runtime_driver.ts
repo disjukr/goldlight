@@ -12,6 +12,7 @@ import {
 } from './scene_root.ts';
 
 type SceneRootLike = Readonly<{
+  flushUpdates?: () => void;
   getScene: () => SceneIr | undefined;
   subscribe: (subscriber: SceneRootSubscriber) => () => void;
 }>;
@@ -30,7 +31,6 @@ export type SceneRootFrameAdvanceOptions = Readonly<{
 }>;
 
 export type SceneRootFrameDriverOptions = Readonly<{
-  flushUpdates?: () => void;
   residency?: RuntimeResidency;
   initialTimeMs?: number;
 }>;
@@ -99,7 +99,7 @@ export const createSceneRootFrameDriver = (
     timeMs: number,
     advanceOptions: SceneRootFrameAdvanceOptions = {},
   ): SceneRootFrameResult => {
-    options.flushUpdates?.();
+    sceneRoot.flushUpdates?.();
     const scene = currentScene;
     if (!scene) {
       throw new Error('Scene root stopped publishing scene snapshots');

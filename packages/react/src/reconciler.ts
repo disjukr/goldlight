@@ -179,6 +179,7 @@ type HostContext = Record<string, never>;
 
 export type ReactSceneRoot = Readonly<{
   render: (element: ReactNode) => SceneIr | undefined;
+  flushUpdates: (work?: () => void) => void;
   unmount: () => void;
   getScene: () => SceneIr | undefined;
   getRevision: () => number;
@@ -634,17 +635,24 @@ export const createReactSceneRoot = (initialElement?: ReactNode): ReactSceneRoot
   const fiberRoot = createFiberRoot(container);
   activeContainers.add(container);
 
-  const render = (element: ReactNode): SceneIr | undefined => {
-    renderer.updateContainerSync(element, fiberRoot, null, null);
+  const flushUpdates = (work?: () => void): void => {
+    if (work) {
+      renderer.flushSyncFromReconciler(work);
+    }
     flushRendererWork();
     throwPendingContainerError(container);
+  };
+
+  const render = (element: ReactNode): SceneIr | undefined => {
+    renderer.updateContainerSync(element, fiberRoot, null, null);
+    flushUpdates();
     return container.currentScene;
   };
 
   const unmount = (): void => {
     renderer.updateContainerSync(null, fiberRoot, null, null);
-    flushRendererWork();
-    throwPendingContainerError(container);
+    flushUpdates();
+    activeContainers.delete(container);
   };
 
   if (initialElement !== undefined) {
@@ -653,6 +661,7 @@ export const createReactSceneRoot = (initialElement?: ReactNode): ReactSceneRoot
 
   return {
     render,
+    flushUpdates,
     unmount,
     getScene: () => container.currentScene,
     getRevision: () => container.revision,

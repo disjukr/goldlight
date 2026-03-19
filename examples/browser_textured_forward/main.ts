@@ -3,8 +3,8 @@
 import { evaluateScene } from '../../packages/core/mod.ts';
 import {
   type AssetSource,
-  configureSurfaceContext,
   createRuntimeResidency,
+  createSurfaceBinding,
   ensureSceneMeshResidency,
   ensureSceneTextureResidency,
   requestGpuContext,
@@ -142,7 +142,7 @@ if (!canvasContext) {
   throw new Error('Failed to acquire WebGPU canvas context');
 }
 
-const surface = configureSurfaceContext(gpuContext, canvasContext as unknown as GPUCanvasContext);
+const surface = createSurfaceBinding(gpuContext, canvasContext as unknown as GPUCanvasContext);
 const residency = createRuntimeResidency();
 const materialRegistry = createMaterialRegistry();
 const evaluatedScene = evaluateScene(scene, { timeMs: 0 });

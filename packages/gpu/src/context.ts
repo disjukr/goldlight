@@ -23,10 +23,9 @@ export type GpuContext = Readonly<{
   target: RenderTarget;
 }>;
 
-export type SurfaceContext = Readonly<{
+export type SurfaceBinding = Readonly<{
   kind: 'surface';
   target: SurfaceTarget;
-  device: GPUDevice;
   canvasContext: GPUCanvasContext;
   depthTexture: GPUTexture;
   depthView: GPUTextureView;
@@ -34,7 +33,7 @@ export type SurfaceContext = Readonly<{
   depthHeight: number;
 }>;
 
-export type OffscreenContext = Readonly<{
+export type OffscreenBinding = Readonly<{
   kind: 'offscreen';
   target: OffscreenTarget;
   texture: GPUTexture;
@@ -43,7 +42,7 @@ export type OffscreenContext = Readonly<{
   depthView: GPUTextureView;
 }>;
 
-export type RenderContextBinding = SurfaceContext | OffscreenContext;
+export type RenderContextBinding = SurfaceBinding | OffscreenBinding;
 
 export type OffscreenReadbackPlan = Readonly<{
   width: number;
@@ -145,12 +144,13 @@ const createDepthTexture = (
     usage: renderAttachmentUsage,
   });
 
-type MutableSurfaceContext = {
-  -readonly [Key in keyof SurfaceContext]: SurfaceContext[Key];
+type MutableSurfaceBinding = {
+  -readonly [Key in keyof SurfaceBinding]: SurfaceBinding[Key];
 };
 
 const syncSurfaceDepthAttachment = (
-  binding: SurfaceContext,
+  device: Pick<GPUDevice, 'createTexture'>,
+  binding: SurfaceBinding,
   colorTexture: GPUTexture,
 ): void => {
   const width = (colorTexture as GPUTexture & { width?: number }).width ?? binding.target.width;
@@ -160,18 +160,18 @@ const syncSurfaceDepthAttachment = (
     return;
   }
 
-  const depthTexture = createDepthTexture(binding.device, width, height);
-  const mutableBinding = binding as MutableSurfaceContext;
+  const depthTexture = createDepthTexture(device, width, height);
+  const mutableBinding = binding as MutableSurfaceBinding;
   mutableBinding.depthTexture = depthTexture;
   mutableBinding.depthView = depthTexture.createView();
   mutableBinding.depthWidth = width;
   mutableBinding.depthHeight = height;
 };
 
-export const configureSurfaceContext = (
+export const createSurfaceBinding = (
   context: Pick<GpuContext, 'device' | 'target'>,
   canvasContext: GPUCanvasContext,
-): SurfaceContext => {
+): SurfaceBinding => {
   if (context.target.kind !== 'surface') {
     throw new Error('surface configuration requires a surface target');
   }
@@ -191,7 +191,6 @@ export const configureSurfaceContext = (
   return {
     kind: 'surface',
     target: context.target,
-    device: context.device,
     canvasContext,
     depthTexture,
     depthView: depthTexture.createView(),
@@ -200,11 +199,11 @@ export const configureSurfaceContext = (
   };
 };
 
-export const createOffscreenContext = (
+export const createOffscreenBinding = (
   context: Pick<GpuContext, 'device' | 'target'>,
-): OffscreenContext => {
+): OffscreenBinding => {
   if (context.target.kind !== 'offscreen') {
-    throw new Error('offscreen context requires an offscreen target');
+    throw new Error('offscreen binding requires an offscreen target');
   }
 
   const texture = context.device.createTexture({
@@ -242,27 +241,32 @@ export const bindRenderTarget = (
     | { canvasContext?: never; offscreen: true },
 ): RenderContextBinding => {
   if (binding.canvasContext) {
-    return configureSurfaceContext(context, binding.canvasContext);
+    return createSurfaceBinding(context, binding.canvasContext);
   }
 
-  return createOffscreenContext(context);
+  return createOffscreenBinding(context);
 };
 
-export const acquireColorAttachmentView = (binding: RenderContextBinding): GPUTextureView => {
+export const acquireColorAttachmentView = (
+  context: Readonly<{
+    device: Pick<GPUDevice, 'createTexture'>;
+  }>,
+  binding: RenderContextBinding,
+): GPUTextureView => {
   if (binding.kind === 'surface') {
     try {
       const colorTexture = binding.canvasContext.getCurrentTexture();
-      syncSurfaceDepthAttachment(binding, colorTexture);
+      syncSurfaceDepthAttachment(context.device, binding, colorTexture);
       return colorTexture.createView();
     } catch (error) {
       if (isDroppedSurfacePresentationError(error)) {
         binding.canvasContext.configure({
-          device: binding.device,
+          device: context.device as GPUDevice,
           format: binding.target.format,
           alphaMode: binding.target.alphaMode ?? 'premultiplied',
         });
         const colorTexture = binding.canvasContext.getCurrentTexture();
-        syncSurfaceDepthAttachment(binding, colorTexture);
+        syncSurfaceDepthAttachment(context.device, binding, colorTexture);
         return colorTexture.createView();
       }
       throw error;
@@ -323,7 +327,7 @@ export const compactOffscreenReadback = (
 
 export const copyOffscreenToReadbackBuffer = (
   context: GpuReadbackContext,
-  binding: OffscreenContext,
+  binding: OffscreenBinding,
   buffer: GPUBuffer,
   plan: OffscreenReadbackPlan,
 ): void => {

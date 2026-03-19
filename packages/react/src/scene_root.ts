@@ -154,6 +154,7 @@ export type SceneRootCommitUpdatePlan = Readonly<{
 
 export type SceneRoot = Readonly<{
   render: (element: AuthoringElement) => SceneIr;
+  flushUpdates: () => void;
   getScene: () => SceneIr | undefined;
   getRevision: () => number;
   subscribe: (subscriber: SceneRootSubscriber) => () => void;
@@ -441,6 +442,26 @@ const compareSceneRootNodes = (
   };
 };
 
+const validateSceneRootTextureReferences = (scene: SceneIr): void => {
+  const textureIds = new Set(scene.textures.map((texture) => texture.id));
+
+  for (const material of scene.materials) {
+    for (const texture of material.textures) {
+      if (textureIds.has(texture.id)) {
+        continue;
+      }
+
+      throw new Error(
+        `material "${material.id}" references missing texture "${texture.id}" in scene "${scene.id}"`,
+      );
+    }
+  }
+};
+
+const validateSceneRootCommitScene = (scene: SceneIr): void => {
+  validateSceneRootTextureReferences(scene);
+};
+
 export const summarizeSceneRootCommit = (commit: SceneRootCommitBase): SceneRootCommitSummary => ({
   sceneIdChanged: commit.scene.id !== commit.previousScene?.id,
   activeCameraChanged: commit.scene.activeCameraId !== commit.previousScene?.activeCameraId,
@@ -534,6 +555,8 @@ export const createSceneRootCommit = (
   previousScene: SceneIr | undefined,
   revision: number,
 ): SceneRootCommit => {
+  validateSceneRootCommitScene(scene);
+
   const baseCommit = {
     scene,
     previousScene,
@@ -735,6 +758,7 @@ export const createSceneRoot = (initialElement?: AuthoringElement): SceneRoot =>
 
   return {
     render,
+    flushUpdates: () => {},
     getScene: () => currentScene,
     getRevision: () => revision,
     subscribe: (subscriber) => {

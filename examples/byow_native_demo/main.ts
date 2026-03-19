@@ -4,8 +4,8 @@ import { EventType, WindowBuilder } from 'jsr:@divy/sdl2@0.15.0';
 import { evaluateScene } from '../../packages/core/mod.ts';
 import {
   type AssetSource,
-  configureSurfaceContext,
   createRuntimeResidency,
+  createSurfaceBinding,
   ensureSceneMeshResidency,
   ensureSceneTextureResidency,
   requestGpuContext,
@@ -227,7 +227,7 @@ const gpuContext = await requestGpuContext({ target });
 const windowSurface = window.windowSurface(width, height);
 const canvasContext = windowSurface.getContext('webgpu');
 
-const surfaceBinding = configureSurfaceContext(
+const surfaceBinding = createSurfaceBinding(
   gpuContext,
   canvasContext as unknown as GPUCanvasContext,
 );

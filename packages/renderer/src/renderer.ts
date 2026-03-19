@@ -3,7 +3,7 @@ import type { Material } from '@rieul3d/ir';
 import {
   acquireColorAttachmentView,
   acquireDepthAttachmentView,
-  createOffscreenContext,
+  createOffscreenBinding,
   ensureMaterialResidency,
   type GpuReadbackContext,
   readOffscreenSnapshot,
@@ -2836,7 +2836,7 @@ export const renderSdfRaymarchPass = (
   binding: RenderContextBinding,
   residency: RuntimeResidency,
   evaluatedScene: EvaluatedScene,
-  targetView = acquireColorAttachmentView(binding),
+  targetView = acquireColorAttachmentView(context, binding),
   targetFormat = binding.target.format,
   camera: RaymarchCamera = defaultRaymarchCamera,
 ): number => {
@@ -2886,7 +2886,7 @@ export const renderVolumeRaymarchPass = (
   binding: RenderContextBinding,
   residency: RuntimeResidency,
   evaluatedScene: EvaluatedScene,
-  targetView = acquireColorAttachmentView(binding),
+  targetView = acquireColorAttachmentView(context, binding),
   targetFormat = binding.target.format,
   camera: RaymarchCamera = defaultRaymarchCamera,
 ): number => {
@@ -3018,7 +3018,7 @@ const renderForwardFrameInternal = (
     )
     : undefined;
   const sceneColorView = sceneColorTexture?.createView();
-  const colorView = sceneColorView ?? acquireColorAttachmentView(binding);
+  const colorView = sceneColorView ?? acquireColorAttachmentView(context, binding);
   const viewProjectionMatrix = options.viewProjectionMatrix ??
     createViewProjectionMatrix(binding, evaluatedScene.activeCamera);
   const encoder = context.device.createCommandEncoder({
@@ -3189,7 +3189,7 @@ const renderPostProcessPasses = (
     );
     const isLastPass = index === postProcessPasses.length - 1;
     const targetView = isLastPass
-      ? acquireColorAttachmentView(binding)
+      ? acquireColorAttachmentView(context, binding)
       : intermediateViews[index % intermediateViews.length];
     const entries: GPUBindGroupEntry[] = [
       {
@@ -3294,7 +3294,7 @@ export const renderDeferredFrame = (
     )
     : undefined;
   const sceneColorView = sceneColorTexture?.createView();
-  const lightingOutputView = sceneColorView ?? acquireColorAttachmentView(binding);
+  const lightingOutputView = sceneColorView ?? acquireColorAttachmentView(context, binding);
   const encoder = context.device.createCommandEncoder({
     label: 'deferred-frame',
   });
@@ -3689,7 +3689,7 @@ export const renderHybridFrame = (
     )
     : undefined;
   const sceneColorView = sceneColorTexture?.createView();
-  const lightingOutputView = sceneColorView ?? acquireColorAttachmentView(binding);
+  const lightingOutputView = sceneColorView ?? acquireColorAttachmentView(context, binding);
   const encoder = context.device.createCommandEncoder({
     label: 'hybrid-frame',
   });
@@ -4044,7 +4044,7 @@ export const renderNodePickFrame = (
   });
   const pass = encoder.beginRenderPass({
     colorAttachments: [{
-      view: acquireColorAttachmentView(binding),
+      view: acquireColorAttachmentView(context, binding),
       clearValue: { r: 0, g: 0, b: 0, a: 0 },
       loadOp: 'clear',
       storeOp: 'store',
@@ -4156,7 +4156,7 @@ export const renderNodePickSnapshot = async (
   residency: RuntimeResidency,
   evaluatedScene: EvaluatedScene,
 ): Promise<NodePickSnapshotResult> => {
-  const pickBinding = createOffscreenContext({
+  const pickBinding = createOffscreenBinding({
     device: context.device as GPUDevice,
     target: {
       kind: 'offscreen',
@@ -4282,7 +4282,7 @@ export const renderForwardCubemapSnapshot = async (
   let submittedCommandBufferCount = 0;
 
   for (const descriptor of cubemapFaceDescriptors) {
-    const binding = createOffscreenContext({
+    const binding = createOffscreenBinding({
       device: context.device as GPUDevice,
       target: {
         kind: 'offscreen',

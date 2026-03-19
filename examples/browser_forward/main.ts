@@ -2,8 +2,8 @@
 
 import { evaluateScene } from '../../packages/core/mod.ts';
 import {
-  configureSurfaceContext,
   createRuntimeResidency,
+  createSurfaceBinding,
   ensureSceneMeshResidency,
   requestGpuContext,
 } from '../../packages/gpu/mod.ts';
@@ -98,7 +98,7 @@ if (!canvasContext) {
   throw new Error('Failed to acquire WebGPU canvas context');
 }
 
-const surface = configureSurfaceContext(gpuContext, canvasContext as unknown as GPUCanvasContext);
+const surface = createSurfaceBinding(gpuContext, canvasContext as unknown as GPUCanvasContext);
 const residency = createRuntimeResidency();
 const materialRegistry = createMaterialRegistry();
 

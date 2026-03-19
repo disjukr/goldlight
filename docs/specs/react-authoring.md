@@ -106,9 +106,9 @@ Issue `#117` provided the first scene-document implementation slice that this ho
 - `@rieul3d/react/reconciler` now exports React-runtime `PerspectiveCamera`, `OrthographicCamera`,
   and `DirectionalLight` convenience components so live reconciler scenes can keep the same
   high-level camera/light composition style as the snapshot authoring surface.
-- `flushReactSceneUpdates()` now exists as a small helper for tests or deterministic integrations
-  that need to force scheduled React work through the reconciler host; it now also rethrows pending
-  reconciler errors captured during those later React-driven updates.
+- `createReactSceneRoot()` now exposes `flushUpdates()` so deterministic integrations can force
+  scheduled React work through one reconciler root and rethrow that root's pending reconciler errors
+  before advancing renderer-side frame work.
 - The scene document currently supports stable node/resource identity, parent-child reordering, and
   subtree/resource removal as the first package-local waypoint before a real reconciler host lands.
 - `summarizeSceneRootCommit()` can derive resource-level added/removed/updated/unchanged ID sets
@@ -133,7 +133,8 @@ Issue `#117` provided the first scene-document implementation slice that this ho
 - Rendering, residency preparation, and execution continue to live in the core/gpu/renderer layers.
 - `createSceneRootForwardRenderer()` and `createSceneRootHybridRenderer()` now provide convenience
   adapters that bundle scene flushing, evaluation, residency upload, and renderer invocation without
-  moving pass orchestration into React application code.
+  moving pass orchestration into React application code; scene roots now own any flush behavior
+  directly instead of requiring a separate runtime callback option.
 - The browser example still demonstrates full-scene JSX authoring plus the current snapshot-based
   `createSceneRoot()` flow, while the BYOW React Bunny demo now exercises the experimental
   reconciler-driven path.

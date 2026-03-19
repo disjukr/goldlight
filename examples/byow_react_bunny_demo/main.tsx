@@ -8,8 +8,8 @@ import {
   getMeshBounds,
 } from '../../packages/core/mod.ts';
 import {
-  configureSurfaceContext,
   createRuntimeResidency,
+  createSurfaceBinding,
   requestGpuContext,
 } from '../../packages/gpu/mod.ts';
 import type { MeshPrimitive } from '../../packages/ir/mod.ts';
@@ -19,7 +19,6 @@ import {
   createReactSceneRoot,
   createSceneRootForwardRenderer,
   DirectionalLight,
-  flushReactSceneUpdates,
   PerspectiveCamera,
 } from '../../packages/react/reconciler.ts';
 import { createMaterialRegistry } from '../../packages/renderer/mod.ts';
@@ -48,13 +47,21 @@ const bunnyMeshWithNormals: MeshPrimitive = {
 const bunnyBounds = getMeshBounds(bunnyMesh);
 const bunnyScale = 1.6 / bunnyBounds.maxDimension;
 const lightRotation = createQuaternionFromEulerDegrees(-42, -36, 0);
+const bunnyRotationDegreesPerSecond = 60;
+const maxRotationDeltaMs = 100;
 
 const BunnyScene = () => {
   const [yawDegrees, setYawDegrees] = React.useState(22);
 
   React.useEffect(() => {
+    let lastUpdateMs = performance.now();
     const timer = setInterval(() => {
-      setYawDegrees((value: number) => value + 1);
+      const nowMs = performance.now();
+      const deltaMs = Math.min(nowMs - lastUpdateMs, maxRotationDeltaMs);
+      lastUpdateMs = nowMs;
+      setYawDegrees((value: number) =>
+        (value + ((deltaMs / 1000) * bunnyRotationDegreesPerSecond)) % 360
+      );
     }, 16);
     return () => clearInterval(timer);
   }, []);
@@ -121,7 +128,7 @@ const gpuContext = await requestGpuContext({ target });
 const windowSurface = window.windowSurface(width, height);
 const canvasContext = windowSurface.getContext('webgpu');
 
-const surfaceBinding = configureSurfaceContext(
+const surfaceBinding = createSurfaceBinding(
   gpuContext,
   canvasContext as unknown as GPUCanvasContext,
 );
@@ -130,7 +137,6 @@ const materialRegistry = createMaterialRegistry();
 const forwardRenderer = createSceneRootForwardRenderer(sceneRoot, {
   context: gpuContext,
   binding: surfaceBinding,
-  flushUpdates: () => flushReactSceneUpdates(),
   residency,
   materialRegistry,
   initialTimeMs: performance.now(),

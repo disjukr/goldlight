@@ -71,7 +71,6 @@ export const createSceneRootRenderer = <TRenderResult>(
   options: SceneRootRendererOptions<TRenderResult>,
 ): SceneRootRenderer<TRenderResult> => {
   const frameDriver = createSceneRootFrameDriver(sceneRoot, {
-    flushUpdates: options.flushUpdates,
     residency: options.residency,
     initialTimeMs: options.initialTimeMs,
   });

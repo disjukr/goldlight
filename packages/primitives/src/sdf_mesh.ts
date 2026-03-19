@@ -398,6 +398,24 @@ const dedupePoints = (points: readonly Vec3[]): readonly Vec3[] => {
   return unique;
 };
 
+const pointsMatch = (pointA: Vec3, pointB: Vec3): boolean =>
+  Math.abs(pointA[0] - pointB[0]) < epsilon &&
+  Math.abs(pointA[1] - pointB[1]) < epsilon &&
+  Math.abs(pointA[2] - pointB[2]) < epsilon;
+
+const isDegenerateTriangle = ([pointA, pointB, pointC]: Triangle): boolean => {
+  if (pointsMatch(pointA, pointB) || pointsMatch(pointB, pointC) || pointsMatch(pointA, pointC)) {
+    return true;
+  }
+
+  return lengthVec3(
+    crossVec3(
+      subtractVec3(pointB, pointA),
+      subtractVec3(pointC, pointA),
+    ),
+  ) < epsilon;
+};
+
 const classifyCorner = (value: number, isoLevel: number): boolean => value <= isoLevel + epsilon;
 
 export const triangulateMarchingCubesCell = (
@@ -450,7 +468,10 @@ export const triangulateMarchingCubesCell = (
       throw new Error(`marching-cubes table referenced an inactive edge for case ${cubeIndex}`);
     }
 
-    triangles.push([pointA, pointB, pointC]);
+    const triangle: Triangle = [pointA, pointB, pointC];
+    if (!isDegenerateTriangle(triangle)) {
+      triangles.push(triangle);
+    }
   }
 
   return triangles;

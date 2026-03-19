@@ -221,6 +221,40 @@ Deno.test('triangulateMarchingCubesCell emits one quad split instead of a centro
   assertEquals(triangles.length, 2);
 });
 
+Deno.test('marching-cubes sphere extraction drops degenerate triangles at exact iso hits', () => {
+  const mesh = extractMarchingCubesMesh(sphere, {
+    resolution: { x: 18, y: 18, z: 18 },
+    bounds: {
+      min: [-0.75, -0.75, -0.75],
+      max: [0.75, 0.75, 0.75],
+    },
+  });
+  const positions = getAttribute(mesh, 'POSITION');
+  const indices = mesh.indices ?? [];
+
+  for (let index = 0; index < indices.length; index += 3) {
+    const pointAIndex = indices[index] * 3;
+    const pointBIndex = indices[index + 1] * 3;
+    const pointCIndex = indices[index + 2] * 3;
+    const ab = [
+      positions[pointBIndex] - positions[pointAIndex],
+      positions[pointBIndex + 1] - positions[pointAIndex + 1],
+      positions[pointBIndex + 2] - positions[pointAIndex + 2],
+    ];
+    const ac = [
+      positions[pointCIndex] - positions[pointAIndex],
+      positions[pointCIndex + 1] - positions[pointAIndex + 1],
+      positions[pointCIndex + 2] - positions[pointAIndex + 2],
+    ];
+    const doubledArea = Math.hypot(
+      (ab[1] * ac[2]) - (ab[2] * ac[1]),
+      (ab[2] * ac[0]) - (ab[0] * ac[2]),
+      (ab[0] * ac[1]) - (ab[1] * ac[0]),
+    );
+    assert(doubledArea > 1e-6);
+  }
+});
+
 Deno.test('sdf extraction rejects unsupported ops, invalid dimensions, and invalid resolutions', () => {
   assertThrows(() =>
     extractSdfMesh({

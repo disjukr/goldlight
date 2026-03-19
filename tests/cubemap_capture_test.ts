@@ -151,7 +151,7 @@ Deno.test('renderForwardCubemapSnapshot returns six ordered cubemap faces for me
   assertEquals(mocks.copyCalls.length, 6);
 });
 
-Deno.test('renderForwardCubemapSnapshot captures hybrid raymarched scenes across all six faces', async () => {
+Deno.test('renderForwardCubemapSnapshot captures mixed raymarched scenes across all six faces', async () => {
   const mocks = createSnapshotMocks();
   const runtimeResidency = createRuntimeResidency();
   let scene = createSceneIr('scene');

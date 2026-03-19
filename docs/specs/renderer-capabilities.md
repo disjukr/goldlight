@@ -118,18 +118,18 @@ This now matches the implemented minimal deferred path:
 - built-in `lit` materials may also sample resident `baseColor` textures when meshes provide
   `TEXCOORD_0`, but alpha behavior should follow accepted material policy rather than using texture
   presence as the classification boundary
-- materials classified as blended transparency are rejected here and should use the hybrid renderer
+- materials classified as blended transparency are rejected here and should use the uber renderer
   entry point instead of the pure deferred entry point
 - masked materials remain deferred-eligible only when the renderer can apply the same coverage rule
   consistently across depth, shadow, and G-buffer passes
 - registered custom WGSL materials may also execute in the G-buffer pass when they provide
   compatible transform bindings, fragment outputs, and declared material bindings
 - SDF sphere/box primitives and resident volumes are composited afterward through the existing
-  raymarch passes, so deferred frames can execute hybrid mesh-plus-raymarch scenes
+  raymarch passes, so deferred frames can execute mixed mesh-plus-raymarch scenes
 
-### Hybrid
+### Uber
 
-The hybrid renderer declares:
+The uber renderer currently declares:
 
 - `mesh: supported`
 - `sdf: supported`
@@ -138,15 +138,26 @@ The hybrid renderer declares:
 - `builtInMaterialKinds: ['unlit', 'lit']`
 - `customShaders: supported`
 
-This matches the implemented hybrid path:
+Today that entry point covers the deferred-plus-forward composition shape while future renderer
+combinations are still being designed.
 
-- deferred-eligible opaque meshes render through deferred depth, G-buffer, and lighting
-- opaque meshes that are not deferred-eligible fall back to a forward opaque pass after lighting
-- transparent meshes render in a second forward pass with blending enabled and deferred depth reused
-- masked coverage may stay in deferred-compatible passes, while blended transparency composites in
-  the forward transparent pass
-- SDF sphere/box primitives and resident volumes still composite afterward through the shared
-  raymarch passes
+### Pathtraced
+
+The current pathtraced renderer declares:
+
+- `mesh: unsupported`
+- `sdf: supported`
+- `volume: unsupported`
+- `light: supported`
+- `builtInMaterialKinds: []`
+- `customShaders: unsupported`
+
+This matches the current first slice:
+
+- sphere and box SDF nodes can render through a fullscreen pathtraced pass
+- mesh geometry is not yet accelerated for path tracing
+- resident volumes are not yet integrated into this renderer
+- custom material shaders are not yet part of the pathtraced binding contract
 
 ## Relationship To Other Specs
 

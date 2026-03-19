@@ -16,6 +16,8 @@ import {
   createDeferredRenderer,
   createForwardRenderer,
   createMaterialRegistry,
+  createPathtracedRenderer,
+  createUberRenderer,
   extractDirectionalLightItems,
   extractSdfPassItems,
   extractVolumePassItems,
@@ -237,7 +239,7 @@ Deno.test('deferred renderer plans only the implemented mesh passes', () => {
   ]);
 });
 
-Deno.test('deferred renderer plans a hybrid raymarch pass when sdf or volume nodes are present', () => {
+Deno.test('deferred renderer plans a mixed raymarch pass when sdf or volume nodes are present', () => {
   let scene = createSceneIr('scene');
   scene = {
     ...scene,
@@ -350,6 +352,56 @@ Deno.test('deferred renderer inserts post-process passes after lighting and raym
       'post-process:blit:output',
     ]],
   );
+});
+
+Deno.test('pathtraced renderer plans a pathtrace pass for sdf scenes', () => {
+  let scene = createSceneIr('scene');
+  scene = {
+    ...scene,
+    sdfPrimitives: [{
+      id: 'sdf-0',
+      op: 'sphere',
+      parameters: {
+        radius: { x: 0.5, y: 0, z: 0, w: 0 },
+      },
+    }],
+  };
+  scene = appendNode(scene, createNode('sdf-node', { sdfId: 'sdf-0' }));
+
+  const frame = planFrame(
+    createPathtracedRenderer(),
+    evaluateScene(scene, { timeMs: 0 }),
+    createRuntimeResidency(),
+  );
+
+  assertEquals(frame.passes.map((pass) => pass.id), ['pathtrace', 'present']);
+});
+
+Deno.test('uber renderer plans deferred, forward, and raymarch composition passes', () => {
+  let scene = createSceneIr('scene');
+  scene = appendMesh(scene, {
+    id: 'mesh-0',
+    attributes: [
+      { semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0, 0, 1, 0] },
+      { semantic: 'NORMAL', itemSize: 3, values: [0, 0, 1, 0, 0, 1, 0, 0, 1] },
+    ],
+  });
+  scene = appendNode(scene, createNode('node-0', { meshId: 'mesh-0' }));
+
+  const frame = planFrame(
+    createUberRenderer(),
+    evaluateScene(scene, { timeMs: 0 }),
+    createRuntimeResidency(),
+  );
+
+  assertEquals(frame.passes.map((pass) => pass.id), [
+    'depth-prepass',
+    'gbuffer',
+    'lighting',
+    'mesh-opaque',
+    'mesh-transparent',
+    'present',
+  ]);
 });
 
 Deno.test('extractVolumePassItems returns only evaluated volumes with residency', () => {
@@ -829,7 +881,7 @@ Deno.test('collectRendererCapabilityIssues accepts supported box sdf ops for exe
   assertEquals(issues, []);
 });
 
-Deno.test('collectRendererCapabilityIssues accepts deferred hybrid sdf and volume scenes', () => {
+Deno.test('collectRendererCapabilityIssues accepts deferred mixed sdf and volume scenes', () => {
   const renderer = createDeferredRenderer();
   const residency = createRuntimeResidency();
   let scene = createSceneIr('scene');
@@ -870,6 +922,27 @@ Deno.test('collectRendererCapabilityIssues accepts deferred hybrid sdf and volum
   );
 
   assertEquals(issues, []);
+});
+
+Deno.test('collectRendererCapabilityIssues rejects mesh execution on the pathtraced renderer slice', () => {
+  let scene = createSceneIr('scene');
+  scene = appendMesh(scene, {
+    id: 'mesh-0',
+    attributes: [{ semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0, 0, 1, 0] }],
+  });
+  scene = appendNode(scene, createNode('mesh-node', { meshId: 'mesh-0' }));
+
+  const issues = collectRendererCapabilityIssues(
+    createPathtracedRenderer(),
+    evaluateScene(scene, { timeMs: 0 }),
+  );
+
+  assertEquals(issues[0], {
+    nodeId: 'mesh-node',
+    feature: 'mesh',
+    requirement: 'mesh-execution',
+    message: 'renderer "pathtraced" does not support mesh execution',
+  });
 });
 
 Deno.test('collectRendererCapabilityIssues reports binding-specific failures in one pass', () => {
@@ -1251,6 +1324,6 @@ Deno.test('deferred renderer rejects transparent meshes that require forward com
     feature: 'material-binding',
     requirement: 'render-queue:transparent',
     message:
-      'renderer "deferred" cannot render transparent node "mesh-node" without the hybrid forward composition path',
+      'renderer "deferred" cannot render transparent node "mesh-node" without the uber forward composition path',
   });
 });

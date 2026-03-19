@@ -1,4 +1,4 @@
-# ADR 0010: Material Alpha Policy For Deferred, Hybrid, And Dithered Coverage
+# ADR 0010: Material Alpha Policy For Deferred, Uber, And Dithered Coverage
 
 ## Status
 
@@ -49,7 +49,7 @@ support. Simply routing any alpha-bearing textured material through the uncondit
 prepass allows texels that should not contribute visible coverage to still write depth before later
 stages can decide how alpha should behave.
 
-Issue `#143` generalized the problem: hybrid deferred-plus-forward rendering is not just an
+Issue `#143` generalized the problem: uber deferred-plus-forward rendering is not just an
 implementation detail, it depends on a stable material policy boundary the renderer can use to
 partition evaluated draws.
 
@@ -70,7 +70,7 @@ blended transparency still requires forward composition.
 
 - deferred rendering keeps a clear opaque/mask boundary instead of silently absorbing blended
   materials
-- hybrid rendering becomes the standard execution path for scenes that mix deferred-eligible opaque
+- uber rendering becomes the standard execution path for scenes that mix deferred-eligible opaque
   or masked content with blended transparent content
 - dithered alpha has a principled home as a deferred-compatible masked coverage mode
 - prepass, shadow, G-buffer, and lighting-related passes must share one alpha-evaluation contract

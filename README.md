@@ -45,10 +45,10 @@ Implemented today:
 - mesh, texture, first volume residency upload paths, and first volume raymarch execution
 - forward rendering, minimal deferred mesh execution with built-in unlit/lit plus custom WGSL
   G-buffer paths, deferred directional-light resolve support, optional baseColor texture sampling,
-  hybrid deferred-plus-forward textured lit composition, post-lighting deferred SDF/volume
-  composition, optional scene-color post-process blit passes, first-class directional light nodes
-  with built-in forward Lambert shading, first SDF raymarch execution, and headless snapshot
-  readback
+  deferred-plus-forward textured lit composition through the `uber` renderer entrypoint,
+  post-lighting deferred SDF/volume composition, optional scene-color post-process blit passes,
+  first-class directional light nodes with built-in forward Lambert shading, first SDF raymarch
+  execution, an initial SDF-only `pathtraced` fullscreen slice, and headless snapshot readback
 - forward-renderer cubemap capture for mesh, SDF, and volume scenes as six ordered offscreen face
   snapshots, plus CPU-side export helpers for equirectangular, angular-map, cross, and strip layouts
   with optional filtered reprojection and caller-controlled output dimensions
@@ -64,7 +64,7 @@ Implemented today:
   sampling, material parameter uploads, custom WGSL registration, declared material texture
   bindings, explicit alpha-policy bindings, and residency-aware custom texture binding validation
 - first-class material alpha policy fields (`alphaMode`, `alphaCutoff`, `renderQueue`, `depthWrite`,
-  and `doubleSided`) plus hybrid forward/deferred mesh partitioning
+  and `doubleSided`) plus uber forward/deferred mesh partitioning
 - depth-tested forward mesh rendering with per-target depth attachments and back-face culling
 - glTF JSON, GLB, data-URI buffers, and caller-provided external glTF resource ingestion
 - ASCII PLY ingestion for in-repo meshes such as the Stanford Bunny reconstruction asset
@@ -92,7 +92,7 @@ Implemented today:
 - that live reconciler path now supports typed TSX scene/resource intrinsics plus React-runtime
   camera/light convenience components built from the primitive `<camera>`, `<light>`, and `<node>`
   surface, and the BYOW Stanford Bunny demo now uses that normal TSX authoring flow
-- `createSceneRootForwardRenderer()` and `createSceneRootHybridRenderer()` convenience adapters that
+- `createSceneRootForwardRenderer()` and `createSceneRootUberRenderer()` convenience adapters that
   bundle scene flushing, evaluation, residency upload, and renderer invocation
 - proposed ADR/discussion tracking for the next React live-update boundary decision around
   partial-apply scene updates without renderer ownership, plus the next proposed reconciler

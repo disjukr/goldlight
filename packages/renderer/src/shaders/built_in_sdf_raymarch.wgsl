@@ -75,7 +75,7 @@ fn fsMain(in: VsOut) -> @location(0) vec4<f32> {
   let cameraOrigin = sdf.cameraOrigin;
   let rayDirection = normalize(
     sdf.cameraForward.xyz +
-      (in.uv.x * sdf.cameraRight.xyz) -
+      (in.uv.x * sdf.cameraRight.xyz) +
       (in.uv.y * sdf.cameraUp.xyz),
   );
   var travel = 0.0;

@@ -42,8 +42,8 @@ Use this page as the main navigation hub.
   [`adr/0008-react-reconciler-scene-document.md`](./adr/0008-react-reconciler-scene-document.md)
 - Review the accepted cubemap capture boundary before 2D reprojection/export:
   [`adr/0009-cubemap-capture-boundary.md`](./adr/0009-cubemap-capture-boundary.md)
-- Review the accepted material alpha policy for deferred, hybrid, and dithered coverage:
-  [`adr/0010-hybrid-deferred-forward-alpha-materials.md`](./adr/0010-hybrid-deferred-forward-alpha-materials.md)
+- Review the accepted material alpha policy for deferred, uber, and dithered coverage:
+  [`adr/0010-uber-deferred-forward-alpha-materials.md`](./adr/0010-uber-deferred-forward-alpha-materials.md)
 - Review the proposed custom WGSL alpha-policy binding contract:
   [`adr/0011-custom-wgsl-alpha-policy-binding.md`](./adr/0011-custom-wgsl-alpha-policy-binding.md)
 - Review the JSX authoring boundary decision:

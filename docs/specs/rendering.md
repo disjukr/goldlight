@@ -2,11 +2,12 @@
 
 ## Renderer Families
 
-`rieul3d` exposes three renderer descriptors in v1:
+`rieul3d` exposes renderer descriptors in v1:
 
 - `forward`
 - `deferred`
-- `hybrid`
+- `uber`
+- `pathtraced`
 
 Both share common pass contracts and evaluated scene extraction.
 
@@ -24,7 +25,7 @@ The initial renderer uses a lightweight pass graph:
 
 - mesh primitives are expected to use raster-oriented passes
 - sdf and volume primitives are expected to use raymarch or compute-oriented passes
-- hybrid frames may mix raster and raymarch passes
+- uber frames may mix raster and raymarch passes
 
 ## Shader Model
 
@@ -42,11 +43,13 @@ The initial renderer uses a lightweight pass graph:
 - Deferred rendering now executes a minimal mesh-only path with a depth prepass, built-in unlit/lit
   albedo-normal G-buffer passes, registered custom WGSL G-buffer programs, a fullscreen
   directional-light lighting resolve, and post-lighting SDF/volume raymarch composition.
-- Hybrid rendering now executes deferred opaque mesh passes, forward opaque fallback passes, and a
+- Uber rendering now executes deferred opaque mesh passes, forward opaque fallback passes, and a
   second forward transparent pass before post-process/present.
 - Forward rendering also encodes a dedicated SDF raymarch pass for supported sphere and box
   primitives.
 - Forward rendering also encodes a first volume raymarch pass for volume primitives with residency.
+- Pathtraced rendering currently ships as an initial SDF-only fullscreen slice. It does not yet
+  path trace mesh geometry, custom materials, or resident volumes.
 - Built-in unlit WGSL is stored as a standalone shader file and imported as text.
 - Built-in forward lit WGSL is stored as a standalone shader file and consumes directional-light
   uniform data extracted from evaluated light nodes.
@@ -71,7 +74,7 @@ The initial renderer uses a lightweight pass graph:
 - Deferred custom WGSL programs may also target the G-buffer path when they write the same two
   render targets and match the deferred transform/material binding contract.
 - Deferred frames now reuse the existing SDF sphere/box and volume raymarch passes after lighting,
-  so hybrid scenes can keep mesh shading in deferred while compositing raymarched primitives into
+  so mixed scenes can keep mesh shading in deferred while compositing raymarched primitives into
   the same output target.
 - Forward and deferred rendering can now route scene output through an explicit intermediate
   scene-color texture when ordered post-process passes are requested.
@@ -172,6 +175,10 @@ The initial renderer uses a lightweight pass graph:
 
 - Post-processing currently exposes a renderer-owned fullscreen pass contract only; scene IR does
   not declare effect graphs yet.
+- The initial pathtraced renderer slice currently supports only sphere and box SDF scene content and
+  should be treated as a renderer-boundary milestone rather than the final path-tracing feature set.
+- Custom WGSL materials do not yet receive a first-class shared alpha-policy binding, so uber
+  partitioning currently treats non-opaque custom materials as forward-only.
 - Renderer-side picking currently targets mesh nodes only; SDF, volume, and per-triangle picking are
   still pending.
 - SDF execution currently supports sphere and box primitives only; broader graph/operator coverage

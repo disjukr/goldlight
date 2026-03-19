@@ -20,7 +20,8 @@ import {
   registerWgslMaterial,
   renderDeferredFrame,
   renderForwardFrame,
-  renderHybridFrame,
+  renderPathtracedFrame,
+  renderUberFrame,
   resolveMaterialProgram,
 } from '@rieul3d/renderer';
 
@@ -747,7 +748,7 @@ Deno.test('renderForwardFrame composites transparent meshes in a second blended 
   assertEquals(transparentPipeline?.descriptor.depthStencil?.depthWriteEnabled, false);
 });
 
-Deno.test('renderHybridFrame keeps transparent meshes on the forward blended pass', () => {
+Deno.test('renderUberFrame preserves the deferred-plus-forward composition behavior', () => {
   const mocks = createRenderMocks();
   const runtimeResidency = createRuntimeResidency();
   let scene = createSceneIr('scene');
@@ -796,7 +797,7 @@ Deno.test('renderHybridFrame keeps transparent meshes on the forward blended pas
     target: { kind: 'offscreen', width: 64, height: 64, format: 'rgba8unorm', sampleCount: 1 },
   });
 
-  const result = renderHybridFrame(
+  const result = renderUberFrame(
     mocks as unknown as GpuRenderExecutionContext,
     binding,
     runtimeResidency,
@@ -805,10 +806,41 @@ Deno.test('renderHybridFrame keeps transparent meshes on the forward blended pas
 
   assertEquals(result.drawCount, 4);
   assertEquals(mocks.renderPassCount.current, 4);
-  const transparentPipeline = mocks.pipelines.find((pipeline) =>
-    pipeline.descriptor.fragment?.targets?.[0]?.blend !== undefined
+});
+
+Deno.test('renderPathtracedFrame encodes a fullscreen sdf pass', () => {
+  const mocks = createRenderMocks();
+  const runtimeResidency = createRuntimeResidency();
+  let scene = createSceneIr('scene');
+  scene = {
+    ...scene,
+    sdfPrimitives: [{
+      id: 'sdf-0',
+      op: 'sphere',
+      parameters: {
+        radius: { x: 0.5, y: 0, z: 0, w: 0 },
+      },
+    }],
+  };
+  scene = appendNode(scene, createNode('sdf-node', { sdfId: 'sdf-0' }));
+
+  const binding = createOffscreenBinding({
+    device: mocks.device as unknown as GPUDevice,
+    target: { kind: 'offscreen', width: 64, height: 64, format: 'rgba8unorm', sampleCount: 1 },
+  });
+
+  const result = renderPathtracedFrame(
+    mocks as unknown as GpuRenderExecutionContext,
+    binding,
+    runtimeResidency,
+    evaluateScene(scene, { timeMs: 0 }),
   );
-  assertEquals(transparentPipeline?.descriptor.depthStencil?.depthWriteEnabled, false);
+
+  assertEquals(result.drawCount, 3);
+  assertEquals(result.submittedCommandBufferCount, 1);
+  assertEquals(mocks.renderPassCount.current, 3);
+  assertEquals(mocks.passActions.filter((action) => action.type === 'draw').length, 3);
+  assertEquals(mocks.pipelines.some((pipeline) => pipeline.descriptor.label?.includes('pathtraced')), true);
 });
 
 Deno.test('renderDeferredFrame runs a post-process pass after deferred lighting when requested', () => {

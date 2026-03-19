@@ -34,6 +34,12 @@ import builtInDeferredGbufferLitShader from './shaders/built_in_deferred_gbuffer
 import builtInDeferredLightingShader from './shaders/built_in_deferred_lighting.wgsl' with {
   type: 'text',
 };
+import builtInPathtracedAccumulateShader from './shaders/built_in_pathtraced_accumulate.wgsl' with {
+  type: 'text',
+};
+import builtInPathtracedSdfShader from './shaders/built_in_pathtraced_sdf.wgsl' with {
+  type: 'text',
+};
 import builtInSdfRaymarchShader from './shaders/built_in_sdf_raymarch.wgsl' with { type: 'text' };
 import builtInVolumeRaymarchShader from './shaders/built_in_volume_raymarch.wgsl' with {
   type: 'text',
@@ -43,12 +49,13 @@ import builtInPostProcessBlitShader from './shaders/built_in_post_process_blit.w
   type: 'text',
 };
 
-export type RendererKind = 'forward' | 'deferred' | 'hybrid';
+export type RendererKind = 'forward' | 'deferred' | 'pathtraced' | 'uber';
 export type PassKind =
   | 'depth-prepass'
   | 'gbuffer'
   | 'lighting'
   | 'mesh'
+  | 'pathtrace'
   | 'post-process'
   | 'raymarch'
   | 'present';
@@ -116,8 +123,10 @@ export type ForwardSnapshotResult = Readonly<{
 
 export type DeferredRenderResult = ForwardRenderResult;
 export type DeferredSnapshotResult = ForwardSnapshotResult;
-export type HybridRenderResult = ForwardRenderResult;
-export type HybridSnapshotResult = ForwardSnapshotResult;
+export type PathtracedRenderResult = ForwardRenderResult;
+export type PathtracedSnapshotResult = ForwardSnapshotResult;
+export type UberRenderResult = ForwardRenderResult;
+export type UberSnapshotResult = ForwardSnapshotResult;
 
 export type CubemapFace =
   | 'positive-x'
@@ -175,6 +184,18 @@ type RaymarchCamera = Readonly<{
   up: readonly [number, number, number];
   forward: readonly [number, number, number];
 }>;
+
+type PathtracedAccumulationState = {
+  width: number;
+  height: number;
+  format: GPUTextureFormat;
+  sampleCount: number;
+  currentSampleTexture: GPUTexture;
+  accumulationA: GPUTexture;
+  accumulationB: GPUTexture;
+  frameIndex: number;
+  swap: boolean;
+};
 
 export type NodePickItem = Readonly<{
   encodedId: number;
@@ -322,6 +343,8 @@ const builtInDeferredGbufferUnlitProgramId = 'built-in:deferred-gbuffer-unlit';
 const builtInDeferredGbufferTexturedUnlitProgramId = 'built-in:deferred-gbuffer-unlit-textured';
 const builtInDeferredGbufferLitProgramId = 'built-in:deferred-gbuffer-lit';
 const builtInDeferredLightingProgramId = 'built-in:deferred-lighting';
+const builtInPathtracedAccumulateProgramId = 'built-in:pathtraced-accumulate';
+const builtInPathtracedSdfProgramId = 'built-in:pathtraced-sdf';
 const builtInSdfRaymarchProgramId = 'built-in:sdf-raymarch';
 const builtInVolumeRaymarchProgramId = 'built-in:volume-raymarch';
 const builtInNodePickProgramId = 'built-in:node-pick';
@@ -339,6 +362,7 @@ const defaultAmbientLight = 0.2;
 const defaultCubemapFormat = 'rgba8unorm';
 const defaultCubemapZnear = 0.1;
 const defaultCubemapZfar = 100;
+const pathtracedAccumulationStates = new WeakMap<RenderContextBinding, PathtracedAccumulationState>();
 const alphaBlendState: GPUBlendState = {
   color: {
     srcFactor: 'src-alpha',
@@ -548,6 +572,68 @@ const createRaymarchCamera = (
       normalizedForward[1] * forwardScale,
       normalizedForward[2] * forwardScale,
     ],
+  };
+};
+
+const createRaymarchCameraFromEvaluatedCamera = (
+  binding: Pick<RenderContextBinding, 'target'>,
+  activeCamera?: EvaluatedCamera,
+): RaymarchCamera => {
+  if (!activeCamera) {
+    return defaultRaymarchCamera;
+  }
+
+  const worldMatrix = activeCamera.worldMatrix;
+  const origin = getMatrixTranslation(worldMatrix);
+  const rightAxis = normalizeVector3(
+    worldMatrix[0] ?? 0,
+    worldMatrix[1] ?? 0,
+    worldMatrix[2] ?? 0,
+  );
+  const upAxis = normalizeVector3(
+    worldMatrix[4] ?? 0,
+    worldMatrix[5] ?? 0,
+    worldMatrix[6] ?? 0,
+  );
+  const forwardAxis = normalizeVector3(
+    -(worldMatrix[8] ?? 0),
+    -(worldMatrix[9] ?? 0),
+    -(worldMatrix[10] ?? 1),
+  );
+
+  if (activeCamera.camera.type === 'orthographic') {
+    return {
+      origin,
+      right: [
+        rightAxis[0] * (activeCamera.camera.xmag ?? 1),
+        rightAxis[1] * (activeCamera.camera.xmag ?? 1),
+        rightAxis[2] * (activeCamera.camera.xmag ?? 1),
+      ],
+      up: [
+        upAxis[0] * (activeCamera.camera.ymag ?? 1),
+        upAxis[1] * (activeCamera.camera.ymag ?? 1),
+        upAxis[2] * (activeCamera.camera.ymag ?? 1),
+      ],
+      forward: forwardAxis,
+    };
+  }
+
+  const aspect = binding.target.width / binding.target.height;
+  const halfFovTan = Math.tan((activeCamera.camera.yfov ?? Math.PI / 3) / 2);
+
+  return {
+    origin,
+    right: [
+      rightAxis[0] * aspect * halfFovTan,
+      rightAxis[1] * aspect * halfFovTan,
+      rightAxis[2] * aspect * halfFovTan,
+    ],
+    up: [
+      upAxis[0] * halfFovTan,
+      upAxis[1] * halfFovTan,
+      upAxis[2] * halfFovTan,
+    ],
+    forward: forwardAxis,
   };
 };
 
@@ -1477,11 +1563,42 @@ export const createDeferredRenderer = (
   ],
 });
 
-export const createHybridRenderer = (
-  label = 'hybrid',
+export const createPathtracedRenderer = (
+  label = 'pathtraced',
   postProcessPasses: readonly PostProcessPass[] = [],
 ): Renderer => ({
-  kind: 'hybrid',
+  kind: 'pathtraced',
+  label,
+  capabilities: {
+    mesh: 'unsupported',
+    sdf: 'supported',
+    volume: 'unsupported',
+    light: 'supported',
+    builtInMaterialKinds: [],
+    customShaders: 'unsupported',
+  },
+  passes: [
+    {
+      id: 'pathtrace',
+      kind: 'pathtrace',
+      reads: ['scene'],
+      writes: [postProcessPasses.length > 0 ? 'scene-color' : 'color'],
+    },
+    ...createPostProcessPassPlans('scene-color', postProcessPasses),
+    {
+      id: 'present',
+      kind: 'present',
+      reads: [getFinalPresentInputResource('color', postProcessPasses)],
+      writes: ['target'],
+    },
+  ],
+});
+
+export const createUberRenderer = (
+  label = 'uber',
+  postProcessPasses: readonly PostProcessPass[] = [],
+): Renderer => ({
+  kind: 'uber',
   label,
   capabilities: {
     mesh: 'supported',
@@ -1541,9 +1658,17 @@ export const planFrame = (
     meshNodeCount: counts.meshNodeCount,
     sdfNodeCount: counts.sdfNodeCount,
     volumeNodeCount: counts.volumeNodeCount,
-    passes: renderer.passes.filter((pass) =>
-      pass.kind === 'raymarch' ? counts.sdfNodeCount > 0 || counts.volumeNodeCount > 0 : true
-    ),
+    passes: renderer.passes.filter((pass) => {
+      if (pass.kind === 'raymarch') {
+        return counts.sdfNodeCount > 0 || counts.volumeNodeCount > 0;
+      }
+
+      if (pass.kind === 'pathtrace') {
+        return counts.sdfNodeCount > 0;
+      }
+
+      return true;
+    }),
   };
 };
 
@@ -1594,7 +1719,7 @@ export const collectRendererCapabilityIssues = (
         pushIssue(
           'material-binding',
           'render-queue:transparent',
-          `renderer "${renderer.label}" cannot render transparent node "${node.node.id}" without the hybrid forward composition path`,
+          `renderer "${renderer.label}" cannot render transparent node "${node.node.id}" without the uber forward composition path`,
         );
       }
       if (!node.mesh.attributes.some((attribute) => attribute.semantic === 'NORMAL')) {
@@ -2112,7 +2237,7 @@ const isDeferredEligibleMeshNode = (
   );
 };
 
-const partitionHybridMeshNodes = (
+const partitionUberMeshNodes = (
   evaluatedScene: EvaluatedScene,
   residency: RuntimeResidency,
 ): Readonly<{
@@ -2581,6 +2706,78 @@ export const ensureSdfRaymarchPipeline = (
   return pipeline;
 };
 
+export const ensurePathtracedSdfPipeline = (
+  context: GpuRenderExecutionContext,
+  residency: RuntimeResidency,
+  format: GPUTextureFormat,
+): GPURenderPipeline => {
+  const cacheKey = `${builtInPathtracedSdfProgramId}:${format}`;
+  const cached = residency.pipelines.get(cacheKey);
+  if (cached) {
+    return cached as GPURenderPipeline;
+  }
+
+  const shader = context.device.createShaderModule({
+    label: cacheKey,
+    code: builtInPathtracedSdfShader,
+  });
+  const pipeline = context.device.createRenderPipeline({
+    label: cacheKey,
+    layout: 'auto',
+    vertex: {
+      module: shader,
+      entryPoint: 'vsMain',
+    },
+    fragment: {
+      module: shader,
+      entryPoint: 'fsMain',
+      targets: [{ format }],
+    },
+    primitive: {
+      topology: 'triangle-list',
+    },
+  });
+
+  residency.pipelines.set(cacheKey, pipeline);
+  return pipeline;
+};
+
+export const ensurePathtracedAccumulatePipeline = (
+  context: GpuRenderExecutionContext,
+  residency: RuntimeResidency,
+  format: GPUTextureFormat,
+): GPURenderPipeline => {
+  const cacheKey = `${builtInPathtracedAccumulateProgramId}:${format}`;
+  const cached = residency.pipelines.get(cacheKey);
+  if (cached) {
+    return cached as GPURenderPipeline;
+  }
+
+  const shader = context.device.createShaderModule({
+    label: cacheKey,
+    code: builtInPathtracedAccumulateShader,
+  });
+  const pipeline = context.device.createRenderPipeline({
+    label: cacheKey,
+    layout: 'auto',
+    vertex: {
+      module: shader,
+      entryPoint: 'vsMain',
+    },
+    fragment: {
+      module: shader,
+      entryPoint: 'fsMain',
+      targets: [{ format }],
+    },
+    primitive: {
+      topology: 'triangle-list',
+    },
+  });
+
+  residency.pipelines.set(cacheKey, pipeline);
+  return pipeline;
+};
+
 export const ensureVolumeRaymarchPipeline = (
   context: GpuRenderExecutionContext,
   residency: RuntimeResidency,
@@ -2676,11 +2873,13 @@ export const ensurePostProcessPipeline = (
 const createSdfUniformData = (
   items: readonly SdfPassItem[],
   camera: RaymarchCamera = defaultRaymarchCamera,
+  frameIndex = 0,
 ): Float32Array => {
   const floatsPerItem = 24;
   const headerFloats = 20;
   const uniformData = new Float32Array(headerFloats + (maxSdfPassItems * floatsPerItem));
   uniformData[0] = Math.min(items.length, maxSdfPassItems);
+  uniformData[1] = frameIndex;
   uniformData.set(camera.origin, 4);
   uniformData.set([...camera.right, 0], 8);
   uniformData.set([...camera.up, 0], 12);
@@ -2881,6 +3080,125 @@ export const renderSdfRaymarchPass = (
     colorAttachments: [{
       view: targetView,
       loadOp: 'load',
+      storeOp: 'store',
+    }],
+  });
+
+  pass.setPipeline(pipeline);
+  pass.setBindGroup(0, bindGroup);
+  pass.draw(6, 1, 0, 0);
+  pass.end();
+
+  return 1;
+};
+
+export const renderPathtracedSdfPass = (
+  context: GpuRenderExecutionContext,
+  encoder: GPUCommandEncoder,
+  binding: RenderContextBinding,
+  residency: RuntimeResidency,
+  evaluatedScene: EvaluatedScene,
+  targetView = acquireColorAttachmentView(context, binding),
+  targetFormat = binding.target.format,
+  camera: RaymarchCamera = defaultRaymarchCamera,
+  frameIndex = 0,
+): number => {
+  const items = extractSdfPassItems(evaluatedScene);
+  if (items.length === 0) {
+    return 0;
+  }
+
+  const pipeline = ensurePathtracedSdfPipeline(context, residency, targetFormat);
+  const uniformData = createSdfUniformData(items, camera, frameIndex);
+  const uniformBuffer = context.device.createBuffer({
+    label: 'pathtraced-sdf-uniforms',
+    size: uniformData.byteLength,
+    usage: uniformUsage | bufferCopyDstUsage,
+  });
+  context.queue.writeBuffer(uniformBuffer, 0, toBufferSource(uniformData));
+
+  const bindGroup = context.device.createBindGroup({
+    layout: pipeline.getBindGroupLayout(0),
+    entries: [{
+      binding: 0,
+      resource: {
+        buffer: uniformBuffer,
+      },
+    }],
+  });
+
+  const pass = encoder.beginRenderPass({
+    colorAttachments: [{
+      view: targetView,
+      clearValue: { r: 0.04, g: 0.05, b: 0.08, a: 1 },
+      loadOp: 'clear',
+      storeOp: 'store',
+    }],
+  });
+
+  pass.setPipeline(pipeline);
+  pass.setBindGroup(0, bindGroup);
+  pass.draw(6, 1, 0, 0);
+  pass.end();
+
+  return 1;
+};
+
+const renderPathtracedAccumulationPass = (
+  context: GpuRenderExecutionContext,
+  encoder: GPUCommandEncoder,
+  residency: RuntimeResidency,
+  format: GPUTextureFormat,
+  currentSampleView: GPUTextureView,
+  previousAccumulationView: GPUTextureView,
+  targetView: GPUTextureView,
+  sampleCount: number,
+): number => {
+  const pipeline = ensurePathtracedAccumulatePipeline(context, residency, format);
+  const sampler = context.device.createSampler({
+    label: 'pathtraced-accumulation-sampler',
+    magFilter: 'linear',
+    minFilter: 'linear',
+  });
+  const uniformData = new Float32Array([sampleCount, 0, 0, 0]);
+  const uniformBuffer = context.device.createBuffer({
+    label: 'pathtraced-accumulation-uniforms',
+    size: uniformData.byteLength,
+    usage: uniformUsage | bufferCopyDstUsage,
+  });
+  context.queue.writeBuffer(uniformBuffer, 0, toBufferSource(uniformData));
+  const bindGroup = context.device.createBindGroup({
+    layout: pipeline.getBindGroupLayout(0),
+    entries: [
+      {
+        binding: 0,
+        resource: previousAccumulationView,
+      },
+      {
+        binding: 1,
+        resource: sampler,
+      },
+      {
+        binding: 2,
+        resource: currentSampleView,
+      },
+      {
+        binding: 3,
+        resource: sampler,
+      },
+      {
+        binding: 4,
+        resource: {
+          buffer: uniformBuffer,
+        },
+      },
+    ],
+  });
+  const pass = encoder.beginRenderPass({
+    colorAttachments: [{
+      view: targetView,
+      clearValue: { r: 0, g: 0, b: 0, a: 1 },
+      loadOp: 'clear',
       storeOp: 'store',
     }],
   });
@@ -3162,8 +3480,54 @@ const createTransientRenderTexture = (
     usage,
   });
 
+const createPathtracedAccumulationTexture = (
+  context: GpuRenderExecutionContext,
+  binding: RenderContextBinding,
+  label: string,
+): GPUTexture =>
+  context.device.createTexture({
+    label,
+    size: {
+      width: binding.target.width,
+      height: binding.target.height,
+      depthOrArrayLayers: 1,
+    },
+    format: binding.target.format,
+    sampleCount: 1,
+    usage: renderAttachmentUsage | textureBindingUsage,
+  });
+
 const getRenderTargetSampleCount = (binding: RenderContextBinding): number =>
   'sampleCount' in binding.target ? binding.target.sampleCount : 1;
+
+const ensurePathtracedAccumulationState = (
+  context: GpuRenderExecutionContext,
+  binding: RenderContextBinding,
+): PathtracedAccumulationState => {
+  const cached = pathtracedAccumulationStates.get(binding);
+  if (
+    cached &&
+    cached.width === binding.target.width &&
+    cached.height === binding.target.height &&
+    cached.format === binding.target.format
+  ) {
+    return cached;
+  }
+
+  const state: PathtracedAccumulationState = {
+    width: binding.target.width,
+    height: binding.target.height,
+    format: binding.target.format,
+    sampleCount: 0,
+    currentSampleTexture: createPathtracedAccumulationTexture(context, binding, 'pathtraced-current'),
+    accumulationA: createPathtracedAccumulationTexture(context, binding, 'pathtraced-accum-a'),
+    accumulationB: createPathtracedAccumulationTexture(context, binding, 'pathtraced-accum-b'),
+    frameIndex: 0,
+    swap: false,
+  };
+  pathtracedAccumulationStates.set(binding, state);
+  return state;
+};
 
 const renderPostProcessPasses = (
   context: GpuRenderExecutionContext,
@@ -3634,15 +3998,91 @@ export const renderDeferredFrame = (
   };
 };
 
-export const renderHybridFrame = (
+export const renderPathtracedFrame = (
   context: GpuRenderExecutionContext,
   binding: RenderContextBinding,
   residency: RuntimeResidency,
   evaluatedScene: EvaluatedScene,
   materialRegistry = createMaterialRegistry(),
   postProcessPasses: readonly PostProcessPass[] = [],
-): HybridRenderResult => {
-  const partitions = partitionHybridMeshNodes(evaluatedScene, residency);
+): PathtracedRenderResult => {
+  assertRendererSceneCapabilities(
+    createPathtracedRenderer('pathtraced', postProcessPasses),
+    evaluatedScene,
+    materialRegistry,
+    residency,
+  );
+
+  const accumulationState = ensurePathtracedAccumulationState(context, binding);
+  const currentSampleView = accumulationState.currentSampleTexture.createView();
+  const previousAccumulationTexture = accumulationState.swap
+    ? accumulationState.accumulationB
+    : accumulationState.accumulationA;
+  const nextAccumulationTexture = accumulationState.swap
+    ? accumulationState.accumulationA
+    : accumulationState.accumulationB;
+  const previousAccumulationView = previousAccumulationTexture.createView();
+  const nextAccumulationView = nextAccumulationTexture.createView();
+  const presentPasses = postProcessPasses.length > 0
+    ? postProcessPasses
+    : [createBlitPostProcessPass()];
+  const encoder = context.device.createCommandEncoder({
+    label: 'pathtraced-frame',
+  });
+  const raymarchCamera = createRaymarchCameraFromEvaluatedCamera(binding, evaluatedScene.activeCamera);
+
+  let drawCount = 0;
+  drawCount += renderPathtracedSdfPass(
+    context,
+    encoder,
+    binding,
+    residency,
+    evaluatedScene,
+    currentSampleView,
+    binding.target.format,
+    raymarchCamera,
+    accumulationState.frameIndex,
+  );
+  drawCount += renderPathtracedAccumulationPass(
+    context,
+    encoder,
+    residency,
+    binding.target.format,
+    currentSampleView,
+    previousAccumulationView,
+    nextAccumulationView,
+    accumulationState.sampleCount,
+  );
+  drawCount += renderPostProcessPasses(
+    context,
+    encoder,
+    binding,
+    residency,
+    presentPasses,
+    nextAccumulationView,
+  );
+
+  const commandBuffer = encoder.finish();
+  context.queue.submit([commandBuffer]);
+  accumulationState.frameIndex += 1;
+  accumulationState.sampleCount += 1;
+  accumulationState.swap = !accumulationState.swap;
+
+  return {
+    drawCount,
+    submittedCommandBufferCount: 1,
+  };
+};
+
+export const renderUberFrame = (
+  context: GpuRenderExecutionContext,
+  binding: RenderContextBinding,
+  residency: RuntimeResidency,
+  evaluatedScene: EvaluatedScene,
+  materialRegistry = createMaterialRegistry(),
+  postProcessPasses: readonly PostProcessPass[] = [],
+): UberRenderResult => {
+  const partitions = partitionUberMeshNodes(evaluatedScene, residency);
   const deferredNodeIds = new Set(partitions.deferredOpaque.map((node) => node.node.id));
   const forwardNodeIds = new Set(
     [...partitions.forwardOpaque, ...partitions.forwardTransparent].map((node) => node.node.id),
@@ -3657,13 +4097,13 @@ export const renderHybridFrame = (
   };
 
   assertRendererSceneCapabilities(
-    createDeferredRenderer('hybrid-deferred'),
+    createDeferredRenderer('uber-deferred'),
     deferredScene,
     materialRegistry,
     residency,
   );
   assertRendererSceneCapabilities(
-    createForwardRenderer('hybrid-forward'),
+    createForwardRenderer('uber-forward'),
     forwardScene,
     materialRegistry,
     residency,
@@ -3672,7 +4112,7 @@ export const renderHybridFrame = (
   const depthTexture = createTransientRenderTexture(
     context,
     binding,
-    'hybrid-depth',
+    'uber-depth',
     deferredDepthFormat,
     renderAttachmentUsage | textureBindingUsage,
   );
@@ -3680,13 +4120,13 @@ export const renderHybridFrame = (
   const gbufferAlbedoTexture = createTransientRenderTexture(
     context,
     binding,
-    'hybrid-gbuffer-albedo',
+    'uber-gbuffer-albedo',
     binding.target.format,
   );
   const gbufferNormalTexture = createTransientRenderTexture(
     context,
     binding,
-    'hybrid-gbuffer-normal',
+    'uber-gbuffer-normal',
     binding.target.format,
   );
   const gbufferAlbedoView = gbufferAlbedoTexture.createView();
@@ -3695,7 +4135,7 @@ export const renderHybridFrame = (
     ? createTransientRenderTexture(
       context,
       binding,
-      'hybrid-scene-color',
+      'uber-scene-color',
       binding.target.format,
       renderAttachmentUsage | textureBindingUsage,
       getRenderTargetSampleCount(binding),
@@ -3704,7 +4144,7 @@ export const renderHybridFrame = (
   const sceneColorView = sceneColorTexture?.createView();
   const lightingOutputView = sceneColorView ?? acquireColorAttachmentView(context, binding);
   const encoder = context.device.createCommandEncoder({
-    label: 'hybrid-frame',
+    label: 'uber-frame',
   });
   const lightingPipeline = ensureDeferredLightingPipeline(
     context,
@@ -3743,7 +4183,7 @@ export const renderHybridFrame = (
     depthPass.setVertexBuffer(0, positionBuffer);
     const transformData = createWorldTransformUniformData(node.worldMatrix);
     const transformBuffer = context.device.createBuffer({
-      label: `${node.node.id}:hybrid-depth-transform`,
+      label: `${node.node.id}:uber-depth-transform`,
       size: transformData.byteLength,
       usage: uniformUsage | bufferCopyDstUsage,
     });
@@ -3844,7 +4284,7 @@ export const renderHybridFrame = (
 
     const transformData = createDeferredMeshTransformUniformData(node.worldMatrix);
     const transformBuffer = context.device.createBuffer({
-      label: `${node.node.id}:hybrid-gbuffer-transform`,
+      label: `${node.node.id}:uber-gbuffer-transform`,
       size: transformData.byteLength,
       usage: uniformUsage | bufferCopyDstUsage,
     });
@@ -3927,7 +4367,7 @@ export const renderHybridFrame = (
   );
   const lightingData = createDirectionalLightUniformData(directionalLights);
   const lightingBuffer = context.device.createBuffer({
-    label: 'hybrid-lighting',
+    label: 'uber-lighting',
     size: lightingData.byteLength,
     usage: uniformUsage | bufferCopyDstUsage,
   });
@@ -4242,15 +4682,41 @@ export const renderDeferredSnapshot = async (
   };
 };
 
-export const renderHybridSnapshot = async (
+export const renderPathtracedSnapshot = async (
   context: GpuRenderExecutionContext & GpuReadbackContext,
   binding: RenderContextBinding,
   residency: RuntimeResidency,
   evaluatedScene: EvaluatedScene,
   materialRegistry = createMaterialRegistry(),
   postProcessPasses: readonly PostProcessPass[] = [],
-): Promise<HybridSnapshotResult> => {
-  const frame = renderHybridFrame(
+): Promise<PathtracedSnapshotResult> => {
+  const frame = renderPathtracedFrame(
+    context,
+    binding,
+    residency,
+    evaluatedScene,
+    materialRegistry,
+    postProcessPasses,
+  );
+  const snapshot = await readOffscreenSnapshot(context, binding);
+
+  return {
+    ...frame,
+    width: snapshot.width,
+    height: snapshot.height,
+    bytes: snapshot.bytes,
+  };
+};
+
+export const renderUberSnapshot = async (
+  context: GpuRenderExecutionContext & GpuReadbackContext,
+  binding: RenderContextBinding,
+  residency: RuntimeResidency,
+  evaluatedScene: EvaluatedScene,
+  materialRegistry = createMaterialRegistry(),
+  postProcessPasses: readonly PostProcessPass[] = [],
+): Promise<UberSnapshotResult> => {
+  const frame = renderUberFrame(
     context,
     binding,
     residency,

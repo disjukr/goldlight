@@ -23,6 +23,7 @@ type ManagerState = {
   running: boolean;
   managerShutdownRequested: boolean;
   windowId?: bigint;
+  windowDestroyed: boolean;
   moduleWorker?: Worker;
   host?: ReturnType<typeof createDesktopHost>;
   moduleReady: boolean;
@@ -35,6 +36,7 @@ const state: ManagerState = {
   initialized: false,
   running: false,
   managerShutdownRequested: false,
+  windowDestroyed: false,
   moduleReady: false,
   moduleShutdownComplete: false,
 };
@@ -130,25 +132,33 @@ const postToModule = (message: DesktopWorkerInboundMessage): void => {
   state.moduleWorker?.postMessage(message);
 };
 
+const destroyHostWindow = (): void => {
+  if (!state.host || state.windowId === undefined || state.windowDestroyed) {
+    return;
+  }
+
+  try {
+    state.host.destroyWindow(state.windowId);
+  } catch {
+    // Window may already be gone during close flow.
+  }
+  state.windowDestroyed = true;
+};
+
 const cleanupManager = async (): Promise<void> => {
   state.running = false;
   if (state.moduleWorker) {
-    postToModule({ kind: 'shutdown' });
-    const deadline = Date.now() + 250;
-    while (!state.moduleShutdownComplete && Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 5));
+    if (!state.moduleShutdownComplete && !state.moduleError) {
+      postToModule({ kind: 'shutdown' });
+      while (!state.moduleShutdownComplete && !state.moduleError) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
     }
     state.moduleWorker.terminate();
     state.moduleWorker = undefined;
   }
 
-  if (state.host && state.windowId !== undefined) {
-    try {
-      state.host.destroyWindow(state.windowId);
-    } catch {
-      // Window may already be gone during close flow.
-    }
-  }
+  destroyHostWindow();
   state.host?.close();
   state.host = undefined;
   state.windowId = undefined;
@@ -182,6 +192,7 @@ const runManager = async (
   state.running = true;
   state.host = host;
   state.windowId = windowId;
+  state.windowDestroyed = false;
   state.moduleWorker = moduleWorker;
 
   moduleWorker.onmessage = (event: MessageEvent<DesktopWorkerOutboundMessage>) => {
@@ -191,16 +202,14 @@ const runManager = async (
         postToMain({ kind: 'ready' });
         return;
       case 'request-redraw':
-        host.requestRedraw(windowId);
+        if (!state.windowDestroyed) {
+          host.requestRedraw(windowId);
+        }
         return;
       case 'close-window':
         state.exitReason = 'module-requested-close';
         state.running = false;
-        try {
-          host.destroyWindow(windowId);
-        } catch {
-          // Window may already be closed.
-        }
+        destroyHostWindow();
         return;
       case 'shutdown-complete':
         state.moduleShutdownComplete = true;

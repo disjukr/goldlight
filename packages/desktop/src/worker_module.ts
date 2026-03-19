@@ -126,11 +126,6 @@ const createWorkerDesktopContext = (
     },
     present: () => surface.present(),
     resizeSurface: (width, height) => {
-      runtimeWindowState.current = {
-        ...runtimeWindowState.current,
-        width,
-        height,
-      };
       surface.resize(width, height);
       (surfaceInfo as { width: number; height: number }).width = width;
       (surfaceInfo as { width: number; height: number }).height = height;

@@ -235,6 +235,17 @@ export const runDesktopModule = async (
     exitResolve = resolve;
   });
 
+  const failManagerWorker = (error: Error): void => {
+    if (!ready) {
+      startupError = error;
+      readyReject?.(error);
+    } else {
+      runtimeError = error;
+    }
+    exited = true;
+    exitResolve?.();
+  };
+
   managerWorker.onmessage = (event: MessageEvent<DesktopWindowManagerOutboundMessage>) => {
     switch (event.data.kind) {
       case 'ready':
@@ -260,12 +271,7 @@ export const runDesktopModule = async (
         if (event.data.stack) {
           error.stack = event.data.stack;
         }
-        if (!ready) {
-          startupError = error;
-          readyReject?.(error);
-        } else {
-          runtimeError = error;
-        }
+        failManagerWorker(error);
         return;
       }
     }
@@ -274,12 +280,10 @@ export const runDesktopModule = async (
     const error = event.error instanceof Error
       ? event.error
       : new Error(event.message || 'Window manager worker failed');
-    startupError = error;
-    readyReject?.(error);
+    failManagerWorker(error);
   };
   managerWorker.onmessageerror = () => {
-    startupError = new Error('Window manager worker message deserialization failed');
-    readyReject?.(startupError);
+    failManagerWorker(new Error('Window manager worker message deserialization failed'));
   };
 
   const postToManager = (message: DesktopWindowManagerInboundMessage): void => {

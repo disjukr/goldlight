@@ -1,8 +1,4 @@
-import type {
-  DesktopHostSystem,
-  DesktopWindowEvent,
-  DesktopWindowState,
-} from './types.ts';
+import type { DesktopHostSystem, DesktopWindowEvent, DesktopWindowState } from './types.ts';
 
 export type DesktopWorkerSurfaceInfo = Readonly<{
   system: DesktopHostSystem;

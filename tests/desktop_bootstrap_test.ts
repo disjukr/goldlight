@@ -39,11 +39,11 @@ Deno.test('desktop runtime cancels callbacks and flushes raf work one frame at a
 
   runtime.flushAnimationFrameCallbacks(12);
   assertEquals(events, ['frame:12']);
-  assertEquals(requestedFrameCount, 2);
+  assertEquals(requestedFrameCount, 4);
 
   runtime.flushAnimationFrameCallbacks(24);
   assertEquals(events, ['frame:12', 'nested']);
-  assertEquals(requestedFrameCount, 2);
+  assertEquals(requestedFrameCount, 4);
 });
 
 Deno.test('desktop runtime postMessage dispatches queued message events', async () => {

@@ -1,6 +1,5 @@
 /// <reference lib="deno.unstable" />
 
-import { installDesktopWindowGlobals } from './bootstrap.ts';
 import { createDesktopHost, type DesktopHost } from './ffi.ts';
 import { createDesktopWindowRuntime, type DesktopWindowRuntime } from './runtime.ts';
 import type {
@@ -224,6 +223,7 @@ export const runDesktopModule = async (
   let exited = false;
   let ready = false;
   let startupError: Error | undefined;
+  let runtimeError: Error | undefined;
   let readyResolve: (() => void) | undefined;
   let readyReject: ((reason?: unknown) => void) | undefined;
   const readyPromise = new Promise<void>((resolve, reject) => {
@@ -260,8 +260,12 @@ export const runDesktopModule = async (
         if (event.data.stack) {
           error.stack = event.data.stack;
         }
-        startupError = error;
-        readyReject?.(error);
+        if (!ready) {
+          startupError = error;
+          readyReject?.(error);
+        } else {
+          runtimeError = error;
+        }
         return;
       }
     }
@@ -290,6 +294,9 @@ export const runDesktopModule = async (
     });
     await readyPromise;
     await exitPromise;
+    if (runtimeError) {
+      throw runtimeError;
+    }
   } finally {
     if (!exited) {
       postToManager({ kind: 'shutdown' });

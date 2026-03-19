@@ -133,22 +133,6 @@ const frameDriver = createSceneRootFrameDriver(sceneRoot, {
   residency,
   initialTimeMs: performance.now(),
 });
-let lastStatsLogTimeMs = 0;
-
-const logRuntimeStats = (
-  timeMs: number,
-  stats: ReturnType<typeof frameDriver.getStats>,
-): void => {
-  if (timeMs - lastStatsLogTimeMs < 1000) {
-    return;
-  }
-
-  lastStatsLogTimeMs = timeMs;
-  console.log(
-    `[byow-react-bunny] partial=${stats.partialUpdateCount} full=${stats.fullUpdateCount} ` +
-      `targeted=${stats.targetedInvalidationCount} reset=${stats.resetInvalidationCount}`,
-  );
-};
 
 const drawFrame = () => {
   const timeMs = performance.now();
@@ -158,7 +142,6 @@ const drawFrame = () => {
   ensureSceneMeshResidency(gpuContext, residency, currentScene, evaluatedScene);
   renderForwardFrame(gpuContext, surfaceBinding, residency, evaluatedScene, materialRegistry);
   windowSurface.present();
-  logRuntimeStats(timeMs, frame.stats);
 };
 
 for await (const event of window.events()) {

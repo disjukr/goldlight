@@ -34,8 +34,6 @@ Expected output:
 
 - a slowly rotating Stanford Bunny centered in the frame
 - simple directional lighting on a pale neutral material
-- terminal logs like `partial=... full=... targeted=... reset=...`, where the partial counter keeps
-  climbing during the rotation loop
 
 Requirements:
 

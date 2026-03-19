@@ -22,6 +22,8 @@ Use this page as the main navigation hub.
 - Understand JSX authoring boundaries: [`specs/react-authoring.md`](./specs/react-authoring.md)
 - Understand the desktop shell host/runtime split and host-driven RAF boundary:
   [`specs/desktop-shell.md`](./specs/desktop-shell.md)
+- Review the tracked native follow-up for modal move/resize frame delivery:
+  [`issues/0001-native-modal-loop-frame-ticks.md`](./issues/0001-native-modal-loop-frame-ticks.md)
 - Understand screen-to-world interaction ray conventions:
   [`specs/interaction.md`](./specs/interaction.md)
 - Understand procedural noise, texture, and volume generation:

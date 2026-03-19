@@ -36,7 +36,7 @@ The JavaScript wrapper does not expose raw FFI calls to app authors.
 
 Each desktop window gets a runtime object even though v1 only supports one window. The runtime owns:
 
-- the host-driven `requestAnimationFrame` queue
+- the window-local `requestAnimationFrame` queue
 - `cancelAnimationFrame`
 - `postMessage` delivery
 - dispatch of host events into a browser-like event surface
@@ -47,14 +47,15 @@ all modules in the same isolate observe the desktop-provided `requestAnimationFr
 
 ## Frame Flow
 
-The host is the timing source for animation frames.
+The current runtime uses a hybrid model:
 
 1. application code schedules `requestAnimationFrame`
 2. the runtime asks the native host to request a redraw
-3. `winit` emits `RedrawRequested`
-4. the host pushes a frame event with a timestamp into the queue
-5. the Deno runtime drains the event queue and flushes RAF callbacks
-6. application render code encodes commands and presents the `UnsafeWindowSurface`
+3. the window worker also keeps a local timer armed so RAF continues during native modal move/resize
+   loops that can delay host redraw delivery on Windows
+4. host `frame` events may still flush RAF callbacks sooner when they arrive
+5. application render code encodes commands and presents the `UnsafeWindowSurface`
 
-This keeps animation timing aligned with host redraw scheduling instead of inventing a parallel
-timer in JavaScript.
+This is a pragmatic behavior fix for the current Windows shell rather than the final timing model.
+The native follow-up for modal-loop tick delivery is tracked in
+[`../issues/0001-native-modal-loop-frame-ticks.md`](../issues/0001-native-modal-loop-frame-ticks.md).

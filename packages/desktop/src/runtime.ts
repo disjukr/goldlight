@@ -22,6 +22,7 @@ export type DesktopWindowRuntime = Readonly<{
 type MutableAnimationFrameState = {
   nextHandle: number;
   callbacks: Map<number, DesktopAnimationFrameCallback>;
+  timerHandle: number | null;
 };
 
 const queueMessageEvent = (
@@ -55,28 +56,39 @@ export const createDesktopWindowRuntime = (
   const animationFrameState: MutableAnimationFrameState = {
     nextHandle: 1,
     callbacks: new Map(),
+    timerHandle: null,
   };
   let onMessage: MessageListener = null;
-  let hostFrameRequested = false;
+
+  const scheduleLocalFrame = (): void => {
+    if (animationFrameState.timerHandle !== null || animationFrameState.callbacks.size === 0) {
+      return;
+    }
+
+    animationFrameState.timerHandle = setTimeout(() => {
+      animationFrameState.timerHandle = null;
+      flushAnimationFrameCallbacks(performance.now());
+    }, 16);
+  };
 
   const requestAnimationFrame = (callback: DesktopAnimationFrameCallback): number => {
     const handle = animationFrameState.nextHandle;
     animationFrameState.nextHandle += 1;
-    const shouldRequestHostFrame = !hostFrameRequested;
     animationFrameState.callbacks.set(handle, callback);
-    if (shouldRequestHostFrame) {
-      hostFrameRequested = true;
-      requestHostFrame();
-    }
+    requestHostFrame();
+    scheduleLocalFrame();
     return handle;
   };
 
   const cancelAnimationFrame = (handle: AnimationFrameHandle): void => {
     animationFrameState.callbacks.delete(handle);
+    if (animationFrameState.callbacks.size === 0 && animationFrameState.timerHandle !== null) {
+      clearTimeout(animationFrameState.timerHandle);
+      animationFrameState.timerHandle = null;
+    }
   };
 
   const flushAnimationFrameCallbacks = (timeMs: number): void => {
-    hostFrameRequested = false;
     if (animationFrameState.callbacks.size === 0) {
       return;
     }
@@ -87,9 +99,9 @@ export const createDesktopWindowRuntime = (
       callback(timeMs);
     }
 
-    if (animationFrameState.callbacks.size > 0 && !hostFrameRequested) {
-      hostFrameRequested = true;
+    if (animationFrameState.callbacks.size > 0) {
       requestHostFrame();
+      scheduleLocalFrame();
     }
   };
 

@@ -117,8 +117,9 @@ The initial renderer uses a lightweight pass graph:
   containing the evaluated node world matrix plus an inverse-transpose normal matrix.
 - Built-in forward lit mesh shaders extend the same transform bind group with an inverse-transpose
   normal matrix for Lambert shading.
-- Material programs can declare `materialBindings` entries for uniform buffers, texture views, and
-  samplers that are assembled into a single material bind group.
+- Material programs can declare `materialBindings` entries for uniform buffers, renderer-owned
+  alpha-policy uniforms, texture views, and samplers that are assembled into a single material bind
+  group.
 - Built-in unlit material uniforms live at `@group(1) @binding(0)`.
 - Built-in material slot `values[1]` now reserves alpha-policy data:
   - `x`: `alphaCutoff`
@@ -143,8 +144,18 @@ The initial renderer uses a lightweight pass graph:
   matrix.
 - Custom WGSL programs that want the same evaluated mesh transform upload should register with
   `usesTransformBindings: true` and match the same `@group(0)` transform contract.
+- Custom WGSL programs that need renderer-owned alpha policy can declare an `alpha-policy`
+  `materialBindings` entry and bind a `vec4<f32>`/equivalent uniform at the requested binding with
+  the same payload used by built-in materials:
+  - `x`: `alphaCutoff`
+  - `y`: alpha mode enum (`0 = opaque`, `1 = mask`, `2 = blend`)
+  - `z`: requested depth-write flag
+  - `w`: requested double-sided flag
 - Custom WGSL programs that need sampled textures should declare matching texture/sampler bindings
   plus the texture semantic they expect from `Material.textures`.
+- The current renderer shape follows the proposed custom WGSL alpha-policy contract in
+  [`../adr/0011-custom-wgsl-alpha-policy-binding.md`](../adr/0011-custom-wgsl-alpha-policy-binding.md),
+  which remains in proposal status until reviewed.
 - Capability preflight validates declared texture semantics, mesh UV requirements, and texture
   residency before the renderer starts encoding bind groups.
 
@@ -160,8 +171,6 @@ The initial renderer uses a lightweight pass graph:
 
 - Post-processing currently exposes a renderer-owned fullscreen pass contract only; scene IR does
   not declare effect graphs yet.
-- Custom WGSL materials do not yet receive a first-class shared alpha-policy binding, so hybrid
-  partitioning currently treats non-opaque custom materials as forward-only.
 - Renderer-side picking currently targets mesh nodes only; SDF, volume, and per-triangle picking are
   still pending.
 - SDF execution currently supports sphere and box primitives only; broader graph/operator coverage

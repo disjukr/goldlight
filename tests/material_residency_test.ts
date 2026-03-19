@@ -1,5 +1,6 @@
 import { assertEquals, assertStrictEquals } from 'jsr:@std/assert@^1.0.14';
 import {
+  createMaterialAlphaPolicyData,
   createMaterialUploadPlan,
   createRuntimeResidency,
   ensureMaterialResidency,
@@ -90,9 +91,26 @@ Deno.test('uploadMaterialResidency allocates a uniform buffer and uploads parame
   });
 
   assertEquals(residency.parameterNames, ['color']);
-  assertEquals(context.buffers.length, 1);
-  assertEquals(context.writes.length, 1);
+  assertEquals(context.buffers.length, 2);
+  assertEquals(context.writes.length, 2);
   assertEquals(context.buffers[0].size, 256);
+  assertEquals(context.buffers[1].size, 16);
+  assertEquals([...residency.alphaPolicyData], [0.5, 0, 1, 0]);
+});
+
+Deno.test('createMaterialAlphaPolicyData encodes explicit renderer policy fields', () => {
+  const data = createMaterialAlphaPolicyData({
+    id: 'material-alpha',
+    kind: 'custom',
+    alphaMode: 'mask',
+    alphaCutoff: 0.25,
+    depthWrite: false,
+    doubleSided: true,
+    textures: [],
+    parameters: {},
+  });
+
+  assertEquals([...data], [0.25, 1, 0, 1]);
 });
 
 Deno.test('ensureMaterialResidency reuses cached material buffers', () => {
@@ -111,7 +129,7 @@ Deno.test('ensureMaterialResidency reuses cached material buffers', () => {
   const second = ensureMaterialResidency(context, runtimeResidency, material);
 
   assertStrictEquals(first, second);
-  assertEquals(context.buffers.length, 1);
+  assertEquals(context.buffers.length, 2);
 });
 
 Deno.test('ensureSceneMaterialResidency uploads only materials referenced by evaluated nodes', () => {
@@ -144,5 +162,5 @@ Deno.test('ensureSceneMaterialResidency uploads only materials referenced by eva
   ensureSceneMaterialResidency(context, runtimeResidency, evaluateScene(scene, { timeMs: 0 }));
 
   assertEquals([...runtimeResidency.materials.keys()], ['material-used']);
-  assertEquals(context.buffers.length, 1);
+  assertEquals(context.buffers.length, 2);
 });

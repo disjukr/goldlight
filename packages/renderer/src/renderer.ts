@@ -229,6 +229,10 @@ export type MaterialBindingDescriptor = Readonly<
     binding: number;
   }
   | {
+    kind: 'alpha-policy';
+    binding: number;
+  }
+  | {
     kind: 'texture';
     binding: number;
     textureSemantic: string;
@@ -1324,6 +1328,15 @@ const resolveMaterialBindingResource = (
         },
       };
     }
+    case 'alpha-policy': {
+      materialResidency.current ??= ensureMaterialResidency(context, residency, material);
+      return {
+        binding: descriptor.binding,
+        resource: {
+          buffer: materialResidency.current.alphaPolicyBuffer,
+        },
+      };
+    }
     case 'texture': {
       const textureResidency = getMaterialTextureResidency(
         residency,
@@ -1658,7 +1671,7 @@ export const collectRendererCapabilityIssues = (
           );
         } else {
           for (const descriptor of getMaterialBindingDescriptors(program)) {
-            if (descriptor.kind === 'uniform') {
+            if (descriptor.kind === 'uniform' || descriptor.kind === 'alpha-policy') {
               continue;
             }
 

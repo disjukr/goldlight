@@ -584,6 +584,60 @@ Deno.test('collectRendererCapabilityIssues accepts deferred lit materials when a
   assertEquals(issues, []);
 });
 
+Deno.test('collectRendererCapabilityIssues accepts deferred lit baseColor textures with normals, uvs, and resident textures', () => {
+  const residency = createRuntimeResidency();
+  let scene = createSceneIr('scene');
+  scene = appendLight(scene, {
+    id: 'light-directional',
+    kind: 'directional',
+    color: { x: 1, y: 0.95, z: 0.9 },
+    intensity: 1.5,
+  });
+  scene = appendMaterial(scene, {
+    id: 'material-lit',
+    kind: 'lit',
+    textures: [{
+      id: 'texture-0',
+      assetId: 'image-0',
+      semantic: 'baseColor',
+      colorSpace: 'srgb',
+      sampler: 'linear-repeat',
+    }],
+    parameters: {
+      color: { x: 0.8, y: 0.4, z: 0.2, w: 1 },
+    },
+  });
+  scene = appendMesh(scene, {
+    id: 'mesh-0',
+    materialId: 'material-lit',
+    attributes: [
+      { semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0, 0, 1, 0] },
+      { semantic: 'NORMAL', itemSize: 3, values: [0, 0, 1, 0, 0, 1, 0, 0, 1] },
+      { semantic: 'TEXCOORD_0', itemSize: 2, values: [0, 0, 1, 0, 0, 1] },
+    ],
+  });
+  scene = appendNode(scene, createNode('light-node', { lightId: 'light-directional' }));
+  scene = appendNode(scene, createNode('mesh-node', { meshId: 'mesh-0' }));
+  residency.textures.set('texture-0', {
+    textureId: 'texture-0',
+    texture: {} as GPUTexture,
+    view: {} as GPUTextureView,
+    sampler: {} as GPUSampler,
+    width: 1,
+    height: 1,
+    format: 'rgba8unorm-srgb',
+  });
+
+  const issues = collectRendererCapabilityIssues(
+    createDeferredRenderer(),
+    evaluateScene(scene, { timeMs: 0 }),
+    createMaterialRegistry(),
+    residency,
+  );
+
+  assertEquals(issues, []);
+});
+
 Deno.test('collectRendererCapabilityIssues rejects lit materials without lights or normals', () => {
   let scene = createSceneIr('scene');
   scene = appendMaterial(scene, {
@@ -623,16 +677,16 @@ Deno.test('collectRendererCapabilityIssues rejects lit materials without lights 
     {
       nodeId: 'mesh-node',
       feature: 'material-binding',
-      requirement: 'light-material:textures-unsupported',
+      requirement: 'vertex-attribute:NORMAL',
       message:
-        'renderer "forward" does not yet support textures on built-in lit material "material-lit"',
+        'renderer "forward" cannot light node "mesh-node" because mesh "mesh-0" is missing NORMAL',
     },
     {
       nodeId: 'mesh-node',
       feature: 'material-binding',
-      requirement: 'vertex-attribute:NORMAL',
+      requirement: 'light-material:textures-unsupported',
       message:
-        'renderer "forward" cannot light node "mesh-node" because mesh "mesh-0" is missing NORMAL',
+        'renderer "forward" does not yet support textures on built-in lit material "material-lit"',
     },
   ]);
 });
@@ -683,16 +737,16 @@ Deno.test('collectRendererCapabilityIssues rejects deferred lit materials withou
     {
       nodeId: 'mesh-node',
       feature: 'material-binding',
-      requirement: 'light-material:textures-unsupported',
+      requirement: 'vertex-attribute:NORMAL',
       message:
-        'renderer "deferred" does not yet support textures on built-in lit material "material-lit"',
+        'renderer "deferred" cannot light node "mesh-node" because mesh "mesh-0" is missing NORMAL',
     },
     {
       nodeId: 'mesh-node',
       feature: 'material-binding',
-      requirement: 'vertex-attribute:NORMAL',
+      requirement: 'vertex-attribute:TEXCOORD_0',
       message:
-        'renderer "deferred" cannot light node "mesh-node" because mesh "mesh-0" is missing NORMAL',
+        'renderer "deferred" cannot sample baseColor textures on lit node "mesh-node" because mesh "mesh-0" is missing TEXCOORD_0',
     },
   ]);
 });

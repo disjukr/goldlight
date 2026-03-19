@@ -92,6 +92,10 @@ Issue `#117` provided the first scene-document implementation slice that this ho
 - `@rieul3d/react/reconciler` now provides an experimental real React renderer that accepts normal
   React components, applies mount/update/unmount work to the internal scene document, and publishes
   live `SceneIr` snapshots through `createReactSceneRoot()`.
+- that live reconciler JSX surface now accepts the same lower-case `group`, `perspectiveCamera`,
+  `orthographicCamera`, and `directionalLight` aliases that the snapshot authoring path already
+  exposes, so React-runtime TSX no longer has to fall back to manual `React.createElement()` calls
+  for those common scene shapes
 - `createReactSceneRoot()` now publishes a terminal empty-scene snapshot on unmount before clearing
   its retained `getScene()` value, so subscriber-driven integrations can explicitly clear any
   previously rendered scene state.

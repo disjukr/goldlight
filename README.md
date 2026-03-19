@@ -84,8 +84,9 @@ Implemented today:
   the package-local scene document so hooks, state updates, and layout effects can publish live
   `SceneIr` snapshots without rebuilding authored trees by hand
 - that live reconciler path now supports typed TSX scene/resource intrinsics plus React-runtime
-  camera/light convenience components, and the BYOW Stanford Bunny demo now uses that normal TSX
-  authoring flow
+  camera/light convenience components, including the same lower-case `group`, `perspectiveCamera`,
+  `orthographicCamera`, and `directionalLight` aliases available on the snapshot path, and the BYOW
+  Stanford Bunny demo now uses that normal TSX authoring flow
 - proposed ADR/discussion tracking for the next React live-update boundary decision around
   partial-apply scene updates without renderer ownership, plus the next proposed reconciler
   scene-document boundary for issue #112

@@ -34,6 +34,7 @@ Runnable examples live here. Each example should document how to build, serve, o
 - Type-check the BYOW primitives demo: `deno task example:byow:primitives:check`
 - Run the BYOW React Bunny demo: `deno task example:byow:react-bunny:run`
 - Type-check the BYOW React Bunny demo: `deno task example:byow:react-bunny:check`
+- Build the desktop host library: `deno task desktop:host:build`
 - Refresh the in-repo example assets: `deno task asset:examples`
 - Refresh the Stanford Bunny source and extracted mesh: `deno task asset:stanford-bunny`
 - Refresh the Damaged Helmet sample: `deno task asset:damaged-helmet`

@@ -1,11 +1,11 @@
 # BYOW Triangle
 
-Windows-native triangle example using Deno BYOW (`Deno.UnsafeWindowSurface`) and SDL2.
+Windows-native triangle example using Deno BYOW (`Deno.UnsafeWindowSurface`) and the
+`@rieul3d/desktop` shell.
 
 Run with:
 
 ```sh
-deno task setup:sdl2:windows
 deno task example:byow:triangle:run
 ```
 
@@ -18,9 +18,4 @@ deno task example:byow:triangle:check
 Requirements:
 
 - Deno with `--unstable-ffi` and `--unstable-webgpu`
-- SDL2 available to `jsr:@divy/sdl2`
-
-The repository includes a Windows-only installer script that downloads the official SDL2 runtime zip
-from `libsdl.org/release` into `vendor/sdl2/windows-x64`. The BYOW run task auto-detects that
-location on Windows, so after setup you can launch the example directly with
-`deno task example:byow:triangle:run`.
+- the desktop host DLL built through `deno task desktop:host:build` or auto-built by the run task

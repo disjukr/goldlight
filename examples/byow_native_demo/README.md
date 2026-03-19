@@ -1,17 +1,17 @@
 # BYOW Native Demo
 
-Windows-native BYOW example using SDL2 and `Deno.UnsafeWindowSurface`.
+Windows-native BYOW example using the `@rieul3d/desktop` shell and `Deno.UnsafeWindowSurface`.
 
 This demo exercises more of the `rieul3d` runtime than the startup triangle by rendering:
 
 - an indexed quad through the built-in textured unlit path
 - an additional accent mesh with a separate material
-- a native WebGPU surface presented through SDL2 on Windows with an opaque swapchain format
+- a native WebGPU surface presented through the `winit` desktop host on Windows with an opaque
+  swapchain format
 
 Run with:
 
 ```sh
-deno task setup:sdl2:windows
 deno task example:byow:run
 ```
 
@@ -29,11 +29,7 @@ Expected output:
 Requirements:
 
 - Windows with Deno `--unstable-ffi` and `--unstable-webgpu`
-- SDL2 available to `jsr:@divy/sdl2`
-
-The repository includes a Windows-only installer script that downloads the official SDL2 runtime zip
-from `libsdl.org/release` into `vendor/sdl2/windows-x64`. The run task auto-detects that location on
-Windows, so after setup you can launch the example directly.
+- the desktop host DLL built through `deno task desktop:host:build` or auto-built by the run task
 
 If the native surface drops its presentation state after window events, the runtime reconfigures the
 surface binding on the next frame before retrying `getCurrentTexture()`.

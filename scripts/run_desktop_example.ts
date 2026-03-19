@@ -15,7 +15,7 @@ const desktopHostLibrary = join(
 
 if (!entrypoint) {
   throw new Error(
-    'Missing BYOW example entrypoint. Pass a relative path such as ./examples/byow_triangle/main.ts',
+    'Missing desktop example entrypoint. Pass a relative path such as ./examples/desktop_react_bunny_demo/main.ts',
   );
 }
 

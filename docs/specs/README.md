@@ -19,6 +19,7 @@ source of truth for package boundaries and feature expectations.
 - [`interaction.md`](./interaction.md): screen-to-world interaction ray construction
 - [`react-authoring.md`](./react-authoring.md): React package role, snapshot bridge, and
   experimental reconciler boundaries
+- [`desktop-shell.md`](./desktop-shell.md): desktop host/runtime boundary and host-driven RAF model
 
 ## Runtime Behavior
 

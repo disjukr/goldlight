@@ -15,12 +15,11 @@ This demo exercises:
   transform-only reevaluation fast path whenever the rotating bunny only changes node transforms
 - reusable `@rieul3d/core` helpers for generated normals, mesh bounds, and Euler-authored light
   rotation
-- built-in forward lit shading with a directional light in a native SDL2 window
+- built-in forward lit shading with a directional light in a native desktop window
 
 Run with:
 
 ```sh
-deno task setup:sdl2:windows
 deno task example:byow:react-bunny:run
 ```
 
@@ -38,4 +37,4 @@ Expected output:
 Requirements:
 
 - Windows with Deno `--unstable-ffi` and `--unstable-webgpu`
-- SDL2 available to `jsr:@divy/sdl2`
+- the desktop host DLL built through `deno task desktop:host:build` or auto-built by the run task

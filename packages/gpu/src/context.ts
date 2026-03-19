@@ -148,6 +148,10 @@ type MutableSurfaceBinding = {
   -readonly [Key in keyof SurfaceBinding]: SurfaceBinding[Key];
 };
 
+type MutableSurfaceTarget = {
+  -readonly [Key in keyof SurfaceTarget]: SurfaceTarget[Key];
+};
+
 const syncSurfaceDepthAttachment = (
   device: Pick<GPUDevice, 'createTexture'>,
   binding: SurfaceBinding,
@@ -278,6 +282,16 @@ export const acquireColorAttachmentView = (
 
 export const acquireDepthAttachmentView = (binding: RenderContextBinding): GPUTextureView =>
   binding.depthView;
+
+export const resizeSurfaceBindingTarget = (
+  binding: SurfaceBinding,
+  width: number,
+  height: number,
+): void => {
+  const mutableTarget = binding.target as MutableSurfaceTarget;
+  mutableTarget.width = width;
+  mutableTarget.height = height;
+};
 
 export const getRenderTargetSize = (target: RenderTarget): Readonly<{
   width: number;

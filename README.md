@@ -16,6 +16,7 @@ The repository is organized as a Deno workspace with packages for:
 - `@rieul3d/react/reconciler`: experimental React reconciler host over the package-local scene
   document
 - `@rieul3d/platform`: browser, Deno, and headless targets
+- `@rieul3d/desktop`: single-process desktop shell bootstrap over a Rust `winit` FFI host
 
 The design source of truth lives in [`docs/specs`](./docs/specs) and [`docs/adr`](./docs/adr).
 
@@ -119,6 +120,7 @@ Implemented today:
 - Runtime residency and rebuild rules:
   [`docs/specs/runtime-residency.md`](./docs/specs/runtime-residency.md)
 - Interaction utilities: [`docs/specs/interaction.md`](./docs/specs/interaction.md)
+- Desktop shell contracts: [`docs/specs/desktop-shell.md`](./docs/specs/desktop-shell.md)
 
 ## Quick Start
 
@@ -147,7 +149,8 @@ Read in this order when onboarding:
 - `deno task asset:damaged-helmet`: refresh the Khronos `DamagedHelmet.glb` sample
 - `deno task asset:sponza`: download the ignored Khronos `Sponza` sample under
   `examples/assets/sponza`
-- `deno task setup:sdl2:windows`: download the official SDL2 Windows runtime for BYOW examples
+- `deno task desktop:host:build`: compile the Rust `winit` FFI host for `@rieul3d/desktop`
+- `deno task desktop:host:check`: type-check the Rust `winit` host crate without producing a DLL
 - `deno task example:headless:check`: type-check the headless snapshot PNG workflow
 - `deno task example:headless:png`: render a headless frame and write
   `examples/headless_snapshot/out/forward.png`
@@ -163,11 +166,10 @@ Read in this order when onboarding:
 - `deno task example:byow:primitives:check`: type-check the Windows BYOW primitives demo
 - `deno task example:byow:primitives:run`: open the Windows BYOW primitives demo
 - `deno task example:byow:react-bunny:check`: type-check the Windows BYOW React Stanford Bunny demo
-- `deno task example:byow:react-bunny:run`: open the Windows BYOW React Stanford Bunny demo
-
-Golden snapshot fixtures live in
-[`tests/fixtures/golden-snapshots`](./tests/fixtures/golden-snapshots). Refresh them intentionally
-with `deno run -A --unstable-raw-imports ./scripts/refresh_golden_snapshots.ts`.
+- `deno task example:byow:react-bunny:run`: open the Windows BYOW React Stanford Bunny demo Golden
+  snapshot fixtures live in [`tests/fixtures/golden-snapshots`](./tests/fixtures/golden-snapshots).
+  Refresh them intentionally with
+  `deno run -A --unstable-raw-imports ./scripts/refresh_golden_snapshots.ts`.
 
 ## Benchmarks
 

@@ -17,7 +17,8 @@ source of truth for package boundaries and feature expectations.
 - [`cubemap-export.md`](./cubemap-export.md): CPU-side reprojection/export layouts built on captured
   cubemap faces
 - [`interaction.md`](./interaction.md): screen-to-world interaction ray construction
-- [`react-authoring.md`](./react-authoring.md): React package role and lowering boundaries
+- [`react-authoring.md`](./react-authoring.md): React package role, snapshot bridge, and
+  experimental reconciler boundaries
 
 ## Runtime Behavior
 

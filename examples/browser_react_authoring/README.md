@@ -10,16 +10,20 @@ GPU residency can drop changed mesh/material/texture/volume entries by ID, keep 
 updates on the lighter path, include unchanged descendants whose world transforms moved under an
 updated ancestor, and still fall back to a full reset for node topology or binding changes.
 
-The example now follows ADR 0005's preferred direction: camera/light convenience lives in reusable
-React components while primitive JSX authoring stays closer to explicit Scene IR concepts such as
-`<camera>`, `<light>`, and `<node>`.
+The example follows ADR 0005's preferred direction: camera/light convenience lives in reusable React
+components while primitive JSX authoring stays closer to explicit Scene IR concepts such as
+`<camera>`, `<light>`, and `<node>`. It intentionally documents the snapshot path, not the live
+reconciler path.
 
-This is now a real JSX authoring example with the current snapshot-based `createSceneRoot()` path,
-but it is still not a live React renderer or reconciler. `@rieul3d/react` currently owns authoring,
-snapshot commits, and subscription only.
+`@rieul3d/react` now has two distinct integration surfaces:
 
-Longer term, this package should move toward a `react-three-fiber`-style interface where
-reconciliation updates rieul3d's runtime over time instead of lowering the tree only once.
+- `createSceneRoot()` for JSX authoring plus snapshot commits, summaries, and targeted update
+  planning
+- `@rieul3d/react/reconciler` for the experimental live React host that publishes committed
+  `SceneIr` snapshots from normal React state and lifecycle updates
+
+If you want the live reconciler path instead of the snapshot bridge, use the BYOW React Bunny demo
+as the current reference example.
 
 Build the example bundle:
 
@@ -42,6 +46,7 @@ http://localhost:8000/examples/browser_react_authoring/index.html
 Related references:
 
 - [`../../examples/README.md`](../README.md)
+- [`../byow_react_bunny_demo/README.md`](../byow_react_bunny_demo/README.md)
 - [`../../docs/specs/react-authoring.md`](../../docs/specs/react-authoring.md)
 - [`../../docs/adr/0004-react-jsx-authoring.md`](../../docs/adr/0004-react-jsx-authoring.md)
 - [`../../docs/specs/rendering.md`](../../docs/specs/rendering.md)

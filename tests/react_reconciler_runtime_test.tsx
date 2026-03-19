@@ -12,15 +12,15 @@ import {
 const NullChild = () => null;
 const EmptyChildren = () => [];
 
-Deno.test('createReactSceneRoot accepts live JSX alias intrinsics', () => {
+Deno.test('createReactSceneRoot accepts live JSX convenience components', () => {
   const root = createReactSceneRoot(
     <scene id='live-scene' activeCameraId='camera-main'>
-      <perspectiveCamera id='camera-main' yfov={0.8} position={[0, 0, 2]}>
+      <PerspectiveCamera id='camera-main' yfov={0.8} position={[0, 0, 2]}>
         <group id='camera-child-group'>
           <node id='camera-child' />
         </group>
-      </perspectiveCamera>
-      <directionalLight
+      </PerspectiveCamera>
+      <DirectionalLight
         id='sun'
         color={{ x: 1, y: 0.95, z: 0.9 }}
         intensity={1.5}
@@ -53,7 +53,7 @@ Deno.test('createReactSceneRoot accepts live JSX alias intrinsics', () => {
   );
 });
 
-Deno.test('reconciler convenience components route through the same live JSX aliases', () => {
+Deno.test('reconciler convenience components route through primitive scene resources and nodes', () => {
   const root = createReactSceneRoot(
     <scene id='component-scene' activeCameraId='camera-main'>
       <PerspectiveCamera id='camera-main' yfov={0.7} position={[0, 1, 3]} />
@@ -72,12 +72,12 @@ Deno.test('reconciler convenience components route through the same live JSX ali
   assertEquals(root.getScene()?.nodes.map((node) => node.id), ['camera-main', 'sun']);
 });
 
-Deno.test('live alias intrinsics keep bound nodes for composite children without host output', () => {
+Deno.test('live convenience components keep bound nodes for composite children without host output', () => {
   const root = createReactSceneRoot(
     <scene id='composite-child-scene' activeCameraId='camera-main'>
-      <perspectiveCamera id='camera-main' yfov={0.7}>
+      <PerspectiveCamera id='camera-main' yfov={0.7}>
         <NullChild />
-      </perspectiveCamera>
+      </PerspectiveCamera>
       <DirectionalLight
         id='sun'
         color={{ x: 1, y: 1, z: 1 }}

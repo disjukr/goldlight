@@ -323,13 +323,13 @@ Deno.test('createAuthoringElement mirrors ids into programmatic scene resources'
   assertEquals(scene.lights[0]?.id, 'sun');
 });
 
-Deno.test('authoringTreeToSceneIr lowers react-style alias intrinsics', () => {
+Deno.test('authoringTreeToSceneIr lowers camera/light convenience components', () => {
   const scene = authoringTreeToSceneIr(
     <scene id='jsx-scene' activeCameraId='camera-main'>
-      <perspectiveCamera id='camera-main' yfov={0.8} position={[0, 0, 2]}>
+      <PerspectiveCamera id='camera-main' yfov={0.8} position={[0, 0, 2]}>
         <node id='camera-child' />
-      </perspectiveCamera>
-      <directionalLight
+      </PerspectiveCamera>
+      <DirectionalLight
         id='sun'
         color={{ x: 1, y: 0.95, z: 0.9 }}
         intensity={1.5}
@@ -425,21 +425,11 @@ Deno.test('authoringTreeToSceneIr lowers exported convenience components through
   assertEquals(scene.nodes.map((node) => node.id), ['camera-main', 'camera-child', 'sun-node']);
 });
 
-Deno.test('react-style aliases stay resource-only without node intent', () => {
-  const cameraProps = {
-    type: 'orthographic' as const,
-    yfov: 0.8,
-  };
-  const lightProps = {
-    kind: 'point' as const,
-    color: { x: 1, y: 0.95, z: 0.9 },
-    intensity: 1.5,
-  };
-
+Deno.test('camera/light convenience components stay resource-only without node intent', () => {
   const scene = authoringTreeToSceneIr(
     <scene id='jsx-scene' activeCameraId='camera-main'>
-      <perspectiveCamera id='camera-main' {...cameraProps} />
-      <directionalLight id='sun' {...lightProps} />
+      <PerspectiveCamera id='camera-main' yfov={0.8} />
+      <DirectionalLight id='sun' color={{ x: 1, y: 0.95, z: 0.9 }} intensity={1.5} />
     </scene>,
   );
 
@@ -459,21 +449,11 @@ Deno.test('react-style aliases stay resource-only without node intent', () => {
   assertEquals(scene.nodes, []);
 });
 
-Deno.test('react-style aliases preserve their fixed resource kinds when props are spread in', () => {
-  const cameraProps = {
-    type: 'orthographic' as const,
-    yfov: 0.8,
-  };
-  const lightProps = {
-    kind: 'point' as const,
-    color: { x: 1, y: 0.95, z: 0.9 },
-    intensity: 1.5,
-  };
-
+Deno.test('camera/light convenience components preserve their fixed resource kinds', () => {
   const scene = authoringTreeToSceneIr(
     <scene id='jsx-scene' activeCameraId='camera-main'>
-      <perspectiveCamera id='camera-main' {...cameraProps} />
-      <directionalLight id='sun' {...lightProps} />
+      <PerspectiveCamera id='camera-main' yfov={0.8} />
+      <DirectionalLight id='sun' color={{ x: 1, y: 0.95, z: 0.9 }} intensity={1.5} />
     </scene>,
   );
 

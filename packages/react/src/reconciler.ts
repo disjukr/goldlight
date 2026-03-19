@@ -9,14 +9,11 @@ import {
 import type {
   AssetJsxProps,
   CameraJsxProps,
-  DirectionalLightJsxProps,
   GroupJsxProps,
   LightJsxProps,
   MaterialJsxProps,
   MeshJsxProps,
   NodeJsxProps,
-  OrthographicCameraJsxProps,
-  PerspectiveCameraJsxProps,
   SceneAuthoringProps,
   SceneJsxProps,
   TextureJsxProps,
@@ -35,19 +32,8 @@ import {
   upsertSceneDocumentResource,
 } from './scene_document.ts';
 
-type AliasNodeProps = Pick<
-  PerspectiveCameraJsxProps,
-  'nodeId' | 'name' | 'transform' | 'position' | 'rotation' | 'scale'
->;
-type AliasHostProps =
-  & AliasNodeProps
-  & Readonly<{
-    __hasChildIntent?: boolean;
-  }>;
-
 type ResourceIntrinsicType = 'asset' | 'texture' | 'material' | 'light' | 'mesh' | 'camera';
-type AliasIntrinsicType = 'group' | 'perspectiveCamera' | 'orthographicCamera' | 'directionalLight';
-type HostIntrinsicType = 'scene' | 'node' | ResourceIntrinsicType | AliasIntrinsicType;
+type HostIntrinsicType = 'scene' | 'node' | 'group' | ResourceIntrinsicType;
 const supportedIntrinsicTypes = new Set<HostIntrinsicType>([
   'scene',
   'node',
@@ -58,9 +44,6 @@ const supportedIntrinsicTypes = new Set<HostIntrinsicType>([
   'light',
   'mesh',
   'camera',
-  'perspectiveCamera',
-  'orthographicCamera',
-  'directionalLight',
 ]);
 
 type HostPropsByType = {
@@ -73,9 +56,6 @@ type HostPropsByType = {
   light: LightJsxProps;
   mesh: MeshJsxProps;
   camera: CameraJsxProps;
-  perspectiveCamera: PerspectiveCameraJsxProps & AliasHostProps;
-  orthographicCamera: OrthographicCameraJsxProps & AliasHostProps;
-  directionalLight: DirectionalLightJsxProps & AliasHostProps;
 };
 
 type HostPropsWithoutChildren<TType extends HostIntrinsicType> = Omit<
@@ -137,24 +117,6 @@ type CameraHostInstance = {
   children: HostChild[];
 };
 
-type PerspectiveCameraAliasHostInstance = {
-  readonly type: 'perspectiveCamera';
-  props: HostPropsWithoutChildren<'perspectiveCamera'>;
-  children: HostChild[];
-};
-
-type OrthographicCameraAliasHostInstance = {
-  readonly type: 'orthographicCamera';
-  props: HostPropsWithoutChildren<'orthographicCamera'>;
-  children: HostChild[];
-};
-
-type DirectionalLightAliasHostInstance = {
-  readonly type: 'directionalLight';
-  props: HostPropsWithoutChildren<'directionalLight'>;
-  children: HostChild[];
-};
-
 type ResourceHostInstance =
   | AssetHostInstance
   | TextureHostInstance
@@ -163,13 +125,7 @@ type ResourceHostInstance =
   | MeshHostInstance
   | CameraHostInstance;
 
-type AliasHostInstance =
-  | GroupHostInstance
-  | PerspectiveCameraAliasHostInstance
-  | OrthographicCameraAliasHostInstance
-  | DirectionalLightAliasHostInstance;
-
-type HostChild = NodeHostInstance | GroupHostInstance | ResourceHostInstance | AliasHostInstance;
+type HostChild = NodeHostInstance | GroupHostInstance | ResourceHostInstance;
 type HostInstance = SceneHostInstance | HostChild;
 type HostContainer = {
   rootChildren: SceneHostInstance[];
@@ -320,19 +276,6 @@ const createHostInstance = (
       children: [],
     };
   }
-  if (
-    intrinsicType === 'perspectiveCamera' || intrinsicType === 'orthographicCamera' ||
-    intrinsicType === 'directionalLight'
-  ) {
-    return {
-      type: intrinsicType,
-      props: normalizedProps as
-        & HostPropsWithoutChildren<'perspectiveCamera'>
-        & HostPropsWithoutChildren<'orthographicCamera'>
-        & HostPropsWithoutChildren<'directionalLight'>,
-      children: [],
-    } as AliasHostInstance;
-  }
   return {
     type: intrinsicType,
     props: normalizedProps as HostPropsWithoutChildren<ResourceIntrinsicType>,
@@ -344,74 +287,11 @@ const extractProps = <TType extends HostIntrinsicType>(
   type: TType,
   props: Record<string, unknown>,
 ): HostPropsWithoutChildren<TType> => {
-  const { children: rawChildren, ...rest } = props;
+  const { children: _children, ...rest } = props;
   if (type === 'node' || type === 'group') {
     return normalizeNodeProps(rest as NodeJsxProps) as HostPropsWithoutChildren<TType>;
   }
-  if (
-    type === 'perspectiveCamera' || type === 'orthographicCamera' || type === 'directionalLight'
-  ) {
-    return {
-      ...rest,
-      __hasChildIntent: hasRawChildIntent(rawChildren),
-    } as unknown as HostPropsWithoutChildren<TType>;
-  }
   return rest as HostPropsWithoutChildren<TType>;
-};
-
-const hasRawChildIntent = (children: unknown): boolean => {
-  if (Array.isArray(children)) {
-    return children.some((child) => hasRawChildIntent(child));
-  }
-  return children !== undefined && children !== null && children !== false && children !== true;
-};
-
-const hasAliasNodeIntent = (
-  props: AliasHostProps,
-  children: readonly HostChild[],
-): boolean =>
-  props.nodeId !== undefined ||
-  props.name !== undefined ||
-  props.transform !== undefined ||
-  props.position !== undefined ||
-  props.rotation !== undefined ||
-  props.scale !== undefined ||
-  props.__hasChildIntent === true ||
-  children.length > 0;
-
-const syncAliasNode = (
-  document: SceneDocument,
-  visitedNodeIds: Set<string>,
-  parentId: string | undefined,
-  nodeIndex: number,
-  boundId: string,
-  binding: Pick<NodeJsxProps, 'cameraId'> | Pick<NodeJsxProps, 'lightId'>,
-  props: AliasHostProps,
-  children: readonly HostChild[],
-  visitChildren: (
-    parentId: string | undefined,
-    children: readonly HostChild[],
-    startIndex?: number,
-  ) => number,
-): number => {
-  if (!hasAliasNodeIntent(props, children)) {
-    return nodeIndex;
-  }
-
-  const { nodeId, __hasChildIntent: _hasChildIntent, ...restNodeProps } = props;
-  const id = nodeId ?? boundId;
-  visitedNodeIds.add(id);
-  upsertSceneDocumentNode(document, {
-    id,
-    parentId,
-    index: nodeIndex,
-    props: normalizeNodeProps({
-      ...restNodeProps,
-      ...binding,
-    }),
-  });
-  visitChildren(id, children);
-  return nodeIndex + 1;
 };
 
 const removeIfPresent = <TValue>(items: TValue[], value: TValue): void => {
@@ -571,105 +451,6 @@ const syncContainerSceneDocument = (container: HostContainer): void => {
     }
 
     switch (child.type) {
-      case 'perspectiveCamera': {
-        const {
-          id,
-          nodeId,
-          name,
-          transform,
-          position,
-          rotation,
-          scale,
-          __hasChildIntent,
-          ...cameraProps
-        } = child.props;
-        visitedResourceIds.camera.add(id);
-        upsertSceneDocumentResource(document, {
-          kind: 'camera',
-          value: normalizeCameraJsxProps({
-            id,
-            type: 'perspective',
-            ...cameraProps,
-          }),
-        });
-        return syncAliasNode(
-          document,
-          visitedNodeIds,
-          parentId,
-          nodeIndex,
-          id,
-          { cameraId: id },
-          { nodeId, name, transform, position, rotation, scale, __hasChildIntent },
-          child.children,
-          visitChildren,
-        );
-      }
-      case 'orthographicCamera': {
-        const {
-          id,
-          nodeId,
-          name,
-          transform,
-          position,
-          rotation,
-          scale,
-          __hasChildIntent,
-          ...cameraProps
-        } = child.props;
-        visitedResourceIds.camera.add(id);
-        upsertSceneDocumentResource(document, {
-          kind: 'camera',
-          value: normalizeCameraJsxProps({
-            id,
-            type: 'orthographic',
-            ...cameraProps,
-          }),
-        });
-        return syncAliasNode(
-          document,
-          visitedNodeIds,
-          parentId,
-          nodeIndex,
-          id,
-          { cameraId: id },
-          { nodeId, name, transform, position, rotation, scale, __hasChildIntent },
-          child.children,
-          visitChildren,
-        );
-      }
-      case 'directionalLight': {
-        const {
-          id,
-          nodeId,
-          name,
-          transform,
-          position,
-          rotation,
-          scale,
-          __hasChildIntent,
-          ...lightProps
-        } = child.props;
-        visitedResourceIds.light.add(id);
-        upsertSceneDocumentResource(document, {
-          kind: 'light',
-          value: {
-            id,
-            kind: 'directional',
-            ...lightProps,
-          },
-        });
-        return syncAliasNode(
-          document,
-          visitedNodeIds,
-          parentId,
-          nodeIndex,
-          id,
-          { lightId: id },
-          { nodeId, name, transform, position, rotation, scale, __hasChildIntent },
-          child.children,
-          visitChildren,
-        );
-      }
       case 'asset':
         visitedResourceIds.asset.add(child.props.id);
         upsertSceneDocumentResource(document, { kind: 'asset', value: child.props });

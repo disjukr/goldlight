@@ -494,9 +494,6 @@ export const jsx = (
   type:
     | keyof AuthoringPropsByType
     | 'group'
-    | 'perspectiveCamera'
-    | 'orthographicCamera'
-    | 'directionalLight'
     | typeof Fragment
     | AuthoringComponent<
       | SceneJsxProps
@@ -543,18 +540,6 @@ export const jsx = (
   if (type === 'group') {
     const { id, children: _children, ...groupProps } = authoringProps as GroupJsxProps;
     return createAuthoringElement('node', id, normalizeNodeProps(groupProps), children);
-  }
-
-  if (type === 'perspectiveCamera') {
-    return buildPerspectiveCameraElement(authoringProps as PerspectiveCameraJsxProps, key);
-  }
-
-  if (type === 'orthographicCamera') {
-    return buildOrthographicCameraElement(authoringProps as OrthographicCameraJsxProps, key);
-  }
-
-  if (type === 'directionalLight') {
-    return buildDirectionalLightElement(authoringProps as DirectionalLightJsxProps, key);
   }
 
   if (

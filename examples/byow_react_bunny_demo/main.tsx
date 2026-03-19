@@ -20,6 +20,7 @@ import { createDenoSurfaceTarget } from '../../packages/platform/mod.ts';
 import {
   createReactSceneRoot,
   DirectionalLight,
+  flushReactSceneUpdates,
   PerspectiveCamera,
 } from '../../packages/react/reconciler.ts';
 import { createMaterialRegistry, renderForwardFrame } from '../../packages/renderer/mod.ts';
@@ -133,6 +134,7 @@ const residency = createRuntimeResidency();
 const materialRegistry = createMaterialRegistry();
 
 const drawFrame = () => {
+  flushReactSceneUpdates();
   const currentScene = scene;
   if (!currentScene) {
     throw new Error('React scene root stopped publishing Stanford Bunny snapshots');
@@ -148,6 +150,7 @@ for await (const event of window.events()) {
   switch (event.type) {
     case EventType.Draw:
       drawFrame();
+      await new Promise((resolve) => setTimeout(resolve, 0));
       break;
     case EventType.Quit:
       Deno.exit(0);

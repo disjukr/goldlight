@@ -14,6 +14,7 @@ import {
   collectRendererCapabilityIssues,
   createDeferredRenderer,
   createForwardRenderer,
+  createIdentityPostProcessPass,
   createMaterialRegistry,
   extractDirectionalLightItems,
   extractSdfPassItems,
@@ -201,6 +202,25 @@ Deno.test('forward renderer omits raymarch pass when scene has no sdf or volume 
   );
 
   assertEquals(frame.passes.map((pass) => pass.id), ['mesh', 'present']);
+});
+
+Deno.test('frame planning inserts post-process passes before present', () => {
+  const frame = planFrame(
+    createForwardRenderer(),
+    evaluateScene(createSceneIr('scene'), { timeMs: 0 }),
+    createRuntimeResidency(),
+    {
+      postProcessPasses: [createIdentityPostProcessPass('post:identity')],
+    },
+  );
+
+  assertEquals(frame.passes.map((pass) => pass.id), ['mesh', 'post:identity', 'present']);
+  assertEquals(frame.passes[1], {
+    id: 'post:identity',
+    kind: 'post-process',
+    reads: ['color'],
+    writes: ['post-process:post:identity'],
+  });
 });
 
 Deno.test('deferred renderer plans only the implemented mesh passes', () => {

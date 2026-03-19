@@ -17,6 +17,8 @@ The initial renderer uses a lightweight pass graph:
 - explicit resource names
 - explicit dependencies
 - no full frame-graph aliasing or aggressive optimization yet
+- optional renderer-owned fullscreen post-process passes that run between scene-color output and
+  final presentation
 
 ## Primitive Mapping
 
@@ -43,6 +45,9 @@ The initial renderer uses a lightweight pass graph:
 - Forward rendering also encodes a dedicated SDF raymarch pass for supported sphere and box
   primitives.
 - Forward rendering also encodes a first volume raymarch pass for volume primitives with residency.
+- Forward and deferred rendering can now optionally route scene output through ordered fullscreen
+  post-process passes. The initial contract provides a sampled scene-color texture, sampler, and an
+  optional uniform buffer to a fullscreen triangle shader before the final present step.
 - Built-in unlit WGSL is stored as a standalone shader file and imported as text.
 - Built-in forward lit WGSL is stored as a standalone shader file and consumes directional-light
   uniform data extracted from evaluated light nodes.
@@ -71,6 +76,7 @@ The initial renderer uses a lightweight pass graph:
   plus non-textured built-in `lit` materials, with optional base-color textures on `unlit`.
 - Custom WGSL programs can be registered and cached through the material registry.
 - Headless/offscreen rendering supports compact byte readback for snapshot testing.
+- Headless/offscreen snapshots reuse the same optional post-process chain instead of bypassing it.
 - Snapshot bytes can also be encoded into PNG for local inspection and regression workflows.
 - Browser examples cover the minimal mesh-only path, a texture-backed built-in unlit path, and a
   custom WGSL path that samples texture residency through declared material bindings.
@@ -116,6 +122,8 @@ The initial renderer uses a lightweight pass graph:
   `examples/headless_snapshot/out/forward.png`.
 - The workflow reuses `requestGpuContext`, `rebuildRuntimeResidency`, `renderForwardSnapshot`, and
   `encodePngRgba` instead of adding a separate renderer path.
+- When post-process passes are requested, the same offscreen snapshot path reads back the final
+  post-processed color target.
 - The command accepts optional output path, width, and height arguments for ad hoc captures.
 
 ## Known Gaps
@@ -123,3 +131,5 @@ The initial renderer uses a lightweight pass graph:
 - Deferred rendering does not yet support textures on built-in lit materials.
 - SDF execution currently supports sphere and box primitives only; broader graph/operator coverage
   is still pending.
+- The current post-process milestone is intentionally narrow: it supports fullscreen color passes
+  with one input texture, one sampler, and optional uniform data, but not a full frame graph.

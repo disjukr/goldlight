@@ -39,7 +39,8 @@ Implemented today:
 - mesh, texture, first volume residency upload paths, and first volume raymarch execution
 - forward rendering, minimal deferred mesh execution with built-in unlit/lit plus custom WGSL
   G-buffer paths, deferred directional-light resolve support, optional baseColor texture sampling,
-  post-lighting deferred SDF/volume composition, first-class directional light nodes with built-in
+  post-lighting deferred SDF/volume composition, renderer-owned fullscreen post-process chaining
+  with an initial identity/blit pass contract, first-class directional light nodes with built-in
   forward Lambert shading, first SDF raymarch execution, and headless snapshot readback
 - forward SDF sphere and box raymarch execution with capability preflight alignment
 - built-in unlit material registration, evaluated mesh transform uploads, base-color texture
@@ -62,7 +63,8 @@ Implemented today:
   camera/light composition, and commit-summary plus update-plan helpers for targeted residency
   invalidation without forcing resets for transform-only node changes
 - proposed ADR/discussion tracking for the next React live-update boundary decision around
-  partial-apply scene updates without renderer ownership
+  partial-apply scene updates without renderer ownership, plus the longer-term post-processing
+  execution model after the first shipped fullscreen pass contract
 - fixture-backed golden snapshot regression tests for clear, mesh, sphere/box SDF, volume, and
   recovery rebuild renders, including guards against raymarch fixtures collapsing back to clear-only
   output

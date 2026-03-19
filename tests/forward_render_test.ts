@@ -10,6 +10,7 @@ import {
   createSceneIr,
 } from '@rieul3d/ir';
 import {
+  createIdentityPostProcessPass,
   createMaterialRegistry,
   ensureBuiltInForwardPipeline,
   ensureMaterialPipeline,
@@ -1570,6 +1571,43 @@ Deno.test('renderForwardFrame uploads parented mesh transforms after scene evalu
   assertAlmostEquals(uploadedMatrix[31] ?? 0, 1, 1e-5);
 });
 
+Deno.test('renderForwardFrame runs post-process passes after scene rendering', () => {
+  const mocks = createRenderMocks();
+  const runtimeResidency = createRuntimeResidency();
+  let scene = createSceneIr('scene');
+  scene = appendMesh(scene, {
+    id: 'mesh-post',
+    attributes: [{ semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0, 0, 1, 0] }],
+  });
+  scene = appendNode(scene, createNode('mesh-node', { meshId: 'mesh-post' }));
+
+  runtimeResidency.geometry.set('mesh-post', {
+    meshId: 'mesh-post',
+    attributeBuffers: { POSITION: { id: 0 } as unknown as GPUBuffer },
+    vertexCount: 3,
+    indexCount: 0,
+  });
+
+  const result = renderForwardFrame(
+    mocks as unknown as GpuRenderExecutionContext,
+    createOffscreenContext({
+      device: mocks.device as unknown as GPUDevice,
+      target: createHeadlessTarget(32, 32),
+    }),
+    runtimeResidency,
+    evaluateScene(scene, { timeMs: 0 }),
+    createMaterialRegistry(),
+    {
+      postProcessPasses: [createIdentityPostProcessPass('post:identity')],
+    },
+  );
+
+  assertEquals(result.drawCount, 2);
+  assertEquals(result.submittedCommandBufferCount, 2);
+  assertEquals(mocks.renderPassCount.current, 2);
+  assertEquals(mocks.submits.length, 2);
+});
+
 Deno.test('renderDeferredFrame composites sdf and volume raymarch passes after deferred lighting', () => {
   const mocks = createRenderMocks();
   const runtimeResidency = createRuntimeResidency();
@@ -1641,4 +1679,47 @@ Deno.test('renderDeferredFrame composites sdf and volume raymarch passes after d
     mocks.passActions.filter((action) => action.type === 'draw').length,
     5,
   );
+});
+
+Deno.test('renderDeferredFrame routes lighting through post-process when requested', () => {
+  const mocks = createRenderMocks();
+  const runtimeResidency = createRuntimeResidency();
+  let scene = createSceneIr('scene');
+  scene = appendMesh(scene, {
+    id: 'mesh-deferred-post',
+    attributes: [
+      { semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0, 0, 1, 0] },
+      { semantic: 'NORMAL', itemSize: 3, values: [0, 0, 1, 0, 0, 1, 0, 0, 1] },
+    ],
+  });
+  scene = appendNode(scene, createNode('mesh-node', { meshId: 'mesh-deferred-post' }));
+
+  runtimeResidency.geometry.set('mesh-deferred-post', {
+    meshId: 'mesh-deferred-post',
+    attributeBuffers: {
+      POSITION: { id: 0 } as unknown as GPUBuffer,
+      NORMAL: { id: 1 } as unknown as GPUBuffer,
+    },
+    vertexCount: 3,
+    indexCount: 0,
+  });
+
+  const result = renderDeferredFrame(
+    mocks as unknown as GpuRenderExecutionContext,
+    createOffscreenContext({
+      device: mocks.device as unknown as GPUDevice,
+      target: createHeadlessTarget(32, 32),
+    }),
+    runtimeResidency,
+    evaluateScene(scene, { timeMs: 0 }),
+    createMaterialRegistry(),
+    {
+      postProcessPasses: [createIdentityPostProcessPass('post:identity')],
+    },
+  );
+
+  assertEquals(result.drawCount, 4);
+  assertEquals(result.submittedCommandBufferCount, 2);
+  assertEquals(mocks.renderPassCount.current, 4);
+  assertEquals(mocks.submits.length, 2);
 });

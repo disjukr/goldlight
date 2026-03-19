@@ -6,7 +6,6 @@ import {
   rebuildRuntimeResidency,
   requestGpuContext,
 } from '@rieul3d/gpu';
-import { createHeadlessTarget } from '@rieul3d/platform';
 import { encodePngRgba } from '@rieul3d/exporters';
 import { renderForwardSnapshot } from '@rieul3d/renderer';
 import {
@@ -30,7 +29,13 @@ const renderFixture = async (
   name: string,
   scenarioFactory: () => GoldenSnapshotScenario,
 ): Promise<void> => {
-  const target = createHeadlessTarget(16, 16);
+  const target = {
+    kind: 'offscreen',
+    width: 16,
+    height: 16,
+    format: 'rgba8unorm',
+    sampleCount: 1,
+  } as const;
   const gpuContext = await requestGpuContext({ target });
 
   try {
@@ -67,7 +72,9 @@ const renderRecoveryFixture = async (
   let recoveredContext: Awaited<ReturnType<typeof requestGpuContext>> | undefined;
 
   try {
-    initialContext = await requestGpuContext({ target: createHeadlessTarget(16, 16) });
+    initialContext = await requestGpuContext({
+      target: { kind: 'offscreen', width: 16, height: 16, format: 'rgba8unorm', sampleCount: 1 },
+    });
     rebuildRuntimeResidency(initialContext, residency, scene, evaluatedScene, assets);
     await renderForwardSnapshot(
       initialContext,
@@ -78,7 +85,9 @@ const renderRecoveryFixture = async (
     initialContext.device.destroy();
     initialContext = undefined;
 
-    recoveredContext = await requestGpuContext({ target: createHeadlessTarget(16, 16) });
+    recoveredContext = await requestGpuContext({
+      target: { kind: 'offscreen', width: 16, height: 16, format: 'rgba8unorm', sampleCount: 1 },
+    });
     rebuildRuntimeResidency(recoveredContext, residency, scene, evaluatedScene, assets);
     const snapshot = await renderForwardSnapshot(
       recoveredContext,

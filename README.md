@@ -15,7 +15,6 @@ The repository is organized as a Deno workspace with packages for:
 - `@rieul3d/react`: declarative authoring adapter
 - `@rieul3d/react/reconciler`: experimental React reconciler host over the package-local scene
   document
-- `@rieul3d/platform`: browser, Deno, and headless targets
 - `@rieul3d/exporters`: output encoders such as PNG
 - `@rieul3d/desktop`: single-process desktop shell bootstrap over a Rust `winit` FFI host
 
@@ -71,6 +70,8 @@ Implemented today:
 - ASCII PLY ingestion for in-repo meshes such as the Stanford Bunny reconstruction asset
 - browser/Deno helpers for resolving external glTF buffers and images into the existing loader
   contract
+- direct surface/offscreen target literals at the call site instead of a dedicated target-helper
+  package
 - browser canvas examples, Windows BYOW native textured demo, headless PNG snapshot workflow, and
   PNG snapshot encoding
 - Windows BYOW primitives demo using `@rieul3d/primitives`, a reusable BYOW runner script, and a

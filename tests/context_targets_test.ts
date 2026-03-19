@@ -8,12 +8,6 @@ import {
   getRenderTargetByteSize,
   getRenderTargetSize,
 } from '@rieul3d/gpu';
-import {
-  createBrowserSurfaceTarget,
-  createDenoSurfaceTarget,
-  createHeadlessTarget,
-} from '@rieul3d/platform';
-
 type MockTexture = Readonly<{
   id: number;
   descriptor: GPUTextureDescriptor;
@@ -60,7 +54,13 @@ Deno.test('createSurfaceBinding configures the canvas context for a surface targ
   const surface = createSurfaceBinding(
     {
       device: device as GPUDevice,
-      target: createBrowserSurfaceTarget(640, 480),
+      target: {
+        kind: 'surface',
+        width: 640,
+        height: 480,
+        format: 'bgra8unorm',
+        alphaMode: undefined,
+      },
     },
     canvasContext,
   );
@@ -89,7 +89,13 @@ Deno.test('createSurfaceBinding honors an explicit surface alpha mode', () => {
   createSurfaceBinding(
     {
       device: device as GPUDevice,
-      target: createDenoSurfaceTarget(640, 480, 'rgba8unorm', 'opaque'),
+      target: {
+        kind: 'surface',
+        width: 640,
+        height: 480,
+        format: 'rgba8unorm',
+        alphaMode: 'opaque',
+      },
     },
     canvasContext,
   );
@@ -105,7 +111,7 @@ Deno.test('createOffscreenBinding allocates color and depth textures and views',
   const { device, textures } = createMockDevice();
   const offscreen = createOffscreenBinding({
     device: device as GPUDevice,
-    target: createHeadlessTarget(320, 240),
+    target: { kind: 'offscreen', width: 320, height: 240, format: 'rgba8unorm', sampleCount: 1 },
   });
 
   assertEquals(offscreen.kind, 'offscreen');
@@ -121,7 +127,13 @@ Deno.test('bindRenderTarget chooses surface or offscreen binding based on input'
   const surfaceBinding = bindRenderTarget(
     {
       device: device as GPUDevice,
-      target: createBrowserSurfaceTarget(100, 50),
+      target: {
+        kind: 'surface',
+        width: 100,
+        height: 50,
+        format: 'bgra8unorm',
+        alphaMode: undefined,
+      },
     },
     {
       canvasContext: {
@@ -136,7 +148,7 @@ Deno.test('bindRenderTarget chooses surface or offscreen binding based on input'
   const offscreenBinding = bindRenderTarget(
     {
       device: device as GPUDevice,
-      target: createHeadlessTarget(100, 50),
+      target: { kind: 'offscreen', width: 100, height: 50, format: 'rgba8unorm', sampleCount: 1 },
     },
     { offscreen: true },
   );
@@ -151,7 +163,13 @@ Deno.test('acquireColorAttachmentView returns a view for surface and offscreen b
   const surfaceBinding = createSurfaceBinding(
     {
       device: surfaceDevice as GPUDevice,
-      target: createBrowserSurfaceTarget(10, 10),
+      target: {
+        kind: 'surface',
+        width: 10,
+        height: 10,
+        format: 'bgra8unorm',
+        alphaMode: undefined,
+      },
     },
     {
       configure: () => undefined,
@@ -169,7 +187,7 @@ Deno.test('acquireColorAttachmentView returns a view for surface and offscreen b
     { device: device as GPUDevice },
     createOffscreenBinding({
       device: device as GPUDevice,
-      target: createHeadlessTarget(10, 10),
+      target: { kind: 'offscreen', width: 10, height: 10, format: 'rgba8unorm', sampleCount: 1 },
     }),
   );
 
@@ -184,7 +202,13 @@ Deno.test('acquireColorAttachmentView recreates the surface depth attachment whe
   const surfaceBinding = createSurfaceBinding(
     {
       device: device as GPUDevice,
-      target: createBrowserSurfaceTarget(10, 10),
+      target: {
+        kind: 'surface',
+        width: 10,
+        height: 10,
+        format: 'bgra8unorm',
+        alphaMode: undefined,
+      },
     },
     {
       configure: () => undefined,
@@ -228,7 +252,13 @@ Deno.test('acquireColorAttachmentView reconfigures a dropped surface presentatio
     createSurfaceBinding(
       {
         device: device as GPUDevice,
-        target: createDenoSurfaceTarget(10, 10, 'rgba8unorm', 'opaque'),
+        target: {
+          kind: 'surface',
+          width: 10,
+          height: 10,
+          format: 'rgba8unorm',
+          alphaMode: 'opaque',
+        },
       },
       {
         configure: (configuration: GPUCanvasConfiguration) => {
@@ -266,7 +296,13 @@ Deno.test('acquireColorAttachmentView rethrows non-state surface errors', () => 
         createSurfaceBinding(
           {
             device: device as GPUDevice,
-            target: createBrowserSurfaceTarget(10, 10),
+            target: {
+              kind: 'surface',
+              width: 10,
+              height: 10,
+              format: 'bgra8unorm',
+              alphaMode: undefined,
+            },
           },
           {
             configure: () => undefined,
@@ -287,19 +323,43 @@ Deno.test('surface/offscreen helpers reject mismatched target kinds and expose t
     createSurfaceBinding(
       {
         device: {} as GPUDevice,
-        target: createHeadlessTarget(8, 8),
+        target: { kind: 'offscreen', width: 8, height: 8, format: 'rgba8unorm', sampleCount: 1 },
       },
       {} as GPUCanvasContext,
     )
   );
 
-  assertEquals(createDenoSurfaceTarget(12, 6), {
+  assertEquals({
+    kind: 'surface',
+    width: 12,
+    height: 6,
+    format: 'bgra8unorm',
+    alphaMode: undefined,
+  }, {
     kind: 'surface',
     width: 12,
     height: 6,
     format: 'bgra8unorm',
     alphaMode: undefined,
   });
-  assertEquals(getRenderTargetSize(createHeadlessTarget(8, 4)), { width: 8, height: 4 });
-  assertEquals(getRenderTargetByteSize(createHeadlessTarget(8, 4)), 128);
+  assertEquals(
+    getRenderTargetSize({
+      kind: 'offscreen',
+      width: 8,
+      height: 4,
+      format: 'rgba8unorm',
+      sampleCount: 1,
+    }),
+    { width: 8, height: 4 },
+  );
+  assertEquals(
+    getRenderTargetByteSize({
+      kind: 'offscreen',
+      width: 8,
+      height: 4,
+      format: 'rgba8unorm',
+      sampleCount: 1,
+    }),
+    128,
+  );
 });

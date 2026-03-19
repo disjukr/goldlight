@@ -17,7 +17,6 @@ import {
   createNode,
   createSceneIr,
 } from '../../packages/ir/mod.ts';
-import { createBrowserSurfaceTarget } from '../../packages/platform/mod.ts';
 import {
   createMaterialRegistry,
   registerWgslMaterial,
@@ -182,7 +181,13 @@ fn fsMain(input: VsOut) -> @location(0) vec4<f32> {
   ],
 });
 
-const target = createBrowserSurfaceTarget(canvas.width, canvas.height);
+const target = {
+  kind: 'surface',
+  width: canvas.width,
+  height: canvas.height,
+  format: 'bgra8unorm',
+  alphaMode: undefined,
+} as const;
 const gpuContext = await requestGpuContext({ target });
 const canvasContext = canvas.getContext('webgpu');
 if (!canvasContext) {

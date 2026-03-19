@@ -19,7 +19,6 @@ import {
   createNode,
   createSceneIr,
 } from '@rieul3d/ir';
-import { createHeadlessTarget } from '@rieul3d/platform';
 import {
   assertRendererSceneCapabilities,
   collectRendererCapabilityIssues,
@@ -337,7 +336,7 @@ Deno.bench('forward frame encoding', () => {
   const context = createRenderBenchContext();
   const binding = createOffscreenBinding({
     device: context.device,
-    target: createHeadlessTarget(64, 64),
+    target: { kind: 'offscreen', width: 64, height: 64, format: 'rgba8unorm', sampleCount: 1 },
   });
 
   renderForwardFrame(

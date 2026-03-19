@@ -15,7 +15,6 @@ import {
   createVec3,
   identityTransform,
 } from '@rieul3d/ir';
-import { createHeadlessTarget } from '@rieul3d/platform';
 import { encodePngRgba } from '@rieul3d/exporters';
 import { renderForwardSnapshot } from '@rieul3d/renderer';
 
@@ -111,7 +110,13 @@ const main = async () => {
   const outputPath = resolveOutputPath(Deno.args[0]);
   const width = parseSize(Deno.args[1], defaultWidth);
   const height = parseSize(Deno.args[2], defaultHeight);
-  const target = createHeadlessTarget(width, height);
+  const target = {
+    kind: 'offscreen',
+    width,
+    height,
+    format: 'rgba8unorm',
+    sampleCount: 1,
+  } as const;
   const context = await requestGpuContext({ target });
   const residency = createRuntimeResidency();
   const scene = createSnapshotScene();

@@ -16,7 +16,6 @@ import {
   renderNodePickFrame,
   renderNodePickSnapshot,
 } from '@rieul3d/renderer';
-import { createHeadlessTarget } from '@rieul3d/platform';
 
 type MockBuffer = Readonly<{ id: number }>;
 type MockPipeline = Readonly<{
@@ -195,7 +194,7 @@ Deno.test('renderNodePickFrame draws mesh nodes and uploads encoded id colors', 
     mocks as unknown as GpuRenderExecutionContext,
     createOffscreenBinding({
       device: mocks.device as unknown as GPUDevice,
-      target: createHeadlessTarget(16, 16),
+      target: { kind: 'offscreen', width: 16, height: 16, format: 'rgba8unorm', sampleCount: 1 },
     }),
     runtimeResidency,
     evaluateScene(scene, { timeMs: 0 }),
@@ -278,7 +277,7 @@ Deno.test('renderNodePickFrame rejects custom shader materials', () => {
       mocks as unknown as GpuRenderExecutionContext,
       createOffscreenBinding({
         device: mocks.device as unknown as GPUDevice,
-        target: createHeadlessTarget(16, 16),
+        target: { kind: 'offscreen', width: 16, height: 16, format: 'rgba8unorm', sampleCount: 1 },
       }),
       runtimeResidency,
       evaluateScene(scene, { timeMs: 0 }),
@@ -353,7 +352,7 @@ Deno.test('renderNodePickSnapshot returns compact offscreen bytes and pick metad
     mocks as unknown as Parameters<typeof renderNodePickSnapshot>[0],
     createOffscreenBinding({
       device: mocks.device as unknown as GPUDevice,
-      target: createHeadlessTarget(2, 2),
+      target: { kind: 'offscreen', width: 2, height: 2, format: 'rgba8unorm', sampleCount: 1 },
     }),
     runtimeResidency,
     evaluateScene(scene, { timeMs: 0 }),

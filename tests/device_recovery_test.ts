@@ -15,7 +15,6 @@ import {
   createNode,
   createSceneIr,
 } from '@rieul3d/ir';
-import { createHeadlessTarget } from '@rieul3d/platform';
 import { renderForwardSnapshot } from '@rieul3d/renderer';
 
 type MockBuffer = Readonly<{
@@ -349,7 +348,13 @@ Deno.test('device-loss recovery rebinds the target, rebuilds residency, and subm
   const scene = createRecoveryScene();
   const evaluatedScene = evaluateScene(scene, { timeMs: 0 });
   const assets = createRecoveryAssets();
-  const target = createHeadlessTarget(2, 2);
+  const target = {
+    kind: 'offscreen',
+    width: 2,
+    height: 2,
+    format: 'rgba8unorm',
+    sampleCount: 1,
+  } as const;
   const initialContext = createRenderMocks([
     [11, 12, 13, 14, 15, 16, 17, 18],
     [19, 20, 21, 22, 23, 24, 25, 26],
@@ -431,7 +436,13 @@ Deno.test('device-loss recovery rebinds the target, rebuilds residency, and subm
 Deno.test('failed recovery leaves the caller in a non-rendering state until rebuild succeeds', () => {
   const scene = createRecoveryScene();
   const evaluatedScene = evaluateScene(scene, { timeMs: 0 });
-  const target = createHeadlessTarget(2, 2);
+  const target = {
+    kind: 'offscreen',
+    width: 2,
+    height: 2,
+    format: 'rgba8unorm',
+    sampleCount: 1,
+  } as const;
   const context = createRenderMocks([
     [51, 52, 53, 54, 55, 56, 57, 58],
     [59, 60, 61, 62, 63, 64, 65, 66],

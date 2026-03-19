@@ -12,7 +12,6 @@ import {
   renderDeferredSnapshot,
   renderForwardSnapshot,
 } from '@rieul3d/renderer';
-import { createHeadlessTarget } from '@rieul3d/platform';
 
 const createSnapshotMocks = () => {
   const submits: unknown[][] = [];
@@ -100,7 +99,13 @@ const createSnapshotMocks = () => {
 };
 
 Deno.test('createOffscreenReadbackPlan aligns rows and compactOffscreenReadback removes padding', () => {
-  const plan = createOffscreenReadbackPlan(createHeadlessTarget(2, 2));
+  const plan = createOffscreenReadbackPlan({
+    kind: 'offscreen',
+    width: 2,
+    height: 2,
+    format: 'rgba8unorm',
+    sampleCount: 1,
+  });
   const padded = new Uint8Array(plan.byteLength);
   padded.set([1, 2, 3, 4, 5, 6, 7, 8], 0);
   padded.set([9, 10, 11, 12, 13, 14, 15, 16], plan.paddedBytesPerRow);
@@ -134,7 +139,7 @@ Deno.test('renderForwardSnapshot returns compact offscreen bytes for headless sn
 
   const binding = createOffscreenBinding({
     device: mocks.device as unknown as GPUDevice,
-    target: createHeadlessTarget(2, 2),
+    target: { kind: 'offscreen', width: 2, height: 2, format: 'rgba8unorm', sampleCount: 1 },
   });
 
   const snapshot = await renderForwardSnapshot(
@@ -189,7 +194,7 @@ Deno.test('renderForwardSnapshot also captures volume-only scenes with seeded re
 
   const binding = createOffscreenBinding({
     device: mocks.device as unknown as GPUDevice,
-    target: createHeadlessTarget(2, 2),
+    target: { kind: 'offscreen', width: 2, height: 2, format: 'rgba8unorm', sampleCount: 1 },
   });
 
   const snapshot = await renderForwardSnapshot(
@@ -235,7 +240,7 @@ Deno.test('renderDeferredSnapshot returns compact offscreen bytes for minimal de
 
   const binding = createOffscreenBinding({
     device: mocks.device as unknown as GPUDevice,
-    target: createHeadlessTarget(2, 2),
+    target: { kind: 'offscreen', width: 2, height: 2, format: 'rgba8unorm', sampleCount: 1 },
   });
 
   const snapshot = await renderDeferredSnapshot(
@@ -313,7 +318,7 @@ Deno.test('renderDeferredSnapshot also accepts textured deferred scenes with res
 
   const binding = createOffscreenBinding({
     device: mocks.device as unknown as GPUDevice,
-    target: createHeadlessTarget(2, 2),
+    target: { kind: 'offscreen', width: 2, height: 2, format: 'rgba8unorm', sampleCount: 1 },
   });
 
   const snapshot = await renderDeferredSnapshot(
@@ -353,7 +358,7 @@ Deno.test('renderForwardSnapshot also supports post-process blit passes', async 
 
   const binding = createOffscreenBinding({
     device: mocks.device as unknown as GPUDevice,
-    target: createHeadlessTarget(2, 2),
+    target: { kind: 'offscreen', width: 2, height: 2, format: 'rgba8unorm', sampleCount: 1 },
   });
 
   const snapshot = await renderForwardSnapshot(

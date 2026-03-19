@@ -7,7 +7,6 @@ import {
   rebuildRuntimeResidency,
   requestGpuContext,
 } from '@rieul3d/gpu';
-import { createHeadlessTarget } from '@rieul3d/platform';
 import { encodePngRgba } from '@rieul3d/exporters';
 import { renderForwardSnapshot } from '@rieul3d/renderer';
 import clearOnlyFrameFixture from './fixtures/golden-snapshots/clear-only-frame.png' with {
@@ -86,7 +85,9 @@ const requestGoldenSnapshotContext = async (
   name: string,
 ): Promise<Awaited<ReturnType<typeof requestGpuContext>> | undefined> => {
   try {
-    return await requestGpuContext({ target: createHeadlessTarget(16, 16) });
+    return await requestGpuContext({
+      target: { kind: 'offscreen', width: 16, height: 16, format: 'rgba8unorm', sampleCount: 1 },
+    });
   } catch (error) {
     if (error instanceof Error && error.message === 'Failed to request WebGPU adapter') {
       console.warn(`Skipping golden snapshot "${name}" because no WebGPU adapter is available.`);

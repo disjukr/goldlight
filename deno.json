@@ -9,7 +9,6 @@
     "./packages/importers",
     "./packages/exporters",
     "./packages/react",
-    "./packages/platform",
     "./packages/desktop"
   ],
   "imports": {
@@ -28,7 +27,6 @@
     "@rieul3d/react/reconciler": "./packages/react/reconciler.ts",
     "@rieul3d/react/jsx-runtime": "./packages/react/jsx-runtime.ts",
     "@rieul3d/react/jsx-dev-runtime": "./packages/react/jsx-dev-runtime.ts",
-    "@rieul3d/platform": "./packages/platform/mod.ts",
     "@rieul3d/desktop": "./packages/desktop/mod.ts"
   },
   "tasks": {

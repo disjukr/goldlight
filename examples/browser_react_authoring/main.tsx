@@ -10,7 +10,6 @@ import {
   ensureSceneMeshResidency,
   requestGpuContext,
 } from '../../packages/gpu/mod.ts';
-import { createBrowserSurfaceTarget } from '../../packages/platform/mod.ts';
 import {
   createSceneRoot,
   PerspectiveCamera,
@@ -76,7 +75,13 @@ if (!scene) {
   throw new Error('Scene root did not publish an initial scene snapshot');
 }
 
-const target = createBrowserSurfaceTarget(canvas.width, canvas.height);
+const target = {
+  kind: 'surface',
+  width: canvas.width,
+  height: canvas.height,
+  format: 'bgra8unorm',
+  alphaMode: undefined,
+} as const;
 const gpuContext = await requestGpuContext({ target });
 const canvasContext = canvas.getContext('webgpu');
 if (!canvasContext) {

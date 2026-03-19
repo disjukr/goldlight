@@ -41,7 +41,6 @@ The runtime is split into explicit data and execution stages:
 - `packages/primitives`: reusable polygon mesh generation plus local SDF-to-mesh extraction helpers.
 - `packages/importers`: format parsers that normalize input into Scene IR.
 - `packages/react`: declarative scene authoring that feeds the same IR/core pipeline.
-- `packages/platform`: target descriptors for browser, Deno, and headless execution.
 - `packages/exporters`: output encoders that serialize renderer results such as PNG.
 - device-loss recovery remains a caller-visible workflow rather than an implicit runtime reset. See
   [`device-loss-recovery.md`](./device-loss-recovery.md).

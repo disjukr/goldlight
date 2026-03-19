@@ -23,7 +23,6 @@ import {
   renderHybridFrame,
   resolveMaterialProgram,
 } from '@rieul3d/renderer';
-import { createHeadlessTarget } from '@rieul3d/platform';
 
 type MockBuffer = Readonly<{ id: number }>;
 type MockBindGroup = Readonly<{ id: number }>;
@@ -384,7 +383,7 @@ Deno.test('renderForwardFrame encodes indexed and non-indexed draws from mesh re
 
   const binding = createOffscreenBinding({
     device: mocks.device as unknown as GPUDevice,
-    target: createHeadlessTarget(64, 64),
+    target: { kind: 'offscreen', width: 64, height: 64, format: 'rgba8unorm', sampleCount: 1 },
   });
 
   const result = renderForwardFrame(
@@ -522,7 +521,7 @@ Deno.test('renderDeferredFrame encodes depth, gbuffer, and lighting passes for m
 
   const binding = createOffscreenBinding({
     device: mocks.device as unknown as GPUDevice,
-    target: createHeadlessTarget(64, 64),
+    target: { kind: 'offscreen', width: 64, height: 64, format: 'rgba8unorm', sampleCount: 1 },
   });
 
   const result = renderDeferredFrame(
@@ -621,7 +620,7 @@ Deno.test('renderForwardFrame runs a post-process pass after scene rendering whe
 
   const binding = createOffscreenBinding({
     device: mocks.device as unknown as GPUDevice,
-    target: createHeadlessTarget(64, 64),
+    target: { kind: 'offscreen', width: 64, height: 64, format: 'rgba8unorm', sampleCount: 1 },
   });
 
   const result = renderForwardFrame(
@@ -664,7 +663,7 @@ Deno.test('renderForwardFrame preserves the target sample count for intermediate
 
   const binding = createOffscreenBinding({
     device: mocks.device as unknown as GPUDevice,
-    target: createHeadlessTarget(64, 64, 'rgba8unorm', 4),
+    target: { kind: 'offscreen', width: 64, height: 64, format: 'rgba8unorm', sampleCount: 4 },
   });
 
   renderForwardFrame(
@@ -722,7 +721,7 @@ Deno.test('renderForwardFrame composites transparent meshes in a second blended 
 
   const binding = createOffscreenBinding({
     device: mocks.device as unknown as GPUDevice,
-    target: createHeadlessTarget(64, 64),
+    target: { kind: 'offscreen', width: 64, height: 64, format: 'rgba8unorm', sampleCount: 1 },
   });
 
   const result = renderForwardFrame(
@@ -786,7 +785,7 @@ Deno.test('renderHybridFrame keeps transparent meshes on the forward blended pas
 
   const binding = createOffscreenBinding({
     device: mocks.device as unknown as GPUDevice,
-    target: createHeadlessTarget(64, 64),
+    target: { kind: 'offscreen', width: 64, height: 64, format: 'rgba8unorm', sampleCount: 1 },
   });
 
   const result = renderHybridFrame(
@@ -829,7 +828,7 @@ Deno.test('renderDeferredFrame runs a post-process pass after deferred lighting 
 
   const binding = createOffscreenBinding({
     device: mocks.device as unknown as GPUDevice,
-    target: createHeadlessTarget(64, 64),
+    target: { kind: 'offscreen', width: 64, height: 64, format: 'rgba8unorm', sampleCount: 1 },
   });
 
   const result = renderDeferredFrame(
@@ -904,7 +903,7 @@ Deno.test('renderDeferredFrame binds base-color textures for textured deferred u
 
   const binding = createOffscreenBinding({
     device: mocks.device as unknown as GPUDevice,
-    target: createHeadlessTarget(64, 64),
+    target: { kind: 'offscreen', width: 64, height: 64, format: 'rgba8unorm', sampleCount: 1 },
   });
 
   const result = renderDeferredFrame(
@@ -992,7 +991,7 @@ Deno.test('renderDeferredFrame forwards textured lit materials after deferred li
 
   const binding = createOffscreenBinding({
     device: mocks.device as unknown as GPUDevice,
-    target: createHeadlessTarget(64, 64),
+    target: { kind: 'offscreen', width: 64, height: 64, format: 'rgba8unorm', sampleCount: 1 },
   });
 
   const result = renderDeferredFrame(
@@ -1073,7 +1072,7 @@ Deno.test('renderDeferredFrame uses registered custom WGSL gbuffer programs', ()
 
   const binding = createOffscreenBinding({
     device: mocks.device as unknown as GPUDevice,
-    target: createHeadlessTarget(64, 64),
+    target: { kind: 'offscreen', width: 64, height: 64, format: 'rgba8unorm', sampleCount: 1 },
   });
 
   const result = renderDeferredFrame(
@@ -1139,7 +1138,7 @@ Deno.test('renderDeferredFrame binds scene lighting uniforms for built-in lit ma
 
   const binding = createOffscreenBinding({
     device: mocks.device as unknown as GPUDevice,
-    target: createHeadlessTarget(64, 64),
+    target: { kind: 'offscreen', width: 64, height: 64, format: 'rgba8unorm', sampleCount: 1 },
   });
 
   const result = renderDeferredFrame(
@@ -1207,7 +1206,7 @@ Deno.test('renderForwardFrame encodes a dedicated sdf raymarch pass for supporte
 
   const binding = createOffscreenBinding({
     device: mocks.device as unknown as GPUDevice,
-    target: createHeadlessTarget(64, 64),
+    target: { kind: 'offscreen', width: 64, height: 64, format: 'rgba8unorm', sampleCount: 1 },
   });
 
   const result = renderForwardFrame(
@@ -1268,7 +1267,7 @@ Deno.test('renderForwardFrame keeps rotated volume nodes in local raymarch space
 
   const binding = createOffscreenBinding({
     device: mocks.device as unknown as GPUDevice,
-    target: createHeadlessTarget(64, 64),
+    target: { kind: 'offscreen', width: 64, height: 64, format: 'rgba8unorm', sampleCount: 1 },
   });
 
   const result = renderForwardFrame(
@@ -1519,7 +1518,7 @@ fn fsMain() -> @location(0) vec4<f32> {
     mocks as unknown as GpuRenderExecutionContext,
     createOffscreenBinding({
       device: mocks.device as unknown as GPUDevice,
-      target: createHeadlessTarget(32, 32),
+      target: { kind: 'offscreen', width: 32, height: 32, format: 'rgba8unorm', sampleCount: 1 },
     }),
     runtimeResidency,
     evaluateScene(scene, { timeMs: 0 }),
@@ -1581,7 +1580,7 @@ Deno.test('renderForwardFrame binds base-color textures for textured built-in un
 
   const binding = createOffscreenBinding({
     device: mocks.device as unknown as GPUDevice,
-    target: createHeadlessTarget(64, 64),
+    target: { kind: 'offscreen', width: 64, height: 64, format: 'rgba8unorm', sampleCount: 1 },
   });
 
   const result = renderForwardFrame(
@@ -1647,7 +1646,7 @@ Deno.test('renderForwardFrame binds lighting uniforms for built-in lit materials
 
   const binding = createOffscreenBinding({
     device: mocks.device as unknown as GPUDevice,
-    target: createHeadlessTarget(64, 64),
+    target: { kind: 'offscreen', width: 64, height: 64, format: 'rgba8unorm', sampleCount: 1 },
   });
 
   const result = renderForwardFrame(
@@ -1738,7 +1737,7 @@ Deno.test('renderForwardFrame does not append texture bindings for shader-select
     mocks as unknown as GpuRenderExecutionContext,
     createOffscreenBinding({
       device: mocks.device as unknown as GPUDevice,
-      target: createHeadlessTarget(64, 64),
+      target: { kind: 'offscreen', width: 64, height: 64, format: 'rgba8unorm', sampleCount: 1 },
     }),
     runtimeResidency,
     evaluateScene(scene, { timeMs: 0 }),
@@ -1865,7 +1864,7 @@ fn fsMain(input: VsOut) -> @location(0) vec4<f32> {
     mocks as unknown as GpuRenderExecutionContext,
     createOffscreenBinding({
       device: mocks.device as unknown as GPUDevice,
-      target: createHeadlessTarget(64, 64),
+      target: { kind: 'offscreen', width: 64, height: 64, format: 'rgba8unorm', sampleCount: 1 },
     }),
     runtimeResidency,
     evaluateScene(scene, { timeMs: 0 }),
@@ -1909,7 +1908,7 @@ Deno.test('renderForwardFrame uploads evaluated mesh transforms for built-in unl
     mocks as unknown as GpuRenderExecutionContext,
     createOffscreenBinding({
       device: mocks.device as unknown as GPUDevice,
-      target: createHeadlessTarget(32, 32),
+      target: { kind: 'offscreen', width: 32, height: 32, format: 'rgba8unorm', sampleCount: 1 },
     }),
     runtimeResidency,
     evaluateScene(scene, { timeMs: 0 }),
@@ -2006,7 +2005,7 @@ Deno.test('renderForwardFrame uploads parented mesh transforms after scene evalu
     mocks as unknown as GpuRenderExecutionContext,
     createOffscreenBinding({
       device: mocks.device as unknown as GPUDevice,
-      target: createHeadlessTarget(32, 32),
+      target: { kind: 'offscreen', width: 32, height: 32, format: 'rgba8unorm', sampleCount: 1 },
     }),
     runtimeResidency,
     evaluateScene(scene, { timeMs: 0 }),
@@ -2076,7 +2075,7 @@ Deno.test('renderDeferredFrame composites sdf and volume raymarch passes after d
 
   const binding = createOffscreenBinding({
     device: mocks.device as unknown as GPUDevice,
-    target: createHeadlessTarget(64, 64),
+    target: { kind: 'offscreen', width: 64, height: 64, format: 'rgba8unorm', sampleCount: 1 },
   });
 
   const result = renderDeferredFrame(

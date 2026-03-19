@@ -15,7 +15,6 @@ import {
   createNode,
   createSceneIr,
 } from '../../packages/ir/mod.ts';
-import { createBrowserSurfaceTarget } from '../../packages/platform/mod.ts';
 import { createMaterialRegistry, renderForwardFrame } from '../../packages/renderer/mod.ts';
 
 const canvas = document.querySelector<HTMLCanvasElement>('#app');
@@ -91,7 +90,13 @@ const scene = appendNode(
   }),
 );
 
-const target = createBrowserSurfaceTarget(canvas.width, canvas.height);
+const target = {
+  kind: 'surface',
+  width: canvas.width,
+  height: canvas.height,
+  format: 'bgra8unorm',
+  alphaMode: undefined,
+} as const;
 const gpuContext = await requestGpuContext({ target });
 const canvasContext = canvas.getContext('webgpu');
 if (!canvasContext) {

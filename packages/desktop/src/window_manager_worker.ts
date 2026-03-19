@@ -202,8 +202,15 @@ const runManager = async (
         postToMain({ kind: 'ready' });
         return;
       case 'request-redraw':
-        if (!state.windowDestroyed) {
-          host.requestRedraw(windowId);
+        if (!state.windowDestroyed && state.running) {
+          try {
+            host.requestRedraw(windowId);
+          } catch {
+            // The native window may already be gone when late redraw requests race with close.
+            state.windowDestroyed = true;
+            state.exitReason = state.exitReason ?? 'host-close-requested';
+            state.running = false;
+          }
         }
         return;
       case 'close-window':

@@ -28,17 +28,44 @@ type WorkerState = {
   runtimeWindowState?: { current: DesktopWindowState };
   initialized: boolean;
   pendingHostEvents: DesktopWindowEvent[];
+  shutdownRequested: boolean;
+  closed: boolean;
 };
 
 const workerState: WorkerState = {
   initialized: false,
   pendingHostEvents: [],
+  shutdownRequested: false,
+  closed: false,
 };
 
 const postMessageToParent = globalThis.postMessage.bind(globalThis);
 
 const postToHost = (message: DesktopWorkerOutboundMessage): void => {
+  if (workerState.closed) {
+    return;
+  }
   postMessageToParent(message);
+};
+
+const closeWorker = (): void => {
+  if (workerState.closed) {
+    return;
+  }
+
+  workerState.closed = true;
+  workerState.restoreGlobals?.();
+  globalThis.close();
+};
+
+const reportWorkerError = (error: unknown): void => {
+  const errorMessage = error instanceof Error ? error.message : String(error);
+  const stack = error instanceof Error ? error.stack : undefined;
+  postToHost({
+    kind: 'error',
+    message: errorMessage,
+    stack,
+  });
 };
 
 const ensureWorkerWebGpuContext = async (): Promise<void> => {
@@ -166,6 +193,10 @@ const runModule = async (
   for (const pendingEvent of pendingHostEvents) {
     handleHostEvent(pendingEvent);
   }
+  if (workerState.shutdownRequested) {
+    await shutdownWorker();
+    return;
+  }
   postToHost({ kind: 'ready' });
 };
 
@@ -195,10 +226,11 @@ const handleHostEvent = (event: DesktopWindowEvent): void => {
 const shutdownWorker = async (): Promise<void> => {
   try {
     await workerState.cleanup?.();
-  } finally {
-    workerState.restoreGlobals?.();
     postToHost({ kind: 'shutdown-complete' });
-    globalThis.close();
+  } catch (error) {
+    reportWorkerError(error);
+  } finally {
+    closeWorker();
   }
 };
 
@@ -206,18 +238,18 @@ globalThis.onmessage = (event: MessageEvent<DesktopWorkerInboundMessage>) => {
   const message = event.data;
   if (message.kind === 'init') {
     void runModule(message).catch((error: unknown) => {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      const stack = error instanceof Error ? error.stack : undefined;
-      postToHost({
-        kind: 'error',
-        message: errorMessage,
-        stack,
-      });
+      reportWorkerError(error);
     });
     return;
   }
 
   if (!workerState.initialized) {
+    if (message.kind === 'shutdown') {
+      workerState.shutdownRequested = true;
+      postToHost({ kind: 'shutdown-complete' });
+      closeWorker();
+      return;
+    }
     if (message.kind === 'event') {
       workerState.pendingHostEvents.push(message.event);
     }

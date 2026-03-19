@@ -74,6 +74,7 @@ struct FsOut {
 @group(0) @binding(0) var<uniform> meshTransform: MeshTransform;
 @group(1) @binding(0) var customTexture: texture_2d<f32>;
 @group(1) @binding(1) var customSampler: sampler;
+@group(1) @binding(2) var<uniform> alphaPolicy: vec4<f32>;
 
 @vertex
 fn vsMain(
@@ -92,6 +93,9 @@ fn vsMain(
 fn fsMain(in: VsOut) -> FsOut {
   var out: FsOut;
   out.albedo = textureSample(customTexture, customSampler, in.uv);
+  if (alphaPolicy.y > 0.5 && alphaPolicy.y < 1.5 && out.albedo.a < alphaPolicy.x) {
+    discard;
+  }
   out.encodedNormal = vec4<f32>((normalize(in.normal) * 0.5) + vec3<f32>(0.5), 1.0);
   return out;
 }
@@ -132,6 +136,10 @@ fn fsMain(in: VsOut) -> FsOut {
       kind: 'sampler' as const,
       binding: 1,
       textureSemantic: 'baseColor',
+    },
+    {
+      kind: 'alpha-policy' as const,
+      binding: 2,
     },
   ],
 });
@@ -1093,7 +1101,7 @@ Deno.test('renderDeferredFrame uses registered custom WGSL gbuffer programs', ()
     (pipeline.descriptor.vertex?.buffers?.length ?? 0) === 3
   );
   assertEquals(deferredGbufferPipeline?.descriptor.fragment?.targets?.length, 2);
-  assertEquals(mocks.bindGroupEntries[2].map((entry) => entry.binding), [0, 1]);
+  assertEquals(mocks.bindGroupEntries[2].map((entry) => entry.binding), [0, 1, 2]);
   assertEquals(mocks.bindGroupEntries[4].map((entry) => entry.binding), [0]);
 });
 
@@ -1774,6 +1782,7 @@ struct MaterialUniforms {
 @group(1) @binding(0) var<uniform> material: MaterialUniforms;
 @group(1) @binding(1) var baseColorTexture: texture_2d<f32>;
 @group(1) @binding(2) var baseColorSampler: sampler;
+@group(1) @binding(3) var<uniform> alphaPolicy: vec4<f32>;
 
 @vertex
 fn vsMain(@location(0) position: vec3<f32>, @location(1) uv: vec2<f32>) -> VsOut {
@@ -1785,7 +1794,11 @@ fn vsMain(@location(0) position: vec3<f32>, @location(1) uv: vec2<f32>) -> VsOut
 
 @fragment
 fn fsMain(input: VsOut) -> @location(0) vec4<f32> {
-  return textureSample(baseColorTexture, baseColorSampler, input.uv) * material.color;
+  let color = textureSample(baseColorTexture, baseColorSampler, input.uv) * material.color;
+  if (alphaPolicy.y > 0.5 && alphaPolicy.y < 1.5 && color.a < alphaPolicy.x) {
+    discard;
+  }
+  return color;
 }
 `,
     vertexEntryPoint: 'vsMain',
@@ -1795,6 +1808,7 @@ fn fsMain(input: VsOut) -> @location(0) vec4<f32> {
       { kind: 'uniform' as const, binding: 0 },
       { kind: 'texture' as const, binding: 1, textureSemantic: 'baseColor' },
       { kind: 'sampler' as const, binding: 2, textureSemantic: 'baseColor' },
+      { kind: 'alpha-policy' as const, binding: 3 },
     ],
     vertexAttributes: [
       {
@@ -1820,6 +1834,8 @@ fn fsMain(input: VsOut) -> @location(0) vec4<f32> {
     id: 'material-custom-textured',
     kind: 'custom',
     shaderId: 'shader:textured-flat-red',
+    alphaMode: 'mask',
+    alphaCutoff: 0.3,
     textures: [{
       id: 'texture-0',
       assetId: 'image-0',
@@ -1874,7 +1890,7 @@ fn fsMain(input: VsOut) -> @location(0) vec4<f32> {
   assertEquals(result.drawCount, 1);
   assertEquals(mocks.bindGroupEntries.length, 2);
   assertEquals(mocks.bindGroupEntries[0].map((entry) => entry.binding), [0]);
-  assertEquals(mocks.bindGroupEntries[1].map((entry) => entry.binding), [0, 1, 2]);
+  assertEquals(mocks.bindGroupEntries[1].map((entry) => entry.binding), [0, 1, 2, 3]);
 });
 
 Deno.test('renderForwardFrame uploads evaluated mesh transforms for built-in unlit draws', () => {

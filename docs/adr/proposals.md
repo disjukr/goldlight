@@ -5,7 +5,9 @@ ADR index.
 
 ## Proposed Decisions
 
-There are currently no proposed ADRs awaiting acceptance.
+- [`0011-custom-wgsl-alpha-policy-binding.md`](./0011-custom-wgsl-alpha-policy-binding.md): custom
+  WGSL materials should receive renderer-owned alpha policy through an explicit shared binding
+  contract instead of built-in uniform packing
 
 ## Related References
 

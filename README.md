@@ -62,7 +62,7 @@ Implemented today:
   readback helpers
 - built-in unlit material registration, evaluated mesh transform uploads, base-color texture
   sampling, material parameter uploads, custom WGSL registration, declared material texture
-  bindings, and residency-aware custom texture binding validation
+  bindings, explicit alpha-policy bindings, and residency-aware custom texture binding validation
 - first-class material alpha policy fields (`alphaMode`, `alphaCutoff`, `renderQueue`, `depthWrite`,
   and `doubleSided`) plus hybrid forward/deferred mesh partitioning
 - depth-tested forward mesh rendering with per-target depth attachments and back-face culling

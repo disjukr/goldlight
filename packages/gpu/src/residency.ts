@@ -52,6 +52,8 @@ export type MaterialResidency = Readonly<{
   parameterNames: readonly string[];
   uniformData: Float32Array;
   uniformBuffer: GPUBuffer;
+  alphaPolicyData: Float32Array;
+  alphaPolicyBuffer: GPUBuffer;
 }>;
 
 export type VolumeResidency = Readonly<{
@@ -121,6 +123,7 @@ const destroyGeometryResidency = (geometry: GeometryResidency): void => {
 
 const destroyMaterialResidency = (material: MaterialResidency): void => {
   material.uniformBuffer.destroy?.();
+  material.alphaPolicyBuffer.destroy?.();
 };
 
 const destroyTextureResidency = (texture: TextureResidency): void => {
@@ -391,23 +394,40 @@ export const createMaterialUploadPlan = (material: Material): MaterialUploadPlan
   };
 };
 
+export const createMaterialAlphaPolicyData = (material: Material): Float32Array =>
+  new Float32Array([
+    material.alphaCutoff ?? 0.5,
+    encodeMaterialAlphaMode(material),
+    material.depthWrite === false ? 0 : 1,
+    material.doubleSided ? 1 : 0,
+  ]);
+
 export const uploadMaterialResidency = (
   context: GpuUploadContext,
   material: Material,
 ): MaterialResidency => {
   const plan = createMaterialUploadPlan(material);
+  const alphaPolicyData = createMaterialAlphaPolicyData(material);
   const uniformBuffer = context.device.createBuffer({
     label: `${material.id}:uniforms`,
     size: plan.byteLength,
     usage: uniformUsage | bufferCopyDstUsage,
   });
+  const alphaPolicyBuffer = context.device.createBuffer({
+    label: `${material.id}:alpha-policy`,
+    size: alphaPolicyData.byteLength,
+    usage: uniformUsage | bufferCopyDstUsage,
+  });
   context.queue.writeBuffer(uniformBuffer, 0, toBufferSource(plan.uniformData));
+  context.queue.writeBuffer(alphaPolicyBuffer, 0, toBufferSource(alphaPolicyData));
 
   return {
     materialId: material.id,
     parameterNames: plan.parameterNames,
     uniformData: plan.uniformData,
     uniformBuffer,
+    alphaPolicyData,
+    alphaPolicyBuffer,
   };
 };
 

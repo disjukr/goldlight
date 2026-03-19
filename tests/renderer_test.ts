@@ -130,6 +130,7 @@ struct FsOut {
 @group(0) @binding(0) var<uniform> meshTransform: MeshTransform;
 @group(1) @binding(0) var customTexture: texture_2d<f32>;
 @group(1) @binding(1) var customSampler: sampler;
+@group(1) @binding(2) var<uniform> alphaPolicy: vec4<f32>;
 
 @vertex
 fn vsMain(
@@ -148,6 +149,9 @@ fn vsMain(
 fn fsMain(in: VsOut) -> FsOut {
   var out: FsOut;
   out.albedo = textureSample(customTexture, customSampler, in.uv);
+  if (alphaPolicy.y > 0.5 && alphaPolicy.y < 1.5 && out.albedo.a < alphaPolicy.x) {
+    discard;
+  }
   out.encodedNormal = vec4<f32>((normalize(in.normal) * 0.5) + vec3<f32>(0.5), 1.0);
   return out;
 }
@@ -188,6 +192,10 @@ fn fsMain(in: VsOut) -> FsOut {
       kind: 'sampler' as const,
       binding: 1,
       textureSemantic: 'baseColor',
+    },
+    {
+      kind: 'alpha-policy' as const,
+      binding: 2,
     },
   ],
 });
@@ -1125,6 +1133,8 @@ Deno.test('deferred renderer accepts custom WGSL materials that satisfy deferred
     id: 'material-custom',
     kind: 'custom',
     shaderId: 'shader:deferred-textured-custom',
+    alphaMode: 'mask',
+    alphaCutoff: 0.4,
     textures: [{
       id: 'texture-0',
       assetId: 'image-0',

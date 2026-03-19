@@ -76,9 +76,9 @@ Implemented today:
 - a browser React authoring example plus the current `createSceneRoot()` snapshot path that commits
   JSX-authored trees into `SceneIr` snapshots before rendering, including JSX-authored scene
   resources such as meshes, materials, cameras, SDFs, volumes, and animation clips, exported convenience components for common camera/light composition, an internal React-owned scene document that preserves stable resource
-  and node host instances across commits before publishing data-only snapshots, and commit-summary
-  plus update-plan helpers for targeted residency invalidation without forcing resets for
-  transform-only node changes
+  and node host instances across commits before publishing data-only snapshots, and commit-summary,
+  update-plan, plus `updatePayload` helpers for targeted residency invalidation without forcing
+  resets for transform-only node changes
 - an experimental `@rieul3d/react/reconciler` entrypoint that mounts normal React components into
   the package-local scene document so hooks, state updates, and layout effects can publish live
   `SceneIr` snapshots without rebuilding authored trees by hand

@@ -22,7 +22,7 @@ import type {
   VolumeJsxProps,
 } from './authoring.ts';
 import { normalizeCameraJsxProps, normalizeNodeProps } from './authoring.ts';
-import type { SceneRootSubscriber } from './scene_root.ts';
+import { createSceneRootCommit, type SceneRootSubscriber } from './scene_root.ts';
 import type { SceneIr } from '@rieul3d/ir';
 import {
   applySceneDocumentScene,
@@ -430,11 +430,11 @@ const syncContainerSceneDocument = (container: HostContainer): void => {
     container.document = undefined;
     container.currentScene = undefined;
     if (previousScene) {
-      const commit = {
-        scene: sceneDocumentToSceneIr(createSceneDocument(previousScene.id)),
+      const commit = createSceneRootCommit(
+        sceneDocumentToSceneIr(createSceneDocument(previousScene.id)),
         previousScene,
-        revision: container.revision + 1,
-      };
+        container.revision + 1,
+      );
       container.revision = commit.revision;
       for (const subscriber of [...container.subscribers]) {
         subscriber(commit);
@@ -561,11 +561,7 @@ const syncContainerSceneDocument = (container: HostContainer): void => {
   sweepUnvisitedResourceIds(document, 'camera', visitedResourceIds.camera);
 
   const scene = sceneDocumentToSceneIr(document);
-  const commit = {
-    scene,
-    previousScene: container.currentScene,
-    revision: container.revision + 1,
-  };
+  const commit = createSceneRootCommit(scene, container.currentScene, container.revision + 1);
   container.currentScene = scene;
   container.revision = commit.revision;
 

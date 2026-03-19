@@ -15,6 +15,7 @@ import {
   PerspectiveCamera,
   planSceneRootCommitUpdates,
   summarizeSceneRootCommit,
+  type SceneRootCommit,
 } from '@rieul3d/react';
 import {
   createReactSceneRoot,
@@ -572,6 +573,7 @@ Deno.test('createSceneRoot publishes committed scene snapshots', () => {
     sceneId: string;
     previousSceneId?: string;
     revision: number;
+    addedNodeIds: string[];
   }> = [];
 
   root.subscribe((commit) => {
@@ -579,6 +581,7 @@ Deno.test('createSceneRoot publishes committed scene snapshots', () => {
       sceneId: commit.scene.id,
       previousSceneId: commit.previousScene?.id,
       revision: commit.revision,
+      addedNodeIds: commit.updatePayload.nodes.added.map((node) => node.id),
     });
   });
 
@@ -600,13 +603,65 @@ Deno.test('createSceneRoot publishes committed scene snapshots', () => {
       sceneId: firstScene.id,
       previousSceneId: undefined,
       revision: 1,
+      addedNodeIds: ['root'],
     },
     {
       sceneId: secondScene.id,
       previousSceneId: firstScene.id,
       revision: 2,
+      addedNodeIds: [],
     },
   ]);
+});
+
+Deno.test('createSceneRoot publishes a data-only update payload alongside snapshots', () => {
+  const root = createSceneRoot();
+  const payloads: string[] = [];
+  let latestCommit: SceneRootCommit | undefined;
+
+  root.subscribe((commit) => {
+    latestCommit = commit;
+    payloads.push(commit.updatePayload.sceneId);
+  });
+
+  root.render(
+    <scene id='payload-scene'>
+      <mesh
+        id='triangle'
+        attributes={[{
+          semantic: 'POSITION',
+          itemSize: 3,
+          values: [0, 0.7, 0, -0.7, -0.7, 0, 0.7, -0.7, 0],
+        }]}
+      />
+      <group id='root'>
+        <node id='animated-node' meshId='triangle' position={[0, 0, 0]} />
+      </group>
+    </scene>,
+  );
+
+  root.render(
+    <scene id='payload-scene'>
+      <mesh
+        id='triangle'
+        attributes={[{
+          semantic: 'POSITION',
+          itemSize: 3,
+          values: [0, 0.7, 0, -0.7, -0.7, 0, 0.7, -0.7, 0],
+        }]}
+      />
+      <group id='root'>
+        <node id='animated-node' meshId='triangle' position={[1, 2, 3]} />
+      </group>
+    </scene>,
+  );
+
+  assertEquals(payloads.length, 2);
+  assertEquals(latestCommit?.summary.nodes.updatedIds, ['animated-node']);
+  assertEquals(latestCommit?.updatePlan.nodes.transformIds, ['animated-node']);
+  assertEquals(latestCommit?.updatePayload.nodes.transform.map((node) => node.id), ['animated-node']);
+  assertEquals(latestCommit?.updatePayload.meshes.updated, []);
+  assertEquals(latestCommit?.updatePayload.meshes.unchangedIds, ['triangle']);
 });
 
 Deno.test('createReactSceneRoot rejects unsupported intrinsic tags', () => {
@@ -1287,12 +1342,16 @@ Deno.test('createSceneRoot does not let mid-dispatch subscriber changes reorder 
 
 Deno.test('createReactSceneRoot applies React state updates to the scene document', () => {
   let setOffset: React.Dispatch<React.SetStateAction<number>> | undefined;
-  const revisions: Array<readonly [number, number]> = [];
+  const revisions: Array<readonly [number, number, string[]]> = [];
   const root = createReactSceneRoot();
 
   root.subscribe((commit) => {
     const node = commit.scene.nodes.find((candidate) => candidate.id === 'animated-node');
-    revisions.push([commit.revision, node?.transform.translation.x ?? -1]);
+    revisions.push([
+      commit.revision,
+      node?.transform.translation.x ?? -1,
+      commit.updatePayload.nodes.transform.map((entry) => entry.id),
+    ]);
   });
 
   const AnimatedNode = () => {
@@ -1318,7 +1377,9 @@ Deno.test('createReactSceneRoot applies React state updates to the scene documen
     root.getScene()?.nodes.find((node) => node.id === 'animated-node')?.transform.translation.x,
     3,
   );
-  assertEquals(revisions, [[1, 0], [2, 3]]);
+  assertEquals(revisions[0]?.[0], 1);
+  assertEquals(revisions[0]?.[1], 0);
+  assertEquals(revisions[1], [2, 3, ['animated-node']]);
 });
 
 Deno.test('createReactSceneRoot flushes layout-effect updates through React lifecycle', () => {

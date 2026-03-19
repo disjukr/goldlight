@@ -84,14 +84,15 @@ Issue `#117` provided the first scene-document implementation slice that this ho
 - `PerspectiveCamera`, `OrthographicCamera`, and `DirectionalLight` now compose those explicit
   primitives into reusable React-facing scene objects without changing the underlying IR semantics.
 - `createSceneRoot()` now provides a data-only commit bridge that publishes full `SceneIr` snapshots
-  plus previous-scene/revision metadata to caller-owned subscribers as a current implementation
-  waypoint.
+  plus previous-scene/revision metadata, commit summaries, update plans, and a data-only
+  `updatePayload` to caller-owned subscribers as a current implementation waypoint.
 - `createSceneRoot()` now keeps an internal React-owned scene document so stable resource and node
   host instances can survive repeated commits even though the published subscriber payload is still
   a data-only `SceneIr` snapshot.
 - `@rieul3d/react/reconciler` now provides an experimental real React renderer that accepts normal
   React components, applies mount/update/unmount work to the internal scene document, and publishes
-  live `SceneIr` snapshots through `createReactSceneRoot()`.
+  live `SceneIr` snapshots plus the same derived summary/update-plan/update-payload commit metadata
+  through `createReactSceneRoot()`.
 - that live reconciler JSX surface keeps its primitive contract focused on `<scene>`, `<node>`,
   `<group>`, `<camera>`, `<light>`, `<mesh>`, `<material>`, `<texture>`, and `<asset>`, while
   camera/light convenience stays in exported React components instead of additional built-in

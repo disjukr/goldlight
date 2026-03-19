@@ -8,12 +8,83 @@ import {
 } from './scene_document.ts';
 
 type SceneRootEntityWithId = Readonly<{ id: string }>;
-
-export type SceneRootCommit = Readonly<{
+type SceneRootCommitBase = Readonly<{
   scene: SceneIr;
   previousScene?: SceneIr;
   revision: number;
 }>;
+
+type SceneRootCollectionName =
+  | 'assets'
+  | 'textures'
+  | 'materials'
+  | 'lights'
+  | 'meshes'
+  | 'cameras'
+  | 'sdfPrimitives'
+  | 'volumePrimitives'
+  | 'animationClips';
+
+type SceneRootCollectionValueByName = {
+  assets: SceneIr['assets'][number];
+  textures: SceneIr['textures'][number];
+  materials: SceneIr['materials'][number];
+  lights: SceneIr['lights'][number];
+  meshes: SceneIr['meshes'][number];
+  cameras: SceneIr['cameras'][number];
+  sdfPrimitives: SceneIr['sdfPrimitives'][number];
+  volumePrimitives: SceneIr['volumePrimitives'][number];
+  animationClips: SceneIr['animationClips'][number];
+};
+
+export type SceneRootCollectionUpdatePayload<TEntry extends SceneRootEntityWithId> = Readonly<{
+  added: readonly TEntry[];
+  updated: readonly TEntry[];
+  removedIds: readonly string[];
+  unchangedIds: readonly string[];
+}>;
+
+export type SceneRootNodeUpdatePayload = Readonly<{
+  added: readonly Node[];
+  updated: readonly Node[];
+  removedIds: readonly string[];
+  unchangedIds: readonly string[];
+  transform: readonly Node[];
+  transformOnly: readonly Node[];
+  parenting: readonly Node[];
+  resourceBinding: readonly Node[];
+  metadata: readonly Node[];
+  otherUpdated: readonly Node[];
+}>;
+
+export type SceneRootCommitUpdatePayload = Readonly<{
+  sceneId: SceneIr['id'];
+  previousSceneId?: SceneIr['id'];
+  revision: number;
+  activeCameraId?: SceneIr['activeCameraId'];
+  activeCameraChanged: boolean;
+  rootNodeIds: readonly string[];
+  rootNodeIdsChanged: boolean;
+  assets: SceneRootCollectionUpdatePayload<SceneRootCollectionValueByName['assets']>;
+  textures: SceneRootCollectionUpdatePayload<SceneRootCollectionValueByName['textures']>;
+  materials: SceneRootCollectionUpdatePayload<SceneRootCollectionValueByName['materials']>;
+  lights: SceneRootCollectionUpdatePayload<SceneRootCollectionValueByName['lights']>;
+  meshes: SceneRootCollectionUpdatePayload<SceneRootCollectionValueByName['meshes']>;
+  cameras: SceneRootCollectionUpdatePayload<SceneRootCollectionValueByName['cameras']>;
+  sdfPrimitives: SceneRootCollectionUpdatePayload<SceneRootCollectionValueByName['sdfPrimitives']>;
+  volumePrimitives: SceneRootCollectionUpdatePayload<SceneRootCollectionValueByName['volumePrimitives']>;
+  nodes: SceneRootNodeUpdatePayload;
+  animationClips: SceneRootCollectionUpdatePayload<SceneRootCollectionValueByName['animationClips']>;
+}>;
+
+export type SceneRootCommit = Readonly<
+  & SceneRootCommitBase
+  & {
+    summary: SceneRootCommitSummary;
+    updatePlan: SceneRootCommitUpdatePlan;
+    updatePayload: SceneRootCommitUpdatePayload;
+  }
+>;
 
 export type SceneRootSubscriber = (commit: SceneRootCommit) => void;
 
@@ -201,6 +272,57 @@ const compareSceneRootCollection = <TEntry extends SceneRootEntityWithId>(
   };
 };
 
+const getSceneCollection = <TName extends SceneRootCollectionName>(
+  scene: SceneIr,
+  name: TName,
+): readonly SceneRootCollectionValueByName[TName][] =>
+  scene[name] as readonly SceneRootCollectionValueByName[TName][];
+
+const toSceneRootCollectionUpdatePayload = <TEntry extends SceneRootEntityWithId>(
+  currentEntries: readonly TEntry[],
+  summary: SceneRootCollectionSummary,
+): SceneRootCollectionUpdatePayload<TEntry> => {
+  const currentById = new Map(currentEntries.map((entry) => [entry.id, entry]));
+
+  return {
+    added: summary.addedIds.flatMap((id) => {
+      const entry = currentById.get(id);
+      return entry ? [entry] : [];
+    }),
+    updated: summary.updatedIds.flatMap((id) => {
+      const entry = currentById.get(id);
+      return entry ? [entry] : [];
+    }),
+    removedIds: summary.removedIds,
+    unchangedIds: summary.unchangedIds,
+  };
+};
+
+const toSceneRootNodeUpdatePayload = (
+  currentNodes: readonly Node[],
+  plan: SceneRootNodeUpdatePlan,
+): SceneRootNodeUpdatePayload => {
+  const currentById = new Map(currentNodes.map((node) => [node.id, node]));
+  const pickNodes = (ids: readonly string[]): Node[] =>
+    ids.flatMap((id) => {
+      const node = currentById.get(id);
+      return node ? [node] : [];
+    });
+
+  return {
+    added: pickNodes(plan.addedIds),
+    updated: pickNodes(plan.updatedIds),
+    removedIds: plan.removedIds,
+    unchangedIds: plan.unchangedIds,
+    transform: pickNodes(plan.transformIds),
+    transformOnly: pickNodes(plan.transformOnlyIds),
+    parenting: pickNodes(plan.parentingIds),
+    resourceBinding: pickNodes(plan.resourceBindingIds),
+    metadata: pickNodes(plan.metadataIds),
+    otherUpdated: pickNodes(plan.otherUpdatedIds),
+  };
+};
+
 const nodeResourceBindingsChanged = (currentNode: Node, previousNode: Node): boolean => {
   return currentNode.meshId !== previousNode.meshId ||
     currentNode.cameraId !== previousNode.cameraId ||
@@ -306,7 +428,7 @@ const compareSceneRootNodes = (
   };
 };
 
-export const summarizeSceneRootCommit = (commit: SceneRootCommit): SceneRootCommitSummary => ({
+export const summarizeSceneRootCommit = (commit: SceneRootCommitBase): SceneRootCommitSummary => ({
   sceneIdChanged: commit.scene.id !== commit.previousScene?.id,
   activeCameraChanged: commit.scene.activeCameraId !== commit.previousScene?.activeCameraId,
   rootNodeIdsChanged: fingerprintValue(commit.scene.rootNodeIds) !==
@@ -332,7 +454,9 @@ export const summarizeSceneRootCommit = (commit: SceneRootCommit): SceneRootComm
   ),
 });
 
-export const planSceneRootCommitUpdates = (commit: SceneRootCommit): SceneRootCommitUpdatePlan => ({
+export const planSceneRootCommitUpdates = (
+  commit: SceneRootCommitBase,
+): SceneRootCommitUpdatePlan => ({
   sceneIdChanged: commit.scene.id !== commit.previousScene?.id,
   activeCameraChanged: commit.scene.activeCameraId !== commit.previousScene?.activeCameraId,
   rootNodeIdsChanged: fingerprintValue(commit.scene.rootNodeIds) !==
@@ -370,6 +494,63 @@ export const commitSummaryNeedsResidencyReset = (summary: SceneRootCommitSummary
     collectionHasChanges(summary.nodes);
 };
 
+export const createSceneRootCommit = (
+  scene: SceneIr,
+  previousScene: SceneIr | undefined,
+  revision: number,
+): SceneRootCommit => {
+  const baseCommit = {
+    scene,
+    previousScene,
+    revision,
+  } as const;
+  const summary = summarizeSceneRootCommit(baseCommit);
+  const updatePlan = planSceneRootCommitUpdates(baseCommit);
+
+  return {
+    ...baseCommit,
+    summary,
+    updatePlan,
+    updatePayload: {
+      sceneId: scene.id,
+      previousSceneId: previousScene?.id,
+      revision,
+      activeCameraId: scene.activeCameraId,
+      activeCameraChanged: updatePlan.activeCameraChanged,
+      rootNodeIds: scene.rootNodeIds,
+      rootNodeIdsChanged: updatePlan.rootNodeIdsChanged,
+      assets: toSceneRootCollectionUpdatePayload(getSceneCollection(scene, 'assets'), updatePlan.assets),
+      textures: toSceneRootCollectionUpdatePayload(
+        getSceneCollection(scene, 'textures'),
+        updatePlan.textures,
+      ),
+      materials: toSceneRootCollectionUpdatePayload(
+        getSceneCollection(scene, 'materials'),
+        updatePlan.materials,
+      ),
+      lights: toSceneRootCollectionUpdatePayload(getSceneCollection(scene, 'lights'), updatePlan.lights),
+      meshes: toSceneRootCollectionUpdatePayload(getSceneCollection(scene, 'meshes'), updatePlan.meshes),
+      cameras: toSceneRootCollectionUpdatePayload(
+        getSceneCollection(scene, 'cameras'),
+        updatePlan.cameras,
+      ),
+      sdfPrimitives: toSceneRootCollectionUpdatePayload(
+        getSceneCollection(scene, 'sdfPrimitives'),
+        updatePlan.sdfPrimitives,
+      ),
+      volumePrimitives: toSceneRootCollectionUpdatePayload(
+        getSceneCollection(scene, 'volumePrimitives'),
+        updatePlan.volumePrimitives,
+      ),
+      nodes: toSceneRootNodeUpdatePayload(scene.nodes, updatePlan.nodes),
+      animationClips: toSceneRootCollectionUpdatePayload(
+        getSceneCollection(scene, 'animationClips'),
+        updatePlan.animationClips,
+      ),
+    },
+  };
+};
+
 export const createSceneRoot = (initialElement?: AuthoringElement): SceneRoot => {
   let currentScene: SceneIr | undefined;
   let currentDocument: SceneDocument | undefined;
@@ -382,11 +563,7 @@ export const createSceneRoot = (initialElement?: AuthoringElement): SceneRoot =>
     }
     authoringTreeToSceneDocument(element, currentDocument);
     const scene = sceneDocumentToSceneIr(currentDocument);
-    const commit = {
-      scene,
-      previousScene: currentScene,
-      revision: revision + 1,
-    } satisfies SceneRootCommit;
+    const commit = createSceneRootCommit(scene, currentScene, revision + 1);
 
     currentScene = scene;
     revision = commit.revision;

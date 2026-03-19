@@ -130,3 +130,48 @@ Deno.test('createReactSceneRoot accepts live sdf and volume resource intrinsics'
     format: 'density:r8unorm',
   }]);
 });
+
+Deno.test('createReactSceneRoot accepts live animation clip intrinsics', () => {
+  const root = createReactSceneRoot(
+    <scene id='animated-scene'>
+      <animationClip
+        id='spin'
+        durationMs={1000}
+        channels={[{
+          nodeId: 'animated-node',
+          property: 'rotation',
+          keyframes: [
+            {
+              timeMs: 0,
+              value: { x: 0, y: 0, z: 0, w: 1 },
+            },
+            {
+              timeMs: 1000,
+              value: { x: 0, y: 1, z: 0, w: 0 },
+            },
+          ],
+        }]}
+      />
+      <node id='animated-node' />
+    </scene>,
+  );
+
+  assertEquals(root.getScene()?.animationClips, [{
+    id: 'spin',
+    durationMs: 1000,
+    channels: [{
+      nodeId: 'animated-node',
+      property: 'rotation',
+      keyframes: [
+        {
+          timeMs: 0,
+          value: { x: 0, y: 0, z: 0, w: 1 },
+        },
+        {
+          timeMs: 1000,
+          value: { x: 0, y: 1, z: 0, w: 0 },
+        },
+      ],
+    }],
+  }]);
+});

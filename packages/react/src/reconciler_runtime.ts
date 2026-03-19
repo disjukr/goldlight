@@ -1,6 +1,7 @@
 import React, { type ReactNode } from 'npm:react@19.2.0';
 
 import type {
+  AnimationClipJsxProps,
   AssetJsxProps,
   CameraJsxProps,
   DirectionalLightJsxProps,
@@ -166,6 +167,7 @@ declare global {
       mesh: MeshJsxProps;
       sdf: SdfJsxProps;
       volume: VolumeJsxProps;
+      animationClip: AnimationClipJsxProps;
       camera: CameraJsxProps;
     }
   }

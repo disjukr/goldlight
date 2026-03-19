@@ -317,6 +317,53 @@ Deno.test('authoringTreeToSceneIr lowers sdf and volume primitives authored in J
   ]);
 });
 
+Deno.test('authoringTreeToSceneIr lowers animation clips authored in JSX', () => {
+  const scene = authoringTreeToSceneIr(
+    <scene id='jsx-scene'>
+      <animationClip
+        id='spin'
+        name='Spin'
+        durationMs={1000}
+        channels={[{
+          nodeId: 'animated-node',
+          property: 'rotation',
+          keyframes: [
+            {
+              timeMs: 0,
+              value: { x: 0, y: 0, z: 0, w: 1 },
+            },
+            {
+              timeMs: 1000,
+              value: { x: 0, y: 1, z: 0, w: 0 },
+            },
+          ],
+        }]}
+      />
+      <node id='animated-node' />
+    </scene>,
+  );
+
+  assertEquals(scene.animationClips, [{
+    id: 'spin',
+    name: 'Spin',
+    durationMs: 1000,
+    channels: [{
+      nodeId: 'animated-node',
+      property: 'rotation',
+      keyframes: [
+        {
+          timeMs: 0,
+          value: { x: 0, y: 0, z: 0, w: 1 },
+        },
+        {
+          timeMs: 1000,
+          value: { x: 0, y: 1, z: 0, w: 0 },
+        },
+      ],
+    }],
+  }]);
+});
+
 Deno.test('createAuthoringElement mirrors ids into programmatic scene resources', () => {
   const scene = authoringTreeToSceneIr(
     createAuthoringElement('scene', 'programmatic-scene', { activeCameraId: 'camera-main' }, [

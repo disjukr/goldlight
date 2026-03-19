@@ -7,6 +7,7 @@ import {
 } from 'npm:react-reconciler@0.33.0/constants.js';
 
 import type {
+  AnimationClipJsxProps,
   AssetJsxProps,
   CameraJsxProps,
   GroupJsxProps,
@@ -42,6 +43,7 @@ type ResourceIntrinsicType =
   | 'mesh'
   | 'sdf'
   | 'volume'
+  | 'animationClip'
   | 'camera';
 type HostIntrinsicType = 'scene' | 'node' | 'group' | ResourceIntrinsicType;
 const supportedIntrinsicTypes = new Set<HostIntrinsicType>([
@@ -55,6 +57,7 @@ const supportedIntrinsicTypes = new Set<HostIntrinsicType>([
   'mesh',
   'sdf',
   'volume',
+  'animationClip',
   'camera',
 ]);
 
@@ -69,6 +72,7 @@ type HostPropsByType = {
   mesh: MeshJsxProps;
   sdf: SdfJsxProps;
   volume: VolumeJsxProps;
+  animationClip: AnimationClipJsxProps;
   camera: CameraJsxProps;
 };
 
@@ -137,6 +141,12 @@ type VolumeHostInstance = {
   children: HostChild[];
 };
 
+type AnimationClipHostInstance = {
+  readonly type: 'animationClip';
+  props: HostPropsWithoutChildren<'animationClip'>;
+  children: HostChild[];
+};
+
 type CameraHostInstance = {
   readonly type: 'camera';
   props: HostPropsWithoutChildren<'camera'>;
@@ -151,6 +161,7 @@ type ResourceHostInstance =
   | MeshHostInstance
   | SdfHostInstance
   | VolumeHostInstance
+  | AnimationClipHostInstance
   | CameraHostInstance;
 
 type HostChild = NodeHostInstance | GroupHostInstance | ResourceHostInstance;
@@ -403,6 +414,8 @@ const sweepUnvisitedResourceIds = (
     ? document.sdfs.order
     : kind === 'volume'
     ? document.volumes.order
+    : kind === 'animationClip'
+    ? document.animationClips.order
     : document.cameras.order;
   for (const id of [...orderedIds]) {
     if (!visitedIds.has(id)) {
@@ -452,6 +465,7 @@ const syncContainerSceneDocument = (container: HostContainer): void => {
     mesh: new Set<string>(),
     sdf: new Set<string>(),
     volume: new Set<string>(),
+    animationClip: new Set<string>(),
     camera: new Set<string>(),
   };
 
@@ -513,6 +527,10 @@ const syncContainerSceneDocument = (container: HostContainer): void => {
         visitedResourceIds.volume.add(child.props.id);
         upsertSceneDocumentResource(document, { kind: 'volume', value: child.props });
         break;
+      case 'animationClip':
+        visitedResourceIds.animationClip.add(child.props.id);
+        upsertSceneDocumentResource(document, { kind: 'animationClip', value: child.props });
+        break;
       case 'camera':
         visitedResourceIds.camera.add(child.props.id);
         upsertSceneDocumentResource(document, {
@@ -539,6 +557,7 @@ const syncContainerSceneDocument = (container: HostContainer): void => {
   sweepUnvisitedResourceIds(document, 'mesh', visitedResourceIds.mesh);
   sweepUnvisitedResourceIds(document, 'sdf', visitedResourceIds.sdf);
   sweepUnvisitedResourceIds(document, 'volume', visitedResourceIds.volume);
+  sweepUnvisitedResourceIds(document, 'animationClip', visitedResourceIds.animationClip);
   sweepUnvisitedResourceIds(document, 'camera', visitedResourceIds.camera);
 
   const scene = sceneDocumentToSceneIr(document);

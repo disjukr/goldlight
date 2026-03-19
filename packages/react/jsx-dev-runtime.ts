@@ -1,5 +1,6 @@
 export { Fragment, jsxDEV } from './src/authoring.ts';
 export type {
+  AnimationClipJsxProps,
   AssetJsxProps,
   AuthoringElement,
   CameraJsxProps,
@@ -31,6 +32,7 @@ export namespace JSX {
     mesh: import('./src/authoring.ts').MeshJsxProps;
     sdf: import('./src/authoring.ts').SdfJsxProps;
     volume: import('./src/authoring.ts').VolumeJsxProps;
+    animationClip: import('./src/authoring.ts').AnimationClipJsxProps;
     camera: import('./src/authoring.ts').CameraJsxProps;
   }
 }

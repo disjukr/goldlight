@@ -1,5 +1,6 @@
 import { createOrthographicCamera, createPerspectiveCamera, identityTransform } from '@rieul3d/ir';
 import type {
+  AnimationClip,
   AssetRef,
   Camera,
   CameraOrthographic,
@@ -55,6 +56,7 @@ export type LightJsxProps = Light;
 export type MeshJsxProps = MeshPrimitive;
 export type SdfJsxProps = SdfPrimitive;
 export type VolumeJsxProps = VolumePrimitive;
+export type AnimationClipJsxProps = AnimationClip;
 export type CameraJsxProps =
   | Readonly<
     {
@@ -75,6 +77,7 @@ type LightAuthoringProps = Readonly<Omit<Light, 'id'>>;
 type MeshAuthoringProps = Readonly<Omit<MeshPrimitive, 'id'>>;
 type SdfAuthoringProps = Readonly<Omit<SdfPrimitive, 'id'>>;
 type VolumeAuthoringProps = Readonly<Omit<VolumePrimitive, 'id'>>;
+type AnimationClipAuthoringProps = Readonly<Omit<AnimationClip, 'id'>>;
 type CameraAuthoringProps =
   | Readonly<
     {
@@ -98,6 +101,7 @@ type AuthoringPropsByType = {
   mesh: MeshJsxProps;
   sdf: SdfJsxProps;
   volume: VolumeJsxProps;
+  animationClip: AnimationClipJsxProps;
   camera: CameraJsxProps;
 };
 
@@ -251,6 +255,12 @@ export function createAuthoringElement(
   children?: readonly AuthoringElement[],
 ): AuthoringElement<'volume'>;
 export function createAuthoringElement(
+  type: 'animationClip',
+  id: string,
+  props?: AnimationClipAuthoringProps,
+  children?: readonly AuthoringElement[],
+): AuthoringElement<'animationClip'>;
+export function createAuthoringElement(
   type: 'camera',
   id: string,
   props?: CameraAuthoringProps,
@@ -270,12 +280,14 @@ export function createAuthoringElement(
     | MeshAuthoringProps
     | SdfAuthoringProps
     | VolumeAuthoringProps
+    | AnimationClipAuthoringProps
     | CameraAuthoringProps = {},
   children: readonly AuthoringElement[] = [],
 ): AuthoringElement {
   const normalizedProps = type === 'node' ? normalizeNodeProps(props as NodeAuthoringProps) : (
       type === 'asset' || type === 'texture' || type === 'material' || type === 'light' ||
-      type === 'mesh' || type === 'sdf' || type === 'volume' || type === 'camera'
+      type === 'mesh' || type === 'sdf' || type === 'volume' || type === 'animationClip' ||
+      type === 'camera'
     )
     ? { id, ...props }
     : props;
@@ -528,6 +540,7 @@ export const jsx = (
       | MeshJsxProps
       | SdfJsxProps
       | VolumeJsxProps
+      | AnimationClipJsxProps
       | CameraJsxProps
       | PerspectiveCameraJsxProps
       | OrthographicCameraJsxProps
@@ -568,7 +581,8 @@ export const jsx = (
 
   if (
     type === 'asset' || type === 'texture' || type === 'material' || type === 'light' ||
-    type === 'mesh' || type === 'sdf' || type === 'volume' || type === 'camera'
+    type === 'mesh' || type === 'sdf' || type === 'volume' || type === 'animationClip' ||
+    type === 'camera'
   ) {
     const { id, children: _children, ...resourceProps } = authoringProps as {
       id: string;
@@ -596,7 +610,16 @@ export const normalizeCameraJsxProps = (camera: CameraJsxProps): Camera =>
 
 const sweepUnvisitedResourceIds = (
   document: SceneDocument,
-  kind: 'asset' | 'texture' | 'material' | 'light' | 'mesh' | 'sdf' | 'volume' | 'camera',
+  kind:
+    | 'asset'
+    | 'texture'
+    | 'material'
+    | 'light'
+    | 'mesh'
+    | 'sdf'
+    | 'volume'
+    | 'animationClip'
+    | 'camera',
   visitedIds: ReadonlySet<string>,
 ): void => {
   const collection = kind === 'asset'
@@ -613,6 +636,8 @@ const sweepUnvisitedResourceIds = (
     ? document.sdfs.order
     : kind === 'volume'
     ? document.volumes.order
+    : kind === 'animationClip'
+    ? document.animationClips.order
     : document.cameras.order;
   for (const id of [...collection]) {
     if (!visitedIds.has(id)) {
@@ -644,6 +669,7 @@ export const authoringTreeToSceneDocument = (
     mesh: new Set<string>(),
     sdf: new Set<string>(),
     volume: new Set<string>(),
+    animationClip: new Set<string>(),
     camera: new Set<string>(),
   };
 
@@ -726,6 +752,13 @@ export const authoringTreeToSceneDocument = (
           value: node.props as VolumePrimitive,
         });
         return nodeIndex;
+      case 'animationClip':
+        visitedResourceIds.animationClip.add(node.id);
+        upsertSceneDocumentResource(document, {
+          kind: 'animationClip',
+          value: node.props as AnimationClip,
+        });
+        return nodeIndex;
       case 'camera':
         visitedResourceIds.camera.add(node.id);
         upsertSceneDocumentResource(document, {
@@ -752,6 +785,7 @@ export const authoringTreeToSceneDocument = (
   sweepUnvisitedResourceIds(document, 'mesh', visitedResourceIds.mesh);
   sweepUnvisitedResourceIds(document, 'sdf', visitedResourceIds.sdf);
   sweepUnvisitedResourceIds(document, 'volume', visitedResourceIds.volume);
+  sweepUnvisitedResourceIds(document, 'animationClip', visitedResourceIds.animationClip);
   sweepUnvisitedResourceIds(document, 'camera', visitedResourceIds.camera);
 
   return document;

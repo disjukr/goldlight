@@ -1,4 +1,5 @@
 import {
+  appendAnimationClip,
   appendAsset,
   appendCamera,
   appendLight,
@@ -12,6 +13,7 @@ import {
   createSceneIr,
 } from '@rieul3d/ir';
 import type {
+  AnimationClip,
   AssetRef,
   Camera,
   Light,
@@ -53,6 +55,7 @@ type SceneDocumentResourceByKind = {
   camera: Camera;
   sdf: SdfPrimitive;
   volume: VolumePrimitive;
+  animationClip: AnimationClip;
 };
 
 export type SceneDocumentResourceKind = keyof SceneDocumentResourceByKind;
@@ -89,6 +92,7 @@ export type SceneDocument = {
   cameras: SceneDocumentResourceCollection<'camera'>;
   sdfs: SceneDocumentResourceCollection<'sdf'>;
   volumes: SceneDocumentResourceCollection<'volume'>;
+  animationClips: SceneDocumentResourceCollection<'animationClip'>;
   nodes: SceneDocumentNodeCollection;
 };
 
@@ -136,6 +140,8 @@ const getResourceCollection = <TKind extends SceneDocumentResourceKind>(
       return document.sdfs as SceneDocumentResourceCollection<TKind>;
     case 'volume':
       return document.volumes as SceneDocumentResourceCollection<TKind>;
+    case 'animationClip':
+      return document.animationClips as SceneDocumentResourceCollection<TKind>;
   }
 };
 
@@ -179,6 +185,7 @@ export const createSceneDocument = (id = 'scene'): SceneDocument => ({
   cameras: createResourceCollection(),
   sdfs: createResourceCollection(),
   volumes: createResourceCollection(),
+  animationClips: createResourceCollection(),
   nodes: {
     order: [],
     rootNodeIds: [],
@@ -335,6 +342,12 @@ export const sceneDocumentToSceneIr = (document: SceneDocument): SceneIr => {
     const volume = document.volumes.byId.get(id);
     if (volume) {
       scene = appendVolumePrimitive(scene, volume.value);
+    }
+  }
+  for (const id of document.animationClips.order) {
+    const clip = document.animationClips.byId.get(id);
+    if (clip) {
+      scene = appendAnimationClip(scene, clip.value);
     }
   }
   for (const id of document.nodes.order) {

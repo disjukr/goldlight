@@ -1,11 +1,11 @@
 import type { GpuUploadContext, RenderContextBinding, RuntimeResidency } from '@rieul3d/gpu';
 import type {
-  ForwardRenderResult,
+  DeferredRenderResult,
   GpuRenderExecutionContext,
   MaterialRegistry,
   PostProcessPass,
 } from '@rieul3d/renderer';
-import { renderForwardFrame } from '@rieul3d/renderer';
+import { renderDeferredFrame } from '@rieul3d/renderer';
 
 import { type SceneRootFrameDriverOptions } from './runtime_driver.ts';
 import {
@@ -16,14 +16,14 @@ import {
   type SceneRootRenderFrameResult,
 } from './runtime_renderer.ts';
 
-type RenderForwardFrameHook = SceneRootRenderFrameHook<ForwardRenderResult>;
+type RenderDeferredFrameHook = SceneRootRenderFrameHook<DeferredRenderResult>;
 
-export type SceneRootForwardRendererHooks = Readonly<{
+export type SceneRootDeferredRendererHooks = Readonly<{
   ensureSceneMeshResidency?: EnsureSceneMeshResidencyHook;
-  renderForwardFrame?: RenderForwardFrameHook;
+  renderDeferredFrame?: RenderDeferredFrameHook;
 }>;
 
-export type SceneRootForwardRendererOptions = Readonly<
+export type SceneRootDeferredRendererOptions = Readonly<
   & SceneRootFrameDriverOptions
   & {
     context: GpuRenderExecutionContext & GpuUploadContext;
@@ -31,23 +31,23 @@ export type SceneRootForwardRendererOptions = Readonly<
     residency: RuntimeResidency;
     materialRegistry?: MaterialRegistry;
     postProcessPasses?: readonly PostProcessPass[];
-    hooks?: SceneRootForwardRendererHooks;
+    hooks?: SceneRootDeferredRendererHooks;
   }
 >;
 
-export type SceneRootForwardFrameResult = SceneRootRenderFrameResult<ForwardRenderResult>;
+export type SceneRootDeferredFrameResult = SceneRootRenderFrameResult<DeferredRenderResult>;
 
-export type SceneRootForwardRenderer = SceneRootRenderer<ForwardRenderResult>;
+export type SceneRootDeferredRenderer = SceneRootRenderer<DeferredRenderResult>;
 
-export const createSceneRootForwardRenderer = (
-  sceneRoot: Parameters<typeof createSceneRootRenderer<ForwardRenderResult>>[0],
-  options: SceneRootForwardRendererOptions,
-): SceneRootForwardRenderer => {
+export const createSceneRootDeferredRenderer = (
+  sceneRoot: Parameters<typeof createSceneRootRenderer<DeferredRenderResult>>[0],
+  options: SceneRootDeferredRendererOptions,
+): SceneRootDeferredRenderer => {
   return createSceneRootRenderer(sceneRoot, {
     ...options,
     hooks: {
       ensureSceneMeshResidency: options.hooks?.ensureSceneMeshResidency,
-      renderFrame: options.hooks?.renderForwardFrame ?? renderForwardFrame,
+      renderFrame: options.hooks?.renderDeferredFrame ?? renderDeferredFrame,
     },
   });
 };

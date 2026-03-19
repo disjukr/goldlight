@@ -1,36 +1,22 @@
 import type { GpuUploadContext, RenderContextBinding, RuntimeResidency } from '@rieul3d/gpu';
-import { ensureSceneMeshResidency } from '@rieul3d/gpu';
 import type {
   GpuRenderExecutionContext,
   HybridRenderResult,
   MaterialRegistry,
   PostProcessPass,
 } from '@rieul3d/renderer';
-import { createMaterialRegistry, renderHybridFrame } from '@rieul3d/renderer';
+import { renderHybridFrame } from '@rieul3d/renderer';
 
+import { type SceneRootFrameDriverOptions } from './runtime_driver.ts';
 import {
-  createSceneRootFrameDriver,
-  type SceneRootFrameAdvanceOptions,
-  type SceneRootFrameDriver,
-  type SceneRootFrameDriverOptions,
-  type SceneRootFrameResult,
-} from './runtime_driver.ts';
+  createSceneRootRenderer,
+  type EnsureSceneMeshResidencyHook,
+  type SceneRootRenderer,
+  type SceneRootRenderFrameHook,
+  type SceneRootRenderFrameResult,
+} from './runtime_renderer.ts';
 
-type EnsureSceneMeshResidencyHook = (
-  context: GpuUploadContext,
-  residency: RuntimeResidency,
-  scene: SceneRootFrameResult['scene'],
-  evaluatedScene: SceneRootFrameResult['evaluatedScene'],
-) => RuntimeResidency;
-
-type RenderHybridFrameHook = (
-  context: GpuRenderExecutionContext,
-  binding: RenderContextBinding,
-  residency: RuntimeResidency,
-  evaluatedScene: SceneRootFrameResult['evaluatedScene'],
-  materialRegistry: MaterialRegistry,
-  postProcessPasses: readonly PostProcessPass[],
-) => HybridRenderResult;
+type RenderHybridFrameHook = SceneRootRenderFrameHook<HybridRenderResult>;
 
 export type SceneRootHybridRendererHooks = Readonly<{
   ensureSceneMeshResidency?: EnsureSceneMeshResidencyHook;
@@ -49,59 +35,19 @@ export type SceneRootHybridRendererOptions = Readonly<
   }
 >;
 
-export type SceneRootHybridFrameResult = Readonly<
-  & SceneRootFrameResult
-  & {
-    renderResult: HybridRenderResult;
-  }
->;
+export type SceneRootHybridFrameResult = SceneRootRenderFrameResult<HybridRenderResult>;
 
-export type SceneRootHybridRenderer = Readonly<{
-  getFrameDriver: () => SceneRootFrameDriver;
-  renderFrame: (
-    timeMs: number,
-    options?: SceneRootFrameAdvanceOptions,
-  ) => SceneRootHybridFrameResult;
-  dispose: () => void;
-}>;
+export type SceneRootHybridRenderer = SceneRootRenderer<HybridRenderResult>;
 
 export const createSceneRootHybridRenderer = (
-  sceneRoot: Parameters<typeof createSceneRootFrameDriver>[0],
+  sceneRoot: Parameters<typeof createSceneRootRenderer<HybridRenderResult>>[0],
   options: SceneRootHybridRendererOptions,
 ): SceneRootHybridRenderer => {
-  const frameDriver = createSceneRootFrameDriver(sceneRoot, {
-    flushUpdates: options.flushUpdates,
-    residency: options.residency,
-    initialTimeMs: options.initialTimeMs,
-  });
-  const ensureMeshResidency = options.hooks?.ensureSceneMeshResidency ?? ensureSceneMeshResidency;
-  const renderHybrid = options.hooks?.renderHybridFrame ?? renderHybridFrame;
-  const materialRegistry = options.materialRegistry ?? createMaterialRegistry();
-  const postProcessPasses = options.postProcessPasses ?? [];
-
-  return {
-    getFrameDriver: () => frameDriver,
-    renderFrame: (timeMs, frameOptions) => {
-      const frame = frameDriver.advanceFrame(timeMs, frameOptions);
-      ensureMeshResidency(
-        options.context,
-        options.residency,
-        frame.scene,
-        frame.evaluatedScene,
-      );
-      const renderResult = renderHybrid(
-        options.context,
-        options.binding,
-        options.residency,
-        frame.evaluatedScene,
-        materialRegistry,
-        postProcessPasses,
-      );
-      return {
-        ...frame,
-        renderResult,
-      };
+  return createSceneRootRenderer(sceneRoot, {
+    ...options,
+    hooks: {
+      ensureSceneMeshResidency: options.hooks?.ensureSceneMeshResidency,
+      renderFrame: options.hooks?.renderHybridFrame ?? renderHybridFrame,
     },
-    dispose: () => frameDriver.dispose(),
-  };
+  });
 };

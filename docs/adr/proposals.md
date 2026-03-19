@@ -5,9 +5,7 @@ ADR index.
 
 ## Proposed Decisions
 
-- [`0010-hybrid-deferred-forward-alpha-materials.md`](./0010-hybrid-deferred-forward-alpha-materials.md):
-  hybrid deferred-plus-forward rendering now has a first Scene IR alpha-policy slice, but the
-  broader renderer/material boundary is still proposed here
+There are currently no proposed ADRs awaiting acceptance.
 
 ## Related References
 

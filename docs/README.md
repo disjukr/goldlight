@@ -34,13 +34,13 @@ Use this page as the main navigation hub.
   [`../examples/byow_primitives_demo/README.md`](../examples/byow_primitives_demo/README.md)
 - Review accepted architecture constraints: [`adr/README.md`](./adr/README.md)
 - Review proposed architecture discussions: [`adr/proposals.md`](./adr/proposals.md)
-- Review the proposed post-processing execution boundary:
+- Review the accepted post-processing execution boundary:
   [`adr/0007-post-processing-execution-model.md`](./adr/0007-post-processing-execution-model.md)
-- Review the proposed React reconciler scene-document boundary:
+- Review the accepted React reconciler scene-document boundary:
   [`adr/0008-react-reconciler-scene-document.md`](./adr/0008-react-reconciler-scene-document.md)
-- Review the proposed cubemap capture boundary before 2D reprojection/export:
+- Review the accepted cubemap capture boundary before 2D reprojection/export:
   [`adr/0009-cubemap-capture-boundary.md`](./adr/0009-cubemap-capture-boundary.md)
-- Review the proposed hybrid deferred-plus-forward alpha-material boundary:
+- Review the accepted material alpha policy for deferred, hybrid, and dithered coverage:
   [`adr/0010-hybrid-deferred-forward-alpha-materials.md`](./adr/0010-hybrid-deferred-forward-alpha-materials.md)
 - Review the JSX authoring boundary decision:
   [`adr/0004-react-jsx-authoring.md`](./adr/0004-react-jsx-authoring.md)
@@ -66,5 +66,5 @@ Use this page as the main navigation hub.
 
 - [`specs/README.md`](./specs/README.md): design docs and behavioral contracts
 - [`adr/README.md`](./adr/README.md): short decision records for accepted constraints
-- [`adr/proposals.md`](./adr/proposals.md): proposed decision records awaiting acceptance
+- [`adr/proposals.md`](./adr/proposals.md): proposed decision records awaiting acceptance, if any
 - [`../examples/README.md`](../examples/README.md): runnable example entry points and commands

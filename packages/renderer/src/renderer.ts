@@ -688,9 +688,9 @@ const blitCubemapFace = (
   sampling: CubemapExportSampling,
 ): void => {
   for (let y = 0; y < outputSize; y += 1) {
-    const v = outputSize === 1 ? 0.5 : y / (outputSize - 1);
+    const v = outputSize === 1 ? 0.5 : (y + 0.5) / outputSize;
     for (let x = 0; x < outputSize; x += 1) {
-      const u = outputSize === 1 ? 0.5 : x / (outputSize - 1);
+      const u = outputSize === 1 ? 0.5 : (x + 0.5) / outputSize;
       const color = sampleFacePixel(source, u, v, sampling);
       if (offsetX + x >= destinationWidth || offsetY + y >= destinationHeight) {
         continue;

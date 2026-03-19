@@ -49,10 +49,10 @@ equirectangular, angular-map, cross, or strip reprojection.
   fail through normal renderer capability checks
 - downstream reprojection/export should consume the returned face snapshots rather than reaching
   back into the renderer
-- `exportCubemapSnapshot(...)` now covers the first CPU-side `equirectangular`, `angular`, `cross`,
-  and `strip` layouts on top of captured faces
+- `exportCubemapSnapshot(...)` now covers CPU-side `equirectangular`, `angular`, `cross`, and
+  `strip` layouts on top of captured faces, including optional filtered reprojection and
+  caller-controlled export dimensions
 
 ## Follow-Up Direction
 
-- evaluate filtered or size-configurable export helpers when low-resolution seams become a problem
 - evaluate a shared GPU texture-array backing when cubemap capture needs to stay on the device

@@ -33,6 +33,7 @@ const createMockTexture = () => {
 Deno.test('invalidateResidencyResources drops only selected residency ids', () => {
   const geometryBuffer = createMockBuffer();
   const materialBuffer = createMockBuffer();
+  const alphaPolicyBuffer = createMockBuffer();
   const texture = createMockTexture();
   const volume = createMockTexture();
   const residency = createRuntimeResidency();
@@ -54,6 +55,8 @@ Deno.test('invalidateResidencyResources drops only selected residency ids', () =
     parameterNames: ['color'],
     uniformData: new Float32Array(4),
     uniformBuffer: materialBuffer,
+    alphaPolicyData: new Float32Array(4),
+    alphaPolicyBuffer,
   });
   residency.textures.set('texture-a', {
     textureId: 'texture-a',
@@ -87,6 +90,7 @@ Deno.test('invalidateResidencyResources drops only selected residency ids', () =
 
   assertEquals(geometryBuffer.destroyed, true);
   assertEquals(materialBuffer.destroyed, true);
+  assertEquals(alphaPolicyBuffer.destroyed, true);
   assertEquals(texture.destroyed, true);
   assertEquals(volume.destroyed, true);
   assertEquals([...residency.geometry.keys()], ['mesh-b']);
@@ -99,6 +103,7 @@ Deno.test('invalidateResidencyResources drops only selected residency ids', () =
 Deno.test('invalidateResidency destroys and clears every cached residency class', () => {
   const geometryBuffer = createMockBuffer();
   const materialBuffer = createMockBuffer();
+  const alphaPolicyBuffer = createMockBuffer();
   const texture = createMockTexture();
   const volume = createMockTexture();
   const residency = createRuntimeResidency();
@@ -115,6 +120,8 @@ Deno.test('invalidateResidency destroys and clears every cached residency class'
     parameterNames: ['color'],
     uniformData: new Float32Array(4),
     uniformBuffer: materialBuffer,
+    alphaPolicyData: new Float32Array(4),
+    alphaPolicyBuffer,
   });
   residency.textures.set('texture-a', {
     textureId: 'texture-a',
@@ -141,6 +148,7 @@ Deno.test('invalidateResidency destroys and clears every cached residency class'
 
   assertEquals(geometryBuffer.destroyed, true);
   assertEquals(materialBuffer.destroyed, true);
+  assertEquals(alphaPolicyBuffer.destroyed, true);
   assertEquals(texture.destroyed, true);
   assertEquals(volume.destroyed, true);
   assertEquals(residency.geometry.size, 0);
@@ -153,6 +161,7 @@ Deno.test('invalidateResidency destroys and clears every cached residency class'
 Deno.test('applyRuntimeResidencyPlan delegates targeted invalidation without full reset', () => {
   const geometryBuffer = createMockBuffer();
   const materialBuffer = createMockBuffer();
+  const alphaPolicyBuffer = createMockBuffer();
   const texture = createMockTexture();
   const volume = createMockTexture();
   const residency = createRuntimeResidency();
@@ -168,6 +177,8 @@ Deno.test('applyRuntimeResidencyPlan delegates targeted invalidation without ful
     parameterNames: ['color'],
     uniformData: new Float32Array(4),
     uniformBuffer: materialBuffer,
+    alphaPolicyData: new Float32Array(4),
+    alphaPolicyBuffer,
   });
   residency.textures.set('texture-a', {
     textureId: 'texture-a',
@@ -199,6 +210,7 @@ Deno.test('applyRuntimeResidencyPlan delegates targeted invalidation without ful
 
   assertEquals(geometryBuffer.destroyed, true);
   assertEquals(materialBuffer.destroyed, true);
+  assertEquals(alphaPolicyBuffer.destroyed, true);
   assertEquals(texture.destroyed, true);
   assertEquals(volume.destroyed, true);
   assertEquals(residency.geometry.size, 0);

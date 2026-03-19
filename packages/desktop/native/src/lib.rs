@@ -395,7 +395,6 @@ pub extern "C" fn desktop_host_request_redraw(window_id: u64) -> u8 {
             return 0;
         }
 
-        runtime.app.push_frame_event(window_id);
         if let Some(window) = runtime.app.window.as_ref() {
             window.request_redraw();
             HOST_RESULT_OK

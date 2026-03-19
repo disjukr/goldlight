@@ -89,6 +89,11 @@ export const createDesktopWindowRuntime = (
   };
 
   const flushAnimationFrameCallbacks = (timeMs: number): void => {
+    if (animationFrameState.timerHandle !== null) {
+      clearTimeout(animationFrameState.timerHandle);
+      animationFrameState.timerHandle = null;
+    }
+
     if (animationFrameState.callbacks.size === 0) {
       return;
     }

@@ -3,10 +3,7 @@
 import { installDesktopWindowGlobals } from './bootstrap.ts';
 import { createDesktopWindowRuntime } from './runtime.ts';
 import type { DesktopModuleCleanup, DesktopModuleContext } from './app.ts';
-import type {
-  DesktopWindow,
-  DesktopModuleContext as RuntimeDesktopModuleContext,
-} from './app.ts';
+import type { DesktopModuleContext as RuntimeDesktopModuleContext, DesktopWindow } from './app.ts';
 import type {
   DesktopHost,
   DesktopWindowEvent,
@@ -30,10 +27,12 @@ type WorkerState = {
   restoreGlobals?: () => void;
   runtimeWindowState?: { current: DesktopWindowState };
   initialized: boolean;
+  pendingHostEvents: DesktopWindowEvent[];
 };
 
 const workerState: WorkerState = {
   initialized: false,
+  pendingHostEvents: [],
 };
 
 const postMessageToParent = globalThis.postMessage.bind(globalThis);
@@ -97,7 +96,9 @@ const createWorkerDesktopContext = (
 
   const hostProxy: DesktopHost = {
     createWindow: () => {
-      throw new Error('Desktop workers do not support creating additional windows from module code');
+      throw new Error(
+        'Desktop workers do not support creating additional windows from module code',
+      );
     },
     destroyWindow: () => {
       postToHost({ kind: 'close-window' });
@@ -165,6 +166,11 @@ const runModule = async (
   }
 
   workerState.initialized = true;
+  const pendingHostEvents = workerState.pendingHostEvents;
+  workerState.pendingHostEvents = [];
+  for (const pendingEvent of pendingHostEvents) {
+    handleHostEvent(pendingEvent);
+  }
   postToHost({ kind: 'ready' });
 };
 
@@ -217,6 +223,9 @@ globalThis.onmessage = (event: MessageEvent<DesktopWorkerInboundMessage>) => {
   }
 
   if (!workerState.initialized) {
+    if (message.kind === 'event') {
+      workerState.pendingHostEvents.push(message.event);
+    }
     return;
   }
 

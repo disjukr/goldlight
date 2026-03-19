@@ -50,6 +50,8 @@ primitives into `MeshPrimitive` geometry for baking, inspection, and mesh-pipeli
   grid resolutions
 - marching-cubes regression tests cover direct case-table wiring and guard against regressing back
   to centroid-fan triangulation on multi-edge cells
+- marching-cubes drops zero-area triangles when exact iso-level hits collapse multiple active edges
+  onto the same endpoint
 - surface-nets stitches boundary-touching contours instead of dropping cap faces when tight bounds
   place the iso-surface directly on the sampling box
 - regression tests cover deterministic output, mesh validity, and basic sphere/box shape fidelity

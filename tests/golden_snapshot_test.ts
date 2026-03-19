@@ -1,7 +1,7 @@
 import { assert } from 'jsr:@std/assert@^1.0.14';
 import { evaluateScene } from '@rieul3d/core';
 import {
-  createOffscreenContext,
+  createOffscreenBinding,
   createRuntimeResidency,
   isWebGPUAvailable,
   rebuildRuntimeResidency,
@@ -116,7 +116,7 @@ const assertGoldenSnapshot = async (
   }
 
   try {
-    const binding = createOffscreenContext(gpuContext);
+    const binding = createOffscreenBinding(gpuContext);
     const { scene, assets } = scenarioFactory();
     const evaluatedScene = evaluateScene(scene, { timeMs: 0 });
     const runtimeResidency = createRuntimeResidency();
@@ -185,7 +185,7 @@ const assertGoldenSnapshotAfterRecovery = async (
     rebuildRuntimeResidency(initialContext, residency, scene, evaluatedScene, assets);
     await renderForwardSnapshot(
       initialContext,
-      createOffscreenContext(initialContext),
+      createOffscreenBinding(initialContext),
       residency,
       evaluatedScene,
     );
@@ -200,7 +200,7 @@ const assertGoldenSnapshotAfterRecovery = async (
     rebuildRuntimeResidency(recoveredContext, residency, scene, evaluatedScene, assets);
     const recoveredSnapshot = await renderForwardSnapshot(
       recoveredContext,
-      createOffscreenContext(recoveredContext),
+      createOffscreenBinding(recoveredContext),
       residency,
       evaluatedScene,
     );
@@ -241,7 +241,7 @@ const requestClearSnapshotBytes = async (): Promise<Uint8Array | undefined> => {
   }
 
   try {
-    const binding = createOffscreenContext(gpuContext);
+    const binding = createOffscreenBinding(gpuContext);
     const { scene, assets } = createClearScene();
     const evaluatedScene = evaluateScene(scene, { timeMs: 0 });
     const runtimeResidency = createRuntimeResidency();

@@ -1,7 +1,7 @@
 import { assertEquals, assertNotStrictEquals, assertThrows } from 'jsr:@std/assert@^1.0.14';
 import { evaluateScene } from '@rieul3d/core';
 import {
-  createOffscreenContext,
+  createOffscreenBinding,
   createRuntimeResidency,
   observeDeviceLoss,
   rebuildRuntimeResidency,
@@ -368,7 +368,7 @@ Deno.test('device-loss recovery rebinds the target, rebuilds residency, and subm
     assets,
   );
 
-  const initialBinding = createOffscreenContext({
+  const initialBinding = createOffscreenBinding({
     device: initialContext.device as unknown as GPUDevice,
     target,
   });
@@ -397,7 +397,7 @@ Deno.test('device-loss recovery rebinds the target, rebuilds residency, and subm
   );
   assertEquals(lostInfo.reason, 'destroyed');
 
-  const recoveredBinding = createOffscreenContext({
+  const recoveredBinding = createOffscreenBinding({
     device: recoveredContext.device as unknown as GPUDevice,
     target,
   });
@@ -437,7 +437,7 @@ Deno.test('failed recovery leaves the caller in a non-rendering state until rebu
     [59, 60, 61, 62, 63, 64, 65, 66],
   ]);
   const residency = createRuntimeResidency();
-  const binding = createOffscreenContext({
+  const binding = createOffscreenBinding({
     device: context.device as unknown as GPUDevice,
     target,
   });

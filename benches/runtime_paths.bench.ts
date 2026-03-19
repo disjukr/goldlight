@@ -1,7 +1,7 @@
 import { evaluateScene } from '@rieul3d/core';
 import {
   createMaterialUploadPlan,
-  createOffscreenContext,
+  createOffscreenBinding,
   createRuntimeResidency,
   createTextureUploadPlan,
   createVolumeUploadPlan,
@@ -335,7 +335,7 @@ Deno.bench('forward frame encoding', () => {
   });
 
   const context = createRenderBenchContext();
-  const binding = createOffscreenContext({
+  const binding = createOffscreenBinding({
     device: context.device,
     target: createHeadlessTarget(64, 64),
   });

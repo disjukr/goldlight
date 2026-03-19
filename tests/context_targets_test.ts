@@ -3,8 +3,8 @@ import {
   acquireColorAttachmentView,
   acquireDepthAttachmentView,
   bindRenderTarget,
-  configureSurfaceContext,
-  createOffscreenContext,
+  createOffscreenBinding,
+  createSurfaceBinding,
   getRenderTargetByteSize,
   getRenderTargetSize,
 } from '@rieul3d/gpu';
@@ -45,7 +45,7 @@ const createMockDevice = () => {
   };
 };
 
-Deno.test('configureSurfaceContext configures the canvas context for a surface target', () => {
+Deno.test('createSurfaceBinding configures the canvas context for a surface target', () => {
   const calls: GPUCanvasConfiguration[] = [];
   const { device, textures } = createMockDevice();
   const canvasContext = {
@@ -57,7 +57,7 @@ Deno.test('configureSurfaceContext configures the canvas context for a surface t
     } as GPUTexture),
   } as GPUCanvasContext;
 
-  const surface = configureSurfaceContext(
+  const surface = createSurfaceBinding(
     {
       device: device as GPUDevice,
       target: createBrowserSurfaceTarget(640, 480),
@@ -71,10 +71,10 @@ Deno.test('configureSurfaceContext configures the canvas context for a surface t
   assertEquals(calls[0].alphaMode, 'premultiplied');
   assertEquals(textures.length, 1);
   assertEquals(textures[0].descriptor.format, 'depth24plus');
-  assertStrictEquals(surface.device, device);
+  assertStrictEquals(surface.canvasContext, canvasContext);
 });
 
-Deno.test('configureSurfaceContext honors an explicit surface alpha mode', () => {
+Deno.test('createSurfaceBinding honors an explicit surface alpha mode', () => {
   const calls: GPUCanvasConfiguration[] = [];
   const { device, textures } = createMockDevice();
   const canvasContext = {
@@ -86,7 +86,7 @@ Deno.test('configureSurfaceContext honors an explicit surface alpha mode', () =>
     } as GPUTexture),
   } as GPUCanvasContext;
 
-  configureSurfaceContext(
+  createSurfaceBinding(
     {
       device: device as GPUDevice,
       target: createDenoSurfaceTarget(640, 480, 'rgba8unorm', 'opaque'),
@@ -101,9 +101,9 @@ Deno.test('configureSurfaceContext honors an explicit surface alpha mode', () =>
   assertEquals(textures[0].descriptor.format, 'depth24plus');
 });
 
-Deno.test('createOffscreenContext allocates color and depth textures and views', () => {
+Deno.test('createOffscreenBinding allocates color and depth textures and views', () => {
   const { device, textures } = createMockDevice();
-  const offscreen = createOffscreenContext({
+  const offscreen = createOffscreenBinding({
     device: device as GPUDevice,
     target: createHeadlessTarget(320, 240),
   });
@@ -148,7 +148,7 @@ Deno.test('bindRenderTarget chooses surface or offscreen binding based on input'
 Deno.test('acquireColorAttachmentView returns a view for surface and offscreen bindings', () => {
   const { device } = createMockDevice();
   const { device: surfaceDevice } = createMockDevice();
-  const surfaceBinding = configureSurfaceContext(
+  const surfaceBinding = createSurfaceBinding(
     {
       device: surfaceDevice as GPUDevice,
       target: createBrowserSurfaceTarget(10, 10),
@@ -161,9 +161,13 @@ Deno.test('acquireColorAttachmentView returns a view for surface and offscreen b
       } as GPUTexture),
     } as unknown as GPUCanvasContext,
   );
-  const surfaceView = acquireColorAttachmentView(surfaceBinding);
+  const surfaceView = acquireColorAttachmentView(
+    { device: surfaceDevice as GPUDevice },
+    surfaceBinding,
+  );
   const offscreenView = acquireColorAttachmentView(
-    createOffscreenContext({
+    { device: device as GPUDevice },
+    createOffscreenBinding({
       device: device as GPUDevice,
       target: createHeadlessTarget(10, 10),
     }),
@@ -177,7 +181,7 @@ Deno.test('acquireColorAttachmentView returns a view for surface and offscreen b
 Deno.test('acquireColorAttachmentView recreates the surface depth attachment when the drawable size changes', () => {
   const { device, textures } = createMockDevice();
   let frame = 0;
-  const surfaceBinding = configureSurfaceContext(
+  const surfaceBinding = createSurfaceBinding(
     {
       device: device as GPUDevice,
       target: createBrowserSurfaceTarget(10, 10),
@@ -199,8 +203,11 @@ Deno.test('acquireColorAttachmentView recreates the surface depth attachment whe
   const initialDepthView = acquireDepthAttachmentView(surfaceBinding) as unknown as {
     textureId: number;
   };
-  acquireColorAttachmentView(surfaceBinding);
-  const colorView = acquireColorAttachmentView(surfaceBinding) as unknown as { textureId: number };
+  acquireColorAttachmentView({ device: device as GPUDevice }, surfaceBinding);
+  const colorView = acquireColorAttachmentView(
+    { device: device as GPUDevice },
+    surfaceBinding,
+  ) as unknown as { textureId: number };
   const resizedDepthView = acquireDepthAttachmentView(surfaceBinding) as unknown as {
     textureId: number;
   };
@@ -217,7 +224,8 @@ Deno.test('acquireColorAttachmentView reconfigures a dropped surface presentatio
   let attempts = 0;
   const { device } = createMockDevice();
   const view = acquireColorAttachmentView(
-    configureSurfaceContext(
+    { device: device as GPUDevice },
+    createSurfaceBinding(
       {
         device: device as GPUDevice,
         target: createDenoSurfaceTarget(10, 10, 'rgba8unorm', 'opaque'),
@@ -254,7 +262,8 @@ Deno.test('acquireColorAttachmentView rethrows non-state surface errors', () => 
   assertThrows(
     () =>
       acquireColorAttachmentView(
-        configureSurfaceContext(
+        { device: device as GPUDevice },
+        createSurfaceBinding(
           {
             device: device as GPUDevice,
             target: createBrowserSurfaceTarget(10, 10),
@@ -275,7 +284,7 @@ Deno.test('acquireColorAttachmentView rethrows non-state surface errors', () => 
 
 Deno.test('surface/offscreen helpers reject mismatched target kinds and expose target sizing', () => {
   assertThrows(() =>
-    configureSurfaceContext(
+    createSurfaceBinding(
       {
         device: {} as GPUDevice,
         target: createHeadlessTarget(8, 8),

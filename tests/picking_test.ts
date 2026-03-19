@@ -5,7 +5,7 @@ import {
   assertThrows,
 } from 'jsr:@std/assert@^1.0.14';
 import { evaluateScene } from '@rieul3d/core';
-import { createOffscreenContext, createRuntimeResidency } from '@rieul3d/gpu';
+import { createOffscreenBinding, createRuntimeResidency } from '@rieul3d/gpu';
 import { appendMaterial, appendMesh, appendNode, createNode, createSceneIr } from '@rieul3d/ir';
 import {
   createNodePickItems,
@@ -193,7 +193,7 @@ Deno.test('renderNodePickFrame draws mesh nodes and uploads encoded id colors', 
 
   const result = renderNodePickFrame(
     mocks as unknown as GpuRenderExecutionContext,
-    createOffscreenContext({
+    createOffscreenBinding({
       device: mocks.device as unknown as GPUDevice,
       target: createHeadlessTarget(16, 16),
     }),
@@ -232,7 +232,7 @@ Deno.test('renderNodePickFrame rejects non-rgba8unorm targets', () => {
   assertThrows(() =>
     renderNodePickFrame(
       mocks as unknown as GpuRenderExecutionContext,
-      createOffscreenContext({
+      createOffscreenBinding({
         device: mocks.device as unknown as GPUDevice,
         target: {
           kind: 'offscreen',
@@ -276,7 +276,7 @@ Deno.test('renderNodePickFrame rejects custom shader materials', () => {
   assertThrows(() =>
     renderNodePickFrame(
       mocks as unknown as GpuRenderExecutionContext,
-      createOffscreenContext({
+      createOffscreenBinding({
         device: mocks.device as unknown as GPUDevice,
         target: createHeadlessTarget(16, 16),
       }),
@@ -351,7 +351,7 @@ Deno.test('renderNodePickSnapshot returns compact offscreen bytes and pick metad
 
   const snapshot = await renderNodePickSnapshot(
     mocks as unknown as Parameters<typeof renderNodePickSnapshot>[0],
-    createOffscreenContext({
+    createOffscreenBinding({
       device: mocks.device as unknown as GPUDevice,
       target: createHeadlessTarget(2, 2),
     }),
@@ -397,7 +397,7 @@ Deno.test('renderNodePickSnapshot uses an internal rgba8unorm target for readbac
 
   const snapshot = await renderNodePickSnapshot(
     mocks as unknown as Parameters<typeof renderNodePickSnapshot>[0],
-    createOffscreenContext({
+    createOffscreenBinding({
       device: mocks.device as unknown as GPUDevice,
       target: {
         kind: 'offscreen',

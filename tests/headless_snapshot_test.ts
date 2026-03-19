@@ -2,7 +2,7 @@ import { assertEquals } from 'jsr:@std/assert@^1.0.14';
 import { evaluateScene } from '@rieul3d/core';
 import {
   compactOffscreenReadback,
-  createOffscreenContext,
+  createOffscreenBinding,
   createOffscreenReadbackPlan,
   createRuntimeResidency,
 } from '@rieul3d/gpu';
@@ -132,7 +132,7 @@ Deno.test('renderForwardSnapshot returns compact offscreen bytes for headless sn
     indexCount: 0,
   });
 
-  const binding = createOffscreenContext({
+  const binding = createOffscreenBinding({
     device: mocks.device as unknown as GPUDevice,
     target: createHeadlessTarget(2, 2),
   });
@@ -187,7 +187,7 @@ Deno.test('renderForwardSnapshot also captures volume-only scenes with seeded re
     format: 'r8unorm',
   });
 
-  const binding = createOffscreenContext({
+  const binding = createOffscreenBinding({
     device: mocks.device as unknown as GPUDevice,
     target: createHeadlessTarget(2, 2),
   });
@@ -233,7 +233,7 @@ Deno.test('renderDeferredSnapshot returns compact offscreen bytes for minimal de
     indexCount: 0,
   });
 
-  const binding = createOffscreenContext({
+  const binding = createOffscreenBinding({
     device: mocks.device as unknown as GPUDevice,
     target: createHeadlessTarget(2, 2),
   });
@@ -311,7 +311,7 @@ Deno.test('renderDeferredSnapshot also accepts textured deferred scenes with res
     format: 'rgba8unorm-srgb',
   });
 
-  const binding = createOffscreenContext({
+  const binding = createOffscreenBinding({
     device: mocks.device as unknown as GPUDevice,
     target: createHeadlessTarget(2, 2),
   });
@@ -351,7 +351,7 @@ Deno.test('renderForwardSnapshot also supports post-process blit passes', async 
     indexCount: 0,
   });
 
-  const binding = createOffscreenContext({
+  const binding = createOffscreenBinding({
     device: mocks.device as unknown as GPUDevice,
     target: createHeadlessTarget(2, 2),
   });

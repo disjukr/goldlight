@@ -1,7 +1,7 @@
 import { dirname, fromFileUrl, resolve } from '@std/path';
 import { evaluateScene } from '@rieul3d/core';
 import {
-  createOffscreenContext,
+  createOffscreenBinding,
   createRuntimeResidency,
   rebuildRuntimeResidency,
   requestGpuContext,
@@ -125,7 +125,7 @@ const main = async () => {
     { images: new Map(), volumes: new Map() },
   );
 
-  const binding = createOffscreenContext(context);
+  const binding = createOffscreenBinding(context);
   const snapshot = await renderForwardSnapshot(context, binding, residency, evaluatedScene);
   const pngBytes = encodePngRgba(snapshot);
 

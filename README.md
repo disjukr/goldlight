@@ -11,11 +11,12 @@ The repository is organized as a Deno workspace with packages for:
 - `@rieul3d/primitives`: procedural polygon mesh generators for common shapes plus local SDF-to-mesh
   extraction helpers; separate from runtime SDF primitives
 - `@rieul3d/procedural`: deterministic procedural noise, texture, and volume generators
-- `@rieul3d/loaders`: OBJ/STL/PLY/glTF ingestion into scene IR
+- `@rieul3d/importers`: OBJ/STL/PLY/glTF ingestion into scene IR
 - `@rieul3d/react`: declarative authoring adapter
 - `@rieul3d/react/reconciler`: experimental React reconciler host over the package-local scene
   document
 - `@rieul3d/platform`: browser, Deno, and headless targets
+- `@rieul3d/exporters`: output encoders such as PNG
 - `@rieul3d/desktop`: single-process desktop shell bootstrap over a Rust `winit` FFI host
 
 The design source of truth lives in [`docs/specs`](./docs/specs) and [`docs/adr`](./docs/adr).

@@ -16,7 +16,7 @@ import {
   resizeSurfaceBindingTarget,
 } from '@rieul3d/gpu';
 import type { MeshPrimitive } from '@rieul3d/ir';
-import { loadPlyFromText } from '@rieul3d/loaders';
+import { loadPlyFromText } from '@rieul3d/importers';
 import {
   createReactSceneRoot,
   createSceneRootForwardRenderer,

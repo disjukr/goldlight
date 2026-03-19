@@ -238,6 +238,8 @@ export const createOffscreenBinding = (
   };
 };
 
+export const createOffscreenContext = createOffscreenBinding;
+
 export const bindRenderTarget = (
   context: Pick<GpuContext, 'device' | 'target'>,
   binding:

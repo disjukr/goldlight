@@ -7,7 +7,8 @@ import {
   rebuildRuntimeResidency,
   requestGpuContext,
 } from '@rieul3d/gpu';
-import { createHeadlessTarget, encodePngRgba } from '@rieul3d/platform';
+import { createHeadlessTarget } from '@rieul3d/platform';
+import { encodePngRgba } from '@rieul3d/exporters';
 import { renderForwardSnapshot } from '@rieul3d/renderer';
 import clearOnlyFrameFixture from './fixtures/golden-snapshots/clear-only-frame.png' with {
   type: 'bytes',

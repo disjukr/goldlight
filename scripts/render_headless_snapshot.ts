@@ -15,7 +15,8 @@ import {
   createVec3,
   identityTransform,
 } from '@rieul3d/ir';
-import { createHeadlessTarget, encodePngRgba } from '@rieul3d/platform';
+import { createHeadlessTarget } from '@rieul3d/platform';
+import { encodePngRgba } from '@rieul3d/exporters';
 import { renderForwardSnapshot } from '@rieul3d/renderer';
 
 const defaultWidth = 512;

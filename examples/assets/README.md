@@ -5,7 +5,7 @@ This directory stores small, versioned assets that are practical to keep in the 
 ## Included Assets
 
 - `stanford-bunny/`: Stanford Bunny source refresh target plus the extracted `bun_zipper.ply`
-  reconstruction mesh, now directly loadable through `@rieul3d/loaders`
+  reconstruction mesh, now directly loadable through `@rieul3d/importers`
 - `damaged-helmet/`: Khronos `DamagedHelmet.glb` sample asset
 
 ## Refresh Commands

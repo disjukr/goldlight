@@ -9,7 +9,7 @@ import {
   loadPlyFromText,
   loadStlFromText,
   readDenoGltfExternalResources,
-} from '@rieul3d/loaders';
+} from '@rieul3d/importers';
 
 const textEncoder = new TextEncoder();
 

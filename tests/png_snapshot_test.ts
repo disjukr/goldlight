@@ -1,5 +1,5 @@
 import { assertEquals, assertThrows } from 'jsr:@std/assert@^1.0.14';
-import { encodePngRgba } from '@rieul3d/platform';
+import { encodePngRgba } from '@rieul3d/exporters';
 
 const decodeAscii = (bytes: Uint8Array): string => new TextDecoder().decode(bytes);
 

@@ -20,8 +20,8 @@ supersedes them.
   post-processing is an explicit scene-color to post-process to present execution stage
 - [`0008-react-reconciler-scene-document.md`](./0008-react-reconciler-scene-document.md): React
   reconciler should target an internal scene document before publishing scene data updates
-- [`0009-cubemap-capture-boundary.md`](./0009-cubemap-capture-boundary.md): cubemap capture
-  should be a renderer output boundary before reprojection or export layouts
+- [`0009-cubemap-capture-boundary.md`](./0009-cubemap-capture-boundary.md): cubemap capture should
+  be a renderer output boundary before reprojection or export layouts
 
 ## Related References
 

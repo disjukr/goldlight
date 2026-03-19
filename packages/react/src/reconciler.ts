@@ -35,6 +35,16 @@ import {
   upsertSceneDocumentResource,
 } from './scene_document.ts';
 
+type AliasNodeProps = Pick<
+  PerspectiveCameraJsxProps,
+  'nodeId' | 'name' | 'transform' | 'position' | 'rotation' | 'scale'
+>;
+type AliasHostProps =
+  & AliasNodeProps
+  & Readonly<{
+    __hasChildIntent?: boolean;
+  }>;
+
 type ResourceIntrinsicType = 'asset' | 'texture' | 'material' | 'light' | 'mesh' | 'camera';
 type AliasIntrinsicType = 'group' | 'perspectiveCamera' | 'orthographicCamera' | 'directionalLight';
 type HostIntrinsicType = 'scene' | 'node' | ResourceIntrinsicType | AliasIntrinsicType;
@@ -63,9 +73,9 @@ type HostPropsByType = {
   light: LightJsxProps;
   mesh: MeshJsxProps;
   camera: CameraJsxProps;
-  perspectiveCamera: PerspectiveCameraJsxProps;
-  orthographicCamera: OrthographicCameraJsxProps;
-  directionalLight: DirectionalLightJsxProps;
+  perspectiveCamera: PerspectiveCameraJsxProps & AliasHostProps;
+  orthographicCamera: OrthographicCameraJsxProps & AliasHostProps;
+  directionalLight: DirectionalLightJsxProps & AliasHostProps;
 };
 
 type HostPropsWithoutChildren<TType extends HostIntrinsicType> = Omit<
@@ -334,20 +344,30 @@ const extractProps = <TType extends HostIntrinsicType>(
   type: TType,
   props: Record<string, unknown>,
 ): HostPropsWithoutChildren<TType> => {
-  const { children: _children, ...rest } = props;
+  const { children: rawChildren, ...rest } = props;
   if (type === 'node' || type === 'group') {
     return normalizeNodeProps(rest as NodeJsxProps) as HostPropsWithoutChildren<TType>;
+  }
+  if (
+    type === 'perspectiveCamera' || type === 'orthographicCamera' || type === 'directionalLight'
+  ) {
+    return {
+      ...rest,
+      __hasChildIntent: hasRawChildIntent(rawChildren),
+    } as unknown as HostPropsWithoutChildren<TType>;
   }
   return rest as HostPropsWithoutChildren<TType>;
 };
 
-type AliasNodeProps = Pick<
-  PerspectiveCameraJsxProps,
-  'nodeId' | 'name' | 'transform' | 'position' | 'rotation' | 'scale'
->;
+const hasRawChildIntent = (children: unknown): boolean => {
+  if (Array.isArray(children)) {
+    return children.some((child) => hasRawChildIntent(child));
+  }
+  return children !== undefined && children !== null && children !== false && children !== true;
+};
 
 const hasAliasNodeIntent = (
-  props: AliasNodeProps,
+  props: AliasHostProps,
   children: readonly HostChild[],
 ): boolean =>
   props.nodeId !== undefined ||
@@ -356,6 +376,7 @@ const hasAliasNodeIntent = (
   props.position !== undefined ||
   props.rotation !== undefined ||
   props.scale !== undefined ||
+  props.__hasChildIntent === true ||
   children.length > 0;
 
 const syncAliasNode = (
@@ -365,7 +386,7 @@ const syncAliasNode = (
   nodeIndex: number,
   boundId: string,
   binding: Pick<NodeJsxProps, 'cameraId'> | Pick<NodeJsxProps, 'lightId'>,
-  props: AliasNodeProps,
+  props: AliasHostProps,
   children: readonly HostChild[],
   visitChildren: (
     parentId: string | undefined,
@@ -377,7 +398,7 @@ const syncAliasNode = (
     return nodeIndex;
   }
 
-  const { nodeId, ...restNodeProps } = props;
+  const { nodeId, __hasChildIntent: _hasChildIntent, ...restNodeProps } = props;
   const id = nodeId ?? boundId;
   visitedNodeIds.add(id);
   upsertSceneDocumentNode(document, {
@@ -559,6 +580,7 @@ const syncContainerSceneDocument = (container: HostContainer): void => {
           position,
           rotation,
           scale,
+          __hasChildIntent,
           ...cameraProps
         } = child.props;
         visitedResourceIds.camera.add(id);
@@ -577,7 +599,7 @@ const syncContainerSceneDocument = (container: HostContainer): void => {
           nodeIndex,
           id,
           { cameraId: id },
-          { nodeId, name, transform, position, rotation, scale },
+          { nodeId, name, transform, position, rotation, scale, __hasChildIntent },
           child.children,
           visitChildren,
         );
@@ -591,6 +613,7 @@ const syncContainerSceneDocument = (container: HostContainer): void => {
           position,
           rotation,
           scale,
+          __hasChildIntent,
           ...cameraProps
         } = child.props;
         visitedResourceIds.camera.add(id);
@@ -609,7 +632,7 @@ const syncContainerSceneDocument = (container: HostContainer): void => {
           nodeIndex,
           id,
           { cameraId: id },
-          { nodeId, name, transform, position, rotation, scale },
+          { nodeId, name, transform, position, rotation, scale, __hasChildIntent },
           child.children,
           visitChildren,
         );
@@ -623,6 +646,7 @@ const syncContainerSceneDocument = (container: HostContainer): void => {
           position,
           rotation,
           scale,
+          __hasChildIntent,
           ...lightProps
         } = child.props;
         visitedResourceIds.light.add(id);
@@ -641,7 +665,7 @@ const syncContainerSceneDocument = (container: HostContainer): void => {
           nodeIndex,
           id,
           { lightId: id },
-          { nodeId, name, transform, position, rotation, scale },
+          { nodeId, name, transform, position, rotation, scale, __hasChildIntent },
           child.children,
           visitChildren,
         );

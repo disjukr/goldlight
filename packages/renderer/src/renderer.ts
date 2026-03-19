@@ -573,6 +573,17 @@ const cubemapFaceDescriptorByFace = new Map(
 const clampNumber = (value: number, min: number, max: number): number =>
   Math.min(Math.max(value, min), max);
 
+const hashString = (value: string): string => {
+  let hash = 2166136261;
+
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return (hash >>> 0).toString(16).padStart(8, '0');
+};
+
 const createRgbaBuffer = (width: number, height: number): Uint8Array =>
   new Uint8Array(width * height * 4);
 
@@ -2171,7 +2182,12 @@ export const ensurePostProcessPipeline = (
   program: PostProcessProgram,
   format: GPUTextureFormat,
 ): GPURenderPipeline => {
-  const cacheKey = `${program.id}:${format}`;
+  const programSignature = hashString(
+    `${program.wgsl}\n${program.fragmentEntryPoint}\n${
+      program.usesUniformBuffer ? 'uniform' : 'nouniform'
+    }`,
+  );
+  const cacheKey = `${program.id}:${format}:${programSignature}`;
   const cached = residency.pipelines.get(cacheKey);
   if (cached) {
     return cached as GPURenderPipeline;

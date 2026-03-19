@@ -6,6 +6,7 @@ import {
   inferSdfExtractionBounds,
 } from '@rieul3d/primitives';
 import type { MeshPrimitive, SdfPrimitive } from '@rieul3d/ir';
+import { triangulateMarchingCubesCell } from '../packages/primitives/src/sdf_mesh.ts';
 
 const getAttribute = (mesh: MeshPrimitive, semantic: string): readonly number[] => {
   const attribute = mesh.attributes.find((candidate) => candidate.semantic === semantic);
@@ -165,6 +166,59 @@ Deno.test('surface-nets sphere extraction closes tight bounds at the poles', () 
 
   assert(Math.abs(minY + 0.75) < 0.05);
   assert(Math.abs(maxY - 0.75) < 0.05);
+});
+
+Deno.test('triangulateMarchingCubesCell follows canonical case-table edge wiring', () => {
+  const triangles = triangulateMarchingCubesCell(
+    [
+      [0, 0, 0],
+      [1, 0, 0],
+      [1, 1, 0],
+      [0, 1, 0],
+      [0, 0, 1],
+      [1, 0, 1],
+      [1, 1, 1],
+      [0, 1, 1],
+    ],
+    [-1, 1, -1, 1, 1, 1, 1, 1],
+    0,
+  );
+
+  assertEquals(triangles.length, 2);
+  assertEquals(
+    triangles.map((triangle) => triangle.map(([x, y, z]) => [x, y, z])),
+    [
+      [
+        [0.5, 0, 0],
+        [0, 0, 0.5],
+        [0, 0.5, 0],
+      ],
+      [
+        [1, 0.5, 0],
+        [0.5, 1, 0],
+        [1, 1, 0.5],
+      ],
+    ],
+  );
+});
+
+Deno.test('triangulateMarchingCubesCell emits one quad split instead of a centroid fan', () => {
+  const triangles = triangulateMarchingCubesCell(
+    [
+      [0, 0, 0],
+      [1, 0, 0],
+      [1, 1, 0],
+      [0, 1, 0],
+      [0, 0, 1],
+      [1, 0, 1],
+      [1, 1, 1],
+      [0, 1, 1],
+    ],
+    [-1, -1, 1, 1, -1, -1, 1, 1],
+    0,
+  );
+
+  assertEquals(triangles.length, 2);
 });
 
 Deno.test('sdf extraction rejects unsupported ops, invalid dimensions, and invalid resolutions', () => {

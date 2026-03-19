@@ -1,7 +1,9 @@
 import type { MeshPrimitive, SdfPrimitive } from '@rieul3d/ir';
+import { marchingCubesEdgeTable, marchingCubesTriTable } from './marching_cubes_tables.ts';
 
 type Vec3 = readonly [number, number, number];
 type Vec2 = readonly [number, number];
+type Triangle = readonly [Vec3, Vec3, Vec3];
 
 export type SdfExtractionAlgorithm = 'marching-cubes' | 'surface-nets';
 
@@ -379,24 +381,6 @@ const pushVertex = (
   return index;
 };
 
-const sortPointsOnPlane = (
-  points: readonly Vec3[],
-  center: Vec3,
-  normal: Vec3,
-): readonly Vec3[] => {
-  const tangentSeed = Math.abs(normal[1]) > 0.9 ? [1, 0, 0] as const : [0, 1, 0] as const;
-  const tangent = normalizeVec3(crossVec3(tangentSeed, normal));
-  const bitangent = normalizeVec3(crossVec3(normal, tangent));
-
-  return [...points].sort((left, right) => {
-    const leftOffset = subtractVec3(left, center);
-    const rightOffset = subtractVec3(right, center);
-    const leftAngle = Math.atan2(dotVec3(leftOffset, bitangent), dotVec3(leftOffset, tangent));
-    const rightAngle = Math.atan2(dotVec3(rightOffset, bitangent), dotVec3(rightOffset, tangent));
-    return leftAngle - rightAngle;
-  });
-};
-
 const dedupePoints = (points: readonly Vec3[]): readonly Vec3[] => {
   const unique: Vec3[] = [];
 
@@ -412,6 +396,64 @@ const dedupePoints = (points: readonly Vec3[]): readonly Vec3[] => {
   }
 
   return unique;
+};
+
+const classifyCorner = (value: number, isoLevel: number): boolean => value <= isoLevel + epsilon;
+
+export const triangulateMarchingCubesCell = (
+  cornerPoints: readonly Vec3[],
+  cornerValues: readonly number[],
+  isoLevel: number,
+): readonly Triangle[] => {
+  let cubeIndex = 0;
+  for (let index = 0; index < cubeCorners.length; index += 1) {
+    if (classifyCorner(cornerValues[index], isoLevel)) {
+      cubeIndex |= 1 << index;
+    }
+  }
+
+  const edgeMask = marchingCubesEdgeTable[cubeIndex];
+  if (edgeMask === 0) {
+    return [];
+  }
+
+  const edgeVertices = new Array<Vec3 | undefined>(cubeEdges.length);
+  for (let edgeIndex = 0; edgeIndex < cubeEdges.length; edgeIndex += 1) {
+    if ((edgeMask & (1 << edgeIndex)) === 0) {
+      continue;
+    }
+
+    const [cornerA, cornerB] = cubeEdges[edgeIndex];
+    edgeVertices[edgeIndex] = interpolateIsoPoint(
+      cornerPoints[cornerA],
+      cornerValues[cornerA],
+      cornerPoints[cornerB],
+      cornerValues[cornerB],
+      isoLevel,
+    );
+  }
+
+  const triangles: Triangle[] = [];
+  const tableOffset = cubeIndex * 16;
+  for (let index = 0; index < 16; index += 3) {
+    const edgeA = marchingCubesTriTable[tableOffset + index];
+    if (edgeA === -1) {
+      break;
+    }
+
+    const edgeB = marchingCubesTriTable[tableOffset + index + 1];
+    const edgeC = marchingCubesTriTable[tableOffset + index + 2];
+    const pointA = edgeVertices[edgeA];
+    const pointB = edgeVertices[edgeB];
+    const pointC = edgeVertices[edgeC];
+    if (!pointA || !pointB || !pointC) {
+      throw new Error(`marching-cubes table referenced an inactive edge for case ${cubeIndex}`);
+    }
+
+    triangles.push([pointA, pointB, pointC]);
+  }
+
+  return triangles;
 };
 
 export const extractMarchingCubesMesh = (
@@ -434,61 +476,39 @@ export const extractMarchingCubesMesh = (
         const cornerValues = cubeCorners.map(([ox, oy, oz]) =>
           grid.values[latticeIndex(grid.resolution, x + ox, y + oy, z + oz)]
         );
-        const intersections = dedupePoints(
-          cubeEdges.flatMap(([a, b]) =>
-            crossesIsoLevel(cornerValues[a], cornerValues[b], grid.isoLevel)
-              ? [interpolateIsoPoint(
-                cornerPoints[a],
-                cornerValues[a],
-                cornerPoints[b],
-                cornerValues[b],
-                grid.isoLevel,
-              )]
-              : []
-          ),
-        );
-
-        if (intersections.length < 3) {
+        const triangles = triangulateMarchingCubesCell(cornerPoints, cornerValues, grid.isoLevel);
+        if (triangles.length === 0) {
           continue;
         }
 
-        const center = scaleVec3(
-          intersections.reduce<Vec3>((acc, point) => addVec3(acc, point), [0, 0, 0]),
-          1 / intersections.length,
-        );
-        const centerNormal = estimateNormal(primitive, center, normalStep);
-        const ordered = sortPointsOnPlane(intersections, center, centerNormal);
-        const centerIndex = pushVertex(
-          positions,
-          normals,
-          texcoords,
-          center,
-          centerNormal,
-          grid.bounds,
-        );
-        const ringIndices = ordered.map((point) =>
-          pushVertex(
-            positions,
-            normals,
-            texcoords,
-            point,
-            estimateNormal(primitive, point, normalStep),
-            grid.bounds,
-          )
-        );
-
-        for (let index = 0; index < ringIndices.length; index += 1) {
-          const current = ringIndices[index];
-          const next = ringIndices[(index + 1) % ringIndices.length];
-          const triangleNormal = crossVec3(
-            subtractVec3(ordered[index], center),
-            subtractVec3(ordered[(index + 1) % ordered.length], center),
+        for (const triangle of triangles) {
+          const triangleNormals = triangle.map((point) =>
+            estimateNormal(primitive, point, normalStep)
           );
-          if (dotVec3(triangleNormal, centerNormal) >= 0) {
-            indices.push(centerIndex, current, next);
-          } else {
-            indices.push(centerIndex, next, current);
-          }
+          const averageNormal = normalizeVec3(
+            triangleNormals.reduce<Vec3>((acc, normal) => addVec3(acc, normal), [0, 0, 0]),
+          );
+          const triangleNormal = crossVec3(
+            subtractVec3(triangle[1], triangle[0]),
+            subtractVec3(triangle[2], triangle[0]),
+          );
+          const orderedTriangle = dotVec3(triangleNormal, averageNormal) >= 0
+            ? triangle
+            : [triangle[0], triangle[2], triangle[1]] as const;
+          const orderedNormals = dotVec3(triangleNormal, averageNormal) >= 0
+            ? triangleNormals
+            : [triangleNormals[0], triangleNormals[2], triangleNormals[1]] as const;
+          const triangleIndices = orderedTriangle.map((point, index) =>
+            pushVertex(
+              positions,
+              normals,
+              texcoords,
+              point,
+              orderedNormals[index],
+              grid.bounds,
+            )
+          );
+          indices.push(triangleIndices[0], triangleIndices[1], triangleIndices[2]);
         }
       }
     }

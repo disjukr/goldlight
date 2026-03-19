@@ -277,6 +277,46 @@ Deno.test('authoringTreeToSceneIr lowers scene resources authored in JSX', () =>
   assertEquals(scene.nodes.map((node) => node.id), ['camera-node', 'light-node', 'mesh-node']);
 });
 
+Deno.test('authoringTreeToSceneIr lowers sdf and volume primitives authored in JSX', () => {
+  const scene = authoringTreeToSceneIr(
+    <scene id='jsx-scene'>
+      <sdf
+        id='sdf-sphere'
+        op='sphere'
+        parameters={{
+          radius: { x: 0.75, y: 0, z: 0, w: 0 },
+        }}
+      />
+      <volume
+        id='density-volume'
+        assetId='volume-asset'
+        dimensions={{ x: 4, y: 4, z: 4 }}
+        format='density:r8unorm'
+      />
+      <node id='sdf-node' sdfId='sdf-sphere' />
+      <node id='volume-node' volumeId='density-volume' />
+    </scene>,
+  );
+
+  assertEquals(scene.sdfPrimitives, [{
+    id: 'sdf-sphere',
+    op: 'sphere',
+    parameters: {
+      radius: { x: 0.75, y: 0, z: 0, w: 0 },
+    },
+  }]);
+  assertEquals(scene.volumePrimitives, [{
+    id: 'density-volume',
+    assetId: 'volume-asset',
+    dimensions: { x: 4, y: 4, z: 4 },
+    format: 'density:r8unorm',
+  }]);
+  assertEquals(scene.nodes.map((node) => [node.id, node.sdfId ?? node.volumeId]), [
+    ['sdf-node', 'sdf-sphere'],
+    ['volume-node', 'density-volume'],
+  ]);
+});
+
 Deno.test('createAuthoringElement mirrors ids into programmatic scene resources', () => {
   const scene = authoringTreeToSceneIr(
     createAuthoringElement('scene', 'programmatic-scene', { activeCameraId: 'camera-main' }, [

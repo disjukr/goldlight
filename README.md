@@ -75,7 +75,7 @@ Implemented today:
   updates through the experimental React reconciler host
 - a browser React authoring example plus the current `createSceneRoot()` snapshot path that commits
   JSX-authored trees into `SceneIr` snapshots before rendering, including JSX-authored scene
-  resources such as meshes, materials, and cameras, exported convenience components for common
+  resources such as meshes, materials, cameras, SDFs, and volumes, exported convenience components for common
   camera/light composition, an internal React-owned scene document that preserves stable resource
   and node host instances across commits before publishing data-only snapshots, and commit-summary
   plus update-plan helpers for targeted residency invalidation without forcing resets for

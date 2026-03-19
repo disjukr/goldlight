@@ -8,7 +8,7 @@ React integration is a separate package. It must not become the source of truth 
 
 - JSX authoring trees are built through `@rieul3d/react` primitives such as `<scene>` and `<node>`.
 - Authored trees may also declare scene resources such as `<camera>`, `<mesh>`, `<material>`,
-  `<light>`, `<texture>`, and `<asset>`.
+  `<light>`, `<texture>`, `<asset>`, `<sdf>`, and `<volume>`.
 - Node-like authoring elements may expose React-style shorthands such as `<group>` plus transform
   props such as `position`, `rotation`, and `scale` when they still lower cleanly into the same
   node-oriented Scene IR structure.

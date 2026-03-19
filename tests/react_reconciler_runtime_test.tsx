@@ -94,3 +94,39 @@ Deno.test('live convenience components keep bound nodes for composite children w
     'sun',
   ]);
 });
+
+Deno.test('createReactSceneRoot accepts live sdf and volume resource intrinsics', () => {
+  const root = createReactSceneRoot(
+    <scene id='volumetric-scene'>
+      <sdf
+        id='sdf-sphere'
+        op='sphere'
+        parameters={{
+          radius: { x: 0.5, y: 0, z: 0, w: 0 },
+        }}
+      />
+      <volume
+        id='density-volume'
+        assetId='volume-asset'
+        dimensions={{ x: 4, y: 4, z: 4 }}
+        format='density:r8unorm'
+      />
+      <node id='sdf-node' sdfId='sdf-sphere' />
+      <node id='volume-node' volumeId='density-volume' />
+    </scene>,
+  );
+
+  assertEquals(root.getScene()?.sdfPrimitives, [{
+    id: 'sdf-sphere',
+    op: 'sphere',
+    parameters: {
+      radius: { x: 0.5, y: 0, z: 0, w: 0 },
+    },
+  }]);
+  assertEquals(root.getScene()?.volumePrimitives, [{
+    id: 'density-volume',
+    assetId: 'volume-asset',
+    dimensions: { x: 4, y: 4, z: 4 },
+    format: 'density:r8unorm',
+  }]);
+});

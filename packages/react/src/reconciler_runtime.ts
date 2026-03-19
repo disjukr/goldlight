@@ -12,7 +12,9 @@ import type {
   OrthographicCameraJsxProps,
   PerspectiveCameraJsxProps,
   SceneJsxProps,
+  SdfJsxProps,
   TextureJsxProps,
+  VolumeJsxProps,
 } from './authoring.ts';
 
 export type ReconcilerSceneProps = Readonly<
@@ -162,6 +164,8 @@ declare global {
       material: MaterialJsxProps;
       light: LightJsxProps;
       mesh: MeshJsxProps;
+      sdf: SdfJsxProps;
+      volume: VolumeJsxProps;
       camera: CameraJsxProps;
     }
   }

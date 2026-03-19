@@ -16,6 +16,9 @@ import builtInForwardLitShader from './shaders/built_in_forward_lit.wgsl' with {
 import builtInForwardTexturedShader from './shaders/built_in_forward_unlit_textured.wgsl' with {
   type: 'text',
 };
+import builtInForwardTexturedLitShader from './shaders/built_in_forward_lit_textured.wgsl' with {
+  type: 'text',
+};
 import builtInDeferredDepthPrepassShader from './shaders/built_in_deferred_depth_prepass.wgsl' with {
   type: 'text',
 };
@@ -26,9 +29,6 @@ import builtInDeferredGbufferTexturedUnlitShader from './shaders/built_in_deferr
   type: 'text',
 };
 import builtInDeferredGbufferLitShader from './shaders/built_in_deferred_gbuffer_lit.wgsl' with {
-  type: 'text',
-};
-import builtInDeferredGbufferTexturedLitShader from './shaders/built_in_deferred_gbuffer_lit_textured.wgsl' with {
   type: 'text',
 };
 import builtInDeferredLightingShader from './shaders/built_in_deferred_lighting.wgsl' with {
@@ -310,11 +310,11 @@ export type DirectionalLightItem = Readonly<{
 const builtInUnlitProgramId = 'built-in:unlit';
 const builtInLitProgramId = 'built-in:lit';
 const builtInTexturedUnlitProgramId = 'built-in:unlit-textured';
+const builtInTexturedLitProgramId = 'built-in:lit-textured';
 const builtInDeferredDepthPrepassProgramId = 'built-in:deferred-depth-prepass';
 const builtInDeferredGbufferUnlitProgramId = 'built-in:deferred-gbuffer-unlit';
 const builtInDeferredGbufferTexturedUnlitProgramId = 'built-in:deferred-gbuffer-unlit-textured';
 const builtInDeferredGbufferLitProgramId = 'built-in:deferred-gbuffer-lit';
-const builtInDeferredGbufferTexturedLitProgramId = 'built-in:deferred-gbuffer-lit-textured';
 const builtInDeferredLightingProgramId = 'built-in:deferred-lighting';
 const builtInSdfRaymarchProgramId = 'built-in:sdf-raymarch';
 const builtInVolumeRaymarchProgramId = 'built-in:volume-raymarch';
@@ -993,6 +993,55 @@ const builtInTexturedUnlitProgram: MaterialProgram = {
   ],
 };
 
+const builtInTexturedLitProgram: MaterialProgram = {
+  id: builtInTexturedLitProgramId,
+  label: 'Built-in Lit (Textured)',
+  wgsl: builtInForwardTexturedLitShader,
+  vertexEntryPoint: 'vsMain',
+  fragmentEntryPoint: 'fsMain',
+  usesMaterialBindings: true,
+  usesTransformBindings: true,
+  materialBindings: [
+    {
+      kind: 'uniform',
+      binding: 0,
+    },
+    {
+      kind: 'texture',
+      binding: 1,
+      textureSemantic: 'baseColor',
+    },
+    {
+      kind: 'sampler',
+      binding: 2,
+      textureSemantic: 'baseColor',
+    },
+  ],
+  vertexAttributes: [
+    {
+      semantic: 'POSITION',
+      shaderLocation: 0,
+      format: 'float32x3',
+      offset: 0,
+      arrayStride: 12,
+    },
+    {
+      semantic: 'NORMAL',
+      shaderLocation: 1,
+      format: 'float32x3',
+      offset: 0,
+      arrayStride: 12,
+    },
+    {
+      semantic: 'TEXCOORD_0',
+      shaderLocation: 2,
+      format: 'float32x2',
+      offset: 0,
+      arrayStride: 8,
+    },
+  ],
+};
+
 const builtInDeferredGbufferUnlitProgram: MaterialProgram = {
   id: builtInDeferredGbufferUnlitProgramId,
   label: 'Built-in Deferred G-buffer Unlit',
@@ -1102,55 +1151,6 @@ const builtInDeferredGbufferLitProgram: MaterialProgram = {
   ],
 };
 
-const builtInDeferredGbufferTexturedLitProgram: MaterialProgram = {
-  id: builtInDeferredGbufferTexturedLitProgramId,
-  label: 'Built-in Deferred G-buffer Lit (Textured)',
-  wgsl: builtInDeferredGbufferTexturedLitShader,
-  vertexEntryPoint: 'vsMain',
-  fragmentEntryPoint: 'fsMain',
-  usesMaterialBindings: true,
-  usesTransformBindings: true,
-  materialBindings: [
-    {
-      kind: 'uniform',
-      binding: 0,
-    },
-    {
-      kind: 'texture',
-      binding: 1,
-      textureSemantic: 'baseColor',
-    },
-    {
-      kind: 'sampler',
-      binding: 2,
-      textureSemantic: 'baseColor',
-    },
-  ],
-  vertexAttributes: [
-    {
-      semantic: 'POSITION',
-      shaderLocation: 0,
-      format: 'float32x3',
-      offset: 0,
-      arrayStride: 12,
-    },
-    {
-      semantic: 'NORMAL',
-      shaderLocation: 1,
-      format: 'float32x3',
-      offset: 0,
-      arrayStride: 12,
-    },
-    {
-      semantic: 'TEXCOORD_0',
-      shaderLocation: 2,
-      format: 'float32x2',
-      offset: 0,
-      arrayStride: 8,
-    },
-  ],
-};
-
 const builtInPostProcessBlitProgram: PostProcessProgram = {
   id: builtInPostProcessBlitProgramId,
   label: 'Built-in Post-Process Blit',
@@ -1190,6 +1190,7 @@ export const createMaterialRegistry = (): MaterialRegistry => ({
 
 export type ResolveMaterialProgramOptions = Readonly<{
   preferTexturedUnlit?: boolean;
+  preferTexturedLit?: boolean;
 }>;
 
 export const registerWgslMaterial = (
@@ -1225,6 +1226,9 @@ export const resolveMaterialProgram = (
   }
 
   if (material.kind === 'lit') {
+    if (options.preferTexturedLit) {
+      return registry.programs.get(builtInTexturedLitProgramId) ?? builtInTexturedLitProgram;
+    }
     return registry.programs.get(builtInLitProgramId) ?? builtInLitProgram;
   }
 
@@ -1638,13 +1642,7 @@ export const collectRendererCapabilityIssues = (
 
       const baseColorTexture = materialTextures.find((texture) => texture.semantic === 'baseColor');
       if (baseColorTexture) {
-        if (renderer.kind !== 'deferred') {
-          pushIssue(
-            'material-binding',
-            'light-material:textures-unsupported',
-            `renderer "${renderer.label}" does not yet support textures on built-in lit material "${material.id}"`,
-          );
-        } else if (node.mesh && !hasTexcoord0) {
+        if (node.mesh && !hasTexcoord0) {
           pushIssue(
             'material-binding',
             'vertex-attribute:TEXCOORD_0',
@@ -1931,7 +1929,166 @@ const createDirectionalLightUniformData = (
 };
 
 const usesLitMaterialProgram = (program: MaterialProgram): boolean =>
-  program.id === builtInLitProgramId;
+  program.id === builtInLitProgramId || program.id === builtInTexturedLitProgramId;
+
+const prefersTexturedMaterialProgram = (
+  program: MaterialProgram,
+  material: Material,
+  geometry: NonNullable<RuntimeResidency['geometry'] extends Map<string, infer T> ? T : never>,
+  residency: RuntimeResidency,
+): ResolveMaterialProgramOptions => {
+  const baseColorTexture = getBaseColorTextureResidency(residency, material);
+  if (!baseColorTexture || !geometry.attributeBuffers.TEXCOORD_0) {
+    return {};
+  }
+
+  if (program.id === builtInUnlitProgramId) {
+    return { preferTexturedUnlit: true };
+  }
+
+  if (program.id === builtInLitProgramId) {
+    return { preferTexturedLit: true };
+  }
+
+  return {};
+};
+
+const renderForwardMeshPass = (
+  context: GpuRenderExecutionContext,
+  pass: GPURenderPassEncoder,
+  residency: RuntimeResidency,
+  nodes: readonly EvaluatedScene['nodes'][number][],
+  materialRegistry: MaterialRegistry,
+  format: GPUTextureFormat,
+  viewProjectionMatrix: readonly number[],
+  directionalLights: readonly DirectionalLightItem[],
+): number => {
+  let drawCount = 0;
+
+  for (const node of nodes) {
+    const mesh = node.mesh;
+    if (!mesh) {
+      continue;
+    }
+
+    const geometry = residency.geometry.get(mesh.id);
+    if (!geometry) {
+      continue;
+    }
+
+    const material = node.material ?? createDefaultMaterial();
+    const resolvedProgram = resolveMaterialProgram(materialRegistry, node.material);
+    const programOptions = prefersTexturedMaterialProgram(
+      resolvedProgram,
+      material,
+      geometry,
+      residency,
+    );
+    const program = Object.keys(programOptions).length > 0
+      ? resolveMaterialProgram(materialRegistry, node.material, programOptions)
+      : resolvedProgram;
+    const pipeline = ensureMaterialPipeline(context, residency, program, format);
+
+    let isDrawable = true;
+    for (let index = 0; index < program.vertexAttributes.length; index += 1) {
+      const attribute = program.vertexAttributes[index];
+      if (attribute.offset !== 0) {
+        isDrawable = false;
+        break;
+      }
+
+      const buffer = geometry.attributeBuffers[attribute.semantic];
+      if (!buffer) {
+        isDrawable = false;
+        break;
+      }
+
+      pass.setVertexBuffer(index, buffer);
+    }
+
+    if (!isDrawable) {
+      continue;
+    }
+
+    pass.setPipeline(pipeline);
+
+    if (program.usesTransformBindings) {
+      const transformData = usesLitMaterialProgram(program)
+        ? createForwardLitMeshTransformUniformData(node.worldMatrix, viewProjectionMatrix)
+        : createForwardMeshTransformUniformData(node.worldMatrix, viewProjectionMatrix);
+      const transformBuffer = context.device.createBuffer({
+        label: `${node.node.id}:mesh-transform`,
+        size: transformData.byteLength,
+        usage: uniformUsage | bufferCopyDstUsage,
+      });
+      context.queue.writeBuffer(transformBuffer, 0, toBufferSource(transformData));
+      const transformBindGroup = context.device.createBindGroup({
+        layout: pipeline.getBindGroupLayout(0),
+        entries: [{
+          binding: 0,
+          resource: {
+            buffer: transformBuffer,
+          },
+        }],
+      });
+      pass.setBindGroup(0, transformBindGroup);
+    }
+
+    const materialBindings = getMaterialBindingDescriptors(program);
+    if (materialBindings.length > 0) {
+      const materialBindGroupIndex = program.usesTransformBindings ? 1 : 0;
+      const materialResidency = {
+        current: undefined as ReturnType<typeof ensureMaterialResidency> | undefined,
+      };
+      const bindGroup = context.device.createBindGroup({
+        layout: pipeline.getBindGroupLayout(materialBindGroupIndex),
+        entries: materialBindings.map((descriptor) =>
+          resolveMaterialBindingResource(
+            context,
+            residency,
+            material,
+            descriptor,
+            materialResidency,
+          )
+        ),
+      });
+      pass.setBindGroup(materialBindGroupIndex, bindGroup);
+    }
+
+    if (usesLitMaterialProgram(program)) {
+      const lightingData = createDirectionalLightUniformData(directionalLights);
+      const lightingBuffer = context.device.createBuffer({
+        label: `${node.node.id}:lighting`,
+        size: lightingData.byteLength,
+        usage: uniformUsage | bufferCopyDstUsage,
+      });
+      context.queue.writeBuffer(lightingBuffer, 0, toBufferSource(lightingData));
+      pass.setBindGroup(
+        2,
+        context.device.createBindGroup({
+          layout: pipeline.getBindGroupLayout(2),
+          entries: [{
+            binding: 0,
+            resource: {
+              buffer: lightingBuffer,
+            },
+          }],
+        }),
+      );
+    }
+
+    if (geometry.indexBuffer && geometry.indexCount > 0) {
+      pass.setIndexBuffer(geometry.indexBuffer, 'uint32');
+      pass.drawIndexed(geometry.indexCount, 1, 0, 0, 0);
+    } else {
+      pass.draw(geometry.vertexCount, 1, 0, 0);
+    }
+
+    drawCount += 1;
+  }
+
+  return drawCount;
+};
 
 export const ensureBuiltInForwardPipeline = (
   context: GpuRenderExecutionContext,
@@ -2599,10 +2756,7 @@ const resolveDeferredGbufferProgram = (
   }
 
   if (material.kind === 'lit') {
-    const baseColorTexture = getBaseColorTextureResidency(residency, material);
-    return baseColorTexture && geometry.attributeBuffers.TEXCOORD_0
-      ? builtInDeferredGbufferTexturedLitProgram
-      : builtInDeferredGbufferLitProgram;
+    return builtInDeferredGbufferLitProgram;
   }
 
   const baseColorTexture = getBaseColorTextureResidency(residency, material);
@@ -2679,129 +2833,17 @@ const renderForwardFrameInternal = (
     },
   });
 
-  let drawCount = 0;
   const directionalLights = extractDirectionalLightItems(evaluatedScene);
-  for (const node of evaluatedScene.nodes) {
-    const mesh = node.mesh;
-    if (!mesh) {
-      continue;
-    }
-
-    const geometry = residency.geometry.get(mesh.id);
-    if (!geometry) {
-      continue;
-    }
-
-    const material = node.material ?? createDefaultMaterial();
-    const baseColorTexture = getBaseColorTextureResidency(residency, material);
-    const resolvedProgram = resolveMaterialProgram(materialRegistry, node.material);
-    const preferTexturedUnlit = resolvedProgram.id === builtInUnlitProgramId &&
-      Boolean(baseColorTexture) &&
-      Boolean(geometry.attributeBuffers.TEXCOORD_0);
-    const program = preferTexturedUnlit
-      ? resolveMaterialProgram(materialRegistry, node.material, {
-        preferTexturedUnlit: true,
-      })
-      : resolvedProgram;
-    const pipeline = ensureMaterialPipeline(context, residency, program, binding.target.format);
-
-    let isDrawable = true;
-    for (let index = 0; index < program.vertexAttributes.length; index += 1) {
-      const attribute = program.vertexAttributes[index];
-      if (attribute.offset !== 0) {
-        isDrawable = false;
-        break;
-      }
-
-      const buffer = geometry.attributeBuffers[attribute.semantic];
-      if (!buffer) {
-        isDrawable = false;
-        break;
-      }
-
-      pass.setVertexBuffer(index, buffer);
-    }
-
-    if (!isDrawable) {
-      continue;
-    }
-
-    pass.setPipeline(pipeline);
-
-    if (program.usesTransformBindings) {
-      const transformData = usesLitMaterialProgram(program)
-        ? createForwardLitMeshTransformUniformData(node.worldMatrix, viewProjectionMatrix)
-        : createForwardMeshTransformUniformData(node.worldMatrix, viewProjectionMatrix);
-      const transformBuffer = context.device.createBuffer({
-        label: `${node.node.id}:mesh-transform`,
-        size: transformData.byteLength,
-        usage: uniformUsage | bufferCopyDstUsage,
-      });
-      context.queue.writeBuffer(transformBuffer, 0, toBufferSource(transformData));
-      const transformBindGroup = context.device.createBindGroup({
-        layout: pipeline.getBindGroupLayout(0),
-        entries: [{
-          binding: 0,
-          resource: {
-            buffer: transformBuffer,
-          },
-        }],
-      });
-      pass.setBindGroup(0, transformBindGroup);
-    }
-
-    const materialBindings = getMaterialBindingDescriptors(program);
-    if (materialBindings.length > 0) {
-      const materialBindGroupIndex = program.usesTransformBindings ? 1 : 0;
-      const materialResidency = {
-        current: undefined as ReturnType<typeof ensureMaterialResidency> | undefined,
-      };
-      const bindGroup = context.device.createBindGroup({
-        layout: pipeline.getBindGroupLayout(materialBindGroupIndex),
-        entries: materialBindings.map((descriptor) =>
-          resolveMaterialBindingResource(
-            context,
-            residency,
-            material,
-            descriptor,
-            materialResidency,
-          )
-        ),
-      });
-      pass.setBindGroup(materialBindGroupIndex, bindGroup);
-    }
-
-    if (usesLitMaterialProgram(program)) {
-      const lightingData = createDirectionalLightUniformData(directionalLights);
-      const lightingBuffer = context.device.createBuffer({
-        label: `${node.node.id}:lighting`,
-        size: lightingData.byteLength,
-        usage: uniformUsage | bufferCopyDstUsage,
-      });
-      context.queue.writeBuffer(lightingBuffer, 0, toBufferSource(lightingData));
-      pass.setBindGroup(
-        2,
-        context.device.createBindGroup({
-          layout: pipeline.getBindGroupLayout(2),
-          entries: [{
-            binding: 0,
-            resource: {
-              buffer: lightingBuffer,
-            },
-          }],
-        }),
-      );
-    }
-
-    if (geometry.indexBuffer && geometry.indexCount > 0) {
-      pass.setIndexBuffer(geometry.indexBuffer, 'uint32');
-      pass.drawIndexed(geometry.indexCount, 1, 0, 0, 0);
-    } else {
-      pass.draw(geometry.vertexCount, 1, 0, 0);
-    }
-
-    drawCount += 1;
-  }
+  let drawCount = renderForwardMeshPass(
+    context,
+    pass,
+    residency,
+    evaluatedScene.nodes,
+    materialRegistry,
+    binding.target.format,
+    viewProjectionMatrix,
+    directionalLights,
+  );
 
   pass.end();
 
@@ -3023,6 +3065,23 @@ export const renderDeferredFrame = (
     binding.target.format,
   );
   const directionalLights = extractDirectionalLightItems(evaluatedScene);
+  const viewProjectionMatrix = createViewProjectionMatrix(binding, evaluatedScene.activeCamera);
+  const forwardFallbackNodeIds = new Set(
+    evaluatedScene.nodes.filter((node) => {
+      const material = node.material;
+      const mesh = node.mesh;
+      if (!material || material.kind !== 'lit' || !mesh) {
+        return false;
+      }
+
+      const geometry = residency.geometry.get(mesh.id);
+      return Boolean(
+        geometry &&
+          getBaseColorTextureResidency(residency, material) &&
+          geometry.attributeBuffers.TEXCOORD_0,
+      );
+    }).map((node) => node.node.id),
+  );
 
   let drawCount = 0;
 
@@ -3044,7 +3103,7 @@ export const renderDeferredFrame = (
 
     const geometry = residency.geometry.get(mesh.id);
     const positionBuffer = geometry?.attributeBuffers.POSITION;
-    if (!geometry || !positionBuffer) {
+    if (!geometry || !positionBuffer || forwardFallbackNodeIds.has(node.node.id)) {
       continue;
     }
 
@@ -3107,7 +3166,7 @@ export const renderDeferredFrame = (
     }
 
     const geometry = residency.geometry.get(mesh.id);
-    if (!geometry) {
+    if (!geometry || forwardFallbackNodeIds.has(node.node.id)) {
       continue;
     }
 
@@ -3252,6 +3311,32 @@ export const renderDeferredFrame = (
   lightingPass.draw(3, 1, 0, 0);
   lightingPass.end();
   drawCount += 1;
+
+  if (forwardFallbackNodeIds.size > 0) {
+    const forwardLitPass = encoder.beginRenderPass({
+      colorAttachments: [{
+        view: lightingOutputView,
+        loadOp: 'load',
+        storeOp: 'store',
+      }],
+      depthStencilAttachment: {
+        view: depthView,
+        depthLoadOp: 'load',
+        depthStoreOp: 'store',
+      },
+    });
+    drawCount += renderForwardMeshPass(
+      context,
+      forwardLitPass,
+      residency,
+      evaluatedScene.nodes.filter((node) => forwardFallbackNodeIds.has(node.node.id)),
+      materialRegistry,
+      binding.target.format,
+      viewProjectionMatrix,
+      directionalLights,
+    );
+    forwardLitPass.end();
+  }
 
   drawCount += renderSdfRaymarchPass(
     context,

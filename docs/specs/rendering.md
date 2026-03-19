@@ -53,14 +53,17 @@ The initial renderer uses a lightweight pass graph:
   `viewProjection` matrix and apply both in the vertex stage before rasterization.
 - Forward mesh draws now allocate a depth attachment per render target and use depth-tested
   triangle-list rasterization with back-face culling.
-- Built-in lit shading currently supports color-only Lambert materials that require mesh normals and
-  at least one directional light.
+- Built-in lit shading supports color-only Lambert materials plus optional base-color texture
+  sampling when UVs and texture residency are available, and still requires mesh normals plus at
+  least one directional light.
 - Built-in deferred unlit shading supports the same optional base-color texture sampling when
   `NORMAL` and `TEXCOORD_0` data plus texture residency are available, and bypasses the lighting
   resolve so color-only materials stay unlit.
-- Built-in deferred lit shading consumes the same material color uniform, optionally multiplies in a
-  resident base-color texture when `TEXCOORD_0` data is available, and uses first-class directional
-  light nodes during the fullscreen lighting resolve.
+- Built-in deferred lit shading consumes the same material color uniform and uses first-class
+  directional light nodes during the fullscreen lighting resolve.
+- Deferred frames route textured built-in lit meshes through a forward lit pass after deferred
+  lighting while reusing the deferred depth buffer, so textured lit meshes can sample `baseColor`
+  without writing incorrect prepass depth through zero-alpha cutouts.
 - Deferred custom WGSL programs may also target the G-buffer path when they write the same two
   render targets and match the deferred transform/material binding contract.
 - Deferred frames now reuse the existing SDF sphere/box and volume raymarch passes after lighting,
@@ -74,8 +77,9 @@ The initial renderer uses a lightweight pass graph:
   directional-light uniform block.
 - Material parameter uploads and bind group creation are implemented for built-in unlit shading.
 - The minimal deferred path currently requires `NORMAL` vertex data and supports built-in `unlit`
-  plus built-in `lit` materials, with optional base-color textures on both when residency and
-  `TEXCOORD_0` data are available.
+  plus built-in `lit` materials; built-in `unlit` textures stay in the G-buffer path, while textured
+  built-in `lit` meshes fall back to a depth-tested forward pass after deferred lighting when
+  residency and `TEXCOORD_0` data are available.
 - Custom WGSL programs can be registered and cached through the material registry.
 - Headless/offscreen rendering supports compact byte readback for snapshot testing.
 - Headless/offscreen rendering also supports forward-renderer cubemap capture as six ordered
@@ -114,6 +118,8 @@ The initial renderer uses a lightweight pass graph:
 - Built-in unlit material uniforms live at `@group(1) @binding(0)`.
 - Built-in textured unlit shading also binds base-color texture/view pairs at
   `@group(1) @binding(1)` and `@group(1) @binding(2)`.
+- Built-in textured lit shading uses the same `@group(1)` base-color texture/sampler contract and a
+  `@group(2) @binding(0)` directional-light uniform block.
 - Built-in deferred textured unlit shading uses the same `@group(1)` base-color texture/sampler
   contract during G-buffer writes.
 - Built-in node picking reserves `@group(0) @binding(0)` for a uniform containing the evaluated node
@@ -145,6 +151,9 @@ The initial renderer uses a lightweight pass graph:
 
 - Post-processing currently exposes a renderer-owned fullscreen pass contract only; scene IR does
   not declare effect graphs yet.
+- Scene IR still does not encode first-class `alphaMode` or `alphaCutoff`; textured lit materials
+  currently treat fully transparent texels as cutouts while broader transparent/hybrid policy stays
+  under proposal.
 - Renderer-side picking currently targets mesh nodes only; SDF, volume, and per-triangle picking are
   still pending.
 - SDF execution currently supports sphere and box primitives only; broader graph/operator coverage

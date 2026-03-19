@@ -92,8 +92,8 @@ The current forward renderer declares:
 - `builtInMaterialKinds: ['unlit', 'lit']`
 - `customShaders: supported`
 
-This matches the implemented path: mesh draws, directional-light Lambert shading, plus first SDF and
-volume raymarch passes are encoded in the forward renderer.
+This matches the implemented path: mesh draws, directional-light Lambert shading with optional
+base-color textures, plus first SDF and volume raymarch passes are encoded in the forward renderer.
 
 ### Deferred
 
@@ -115,12 +115,13 @@ This now matches the implemented minimal deferred path:
   directional light nodes during the fullscreen lighting resolve
 - built-in `unlit` materials may also sample resident `baseColor` textures when meshes provide
   `TEXCOORD_0`
+- built-in `lit` materials may also sample resident `baseColor` textures when meshes provide
+  `TEXCOORD_0`, but textured lit meshes are composited in a depth-tested forward pass after deferred
+  lighting instead of writing through the deferred depth prepass
 - registered custom WGSL materials may also execute in the G-buffer pass when they provide
   compatible transform bindings, fragment outputs, and declared material bindings
 - SDF sphere/box primitives and resident volumes are composited afterward through the existing
   raymarch passes, so deferred frames can execute hybrid mesh-plus-raymarch scenes
-- built-in `lit` materials still reject texture bindings until a deferred textured-lighting contract
-  exists
 
 ## Relationship To Other Specs
 

@@ -308,6 +308,9 @@ Deno.test('loadGltfFromJson ingests buffer views, accessors, images, and materia
     }],
     textures: [{ source: 0 }],
     materials: [{
+      alphaMode: 'MASK',
+      alphaCutoff: 0.3,
+      doubleSided: true,
       pbrMetallicRoughness: {
         baseColorTexture: { index: 0 },
         baseColorFactor: [0.25, 0.5, 0.75, 1],
@@ -356,6 +359,10 @@ Deno.test('loadGltfFromJson ingests buffer views, accessors, images, and materia
     sampler: 'linear-repeat',
   }]);
   assertEquals(scene.materials[0].textures, [scene.textures[0]]);
+  assertEquals(scene.materials[0].alphaMode, 'mask');
+  assertEquals(scene.materials[0].alphaCutoff, 0.3);
+  assertEquals(scene.materials[0].doubleSided, true);
+  assertEquals(scene.materials[0].renderQueue, 'opaque');
   assertEquals(scene.materials[0].parameters.color, {
     x: 0.25,
     y: 0.5,

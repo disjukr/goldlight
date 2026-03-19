@@ -5,6 +5,8 @@ export type Id = string;
 
 export type Scalar = number;
 
+export type Boolean = boolean;
+
 export type Vec2 = Readonly<{
   x: Scalar;
   y: Scalar;
@@ -54,6 +56,11 @@ export type Material = Readonly<{
   id: Id;
   kind: string;
   shaderId?: Id;
+  alphaMode?: string;
+  alphaCutoff?: Scalar;
+  depthWrite?: Boolean;
+  doubleSided?: Boolean;
+  renderQueue?: string;
   textures: readonly TextureRef[];
   parameters: Readonly<Record<string, Vec4>>;
 }>;

@@ -20,6 +20,7 @@ import {
   registerWgslMaterial,
   renderDeferredFrame,
   renderForwardFrame,
+  renderHybridFrame,
   resolveMaterialProgram,
 } from '@rieul3d/renderer';
 import { createHeadlessTarget } from '@rieul3d/platform';
@@ -681,6 +682,128 @@ Deno.test('renderForwardFrame preserves the target sample count for intermediate
   assertEquals(sceneColorTexture?.descriptor.sampleCount, 4);
 });
 
+Deno.test('renderForwardFrame composites transparent meshes in a second blended pass', () => {
+  const mocks = createRenderMocks();
+  const runtimeResidency = createRuntimeResidency();
+  let scene = createSceneIr('scene');
+  scene = appendMaterial(scene, {
+    id: 'material-transparent',
+    kind: 'unlit',
+    alphaMode: 'blend',
+    textures: [],
+    parameters: {
+      color: { x: 0.25, y: 0.5, z: 1, w: 0.4 },
+    },
+  });
+  scene = appendMesh(scene, {
+    id: 'mesh-opaque',
+    attributes: [{ semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0, 0, 1, 0] }],
+  });
+  scene = appendMesh(scene, {
+    id: 'mesh-transparent',
+    materialId: 'material-transparent',
+    attributes: [{ semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, -1, 0, 0, 0, -1, 0] }],
+  });
+  scene = appendNode(scene, createNode('node-opaque', { meshId: 'mesh-opaque' }));
+  scene = appendNode(scene, createNode('node-transparent', { meshId: 'mesh-transparent' }));
+
+  runtimeResidency.geometry.set('mesh-opaque', {
+    meshId: 'mesh-opaque',
+    attributeBuffers: { POSITION: { id: 0 } as unknown as GPUBuffer },
+    vertexCount: 3,
+    indexCount: 0,
+  });
+  runtimeResidency.geometry.set('mesh-transparent', {
+    meshId: 'mesh-transparent',
+    attributeBuffers: { POSITION: { id: 1 } as unknown as GPUBuffer },
+    vertexCount: 3,
+    indexCount: 0,
+  });
+
+  const binding = createOffscreenContext({
+    device: mocks.device as unknown as GPUDevice,
+    target: createHeadlessTarget(64, 64),
+  });
+
+  const result = renderForwardFrame(
+    mocks as unknown as GpuRenderExecutionContext,
+    binding,
+    runtimeResidency,
+    evaluateScene(scene, { timeMs: 0 }),
+  );
+
+  assertEquals(result.drawCount, 2);
+  assertEquals(mocks.renderPassCount.current, 2);
+  const transparentPipeline = mocks.pipelines.find((pipeline) =>
+    pipeline.descriptor.fragment?.targets?.[0]?.blend !== undefined
+  );
+  assertEquals(transparentPipeline?.descriptor.depthStencil?.depthWriteEnabled, false);
+});
+
+Deno.test('renderHybridFrame keeps transparent meshes on the forward blended pass', () => {
+  const mocks = createRenderMocks();
+  const runtimeResidency = createRuntimeResidency();
+  let scene = createSceneIr('scene');
+  scene = appendMaterial(scene, {
+    id: 'material-transparent',
+    kind: 'unlit',
+    alphaMode: 'blend',
+    textures: [],
+    parameters: {
+      color: { x: 1, y: 0.5, z: 0.25, w: 0.5 },
+    },
+  });
+  scene = appendMesh(scene, {
+    id: 'mesh-deferred',
+    attributes: [
+      { semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0, 0, 1, 0] },
+      { semantic: 'NORMAL', itemSize: 3, values: [0, 0, 1, 0, 0, 1, 0, 0, 1] },
+    ],
+  });
+  scene = appendMesh(scene, {
+    id: 'mesh-transparent',
+    materialId: 'material-transparent',
+    attributes: [{ semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, -1, 0, 0, 0, -1, 0] }],
+  });
+  scene = appendNode(scene, createNode('node-deferred', { meshId: 'mesh-deferred' }));
+  scene = appendNode(scene, createNode('node-transparent', { meshId: 'mesh-transparent' }));
+
+  runtimeResidency.geometry.set('mesh-deferred', {
+    meshId: 'mesh-deferred',
+    attributeBuffers: {
+      POSITION: { id: 0 } as unknown as GPUBuffer,
+      NORMAL: { id: 1 } as unknown as GPUBuffer,
+    },
+    vertexCount: 3,
+    indexCount: 0,
+  });
+  runtimeResidency.geometry.set('mesh-transparent', {
+    meshId: 'mesh-transparent',
+    attributeBuffers: { POSITION: { id: 2 } as unknown as GPUBuffer },
+    vertexCount: 3,
+    indexCount: 0,
+  });
+
+  const binding = createOffscreenContext({
+    device: mocks.device as unknown as GPUDevice,
+    target: createHeadlessTarget(64, 64),
+  });
+
+  const result = renderHybridFrame(
+    mocks as unknown as GpuRenderExecutionContext,
+    binding,
+    runtimeResidency,
+    evaluateScene(scene, { timeMs: 0 }),
+  );
+
+  assertEquals(result.drawCount, 4);
+  assertEquals(mocks.renderPassCount.current, 4);
+  const transparentPipeline = mocks.pipelines.find((pipeline) =>
+    pipeline.descriptor.fragment?.targets?.[0]?.blend !== undefined
+  );
+  assertEquals(transparentPipeline?.descriptor.depthStencil?.depthWriteEnabled, false);
+});
+
 Deno.test('renderDeferredFrame runs a post-process pass after deferred lighting when requested', () => {
   const mocks = createRenderMocks();
   const runtimeResidency = createRuntimeResidency();
@@ -880,7 +1003,7 @@ Deno.test('renderDeferredFrame forwards textured lit materials after deferred li
   );
 
   assertEquals(result.drawCount, 2);
-  assertEquals(mocks.pipelines.length, 3);
+  assertEquals(mocks.pipelines.length, 2);
   const forwardLitPipeline = mocks.pipelines.find((pipeline) =>
     pipeline.descriptor.fragment?.targets?.length === 1 &&
     (pipeline.descriptor.vertex?.buffers?.length ?? 0) === 3

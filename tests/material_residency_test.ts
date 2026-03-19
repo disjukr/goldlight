@@ -61,6 +61,8 @@ Deno.test('createMaterialUploadPlan prefers color in the first slot and pads rem
   const plan = createMaterialUploadPlan({
     id: 'material-0',
     kind: 'unlit',
+    alphaMode: 'mask',
+    alphaCutoff: 0.25,
     textures: [],
     parameters: {
       roughness: { x: 0.2, y: 0, z: 0, w: 0 },
@@ -69,7 +71,10 @@ Deno.test('createMaterialUploadPlan prefers color in the first slot and pads rem
   });
 
   assertEquals(plan.parameterNames, ['color', 'roughness']);
-  assertEquals([...plan.uniformData.slice(0, 8)], [1, 0.5, 0.25, 1, 0.20000000298023224, 0, 0, 0]);
+  assertEquals(
+    [...plan.uniformData.slice(0, 12)],
+    [1, 0.5, 0.25, 1, 0.25, 1, 1, 0, 0.20000000298023224, 0, 0, 0],
+  );
   assertEquals(plan.byteLength, 256);
 });
 

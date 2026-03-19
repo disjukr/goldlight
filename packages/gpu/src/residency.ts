@@ -233,6 +233,20 @@ const textureCopyDstUsage = 0x02;
 const materialParameterSlots = 16;
 const floatsPerVec4 = 4;
 const defaultMaterialColor = [0.95, 0.95, 0.95, 1] as const;
+const materialAlphaPolicySlot = 1;
+const materialReservedParameterNames = new Set(['color']);
+
+const encodeMaterialAlphaMode = (material: Material): number => {
+  switch (material.alphaMode) {
+    case 'mask':
+      return 1;
+    case 'blend':
+      return 2;
+    case 'opaque':
+    default:
+      return 0;
+  }
+};
 
 const createAttributeArray = (attribute: MeshAttribute): Float32Array =>
   Float32Array.from(attribute.values);
@@ -338,21 +352,35 @@ export const ensureSceneMeshResidency = (
 };
 
 const getMaterialParameterNames = (material: Material): readonly string[] => {
-  const names = Object.keys(material.parameters).filter((name) => name !== 'color').sort();
+  const names = Object.keys(material.parameters).filter((name) =>
+    !materialReservedParameterNames.has(name)
+  ).sort();
   return material.parameters.color ? ['color', ...names] : names;
 };
 
 export const createMaterialUploadPlan = (material: Material): MaterialUploadPlan => {
-  const parameterNames = getMaterialParameterNames(material).slice(0, materialParameterSlots);
+  const customParameterLimit = Math.max(materialParameterSlots - 1, 0);
+  const parameterNames = getMaterialParameterNames(material).slice(0, customParameterLimit);
   const uniformData = new Float32Array(materialParameterSlots * floatsPerVec4);
 
   if (parameterNames.length === 0) {
     uniformData.set(defaultMaterialColor, 0);
   }
 
+  uniformData.set(
+    [
+      material.alphaCutoff ?? 0.5,
+      encodeMaterialAlphaMode(material),
+      material.depthWrite === false ? 0 : 1,
+      material.doubleSided ? 1 : 0,
+    ],
+    materialAlphaPolicySlot * floatsPerVec4,
+  );
+
   for (let index = 0; index < parameterNames.length; index += 1) {
     const value = material.parameters[parameterNames[index]];
-    uniformData.set([value.x, value.y, value.z, value.w], index * floatsPerVec4);
+    const targetIndex = index >= materialAlphaPolicySlot ? index + 1 : index;
+    uniformData.set([value.x, value.y, value.z, value.w], targetIndex * floatsPerVec4);
   }
 
   return {

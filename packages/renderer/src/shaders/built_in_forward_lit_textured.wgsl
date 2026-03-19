@@ -42,7 +42,11 @@ fn vsMain(
 @fragment
 fn fsMain(in: VsOut) -> @location(0) vec4<f32> {
   let baseColor = material.values[0] * textureSample(baseColorTexture, baseColorSampler, in.texCoord);
-  if (baseColor.a <= 0.0) {
+  let alphaPolicy = material.values[1];
+  if (alphaPolicy.y > 0.5 && alphaPolicy.y < 1.5 && baseColor.a < alphaPolicy.x) {
+    discard;
+  }
+  if (alphaPolicy.y < 1.5 && baseColor.a <= 0.0) {
     discard;
   }
 

@@ -118,10 +118,31 @@ This now matches the implemented minimal deferred path:
 - built-in `lit` materials may also sample resident `baseColor` textures when meshes provide
   `TEXCOORD_0`, but textured lit meshes are composited in a depth-tested forward pass after deferred
   lighting instead of writing through the deferred depth prepass
+- materials classified with `renderQueue: 'transparent'` are rejected here and should use the hybrid
+  renderer entry point instead of the pure deferred entry point
 - registered custom WGSL materials may also execute in the G-buffer pass when they provide
   compatible transform bindings, fragment outputs, and declared material bindings
 - SDF sphere/box primitives and resident volumes are composited afterward through the existing
   raymarch passes, so deferred frames can execute hybrid mesh-plus-raymarch scenes
+
+### Hybrid
+
+The hybrid renderer declares:
+
+- `mesh: supported`
+- `sdf: supported`
+- `volume: supported`
+- `light: supported`
+- `builtInMaterialKinds: ['unlit', 'lit']`
+- `customShaders: supported`
+
+This matches the implemented hybrid path:
+
+- deferred-eligible opaque meshes render through deferred depth, G-buffer, and lighting
+- opaque meshes that are not deferred-eligible fall back to a forward opaque pass after lighting
+- transparent meshes render in a second forward pass with blending enabled and deferred depth reused
+- SDF sphere/box primitives and resident volumes still composite afterward through the shared
+  raymarch passes
 
 ## Relationship To Other Specs
 

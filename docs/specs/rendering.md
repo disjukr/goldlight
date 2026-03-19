@@ -2,10 +2,11 @@
 
 ## Renderer Families
 
-`rieul3d` exposes two renderer descriptors in v1:
+`rieul3d` exposes three renderer descriptors in v1:
 
 - `forward`
 - `deferred`
+- `hybrid`
 
 Both share common pass contracts and evaluated scene extraction.
 
@@ -41,6 +42,8 @@ The initial renderer uses a lightweight pass graph:
 - Deferred rendering now executes a minimal mesh-only path with a depth prepass, built-in unlit/lit
   albedo-normal G-buffer passes, registered custom WGSL G-buffer programs, a fullscreen
   directional-light lighting resolve, and post-lighting SDF/volume raymarch composition.
+- Hybrid rendering now executes deferred opaque mesh passes, forward opaque fallback passes, and a
+  second forward transparent pass before post-process/present.
 - Forward rendering also encodes a dedicated SDF raymarch pass for supported sphere and box
   primitives.
 - Forward rendering also encodes a first volume raymarch pass for volume primitives with residency.
@@ -51,8 +54,9 @@ The initial renderer uses a lightweight pass graph:
   UVs and texture residency are available.
 - Built-in forward mesh draws upload each evaluated node `worldMatrix` plus the active camera
   `viewProjection` matrix and apply both in the vertex stage before rasterization.
-- Forward mesh draws now allocate a depth attachment per render target and use depth-tested
-  triangle-list rasterization with back-face culling.
+- Forward mesh draws now allocate a depth attachment per render target, render opaque meshes before
+  transparent meshes, and use depth-tested triangle-list rasterization with per-material blend and
+  double-sided policy where requested.
 - Built-in lit shading supports color-only Lambert materials plus optional base-color texture
   sampling when UVs and texture residency are available, and still requires mesh normals plus at
   least one directional light.
@@ -116,6 +120,11 @@ The initial renderer uses a lightweight pass graph:
 - Material programs can declare `materialBindings` entries for uniform buffers, texture views, and
   samplers that are assembled into a single material bind group.
 - Built-in unlit material uniforms live at `@group(1) @binding(0)`.
+- Built-in material slot `values[1]` now reserves alpha-policy data:
+  - `x`: `alphaCutoff`
+  - `y`: alpha mode enum (`0 = opaque`, `1 = mask`, `2 = blend`)
+  - `z`: requested depth-write flag
+  - `w`: requested double-sided flag
 - Built-in textured unlit shading also binds base-color texture/view pairs at
   `@group(1) @binding(1)` and `@group(1) @binding(2)`.
 - Built-in textured lit shading uses the same `@group(1)` base-color texture/sampler contract and a
@@ -151,9 +160,8 @@ The initial renderer uses a lightweight pass graph:
 
 - Post-processing currently exposes a renderer-owned fullscreen pass contract only; scene IR does
   not declare effect graphs yet.
-- Scene IR still does not encode first-class `alphaMode` or `alphaCutoff`; textured lit materials
-  currently treat fully transparent texels as cutouts while broader transparent/hybrid policy stays
-  under proposal.
+- Custom WGSL materials do not yet receive a first-class shared alpha-policy binding, so hybrid
+  partitioning currently treats non-opaque custom materials as forward-only.
 - Renderer-side picking currently targets mesh nodes only; SDF, volume, and per-triangle picking are
   still pending.
 - SDF execution currently supports sphere and box primitives only; broader graph/operator coverage

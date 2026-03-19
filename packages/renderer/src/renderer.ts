@@ -112,7 +112,7 @@ export type GpuRenderExecutionContext = Readonly<{
     | 'createShaderModule'
     | 'createTexture'
   >;
-  queue: Pick<GPUQueue, 'submit' | 'writeBuffer'>;
+  queue: Pick<GPUQueue, 'submit' | 'writeBuffer'> & Partial<Pick<GPUQueue, 'writeTexture'>>;
 }>;
 
 export type ForwardRenderResult = Readonly<{
@@ -213,6 +213,9 @@ type PathtracedMeshTriangle = Readonly<{
   na: readonly [number, number, number];
   nb: readonly [number, number, number];
   nc: readonly [number, number, number];
+  ta: readonly [number, number];
+  tb: readonly [number, number];
+  tc: readonly [number, number];
 }>;
 
 type PathtracedMeshAsset = Readonly<{
@@ -229,10 +232,19 @@ type PathtracedMeshSceneState = Readonly<{
 
 type PathtracedMeshInstance = Readonly<{
   rootNodeIndex: number;
+  baseColorTextureSlot: number;
+  metallicRoughnessTextureSlot: number;
+  normalTextureSlot: number;
+  emissiveTextureSlot: number;
+  occlusionTextureSlot: number;
   localToWorld: readonly number[];
   worldToLocal: readonly number[];
   albedo: readonly [number, number, number];
-  emission: number;
+  emissive: readonly [number, number, number];
+  metallic: number;
+  roughness: number;
+  occlusionStrength: number;
+  normalScale: number;
 }>;
 
 export type NodePickItem = Readonly<{
@@ -395,11 +407,13 @@ const renderAttachmentUsage = 0x10;
 const uniformUsage = 0x40;
 const storageUsage = 0x80;
 const bufferCopyDstUsage = 0x08;
+const textureCopyDstUsage = 0x02;
 const deferredDepthFormat = 'depth24plus';
 const maxSdfPassItems = 16;
 const pathtracedAccumulationFormat = 'rgba16float';
 const depthTextureFormat = 'depth24plus';
 const maxDirectionalLights = 4;
+const maxPathtracedMaterialTextures = 8;
 const defaultAmbientLight = 0.2;
 const defaultCubemapFormat = 'rgba8unorm';
 const defaultCubemapZnear = 0.1;
@@ -409,6 +423,10 @@ const pathtracedAccumulationStates = new WeakMap<
   PathtracedAccumulationState
 >();
 const pathtracedMeshSceneStates = new WeakMap<RenderContextBinding, PathtracedMeshSceneState>();
+const pathtracedFallbackTextureBindings = new WeakMap<
+  object,
+  Readonly<{ texture: GPUTexture; textureView: GPUTextureView; sampler: GPUSampler }>
+>();
 const alphaBlendState: GPUBlendState = {
   color: {
     srcFactor: 'src-alpha',
@@ -2075,12 +2093,17 @@ const getMeshNormalValues = (
   attributes: readonly { semantic: string; values: readonly number[] }[],
 ) => attributes.find((attribute) => attribute.semantic === 'NORMAL')?.values;
 
+const getMeshTexcoord0Values = (
+  attributes: readonly { semantic: string; values: readonly number[] }[],
+) => attributes.find((attribute) => attribute.semantic === 'TEXCOORD_0')?.values;
+
 const createPathtracedMeshTriangles = (
   attributes: readonly { semantic: string; values: readonly number[] }[],
   indices: readonly number[] | undefined,
 ): readonly PathtracedMeshTriangle[] => {
   const positions = getMeshPositionValues(attributes);
   const normals = getMeshNormalValues(attributes);
+  const texcoords = getMeshTexcoord0Values(attributes);
   if (!positions || positions.length === 0 || positions.length % 3 !== 0) {
     return [];
   }
@@ -2142,6 +2165,24 @@ const createPathtracedMeshTriangles = (
           normals[(cIndex * 3) + 2] ?? 0,
         ]
         : [0, 0, 0],
+      ta: texcoords
+        ? [
+          texcoords[aIndex * 2] ?? 0,
+          texcoords[(aIndex * 2) + 1] ?? 0,
+        ]
+        : [0, 0],
+      tb: texcoords
+        ? [
+          texcoords[bIndex * 2] ?? 0,
+          texcoords[(bIndex * 2) + 1] ?? 0,
+        ]
+        : [0, 0],
+      tc: texcoords
+        ? [
+          texcoords[cIndex * 2] ?? 0,
+          texcoords[(cIndex * 2) + 1] ?? 0,
+        ]
+        : [0, 0],
     });
   }
 
@@ -3317,7 +3358,9 @@ export const renderPathtracedSdfPass = (
 
   const pipeline = ensurePathtracedSdfPipeline(context, residency, targetFormat);
   const uniformData = createSdfUniformData(items, camera, frameIndex);
-  const lightingData = createDirectionalLightUniformData(extractDirectionalLightItems(evaluatedScene));
+  const lightingData = createDirectionalLightUniformData(
+    extractDirectionalLightItems(evaluatedScene),
+  );
   const uniformBuffer = context.device.createBuffer({
     label: 'pathtraced-sdf-uniforms',
     size: uniformData.byteLength,
@@ -3375,17 +3418,20 @@ const createPathtracedMeshTriangleBufferData = (
   triangles: readonly PathtracedMeshTriangle[],
   triangleIndices: readonly number[],
 ): Float32Array => {
-  const data = new Float32Array(triangleIndices.length * 24);
+  const data = new Float32Array(triangleIndices.length * 36);
 
   triangleIndices.forEach((triangleIndex, outputIndex) => {
     const triangle = triangles[triangleIndex];
-    const baseIndex = outputIndex * 24;
+    const baseIndex = outputIndex * 36;
     data.set([...triangle.a, 1], baseIndex);
     data.set([...triangle.b, 1], baseIndex + 4);
     data.set([...triangle.c, 1], baseIndex + 8);
     data.set([...triangle.na, 0], baseIndex + 12);
     data.set([...triangle.nb, 0], baseIndex + 16);
     data.set([...triangle.nc, 0], baseIndex + 20);
+    data.set([...triangle.ta, 0, 0], baseIndex + 24);
+    data.set([...triangle.tb, 0, 0], baseIndex + 28);
+    data.set([...triangle.tc, 0, 0], baseIndex + 32);
   });
 
   return data;
@@ -3419,6 +3465,7 @@ const createPathtracedMeshBvhBufferData = (
 const createPathtracedMeshInstances = (
   evaluatedScene: EvaluatedScene,
   meshAssets: ReadonlyMap<string, PathtracedMeshAsset>,
+  textureSlots: ReadonlyMap<string, number>,
 ): readonly PathtracedMeshInstance[] =>
   evaluatedScene.nodes.flatMap((node) => {
     if (!node.mesh) {
@@ -3431,29 +3478,137 @@ const createPathtracedMeshInstances = (
     }
 
     const color = node.material?.parameters.color ?? { x: 0.82, y: 0.82, z: 0.82, w: 1 };
+    const emissive = node.material?.parameters.emissive ?? { x: 0, y: 0, z: 0, w: 1 };
+    const metallicRoughness = node.material?.parameters.metallicRoughness ?? {
+      x: 1,
+      y: 1,
+      z: 1,
+      w: 1,
+    };
+    const getTextureSlot = (semantic: string): number => {
+      const textureId = node.material?.textures.find((texture) => texture.semantic === semantic)
+        ?.id;
+      return textureId ? textureSlots.get(textureId) ?? -1 : -1;
+    };
     return [{
       rootNodeIndex: asset.rootNodeIndex,
+      baseColorTextureSlot: getTextureSlot('baseColor'),
+      metallicRoughnessTextureSlot: getTextureSlot('metallicRoughness'),
+      normalTextureSlot: getTextureSlot('normal'),
+      emissiveTextureSlot: getTextureSlot('emissive'),
+      occlusionTextureSlot: getTextureSlot('occlusion'),
       localToWorld: node.worldMatrix,
       worldToLocal: invertAffineMatrix(node.worldMatrix),
       albedo: [color.x, color.y, color.z],
-      emission: 0,
+      emissive: [emissive.x, emissive.y, emissive.z],
+      metallic: metallicRoughness.x,
+      roughness: metallicRoughness.y,
+      occlusionStrength: metallicRoughness.z,
+      normalScale: metallicRoughness.w,
     }];
   });
 
 const createPathtracedMeshInstanceBufferData = (
   instances: readonly PathtracedMeshInstance[],
 ): Float32Array => {
-  const data = new Float32Array(instances.length * 40);
+  const data = new Float32Array(instances.length * 52);
 
   instances.forEach((instance, index) => {
-    const baseIndex = index * 40;
+    const baseIndex = index * 52;
     data.set(instance.localToWorld.slice(0, 16), baseIndex);
     data.set(instance.worldToLocal.slice(0, 16), baseIndex + 16);
-    data.set([instance.rootNodeIndex, 0, 0, 0], baseIndex + 32);
-    data.set([...instance.albedo, instance.emission], baseIndex + 36);
+    data.set(
+      [
+        instance.rootNodeIndex,
+        instance.baseColorTextureSlot,
+        instance.metallicRoughnessTextureSlot,
+        instance.normalTextureSlot,
+      ],
+      baseIndex + 32,
+    );
+    data.set([...instance.albedo, 0], baseIndex + 36);
+    data.set(
+      [
+        instance.metallic,
+        instance.roughness,
+        instance.emissiveTextureSlot,
+        instance.occlusionTextureSlot,
+      ],
+      baseIndex + 40,
+    );
+    data.set([...instance.emissive, instance.normalScale], baseIndex + 44);
+    data.set([instance.occlusionStrength, 0, 0, 0], baseIndex + 48);
   });
 
   return data;
+};
+
+const collectPathtracedMaterialTextures = (
+  evaluatedScene: EvaluatedScene,
+  residency: RuntimeResidency,
+): Readonly<{
+  slots: ReadonlyMap<string, number>;
+  textures: readonly TextureResidency[];
+}> => {
+  const slots = new Map<string, number>();
+  const textures: TextureResidency[] = [];
+
+  for (const node of evaluatedScene.nodes) {
+    const material = node.material;
+    if (!material) {
+      continue;
+    }
+
+    for (const texture of material.textures) {
+      const residencyTexture = residency.textures.get(texture.id);
+      if (!residencyTexture || slots.has(residencyTexture.textureId)) {
+        continue;
+      }
+
+      if (textures.length >= maxPathtracedMaterialTextures) {
+        break;
+      }
+
+      slots.set(residencyTexture.textureId, textures.length);
+      textures.push(residencyTexture);
+    }
+  }
+
+  return { slots, textures };
+};
+
+const createFallbackPathtracedTextureBinding = (
+  context: GpuRenderExecutionContext,
+): Readonly<{ texture: GPUTexture; textureView: GPUTextureView; sampler: GPUSampler }> => {
+  const cached = pathtracedFallbackTextureBindings.get(context.device);
+  if (cached) {
+    return cached;
+  }
+
+  const texture = context.device.createTexture({
+    label: 'pathtraced-fallback-base-color',
+    size: { width: 1, height: 1, depthOrArrayLayers: 1 },
+    format: 'rgba8unorm',
+    usage: textureBindingUsage | textureCopyDstUsage,
+  });
+  context.queue.writeTexture?.(
+    { texture },
+    new Uint8Array([255, 255, 255, 255]),
+    { bytesPerRow: 4, rowsPerImage: 1 },
+    { width: 1, height: 1, depthOrArrayLayers: 1 },
+  );
+  const binding = {
+    textureView: texture.createView(),
+    texture,
+    sampler: context.device.createSampler({
+      magFilter: 'linear',
+      minFilter: 'linear',
+      addressModeU: 'repeat',
+      addressModeV: 'repeat',
+    }),
+  };
+  pathtracedFallbackTextureBindings.set(context.device, binding);
+  return binding;
 };
 
 const ensurePathtracedMeshSceneState = (
@@ -3585,7 +3740,12 @@ export const renderPathtracedMeshPass = (
   if (!sceneState) {
     return 0;
   }
-  const instances = createPathtracedMeshInstances(evaluatedScene, sceneState.meshAssets);
+  const textureBindings = collectPathtracedMaterialTextures(evaluatedScene, residency);
+  const instances = createPathtracedMeshInstances(
+    evaluatedScene,
+    sceneState.meshAssets,
+    textureBindings.slots,
+  );
   if (instances.length === 0) {
     return 0;
   }
@@ -3594,7 +3754,9 @@ export const renderPathtracedMeshPass = (
   const uniformData = createPathtracedMeshUniformData(instances.length, camera, frameIndex);
   const sdfItems = extractSdfPassItems(evaluatedScene);
   const sdfUniformData = createSdfUniformData(sdfItems, camera, frameIndex);
-  const lightingData = createDirectionalLightUniformData(extractDirectionalLightItems(evaluatedScene));
+  const lightingData = createDirectionalLightUniformData(
+    extractDirectionalLightItems(evaluatedScene),
+  );
   const uniformBuffer = context.device.createBuffer({
     label: 'pathtraced-mesh-uniforms',
     size: uniformData.byteLength,
@@ -3620,6 +3782,11 @@ export const renderPathtracedMeshPass = (
     usage: storageUsage | bufferCopyDstUsage,
   });
   context.queue.writeBuffer(instanceBuffer, 0, toBufferSource(instanceData));
+  const fallbackTextureBinding = createFallbackPathtracedTextureBinding(context);
+  const boundTextures = Array.from(
+    { length: maxPathtracedMaterialTextures },
+    (_, index) => textureBindings.textures[index],
+  );
 
   const bindGroup = context.device.createBindGroup({
     layout: pipeline.getBindGroupLayout(0),
@@ -3660,6 +3827,70 @@ export const renderPathtracedMeshPass = (
           buffer: lightingBuffer,
         },
       },
+      {
+        binding: 6,
+        resource: boundTextures[0]?.view ?? fallbackTextureBinding.textureView,
+      },
+      {
+        binding: 7,
+        resource: boundTextures[0]?.sampler ?? fallbackTextureBinding.sampler,
+      },
+      {
+        binding: 8,
+        resource: boundTextures[1]?.view ?? fallbackTextureBinding.textureView,
+      },
+      {
+        binding: 9,
+        resource: boundTextures[1]?.sampler ?? fallbackTextureBinding.sampler,
+      },
+      {
+        binding: 10,
+        resource: boundTextures[2]?.view ?? fallbackTextureBinding.textureView,
+      },
+      {
+        binding: 11,
+        resource: boundTextures[2]?.sampler ?? fallbackTextureBinding.sampler,
+      },
+      {
+        binding: 12,
+        resource: boundTextures[3]?.view ?? fallbackTextureBinding.textureView,
+      },
+      {
+        binding: 13,
+        resource: boundTextures[3]?.sampler ?? fallbackTextureBinding.sampler,
+      },
+      {
+        binding: 14,
+        resource: boundTextures[4]?.view ?? fallbackTextureBinding.textureView,
+      },
+      {
+        binding: 15,
+        resource: boundTextures[4]?.sampler ?? fallbackTextureBinding.sampler,
+      },
+      {
+        binding: 16,
+        resource: boundTextures[5]?.view ?? fallbackTextureBinding.textureView,
+      },
+      {
+        binding: 17,
+        resource: boundTextures[5]?.sampler ?? fallbackTextureBinding.sampler,
+      },
+      {
+        binding: 18,
+        resource: boundTextures[6]?.view ?? fallbackTextureBinding.textureView,
+      },
+      {
+        binding: 19,
+        resource: boundTextures[6]?.sampler ?? fallbackTextureBinding.sampler,
+      },
+      {
+        binding: 20,
+        resource: boundTextures[7]?.view ?? fallbackTextureBinding.textureView,
+      },
+      {
+        binding: 21,
+        resource: boundTextures[7]?.sampler ?? fallbackTextureBinding.sampler,
+      },
     ],
   });
 
@@ -3689,7 +3920,11 @@ const renderPathtracedAccumulationPass = (
   targetView: GPUTextureView,
   sampleCount: number,
 ): number => {
-  const pipeline = ensurePathtracedAccumulatePipeline(context, residency, pathtracedAccumulationFormat);
+  const pipeline = ensurePathtracedAccumulatePipeline(
+    context,
+    residency,
+    pathtracedAccumulationFormat,
+  );
   const sampler = context.device.createSampler({
     label: 'pathtraced-accumulation-sampler',
     magFilter: 'nearest',

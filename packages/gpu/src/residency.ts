@@ -1,5 +1,7 @@
 import type { EvaluatedScene } from '@rieul3d/core';
 import type { Material, MeshAttribute, MeshPrimitive, SceneIr } from '@rieul3d/ir';
+import jpeg from 'npm:jpeg-js@0.4.4';
+import { PNG } from 'npm:pngjs@7.0.0';
 
 export type ImageAsset = Readonly<{
   id: string;
@@ -508,21 +510,63 @@ export const resolveTextureImageAsset = (
   return assetSource.images.get(textureRef.assetId);
 };
 
+const decodeImageAssetBytes = (imageAsset: ImageAsset): ImageAsset => {
+  if (imageAsset.width && imageAsset.height) {
+    return imageAsset;
+  }
+
+  switch (imageAsset.mimeType) {
+    case 'image/png': {
+      const decoded = PNG.sync.read(imageAsset.bytes);
+      return {
+        ...imageAsset,
+        bytes: decoded.data,
+        width: decoded.width,
+        height: decoded.height,
+        pixelFormat: 'rgba8unorm',
+        bytesPerRow: decoded.width * 4,
+        rowsPerImage: decoded.height,
+      };
+    }
+    case 'image/jpeg': {
+      const decoded = jpeg.decode(imageAsset.bytes, {
+        useTArray: true,
+        formatAsRGBA: true,
+      });
+      return {
+        ...imageAsset,
+        bytes: decoded.data,
+        width: decoded.width,
+        height: decoded.height,
+        pixelFormat: 'rgba8unorm',
+        bytesPerRow: decoded.width * 4,
+        rowsPerImage: decoded.height,
+      };
+    }
+    default:
+      throw new Error(
+        `texture asset "${imageAsset.id}" with mimeType "${imageAsset.mimeType}" is missing decoded pixels`,
+      );
+  }
+};
+
 export const createTextureUploadPlan = (
   textureRef: SceneIr['textures'][number],
   imageAsset: ImageAsset,
 ): TextureUploadPlan => {
-  if (!imageAsset.width || !imageAsset.height) {
-    throw new Error(`texture asset "${imageAsset.id}" is missing width/height`);
+  const decodedAsset = decodeImageAssetBytes(imageAsset);
+
+  if (!decodedAsset.width || !decodedAsset.height) {
+    throw new Error(`texture asset "${decodedAsset.id}" is missing width/height`);
   }
 
   return {
     textureId: textureRef.id,
-    width: imageAsset.width,
-    height: imageAsset.height,
-    format: imageAsset.pixelFormat ?? 'rgba8unorm',
-    bytesPerRow: imageAsset.bytesPerRow ?? imageAsset.width * 4,
-    rowsPerImage: imageAsset.rowsPerImage ?? imageAsset.height,
+    width: decodedAsset.width,
+    height: decodedAsset.height,
+    format: decodedAsset.pixelFormat ?? 'rgba8unorm',
+    bytesPerRow: decodedAsset.bytesPerRow ?? decodedAsset.width * 4,
+    rowsPerImage: decodedAsset.rowsPerImage ?? decodedAsset.height,
   };
 };
 
@@ -567,7 +611,8 @@ export const uploadTextureResidency = (
   textureRef: SceneIr['textures'][number],
   imageAsset: ImageAsset,
 ): TextureResidency => {
-  const plan = createTextureUploadPlan(textureRef, imageAsset);
+  const decodedAsset = decodeImageAssetBytes(imageAsset);
+  const plan = createTextureUploadPlan(textureRef, decodedAsset);
   const texture = context.device.createTexture({
     label: textureRef.id,
     size: { width: plan.width, height: plan.height, depthOrArrayLayers: 1 },
@@ -577,7 +622,7 @@ export const uploadTextureResidency = (
 
   context.queue.writeTexture(
     { texture },
-    toBufferSource(imageAsset.bytes),
+    toBufferSource(decodedAsset.bytes),
     {
       offset: 0,
       bytesPerRow: plan.bytesPerRow,

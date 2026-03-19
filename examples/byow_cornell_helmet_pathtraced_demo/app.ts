@@ -5,13 +5,14 @@ import type { DesktopModuleContext } from '@rieul3d/desktop';
 import {
   createRuntimeResidency,
   createSurfaceBinding,
+  ensureSceneMaterialResidency,
+  ensureSceneMeshResidency,
+  ensureSceneTextureResidency,
   requestGpuContext,
   resizeSurfaceBindingTarget,
 } from '@rieul3d/gpu';
 import {
   appendCamera,
-  appendMaterial,
-  appendMesh,
   appendNode,
   appendSdfPrimitive,
   createNode,
@@ -19,14 +20,17 @@ import {
   createSceneIr,
   setActiveCamera,
 } from '@rieul3d/ir';
-import { importGltfFromGlb } from '@rieul3d/importers';
+import { importGltfFromGlbWithAssets } from '@rieul3d/importers';
 import { createMaterialRegistry, renderPathtracedFrame } from '@rieul3d/renderer';
 
 const cameraId = 'cornell-helmet-camera';
 const helmetSource = await Deno.readFile(
   new URL('../assets/damaged-helmet/DamagedHelmet.glb', import.meta.url),
 );
-const helmetScene = importGltfFromGlb(helmetSource, 'damaged-helmet');
+const { scene: helmetScene, assetSource: helmetAssetSource } = importGltfFromGlbWithAssets(
+  helmetSource,
+  'damaged-helmet',
+);
 const sourceMesh = helmetScene.meshes[0];
 
 if (!sourceMesh) {
@@ -34,15 +38,16 @@ if (!sourceMesh) {
 }
 
 const helmetBounds = getMeshBounds(sourceMesh);
-const helmetScale = 1.15 / helmetBounds.maxDimension;
-const helmetMesh = {
-  ...sourceMesh,
-  id: 'cornell-damaged-helmet',
-  materialId: 'cornell-damaged-helmet-material',
-};
-
+const helmetScale = 1.56 / helmetBounds.maxDimension;
 const createCornellHelmetScene = () => {
   let scene = createSceneIr('byow-cornell-helmet-pathtraced-demo');
+  scene = {
+    ...scene,
+    assets: [...scene.assets, ...helmetScene.assets],
+    textures: [...scene.textures, ...helmetScene.textures],
+    materials: [...scene.materials, ...helmetScene.materials],
+    meshes: [...scene.meshes, ...helmetScene.meshes],
+  };
   scene = setActiveCamera(
     appendCamera(
       scene,
@@ -54,15 +59,6 @@ const createCornellHelmetScene = () => {
     ),
     cameraId,
   );
-  scene = appendMaterial(scene, {
-    id: 'cornell-damaged-helmet-material',
-    kind: 'unlit',
-    textures: [],
-    parameters: {
-      color: { x: 0.84, y: 0.85, z: 0.88, w: 1 },
-    },
-  });
-  scene = appendMesh(scene, helmetMesh);
   scene = appendNode(
     scene,
     createNode('cornell-camera-node', {
@@ -160,12 +156,12 @@ const createCornellHelmetScene = () => {
         id: 'pedestal',
         op: 'box' as const,
         parameters: {
-          size: { x: 0.52, y: 0.2, z: 0.52, w: 0 },
+          size: { x: 0.78, y: 0.34, z: 0.78, w: 0 },
           color: { x: 0.8, y: 0.8, z: 0.78, w: 0 },
         },
       },
       nodeId: 'pedestal-node',
-      translation: [0, -1.3, -1.78] as const,
+      translation: [0, -1.16, -1.78] as const,
     },
   ] as const;
 
@@ -191,11 +187,11 @@ const createCornellHelmetScene = () => {
   scene = appendNode(
     scene,
     createNode('helmet-node', {
-      meshId: helmetMesh.id,
+      meshId: sourceMesh.id,
       transform: {
         translation: {
           x: -helmetBounds.center.x * helmetScale,
-          y: -(helmetBounds.min.y * helmetScale) - 1.08,
+          y: -(helmetBounds.min.y * helmetScale) - 0.84,
           z: (-helmetBounds.center.z * helmetScale) - 1.78,
         },
         rotation: createQuaternionFromEulerDegrees(72, -32, 0),
@@ -221,6 +217,9 @@ export default async ({ window }: DesktopModuleContext): Promise<() => void> => 
   const materialRegistry = createMaterialRegistry();
   const scene = createCornellHelmetScene();
   const evaluatedScene = evaluateScene(scene, { timeMs: 0 });
+  ensureSceneMeshResidency(gpuContext, residency, scene, evaluatedScene);
+  ensureSceneMaterialResidency(gpuContext, residency, evaluatedScene);
+  ensureSceneTextureResidency(gpuContext, residency, scene, helmetAssetSource);
 
   window.runtime.addEventListener('resize', (event) => {
     const detail = (event as CustomEvent<{ width: number; height: number }>).detail;

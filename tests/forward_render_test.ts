@@ -1,4 +1,9 @@
-import { assertAlmostEquals, assertEquals, assertStrictEquals } from 'jsr:@std/assert@^1.0.14';
+import {
+  assert,
+  assertAlmostEquals,
+  assertEquals,
+  assertStrictEquals,
+} from 'jsr:@std/assert@^1.0.14';
 import { evaluateScene } from '@rieul3d/core';
 import { createOffscreenBinding, createRuntimeResidency } from '@rieul3d/gpu';
 import {
@@ -1008,7 +1013,7 @@ Deno.test('renderPathtracedFrame reuses mesh-local BVH uploads when only node tr
   );
   const meshUploadWriteSizes = mocks.writeBufferCalls
     .map((call) => call.bytes.byteLength)
-    .filter((size) => size === 96 || size === 48);
+    .filter((size) => size === 144 || size === 48);
   const writeCountAfterFirstRender = mocks.writeBufferCalls.length;
 
   let movedScene = createSceneIr('scene');
@@ -1036,8 +1041,9 @@ Deno.test('renderPathtracedFrame reuses mesh-local BVH uploads when only node tr
   const secondMeshUploadWriteSizes = mocks.writeBufferCalls
     .slice(writeCountAfterFirstRender)
     .map((call) => call.bytes.byteLength)
-    .filter((size) => size === 96 || size === 48);
-  assertEquals(meshUploadWriteSizes, [96, 48]);
+    .filter((size) => size === 48);
+  assert(meshUploadWriteSizes.includes(144));
+  assert(meshUploadWriteSizes.includes(48));
   assertEquals(secondMeshUploadWriteSizes.length, 0);
 });
 

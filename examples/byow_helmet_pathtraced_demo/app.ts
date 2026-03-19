@@ -6,6 +6,9 @@ import { createBoxMesh } from '@rieul3d/geometry';
 import {
   createRuntimeResidency,
   createSurfaceBinding,
+  ensureSceneMaterialResidency,
+  ensureSceneMeshResidency,
+  ensureSceneTextureResidency,
   requestGpuContext,
   resizeSurfaceBindingTarget,
 } from '@rieul3d/gpu';
@@ -20,14 +23,17 @@ import {
   createSceneIr,
   setActiveCamera,
 } from '@rieul3d/ir';
-import { importGltfFromGlb } from '@rieul3d/importers';
+import { importGltfFromGlbWithAssets } from '@rieul3d/importers';
 import { createMaterialRegistry, renderPathtracedFrame } from '@rieul3d/renderer';
 
 const cameraId = 'helmet-pathtraced-camera';
 const helmetSource = await Deno.readFile(
   new URL('../assets/damaged-helmet/DamagedHelmet.glb', import.meta.url),
 );
-const helmetScene = importGltfFromGlb(helmetSource, 'damaged-helmet');
+const { scene: helmetScene, assetSource: helmetAssetSource } = importGltfFromGlbWithAssets(
+  helmetSource,
+  'damaged-helmet',
+);
 const sourceMesh = helmetScene.meshes[0];
 
 if (!sourceMesh) {
@@ -36,11 +42,6 @@ if (!sourceMesh) {
 
 const helmetBounds = getMeshBounds(sourceMesh);
 const helmetScale = 1.8 / helmetBounds.maxDimension;
-const helmetMesh = {
-  ...sourceMesh,
-  id: 'damaged-helmet-pathtraced',
-  materialId: 'damaged-helmet-pathtraced-material',
-};
 const floorMesh = {
   ...createBoxMesh({
     id: 'pathtraced-floor',
@@ -53,6 +54,13 @@ const floorMesh = {
 
 const createHelmetScene = () => {
   let scene = createSceneIr('byow-helmet-pathtraced-demo');
+  scene = {
+    ...scene,
+    assets: [...scene.assets, ...helmetScene.assets],
+    textures: [...scene.textures, ...helmetScene.textures],
+    materials: [...scene.materials, ...helmetScene.materials],
+    meshes: [...scene.meshes, ...helmetScene.meshes],
+  };
   scene = setActiveCamera(
     appendCamera(
       scene,
@@ -64,14 +72,6 @@ const createHelmetScene = () => {
     ),
     cameraId,
   );
-  scene = appendMaterial(scene, {
-    id: 'damaged-helmet-pathtraced-material',
-    kind: 'unlit',
-    textures: [],
-    parameters: {
-      color: { x: 0.82, y: 0.84, z: 0.88, w: 1 },
-    },
-  });
   scene = appendMaterial(scene, {
     id: 'pathtraced-floor-material',
     kind: 'unlit',
@@ -86,7 +86,6 @@ const createHelmetScene = () => {
     color: { x: 0.95, y: 0.9, z: 0.84 },
     intensity: 0.65,
   });
-  scene = appendMesh(scene, helmetMesh);
   scene = appendMesh(scene, floorMesh);
   scene = appendNode(
     scene,
@@ -102,7 +101,7 @@ const createHelmetScene = () => {
   scene = appendNode(
     scene,
     createNode('helmet-node', {
-      meshId: helmetMesh.id,
+      meshId: sourceMesh.id,
       transform: {
         translation: {
           x: -helmetBounds.center.x * helmetScale,
@@ -116,22 +115,22 @@ const createHelmetScene = () => {
   );
   scene = appendNode(
     scene,
-    createNode('floor-node', {
-      meshId: floorMesh.id,
+    createNode('sun-node', {
+      lightId: 'helmet-pathtraced-sun',
       transform: {
-        translation: { x: 0, y: -1.02, z: -0.8 },
-        rotation: { x: 0, y: 0, z: 0, w: 1 },
+        translation: { x: 0, y: 0, z: 0 },
+        rotation: createQuaternionFromEulerDegrees(-62, 24, 0),
         scale: { x: 1, y: 1, z: 1 },
       },
     }),
   );
   scene = appendNode(
     scene,
-    createNode('sun-node', {
-      lightId: 'helmet-pathtraced-sun',
+    createNode('floor-node', {
+      meshId: floorMesh.id,
       transform: {
-        translation: { x: 0, y: 0, z: 0 },
-        rotation: createQuaternionFromEulerDegrees(-62, 24, 0),
+        translation: { x: 0, y: -1.02, z: -0.8 },
+        rotation: { x: 0, y: 0, z: 0, w: 1 },
         scale: { x: 1, y: 1, z: 1 },
       },
     }),
@@ -153,6 +152,9 @@ export default async ({ window }: DesktopModuleContext): Promise<() => void> => 
   const materialRegistry = createMaterialRegistry();
   const scene = createHelmetScene();
   const evaluatedScene = evaluateScene(scene, { timeMs: 0 });
+  ensureSceneMeshResidency(gpuContext, residency, scene, evaluatedScene);
+  ensureSceneMaterialResidency(gpuContext, residency, evaluatedScene);
+  ensureSceneTextureResidency(gpuContext, residency, scene, helmetAssetSource);
 
   window.runtime.addEventListener('resize', (event) => {
     const detail = (event as CustomEvent<{ width: number; height: number }>).detail;

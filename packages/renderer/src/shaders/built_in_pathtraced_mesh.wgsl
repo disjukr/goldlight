@@ -13,6 +13,9 @@ struct MeshTriangle {
   na: vec4<f32>,
   nb: vec4<f32>,
   nc: vec4<f32>,
+  ta: vec4<f32>,
+  tb: vec4<f32>,
+  tc: vec4<f32>,
 };
 
 struct BvhNode {
@@ -31,7 +34,10 @@ struct MeshInstance {
   worldToLocal2: vec4<f32>,
   worldToLocal3: vec4<f32>,
   payload: vec4<f32>,
-  albedoEmission: vec4<f32>,
+  baseColor: vec4<f32>,
+  materialParams: vec4<f32>,
+  emissiveNormal: vec4<f32>,
+  auxiliary: vec4<f32>,
 };
 
 struct SdfItem {
@@ -81,6 +87,7 @@ struct LocalHitRecord {
   localDistance: f32,
   triangleIndex: i32,
   localPosition: vec3<f32>,
+  uv: vec2<f32>,
   shadingNormal: vec3<f32>,
   geometricNormal: vec3<f32>,
 };
@@ -90,10 +97,13 @@ struct WorldHitRecord {
   isSdf: bool,
   distance: f32,
   position: vec3<f32>,
+  uv: vec2<f32>,
   shadingNormal: vec3<f32>,
   geometricNormal: vec3<f32>,
   albedo: vec3<f32>,
-  emission: f32,
+  emissive: vec3<f32>,
+  metallic: f32,
+  roughness: f32,
 };
 
 struct SdfSample {
@@ -119,6 +129,22 @@ const minRussianRouletteProbability = 0.1;
 @group(0) @binding(3) var<storage, read> instances: InstanceBuffer;
 @group(0) @binding(4) var<uniform> sdf: SdfUniforms;
 @group(0) @binding(5) var<uniform> lighting: LightingUniforms;
+@group(0) @binding(6) var materialTexture0: texture_2d<f32>;
+@group(0) @binding(7) var materialSampler0: sampler;
+@group(0) @binding(8) var materialTexture1: texture_2d<f32>;
+@group(0) @binding(9) var materialSampler1: sampler;
+@group(0) @binding(10) var materialTexture2: texture_2d<f32>;
+@group(0) @binding(11) var materialSampler2: sampler;
+@group(0) @binding(12) var materialTexture3: texture_2d<f32>;
+@group(0) @binding(13) var materialSampler3: sampler;
+@group(0) @binding(14) var materialTexture4: texture_2d<f32>;
+@group(0) @binding(15) var materialSampler4: sampler;
+@group(0) @binding(16) var materialTexture5: texture_2d<f32>;
+@group(0) @binding(17) var materialSampler5: sampler;
+@group(0) @binding(18) var materialTexture6: texture_2d<f32>;
+@group(0) @binding(19) var materialSampler6: sampler;
+@group(0) @binding(20) var materialTexture7: texture_2d<f32>;
+@group(0) @binding(21) var materialSampler7: sampler;
 
 @vertex
 fn vsMain(@builtin(vertex_index) vertexIndex: u32) -> VsOut {
@@ -188,6 +214,90 @@ fn clampFireflies(color: vec3<f32>) -> vec3<f32> {
     return color;
   }
   return color * (fireflyClampLuminance / max(value, 1e-4));
+}
+
+fn sampleMaterialTexture(textureSlot: i32, uv: vec2<f32>) -> vec4<f32> {
+  switch textureSlot {
+    case 0: {
+      return textureSampleLevel(materialTexture0, materialSampler0, uv, 0.0);
+    }
+    case 1: {
+      return textureSampleLevel(materialTexture1, materialSampler1, uv, 0.0);
+    }
+    case 2: {
+      return textureSampleLevel(materialTexture2, materialSampler2, uv, 0.0);
+    }
+    case 3: {
+      return textureSampleLevel(materialTexture3, materialSampler3, uv, 0.0);
+    }
+    case 4: {
+      return textureSampleLevel(materialTexture4, materialSampler4, uv, 0.0);
+    }
+    case 5: {
+      return textureSampleLevel(materialTexture5, materialSampler5, uv, 0.0);
+    }
+    case 6: {
+      return textureSampleLevel(materialTexture6, materialSampler6, uv, 0.0);
+    }
+    case 7: {
+      return textureSampleLevel(materialTexture7, materialSampler7, uv, 0.0);
+    }
+    default: {
+      return vec4<f32>(1.0);
+    }
+  }
+}
+
+fn computeTangentFrame(
+  geometricNormal: vec3<f32>,
+  edge1: vec3<f32>,
+  edge2: vec3<f32>,
+  uv1: vec2<f32>,
+  uv2: vec2<f32>,
+) -> mat3x3<f32> {
+  let determinant = (uv1.x * uv2.y) - (uv1.y * uv2.x);
+  if (abs(determinant) < 1e-6) {
+    return orthonormalBasis(geometricNormal);
+  }
+
+  let inverseDeterminant = 1.0 / determinant;
+  var tangent = ((edge1 * uv2.y) - (edge2 * uv1.y)) * inverseDeterminant;
+  tangent = normalize(tangent - (geometricNormal * dot(geometricNormal, tangent)));
+  var bitangent = normalize(cross(geometricNormal, tangent));
+  if (dot(bitangent, ((edge2 * uv1.x) - (edge1 * uv2.x)) * inverseDeterminant) < 0.0) {
+    bitangent = -bitangent;
+  }
+  return mat3x3<f32>(tangent, bitangent, geometricNormal);
+}
+
+fn applyNormalMap(
+  geometricNormal: vec3<f32>,
+  shadingNormal: vec3<f32>,
+  edge1: vec3<f32>,
+  edge2: vec3<f32>,
+  uv1: vec2<f32>,
+  uv2: vec2<f32>,
+  sampledNormal: vec3<f32>,
+  normalScale: f32,
+) -> vec3<f32> {
+  let tangentFrame = computeTangentFrame(geometricNormal, edge1, edge2, uv1, uv2);
+  let tangentNormal = normalize(vec3<f32>(
+    sampledNormal.x * 2.0 - 1.0,
+    (sampledNormal.y * 2.0 - 1.0) * normalScale,
+    sampledNormal.z * 2.0 - 1.0,
+  ));
+  let mappedNormal = normalize(tangentFrame * tangentNormal);
+  return normalize(select(shadingNormal, mappedNormal, dot(mappedNormal, geometricNormal) >= 0.0));
+}
+
+fn sampleGlossyDirection(
+  reflectionDirection: vec3<f32>,
+  roughness: f32,
+  state: ptr<function, vec2<f32>>,
+) -> vec3<f32> {
+  let jitteredDirection = sampleCosineHemisphere(reflectionDirection, state);
+  let glossyMix = clamp(roughness * roughness, 0.0, 1.0);
+  return normalize(mix(reflectionDirection, jitteredDirection, glossyMix));
 }
 
 fn transformPoint(
@@ -298,7 +408,15 @@ fn traceInstance(
   let inverseDirection = safeReciprocal(localDirection);
   let rootNodeIndex = i32(instance.payload.x);
   if (rootNodeIndex < 0) {
-    return LocalHitRecord(false, 1e9, -1, vec3<f32>(0.0), vec3<f32>(0.0), vec3<f32>(0.0));
+    return LocalHitRecord(
+      false,
+      1e9,
+      -1,
+      vec3<f32>(0.0),
+      vec2<f32>(0.0),
+      vec3<f32>(0.0),
+      vec3<f32>(0.0),
+    );
   }
 
   var stack = array<i32, 64>();
@@ -306,6 +424,8 @@ fn traceInstance(
   stack[0] = rootNodeIndex;
   var bestDistance = 1e9;
   var bestTriangleIndex = -1;
+  var bestU = 0.0;
+  var bestV = 0.0;
   var bestShadingNormal = vec3<f32>(0.0);
   var bestGeometricNormal = vec3<f32>(0.0);
 
@@ -344,6 +464,8 @@ fn traceInstance(
         if (hit.x > 0.0 && hit.x < bestDistance) {
           bestDistance = hit.x;
           bestTriangleIndex = triangleIndex;
+          bestU = hit.y;
+          bestV = hit.z;
           let geometricNormal = normalize(cross(triangle.b.xyz - triangle.a.xyz, triangle.c.xyz - triangle.a.xyz));
           let w = 1.0 - hit.y - hit.z;
           let smoothedNormal = (triangle.na.xyz * w) + (triangle.nb.xyz * hit.y) + (triangle.nc.xyz * hit.z);
@@ -371,14 +493,27 @@ fn traceInstance(
   }
 
   if (bestTriangleIndex < 0) {
-    return LocalHitRecord(false, 1e9, -1, vec3<f32>(0.0), vec3<f32>(0.0), vec3<f32>(0.0));
+    return LocalHitRecord(
+      false,
+      1e9,
+      -1,
+      vec3<f32>(0.0),
+      vec2<f32>(0.0),
+      vec3<f32>(0.0),
+      vec3<f32>(0.0),
+    );
   }
+
+  let triangle = triangles.values[u32(bestTriangleIndex)];
+  let bestW = 1.0 - bestU - bestV;
+  let uv = (triangle.ta.xy * bestW) + (triangle.tb.xy * bestU) + (triangle.tc.xy * bestV);
 
   return LocalHitRecord(
     true,
     bestDistance,
     bestTriangleIndex,
     localOrigin + (localDirection * bestDistance),
+    uv,
     bestShadingNormal,
     bestGeometricNormal,
   );
@@ -392,10 +527,13 @@ fn traceMeshScene(origin: vec3<f32>, direction: vec3<f32>, allowBackface: bool) 
     false,
     bestDistance,
     vec3<f32>(0.0),
+    vec2<f32>(0.0),
+    vec3<f32>(0.0),
     vec3<f32>(0.0),
     vec3<f32>(0.0),
     vec3<f32>(0.0),
     0.0,
+    1.0,
   );
 
   for (var index: i32 = 0; index < instanceCount; index = index + 1) {
@@ -446,16 +584,66 @@ fn traceMeshScene(origin: vec3<f32>, direction: vec3<f32>, allowBackface: bool) 
       worldShadingNormal = -worldShadingNormal;
     }
 
+    var albedo = instance.baseColor.xyz;
+    let baseColorTextureSlot = i32(instance.payload.y);
+    if (baseColorTextureSlot >= 0) {
+      let sampledBaseColor = sampleMaterialTexture(baseColorTextureSlot, localHit.uv);
+      albedo *= sampledBaseColor.xyz;
+    }
+
+    var metallic = clamp(instance.materialParams.x, 0.0, 1.0);
+    var roughness = clamp(instance.materialParams.y, 0.04, 1.0);
+    let emissiveTextureSlot = i32(instance.materialParams.z);
+    let occlusionTextureSlot = i32(instance.materialParams.w);
+    let normalTextureSlot = i32(instance.payload.w);
+    var emissive = instance.emissiveNormal.xyz;
+
+    let metallicRoughnessTextureSlot = i32(instance.payload.z);
+    if (metallicRoughnessTextureSlot >= 0) {
+      let sampledMetallicRoughness = sampleMaterialTexture(metallicRoughnessTextureSlot, localHit.uv);
+      roughness *= sampledMetallicRoughness.y;
+      metallic *= sampledMetallicRoughness.z;
+    }
+
+    if (occlusionTextureSlot >= 0) {
+      let sampledOcclusion = sampleMaterialTexture(occlusionTextureSlot, localHit.uv).x;
+      let occlusion = mix(1.0, sampledOcclusion, clamp(instance.auxiliary.x, 0.0, 1.0));
+      albedo *= occlusion;
+    }
+
+    if (emissiveTextureSlot >= 0) {
+      emissive *= sampleMaterialTexture(emissiveTextureSlot, localHit.uv).xyz;
+    }
+
+    if (normalTextureSlot >= 0) {
+      let sampledNormal = sampleMaterialTexture(normalTextureSlot, localHit.uv).xyz;
+      let uvEdge1 = triangle.tb.xy - triangle.ta.xy;
+      let uvEdge2 = triangle.tc.xy - triangle.ta.xy;
+      worldShadingNormal = applyNormalMap(
+        worldGeometricNormal,
+        worldShadingNormal,
+        worldEdge1,
+        worldEdge2,
+        uvEdge1,
+        uvEdge2,
+        sampledNormal,
+        instance.emissiveNormal.w,
+      );
+    }
+
     bestDistance = worldDistance;
     result = WorldHitRecord(
       true,
       false,
       worldDistance,
       worldPosition,
+      localHit.uv,
       worldShadingNormal,
       worldGeometricNormal,
-      instance.albedoEmission.xyz,
-      instance.albedoEmission.w,
+      albedo,
+      emissive,
+      metallic,
+      roughness,
     );
   }
 
@@ -514,10 +702,13 @@ fn traceSdfScene(origin: vec3<f32>, direction: vec3<f32>, maxDistance: f32) -> W
       true,
       maxDistance,
       vec3<f32>(0.0),
+      vec2<f32>(0.0),
+      vec3<f32>(0.0),
       vec3<f32>(0.0),
       vec3<f32>(0.0),
       vec3<f32>(0.0),
       0.0,
+      1.0,
     );
   }
 
@@ -540,10 +731,13 @@ fn traceSdfScene(origin: vec3<f32>, direction: vec3<f32>, maxDistance: f32) -> W
         true,
         travel,
         point,
+        vec2<f32>(0.0),
         normal,
         normal,
         sample.albedo,
-        sample.emission,
+        sample.albedo * sample.emission,
+        0.0,
+        1.0,
       );
     }
 
@@ -555,10 +749,13 @@ fn traceSdfScene(origin: vec3<f32>, direction: vec3<f32>, maxDistance: f32) -> W
     true,
     maxDistance,
     vec3<f32>(0.0),
+    vec2<f32>(0.0),
+    vec3<f32>(0.0),
     vec3<f32>(0.0),
     vec3<f32>(0.0),
     vec3<f32>(0.0),
     0.0,
+    1.0,
   );
 }
 
@@ -743,8 +940,8 @@ fn fsMain(in: VsOut) -> @location(0) vec4<f32> {
       break;
     }
 
-    if (hit.emission > 0.0) {
-      radiance += clampFireflies(throughput * hit.albedo * hit.emission);
+    if (luminance(hit.emissive) > 0.0) {
+      radiance += clampFireflies(throughput * hit.emissive);
     }
 
     let shadingNormal = normalize(select(
@@ -752,13 +949,14 @@ fn fsMain(in: VsOut) -> @location(0) vec4<f32> {
       hit.shadingNormal,
       dot(hit.shadingNormal, hit.geometricNormal) >= 0.0,
     ));
+    let diffuseAlbedo = hit.albedo * (1.0 - hit.metallic);
     radiance += throughput *
       sampleDirectDirectionalLights(
         hit.position,
         shadingNormal,
         hit.geometricNormal,
         hit.isSdf,
-        hit.albedo,
+        diffuseAlbedo,
       );
     radiance += throughput *
       sampleDirectAreaLight(
@@ -766,11 +964,26 @@ fn fsMain(in: VsOut) -> @location(0) vec4<f32> {
         shadingNormal,
         hit.geometricNormal,
         hit.isSdf,
-        hit.albedo,
+        diffuseAlbedo,
         &randomState,
       );
 
-    throughput *= hit.albedo;
+    let viewDirection = -direction;
+    let ndotv = max(dot(shadingNormal, viewDirection), 0.0);
+    let f0 = mix(vec3<f32>(0.04), hit.albedo, hit.metallic);
+    let fresnel = f0 + ((vec3<f32>(1.0) - f0) * pow(1.0 - ndotv, 5.0));
+    let specularChance = clamp(luminance(fresnel), 0.08, 0.92);
+    let chooseSpecular = random(&randomState) < specularChance;
+
+    if (chooseSpecular) {
+      let reflectionDirection = reflect(direction, shadingNormal);
+      direction = sampleGlossyDirection(reflectionDirection, hit.roughness, &randomState);
+      throughput *= fresnel / specularChance;
+    } else {
+      direction = sampleCosineHemisphere(shadingNormal, &randomState);
+      throughput *= diffuseAlbedo / max(1.0 - specularChance, 1e-3);
+    }
+
     if (bounce >= 2u) {
       let survivalProbability = clamp(
         max(throughput.x, max(throughput.y, throughput.z)),
@@ -784,7 +997,6 @@ fn fsMain(in: VsOut) -> @location(0) vec4<f32> {
     }
 
     origin = hit.position + (hit.geometricNormal * hitOffset(hit));
-    direction = sampleCosineHemisphere(hit.geometricNormal, &randomState);
   }
 
   return vec4<f32>(clampFireflies(radiance), 1.0);

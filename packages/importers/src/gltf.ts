@@ -10,6 +10,7 @@ import {
   createVec3,
   identityTransform,
 } from '@rieul3d/ir';
+import type { AssetSource, ImageAsset } from '@rieul3d/gpu';
 import type {
   AnimationChannel,
   AnimationClip,
@@ -54,6 +55,7 @@ type GltfImage = Readonly<{
 
 type GltfTexture = Readonly<{
   source?: number;
+  sampler?: number;
 }>;
 
 type GltfMaterial = Readonly<{
@@ -61,9 +63,16 @@ type GltfMaterial = Readonly<{
   alphaMode?: 'OPAQUE' | 'MASK' | 'BLEND';
   alphaCutoff?: number;
   doubleSided?: boolean;
+  normalTexture?: Readonly<{ index: number; scale?: number }>;
+  occlusionTexture?: Readonly<{ index: number; strength?: number }>;
+  emissiveTexture?: Readonly<{ index: number }>;
+  emissiveFactor?: readonly number[];
   pbrMetallicRoughness?: Readonly<{
     baseColorTexture?: Readonly<{ index: number }>;
     baseColorFactor?: readonly number[];
+    metallicRoughnessTexture?: Readonly<{ index: number }>;
+    metallicFactor?: number;
+    roughnessFactor?: number;
   }>;
 }>;
 
@@ -606,9 +615,10 @@ const createTextureRefs = (
   json: GltfJson,
   buffers: readonly Uint8Array[],
   options: GltfImportOptions,
-): { assets: AssetRef[]; textures: TextureRef[] } => {
+): { assets: AssetRef[]; textures: TextureRef[]; imageAssets: Map<string, ImageAsset> } => {
   const assets: AssetRef[] = [];
   const textures: TextureRef[] = [];
+  const imageAssets = new Map<string, ImageAsset>();
 
   json.textures?.forEach((texture, textureIndex) => {
     const imageIndex = texture.source;
@@ -634,6 +644,15 @@ const createTextureRefs = (
             inferMimeTypeFromUri(resource.uri) ??
             (resource.bytes ? 'application/octet-stream' : undefined),
         });
+        if (resource.bytes) {
+          imageAssets.set(assetId, {
+            id: assetId,
+            mimeType: image.mimeType ?? inferDataUriMimeType(image.uri ?? '') ??
+              inferMimeTypeFromUri(resource.uri) ??
+              'application/octet-stream',
+            bytes: resource.bytes,
+          });
+        }
       }
     }
 
@@ -646,7 +665,7 @@ const createTextureRefs = (
     });
   });
 
-  return { assets, textures };
+  return { assets, textures, imageAssets };
 };
 
 const createMaterials = (
@@ -655,11 +674,49 @@ const createMaterials = (
   sceneTextures: readonly TextureRef[],
 ): Material[] =>
   (json.materials ?? []).map((material, materialIndex) => {
-    const textureIndex = material.pbrMetallicRoughness?.baseColorTexture?.index;
     const baseColor = material.pbrMetallicRoughness?.baseColorFactor ?? [1, 1, 1, 1];
-    const textures: TextureRef[] = textureIndex === undefined
-      ? []
-      : sceneTextures.filter((texture) => texture.id === `${sceneId}-texture-${textureIndex}`);
+    const emissiveFactor = material.emissiveFactor ?? [0, 0, 0];
+    const metallicFactor = material.pbrMetallicRoughness?.metallicFactor ?? 1;
+    const roughnessFactor = material.pbrMetallicRoughness?.roughnessFactor ?? 1;
+    const normalScale = material.normalTexture?.scale ?? 1;
+    const occlusionStrength = material.occlusionTexture?.strength ?? 1;
+    const toMaterialTexture = (
+      textureIndex: number | undefined,
+      semantic: string,
+      colorSpace: string,
+    ): TextureRef[] => {
+      if (textureIndex === undefined) {
+        return [];
+      }
+
+      const sceneTexture = sceneTextures.find((texture) =>
+        texture.id === `${sceneId}-texture-${textureIndex}`
+      );
+      if (!sceneTexture) {
+        return [];
+      }
+
+      return [{
+        ...sceneTexture,
+        semantic,
+        colorSpace,
+      }];
+    };
+    const textures: TextureRef[] = [
+      ...toMaterialTexture(
+        material.pbrMetallicRoughness?.baseColorTexture?.index,
+        'baseColor',
+        'srgb',
+      ),
+      ...toMaterialTexture(
+        material.pbrMetallicRoughness?.metallicRoughnessTexture?.index,
+        'metallicRoughness',
+        'linear',
+      ),
+      ...toMaterialTexture(material.normalTexture?.index, 'normal', 'linear'),
+      ...toMaterialTexture(material.occlusionTexture?.index, 'occlusion', 'linear'),
+      ...toMaterialTexture(material.emissiveTexture?.index, 'emissive', 'srgb'),
+    ];
 
     return {
       id: `${sceneId}-material-${materialIndex}`,
@@ -671,6 +728,18 @@ const createMaterials = (
       textures,
       parameters: {
         color: toVec4(baseColor),
+        emissive: {
+          x: emissiveFactor[0] ?? 0,
+          y: emissiveFactor[1] ?? 0,
+          z: emissiveFactor[2] ?? 0,
+          w: 1,
+        },
+        metallicRoughness: {
+          x: metallicFactor,
+          y: roughnessFactor,
+          z: occlusionStrength,
+          w: normalScale,
+        },
       },
     };
   });
@@ -755,18 +824,18 @@ const createAnimationClips = (
     };
   });
 
-const importGltfScene = (
+const importGltfSceneWithAssets = (
   json: GltfJson,
   sceneId: string,
   options: GltfImportOptions,
   binaryChunk?: Uint8Array,
-): SceneIr => {
+): Readonly<{ scene: SceneIr; assetSource: AssetSource }> => {
   const nodes = json.nodes ?? [];
   const buffers = (json.buffers ?? []).map((buffer, bufferIndex) =>
     getBufferBytes(buffer, sceneId, bufferIndex, options, binaryChunk)
   );
   const parentIds = buildParentIds(sceneId, nodes);
-  const { assets, textures } = createTextureRefs(sceneId, json, buffers, options);
+  const { assets, textures, imageAssets } = createTextureRefs(sceneId, json, buffers, options);
   const materials = createMaterials(sceneId, json, textures);
   const rootNodeIds = getDefaultRootIndices(json).map((nodeIndex) =>
     `${sceneId}-node-${nodeIndex}`
@@ -837,8 +906,21 @@ const importGltfScene = (
     scene = appendAnimationClip(scene, clip);
   }
 
-  return scene;
+  return {
+    scene,
+    assetSource: {
+      images: imageAssets,
+      volumes: new Map(),
+    },
+  };
 };
+
+const importGltfScene = (
+  json: GltfJson,
+  sceneId: string,
+  options: GltfImportOptions,
+  binaryChunk?: Uint8Array,
+): SceneIr => importGltfSceneWithAssets(json, sceneId, options, binaryChunk).scene;
 
 export const importGltfFromJson = (
   json: GltfJson,
@@ -900,4 +982,13 @@ export const importGltfFromGlb = (
 ): SceneIr => {
   const { json, binaryChunk } = parseGlb(glbBytes);
   return importGltfScene(json, sceneId, options, binaryChunk);
+};
+
+export const importGltfFromGlbWithAssets = (
+  glbBytes: Uint8Array,
+  sceneId = 'gltf-scene',
+  options: GltfImportOptions = {},
+): Readonly<{ scene: SceneIr; assetSource: AssetSource }> => {
+  const { json, binaryChunk } = parseGlb(glbBytes);
+  return importGltfSceneWithAssets(json, sceneId, options, binaryChunk);
 };

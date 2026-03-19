@@ -369,6 +369,18 @@ Deno.test('importGltfFromJson ingests buffer views, accessors, images, and mater
     z: 0.75,
     w: 1,
   });
+  assertEquals(scene.materials[0].parameters.emissive, {
+    x: 0,
+    y: 0,
+    z: 0,
+    w: 1,
+  });
+  assertEquals(scene.materials[0].parameters.metallicRoughness, {
+    x: 1,
+    y: 1,
+    z: 1,
+    w: 1,
+  });
   assertEquals(scene.meshes[0].attributes[0].values, [0, 0, 0, 1, 0, 0, 0, 1, 0]);
   assertEquals(scene.meshes[0].indices, [0, 1, 2]);
   assertEquals(scene.nodes[0].transform.translation, { x: 1, y: 2, z: 3 });

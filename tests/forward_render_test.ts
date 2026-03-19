@@ -14,7 +14,9 @@ import {
   createMaterialRegistry,
   ensureBuiltInForwardPipeline,
   ensureMaterialPipeline,
+  ensurePostProcessPipeline,
   type GpuRenderExecutionContext,
+  type PostProcessProgram,
   registerWgslMaterial,
   renderDeferredFrame,
   renderForwardFrame,
@@ -284,6 +286,69 @@ Deno.test('ensureBuiltInForwardPipeline caches the generated pipeline', () => {
   assertStrictEquals(first, second);
   assertEquals(mocks.pipelines.length, 1);
   assertEquals(mocks.shaders.length, 1);
+});
+
+Deno.test('ensurePostProcessPipeline rebuilds cache entries when shader identity changes', () => {
+  const runtimeResidency = createRuntimeResidency();
+  const mocks = createRenderMocks();
+  const baseProgram: PostProcessProgram = {
+    id: 'post-process:test',
+    label: 'Post Process Test',
+    wgsl: `
+struct VsOut {
+  @builtin(position) position: vec4<f32>,
+};
+
+@vertex
+fn vsMain(@builtin(vertex_index) index: u32) -> VsOut {
+  var out: VsOut;
+  out.position = vec4<f32>(f32(index), 0.0, 0.0, 1.0);
+  return out;
+}
+
+@fragment
+fn fsMain() -> @location(0) vec4<f32> {
+  return vec4<f32>(1.0, 0.0, 0.0, 1.0);
+}
+`,
+    fragmentEntryPoint: 'fsMain',
+  };
+
+  const first = ensurePostProcessPipeline(
+    mocks as unknown as GpuRenderExecutionContext,
+    runtimeResidency,
+    baseProgram,
+    'rgba8unorm',
+  );
+  const same = ensurePostProcessPipeline(
+    mocks as unknown as GpuRenderExecutionContext,
+    runtimeResidency,
+    baseProgram,
+    'rgba8unorm',
+  );
+  const changedShader = ensurePostProcessPipeline(
+    mocks as unknown as GpuRenderExecutionContext,
+    runtimeResidency,
+    {
+      ...baseProgram,
+      wgsl: baseProgram.wgsl.replace('1.0, 0.0, 0.0, 1.0', '0.0, 1.0, 0.0, 1.0'),
+    },
+    'rgba8unorm',
+  );
+  const changedLayout = ensurePostProcessPipeline(
+    mocks as unknown as GpuRenderExecutionContext,
+    runtimeResidency,
+    {
+      ...baseProgram,
+      usesUniformBuffer: true,
+    },
+    'rgba8unorm',
+  );
+
+  assertStrictEquals(first, same);
+  assertEquals(first === changedShader, false);
+  assertEquals(changedShader === changedLayout, false);
+  assertEquals(mocks.pipelines.length, 3);
 });
 
 Deno.test('renderForwardFrame encodes indexed and non-indexed draws from mesh residency', () => {

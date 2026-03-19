@@ -119,6 +119,8 @@ The initial renderer uses a lightweight pass graph:
 - Post-process programs reserve `@group(0) @binding(0)` for the input color texture and
   `@group(0) @binding(1)` for the input sampler; programs that opt into uniforms also reserve
   `@group(0) @binding(2)` for a uniform buffer.
+- Post-process pipeline residency is keyed by effective program identity, including WGSL, fragment
+  entry point, and uniform-buffer usage, so shader swaps do not silently reuse stale pipelines.
 - Deferred custom WGSL programs that register with `usesTransformBindings: true` should match the
   deferred `@group(0)` transform contract: evaluated node world matrix plus inverse-transpose normal
   matrix.

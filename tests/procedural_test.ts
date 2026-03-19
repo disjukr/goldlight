@@ -11,6 +11,8 @@ import {
   createUvDebugTexture,
   createWorleyTexture,
   createWorleyVolume,
+} from '@rieul3d/procedural';
+import {
   sampleDomainWarpedFbm2d,
   sampleDomainWarpedFbm3d,
   sampleFbm2d,
@@ -25,7 +27,7 @@ import {
   sampleValueNoise3d,
   sampleWorleyNoise2d,
   sampleWorleyNoise3d,
-} from '@rieul3d/procedural';
+} from '@rieul3d/math';
 
 const assertByteRange = (values: Uint8Array): void => {
   for (const value of values) {

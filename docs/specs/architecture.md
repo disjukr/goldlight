@@ -23,6 +23,11 @@ The runtime is split into explicit data and execution stages:
 - `packages/ir`: schema and generated types for serializable scene IR.
 - BDL schema files must declare an explicit standard. `rieul3d` currently uses the `conventional`
   standard for scene IR modules.
+- `packages/math`: low-level deterministic math and sampling helpers, including reusable noise
+  functions.
+- `packages/geometry`: shape definitions, mesh primitive generation, triangulation, and local
+  SDF-to-mesh extraction helpers.
+- `packages/spatial`: spatial indexing and broad-phase query helpers.
 - `packages/core`: pure functions that evaluate IR into renderable CPU state.
 - `packages/core` also owns evaluated-camera math helpers such as screen-to-world ray generation for
   interaction foundations.
@@ -36,14 +41,28 @@ The runtime is split into explicit data and execution stages:
   pass execution.
 - renderer descriptors also publish capability contracts for primitive/material compatibility before
   execution. See [`renderer-capabilities.md`](./renderer-capabilities.md).
-- `packages/procedural`: deterministic CPU-side procedural sampling plus texture/volume baking
-  helpers.
-- `packages/primitives`: reusable polygon mesh generation plus local SDF-to-mesh extraction helpers.
+- `packages/procedural`: deterministic CPU-side procedural texture, volume, and future field
+  generation helpers.
+- `packages/raytrace`: tracing acceleration and traversal helpers for ray or path-traced execution.
 - `packages/importers`: format parsers that normalize input into Scene IR.
 - `packages/react`: declarative scene authoring that feeds the same IR/core pipeline.
 - `packages/exporters`: output encoders that serialize renderer results such as PNG.
 - device-loss recovery remains a caller-visible workflow rather than an implicit runtime reset. See
   [`device-loss-recovery.md`](./device-loss-recovery.md).
+
+## Utility Module Direction
+
+Utility and generation modules that are still evolving should organize around roles before they are
+split into new public packages.
+
+- `math`: pure math and geometry fundamentals
+- `geometry`: shape definitions, splines, triangulation, and mesh generation
+- `spatial`: general-purpose spatial indexing and query helpers
+- `procedural`: noise, fields, SDF composition, and procedural asset generation
+- `raytrace`: tracing acceleration structures and traversal helpers
+
+These role-oriented packages are the intended public surface for evolving utility code. See
+[`../adr/0012-role-oriented-utility-package-layout.md`](../adr/0012-role-oriented-utility-package-layout.md).
 
 ## Current Runtime Surface
 

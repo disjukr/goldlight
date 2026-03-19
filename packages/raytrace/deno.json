@@ -1,5 +1,5 @@
 {
-  "name": "@rieul3d/primitives",
+  "name": "@rieul3d/raytrace",
   "version": "0.0.0",
   "exports": "./mod.ts"
 }

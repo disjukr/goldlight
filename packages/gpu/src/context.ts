@@ -25,6 +25,7 @@ export type GpuContext = Readonly<{
 
 export type SurfaceBinding = Readonly<{
   kind: 'surface';
+  device: GPUDevice;
   target: SurfaceTarget;
   canvasContext: GPUCanvasContext;
   depthTexture: GPUTexture;
@@ -194,6 +195,7 @@ export const createSurfaceBinding = (
 
   return {
     kind: 'surface',
+    device: context.device,
     target: context.target,
     canvasContext,
     depthTexture,
@@ -291,6 +293,11 @@ export const resizeSurfaceBindingTarget = (
   const mutableTarget = binding.target as MutableSurfaceTarget;
   mutableTarget.width = width;
   mutableTarget.height = height;
+  binding.canvasContext.configure({
+    device: binding.device,
+    format: binding.target.format,
+    alphaMode: binding.target.alphaMode ?? 'premultiplied',
+  });
 };
 
 export const getRenderTargetSize = (target: RenderTarget): Readonly<{

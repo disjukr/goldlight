@@ -6,11 +6,13 @@ The repository is organized as a Deno workspace with packages for:
 
 - `@rieul3d/ir`: BDL-backed scene IR definitions
 - `@rieul3d/core`: scene evaluation and animation helpers
+- `@rieul3d/math`: low-level deterministic sampling and reusable math helpers
+- `@rieul3d/geometry`: shape definition, mesh primitive generation, and local SDF-to-mesh helpers
+- `@rieul3d/spatial`: spatial indexing and broad-phase query helpers
+- `@rieul3d/procedural`: deterministic procedural texture and volume generators
+- `@rieul3d/raytrace`: tracing acceleration and traversal helpers
 - `@rieul3d/gpu`: WebGPU context and runtime residency helpers
 - `@rieul3d/renderer`: forward/deferred frame planning and execution contracts
-- `@rieul3d/primitives`: procedural polygon mesh generators for common shapes plus local SDF-to-mesh
-  extraction helpers; separate from runtime SDF primitives
-- `@rieul3d/procedural`: deterministic procedural noise, texture, and volume generators
 - `@rieul3d/importers`: OBJ/STL/PLY/glTF ingestion into scene IR
 - `@rieul3d/react`: declarative authoring adapter
 - `@rieul3d/react/reconciler`: experimental React reconciler host over the package-local scene
@@ -19,6 +21,10 @@ The repository is organized as a Deno workspace with packages for:
 - `@rieul3d/desktop`: single-process desktop shell bootstrap over a Rust `winit` FFI host
 
 The design source of truth lives in [`docs/specs`](./docs/specs) and [`docs/adr`](./docs/adr).
+
+Utility and generation modules are organized around role-oriented boundaries such as `geometry`,
+`spatial`, `procedural`, and `raytrace`. See
+[`docs/adr/0012-role-oriented-utility-package-layout.md`](./docs/adr/0012-role-oriented-utility-package-layout.md).
 
 ## Documentation Map
 
@@ -52,8 +58,8 @@ Implemented today:
 - forward-renderer cubemap capture for mesh, SDF, and volume scenes as six ordered offscreen face
   snapshots, plus CPU-side export helpers for equirectangular, angular-map, cross, and strip layouts
   with optional filtered reprojection and caller-controlled output dimensions
-- Perlin gradient-noise samplers in `@rieul3d/procedural` plus grayscale texture/volume generators
-  that share the existing deterministic seed model
+- Perlin gradient-noise samplers in `@rieul3d/math` plus grayscale texture/volume generators in
+  `@rieul3d/procedural` that share the existing deterministic seed model
 - forward SDF sphere and box raymarch execution with capability preflight alignment
 - local-space SDF-to-mesh extraction for supported sphere and box primitives, including
   canonical-table marching-cubes and naive surface-nets contouring helpers for baking or inspection
@@ -74,8 +80,8 @@ Implemented today:
   package
 - browser canvas examples, Windows BYOW native textured demo, headless PNG snapshot workflow, and
   PNG snapshot encoding
-- Windows BYOW primitives demo using `@rieul3d/primitives`, a reusable BYOW runner script, and a
-  custom lit shader for mesh normals
+- Windows BYOW primitives demo using `@rieul3d/geometry`, a reusable BYOW runner script, built-in
+  `lit` materials, and directional-light shading
 - Windows BYOW Stanford Bunny demo authored through `@rieul3d/react`, loading the vendored ASCII PLY
   mesh, generating runtime normals for built-in lit shading, and publishing live bunny rotation
   updates through the experimental React reconciler host

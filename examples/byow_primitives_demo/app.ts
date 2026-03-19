@@ -5,12 +5,14 @@ import { evaluateScene } from '@rieul3d/core';
 import {
   createRuntimeResidency,
   createSurfaceBinding,
+  ensureSceneMaterialResidency,
   ensureSceneMeshResidency,
   requestGpuContext,
   resizeSurfaceBindingTarget,
 } from '@rieul3d/gpu';
 import {
   appendCamera,
+  appendLight,
   appendMaterial,
   appendMesh,
   appendNode,
@@ -30,16 +32,11 @@ import {
   createSphereMesh,
   createTetrahedronMesh,
   createTorusMesh,
-} from '@rieul3d/primitives';
-import {
-  createMaterialRegistry,
-  registerWgslMaterial,
-  renderForwardFrame,
-} from '@rieul3d/renderer';
-import litShader from './lit.wgsl' with { type: 'text' };
+} from '@rieul3d/geometry';
+import { createMaterialRegistry, renderForwardFrame } from '@rieul3d/renderer';
 
-const shaderId = 'shader:byow-primitives-lit';
 const cameraId = 'byow-primitives-camera';
+const lightId = 'byow-primitives-key-light';
 
 const createQuatFromEulerDegrees = (
   xDegrees: number,
@@ -213,14 +210,30 @@ const createPrimitiveScene = (timeMs: number) => {
       },
     }),
   );
+  scene = appendLight(scene, {
+    id: lightId,
+    kind: 'directional',
+    color: { x: 1, y: 0.95, z: 0.9 },
+    intensity: 1.7,
+  });
+  scene = appendNode(
+    scene,
+    createNode('byow-primitives-light-node', {
+      lightId,
+      transform: {
+        translation: { x: 0, y: 0, z: 0 },
+        rotation: createQuatFromEulerDegrees(-42, -36, 0),
+        scale: { x: 1, y: 1, z: 1 },
+      },
+    }),
+  );
 
   const elapsedSeconds = timeMs / 1000;
 
   for (const entry of primitiveEntries) {
     scene = appendMaterial(scene, {
       id: entry.materialId,
-      kind: 'custom',
-      shaderId,
+      kind: 'lit',
       textures: [],
       parameters: {
         color: {
@@ -277,39 +290,16 @@ export default async ({ window }: DesktopModuleContext): Promise<() => void> => 
   const gpuContext = await requestGpuContext({ target });
   const binding = createSurfaceBinding(gpuContext, window.canvasContext);
   const residency = createRuntimeResidency();
-  const materialRegistry = registerWgslMaterial(createMaterialRegistry(), {
-    id: shaderId,
-    label: 'BYOW Primitive Lit',
-    wgsl: litShader,
-    vertexEntryPoint: 'vsMain',
-    fragmentEntryPoint: 'fsMain',
-    usesMaterialBindings: true,
-    usesTransformBindings: true,
-    materialBindings: [{ kind: 'uniform', binding: 0 }],
-    vertexAttributes: [
-      {
-        semantic: 'POSITION',
-        shaderLocation: 0,
-        format: 'float32x3',
-        offset: 0,
-        arrayStride: 12,
-      },
-      {
-        semantic: 'NORMAL',
-        shaderLocation: 1,
-        format: 'float32x3',
-        offset: 0,
-        arrayStride: 12,
-      },
-    ],
-  });
+  const materialRegistry = createMaterialRegistry();
   const initialScene = createPrimitiveScene(0);
+  const initialEvaluatedScene = evaluateScene(initialScene, { timeMs: 0 });
   ensureSceneMeshResidency(
     gpuContext,
     residency,
     initialScene,
-    evaluateScene(initialScene, { timeMs: 0 }),
+    initialEvaluatedScene,
   );
+  ensureSceneMaterialResidency(gpuContext, residency, initialEvaluatedScene);
 
   window.runtime.addEventListener('resize', (event) => {
     const detail = (event as CustomEvent<{ width: number; height: number }>).detail;
@@ -324,6 +314,7 @@ export default async ({ window }: DesktopModuleContext): Promise<() => void> => 
     const timeMs = performance.now() - startTime;
     const animatedScene = createPrimitiveScene(timeMs);
     const evaluatedScene = evaluateScene(animatedScene, { timeMs });
+    ensureSceneMaterialResidency(gpuContext, residency, evaluatedScene);
     renderForwardFrame(gpuContext, binding, residency, evaluatedScene, materialRegistry);
     window.present();
     frameHandle = requestAnimationFrame(drawFrame);

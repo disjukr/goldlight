@@ -3,7 +3,7 @@ import {
   sampleFbm3d,
   samplePerlinNoise3d,
   sampleWorleyNoise3d,
-} from './math.ts';
+} from '@rieul3d/math';
 
 export type ProceduralVolume3d = Readonly<{
   width: number;

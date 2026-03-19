@@ -3,7 +3,7 @@ import {
   sampleFbm2d,
   samplePerlinNoise2d,
   sampleWorleyNoise2d,
-} from './math.ts';
+} from '@rieul3d/math';
 
 export type ColorRgba = readonly [number, number, number, number];
 

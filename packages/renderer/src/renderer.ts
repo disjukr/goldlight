@@ -3067,15 +3067,6 @@ export const renderSdfRaymarchPass = (
 ): number => {
   const items = extractSdfPassItems(evaluatedScene);
   if (items.length === 0) {
-    const clearPass = encoder.beginRenderPass({
-      colorAttachments: [{
-        view: targetView,
-        clearValue: { r: 0.04, g: 0.05, b: 0.08, a: 1 },
-        loadOp: 'clear',
-        storeOp: 'store',
-      }],
-    });
-    clearPass.end();
     return 0;
   }
 

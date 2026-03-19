@@ -503,6 +503,39 @@ Deno.test('renderForwardFrame encodes indexed and non-indexed draws from mesh re
   );
 });
 
+Deno.test('renderForwardFrame does not clear scene color again when no sdf or volume nodes exist', () => {
+  const mocks = createRenderMocks();
+  const runtimeResidency = createRuntimeResidency();
+  let scene = createSceneIr('scene');
+  scene = appendMesh(scene, {
+    id: 'mesh-only',
+    attributes: [{ semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0, 0, 1, 0] }],
+  });
+  scene = appendNode(scene, createNode('mesh-only-node', { meshId: 'mesh-only' }));
+
+  runtimeResidency.geometry.set('mesh-only', {
+    meshId: 'mesh-only',
+    attributeBuffers: { POSITION: { id: 0 } as unknown as GPUBuffer },
+    vertexCount: 3,
+    indexCount: 0,
+  });
+
+  const binding = createOffscreenBinding({
+    device: mocks.device as unknown as GPUDevice,
+    target: { kind: 'offscreen', width: 64, height: 64, format: 'rgba8unorm', sampleCount: 1 },
+  });
+
+  const result = renderForwardFrame(
+    mocks as unknown as GpuRenderExecutionContext,
+    binding,
+    runtimeResidency,
+    evaluateScene(scene, { timeMs: 0 }),
+  );
+
+  assertEquals(result.drawCount, 1);
+  assertEquals(mocks.renderPassCount.current, 1);
+});
+
 Deno.test('renderDeferredFrame encodes depth, gbuffer, and lighting passes for minimal mesh/unlit scenes', () => {
   const mocks = createRenderMocks();
   const runtimeResidency = createRuntimeResidency();
@@ -550,7 +583,7 @@ Deno.test('renderDeferredFrame encodes depth, gbuffer, and lighting passes for m
 
   assertEquals(result.drawCount, 3);
   assertEquals(result.submittedCommandBufferCount, 1);
-  assertEquals(mocks.renderPassCount.current, 4);
+  assertEquals(mocks.renderPassCount.current, 3);
   assertEquals(mocks.pipelines.length, 3);
   assertEquals(
     mocks.passActions.filter((action) => action.type === 'draw').length,
@@ -650,7 +683,7 @@ Deno.test('renderForwardFrame runs a post-process pass after scene rendering whe
   );
 
   assertEquals(result.drawCount, 2);
-  assertEquals(mocks.renderPassCount.current, 3);
+  assertEquals(mocks.renderPassCount.current, 2);
   assertEquals(
     mocks.passActions.filter((action) => action.type === 'draw').length,
     2,
@@ -749,7 +782,7 @@ Deno.test('renderForwardFrame composites transparent meshes in a second blended 
   );
 
   assertEquals(result.drawCount, 2);
-  assertEquals(mocks.renderPassCount.current, 3);
+  assertEquals(mocks.renderPassCount.current, 2);
   const transparentPipeline = mocks.pipelines.find((pipeline) =>
     pipeline.descriptor.fragment?.targets?.[0]?.blend !== undefined
   );
@@ -813,7 +846,7 @@ Deno.test('renderUberFrame preserves the deferred-plus-forward composition behav
   );
 
   assertEquals(result.drawCount, 4);
-  assertEquals(mocks.renderPassCount.current, 5);
+  assertEquals(mocks.renderPassCount.current, 4);
 });
 
 Deno.test('renderPathtracedFrame encodes a fullscreen sdf pass', () => {
@@ -1062,7 +1095,7 @@ Deno.test('renderDeferredFrame runs a post-process pass after deferred lighting 
   );
 
   assertEquals(result.drawCount, 4);
-  assertEquals(mocks.renderPassCount.current, 5);
+  assertEquals(mocks.renderPassCount.current, 4);
   assertEquals(
     mocks.passActions.filter((action) => action.type === 'draw').length,
     4,
@@ -1500,7 +1533,7 @@ Deno.test('renderForwardFrame keeps rotated volume nodes in local raymarch space
 
   assertEquals(result.drawCount, 1);
   assertEquals(result.submittedCommandBufferCount, 1);
-  assertEquals(mocks.renderPassCount.current, 3);
+  assertEquals(mocks.renderPassCount.current, 2);
   assertEquals(
     mocks.passActions.filter((action) => action.type === 'draw').length,
     1,

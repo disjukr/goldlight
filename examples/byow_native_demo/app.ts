@@ -6,6 +6,7 @@ import {
   type AssetSource,
   createRuntimeResidency,
   createSurfaceBinding,
+  ensureSceneMaterialResidency,
   ensureSceneMeshResidency,
   ensureSceneTextureResidency,
   requestGpuContext,
@@ -229,6 +230,7 @@ export default async ({ window }: DesktopModuleContext): Promise<() => void> => 
   const evaluatedScene = evaluateScene(scene, { timeMs: 0 });
 
   ensureSceneMeshResidency(gpuContext, residency, scene, evaluatedScene);
+  ensureSceneMaterialResidency(gpuContext, residency, evaluatedScene);
   ensureSceneTextureResidency(gpuContext, residency, scene, assetSource);
 
   window.runtime.addEventListener('resize', (event) => {

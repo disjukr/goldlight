@@ -17,7 +17,7 @@ import {
   createSphereMesh,
   createTetrahedronMesh,
   createTorusMesh,
-} from '@rieul3d/primitives';
+} from '@rieul3d/geometry';
 
 type MockBuffer = Readonly<{
   id: number;

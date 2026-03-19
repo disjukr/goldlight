@@ -101,8 +101,8 @@ The initial renderer uses a lightweight pass graph:
   2D environment-map layout in the renderer itself.
 - Browser examples cover the minimal mesh-only path, a texture-backed built-in unlit path, and a
   custom WGSL path that samples texture residency through declared material bindings.
-- The native BYOW demo uses the same forward renderer/runtime residency path on an SDL2-backed
-  surface target instead of a browser canvas.
+- The native BYOW demos use the same forward renderer/runtime residency path on a `winit`-hosted
+  `Deno.UnsafeWindowSurface` target instead of a browser canvas.
 - Fixture-backed golden snapshot tests cover clear-only, mesh, sphere/box SDF, volume, and
   recovery-rebuild headless frames.
 - Raymarch golden tests also assert that SDF/volume snapshots differ from the clear-only frame so

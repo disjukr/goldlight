@@ -53,12 +53,12 @@ Runnable examples live here. Each example should document how to build, serve, o
 
 ## Primitive Authoring
 
-`@rieul3d/primitives` exposes polygon mesh generators that return `MeshPrimitive` data. These are
-mesh helpers, not SDF primitives.
+`@rieul3d/geometry` exposes polygon mesh generators that return `MeshPrimitive` data. These are mesh
+helpers, not SDF primitives.
 
 ```ts
 import { appendMesh, createSceneIr } from '@rieul3d/ir';
-import { createBoxMesh } from '@rieul3d/primitives';
+import { createBoxMesh } from '@rieul3d/geometry';
 
 const scene = appendMesh(
   createSceneIr('primitive-scene'),

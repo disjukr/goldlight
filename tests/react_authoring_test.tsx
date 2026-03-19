@@ -12,7 +12,7 @@ import {
   createSceneRoot,
   createSceneRootForwardRenderer,
   createSceneRootFrameDriver,
-  createSceneRootHybridRenderer,
+  createSceneRootUberRenderer,
   DirectionalLight,
   Fragment,
   OrthographicCamera,
@@ -1614,16 +1614,16 @@ Deno.test('createSceneRootForwardRenderer encapsulates frame advance and forward
   });
 });
 
-Deno.test('createSceneRootHybridRenderer encapsulates frame advance and hybrid rendering', () => {
+Deno.test('createSceneRootUberRenderer encapsulates frame advance and uber rendering', () => {
   const root = createSceneRoot(
-    <scene id='hybrid-driver-scene'>
+    <scene id='uber-driver-scene'>
       <group id='root'>
         <node id='mesh-node' position={[3, 0, 0]} />
       </group>
     </scene>,
   );
   const calls: string[] = [];
-  const renderer = createSceneRootHybridRenderer(root, {
+  const renderer = createSceneRootUberRenderer(root, {
     context: {} as never,
     binding: {} as never,
     residency: createRuntimeResidency(),
@@ -1633,7 +1633,7 @@ Deno.test('createSceneRootHybridRenderer encapsulates frame advance and hybrid r
         calls.push(`ensure:${scene.id}:${evaluatedScene.nodes.length}`);
         return createRuntimeResidency();
       },
-      renderHybridFrame: (_context, _binding, _residency, evaluatedScene) => {
+      renderUberFrame: (_context, _binding, _residency, evaluatedScene) => {
         const meshNode = evaluatedScene.nodes.find((entry) => entry.node.id === 'mesh-node');
         calls.push(`render:${meshNode?.worldMatrix[12] ?? -1}`);
         return {
@@ -1646,7 +1646,7 @@ Deno.test('createSceneRootHybridRenderer encapsulates frame advance and hybrid r
 
   const frame = renderer.renderFrame(16);
 
-  assertEquals(calls, ['ensure:hybrid-driver-scene:2', 'render:3']);
+  assertEquals(calls, ['ensure:uber-driver-scene:2', 'render:3']);
   assertEquals(frame.evaluationMode, 'none');
   assertEquals(frame.renderResult, {
     drawCount: 3,

@@ -131,7 +131,7 @@ Issue `#117` provided the first scene-document implementation slice that this ho
   summaries now let them scope that rebuild without missing node-only changes that can remap which
   stable resources remain live.
 - Rendering, residency preparation, and execution continue to live in the core/gpu/renderer layers.
-- `createSceneRootForwardRenderer()` and `createSceneRootHybridRenderer()` now provide convenience
+- `createSceneRootForwardRenderer()` and `createSceneRootUberRenderer()` now provide convenience
   adapters that bundle scene flushing, evaluation, residency upload, and renderer invocation without
   moving pass orchestration into React application code; scene roots now own any flush behavior
   directly instead of requiring a separate runtime callback option.

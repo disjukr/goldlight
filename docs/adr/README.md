@@ -22,7 +22,7 @@ supersedes them.
   reconciler should target an internal scene document before publishing scene data updates
 - [`0009-cubemap-capture-boundary.md`](./0009-cubemap-capture-boundary.md): cubemap capture should
   be a renderer output boundary before reprojection or export layouts
-- [`0010-hybrid-deferred-forward-alpha-materials.md`](./0010-hybrid-deferred-forward-alpha-materials.md):
+- [`0010-uber-deferred-forward-alpha-materials.md`](./0010-uber-deferred-forward-alpha-materials.md):
   material alpha policy should explicitly separate deferred opaque or masked coverage from forward
   blended transparency
 

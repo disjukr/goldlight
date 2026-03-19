@@ -46,7 +46,7 @@ and explicitly reject unsupported raymarched content until that camera model is 
 - future reprojection/export helpers should consume captured cubemap faces, not renderer internals
 - cubemap capture remains useful for environment probes, debugging, and offline tooling even before
   2D exports exist
-- hybrid cubemap capture for SDF/volume scenes remains a tracked follow-up instead of a silent
+- uber cubemap capture for SDF/volume scenes remains a tracked follow-up instead of a silent
   correctness gap
 
 ## Alternatives Considered

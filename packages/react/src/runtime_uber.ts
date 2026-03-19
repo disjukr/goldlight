@@ -1,11 +1,11 @@
 import type { GpuUploadContext, RenderContextBinding, RuntimeResidency } from '@rieul3d/gpu';
 import type {
   GpuRenderExecutionContext,
-  HybridRenderResult,
   MaterialRegistry,
   PostProcessPass,
+  UberRenderResult,
 } from '@rieul3d/renderer';
-import { renderHybridFrame } from '@rieul3d/renderer';
+import { renderUberFrame } from '@rieul3d/renderer';
 
 import { type SceneRootFrameDriverOptions } from './runtime_driver.ts';
 import {
@@ -16,14 +16,14 @@ import {
   type SceneRootRenderFrameResult,
 } from './runtime_renderer.ts';
 
-type RenderHybridFrameHook = SceneRootRenderFrameHook<HybridRenderResult>;
+type RenderUberFrameHook = SceneRootRenderFrameHook<UberRenderResult>;
 
-export type SceneRootHybridRendererHooks = Readonly<{
+export type SceneRootUberRendererHooks = Readonly<{
   ensureSceneMeshResidency?: EnsureSceneMeshResidencyHook;
-  renderHybridFrame?: RenderHybridFrameHook;
+  renderUberFrame?: RenderUberFrameHook;
 }>;
 
-export type SceneRootHybridRendererOptions = Readonly<
+export type SceneRootUberRendererOptions = Readonly<
   & SceneRootFrameDriverOptions
   & {
     context: GpuRenderExecutionContext & GpuUploadContext;
@@ -31,23 +31,23 @@ export type SceneRootHybridRendererOptions = Readonly<
     residency: RuntimeResidency;
     materialRegistry?: MaterialRegistry;
     postProcessPasses?: readonly PostProcessPass[];
-    hooks?: SceneRootHybridRendererHooks;
+    hooks?: SceneRootUberRendererHooks;
   }
 >;
 
-export type SceneRootHybridFrameResult = SceneRootRenderFrameResult<HybridRenderResult>;
+export type SceneRootUberFrameResult = SceneRootRenderFrameResult<UberRenderResult>;
 
-export type SceneRootHybridRenderer = SceneRootRenderer<HybridRenderResult>;
+export type SceneRootUberRenderer = SceneRootRenderer<UberRenderResult>;
 
-export const createSceneRootHybridRenderer = (
-  sceneRoot: Parameters<typeof createSceneRootRenderer<HybridRenderResult>>[0],
-  options: SceneRootHybridRendererOptions,
-): SceneRootHybridRenderer => {
+export const createSceneRootUberRenderer = (
+  sceneRoot: Parameters<typeof createSceneRootRenderer<UberRenderResult>>[0],
+  options: SceneRootUberRendererOptions,
+): SceneRootUberRenderer => {
   return createSceneRootRenderer(sceneRoot, {
     ...options,
     hooks: {
       ensureSceneMeshResidency: options.hooks?.ensureSceneMeshResidency,
-      renderFrame: options.hooks?.renderHybridFrame ?? renderHybridFrame,
+      renderFrame: options.hooks?.renderUberFrame ?? renderUberFrame,
     },
   });
 };

@@ -183,12 +183,14 @@ type RaymarchCamera = Readonly<{
   right: readonly [number, number, number];
   up: readonly [number, number, number];
   forward: readonly [number, number, number];
+  projection: 'perspective' | 'orthographic';
 }>;
 
 type PathtracedAccumulationState = {
   width: number;
   height: number;
   format: GPUTextureFormat;
+  sceneKey: string;
   sampleCount: number;
   currentSampleTexture: GPUTexture;
   accumulationA: GPUTexture;
@@ -362,7 +364,10 @@ const defaultAmbientLight = 0.2;
 const defaultCubemapFormat = 'rgba8unorm';
 const defaultCubemapZnear = 0.1;
 const defaultCubemapZfar = 100;
-const pathtracedAccumulationStates = new WeakMap<RenderContextBinding, PathtracedAccumulationState>();
+const pathtracedAccumulationStates = new WeakMap<
+  RenderContextBinding,
+  PathtracedAccumulationState
+>();
 const alphaBlendState: GPUBlendState = {
   color: {
     srcFactor: 'src-alpha',
@@ -380,6 +385,7 @@ const defaultRaymarchCamera: RaymarchCamera = {
   right: [1, 0, 0],
   up: [0, 1, 0],
   forward: [0, 0, -1.75],
+  projection: 'perspective',
 };
 const toBufferSource = (view: ArrayBuffer | ArrayBufferView): Uint8Array<ArrayBuffer> => {
   if (view instanceof ArrayBuffer) {
@@ -572,6 +578,7 @@ const createRaymarchCamera = (
       normalizedForward[1] * forwardScale,
       normalizedForward[2] * forwardScale,
     ],
+    projection: 'perspective',
   };
 };
 
@@ -615,6 +622,7 @@ const createRaymarchCameraFromEvaluatedCamera = (
         upAxis[2] * (activeCamera.camera.ymag ?? 1),
       ],
       forward: forwardAxis,
+      projection: 'orthographic',
     };
   }
 
@@ -634,6 +642,7 @@ const createRaymarchCameraFromEvaluatedCamera = (
       upAxis[2] * halfFovTan,
     ],
     forward: forwardAxis,
+    projection: 'perspective',
   };
 };
 
@@ -2833,13 +2842,14 @@ export const ensurePostProcessPipeline = (
   residency: RuntimeResidency,
   program: PostProcessProgram,
   format: GPUTextureFormat,
+  sampleCount = 1,
 ): GPURenderPipeline => {
   const programSignature = hashString(
     `${program.wgsl}\n${program.fragmentEntryPoint}\n${
       program.usesUniformBuffer ? 'uniform' : 'nouniform'
     }`,
   );
-  const cacheKey = `${program.id}:${format}:${programSignature}`;
+  const cacheKey = `${program.id}:${format}:${sampleCount}:${programSignature}`;
   const cached = residency.pipelines.get(cacheKey);
   if (cached) {
     return cached as GPURenderPipeline;
@@ -2864,6 +2874,9 @@ export const ensurePostProcessPipeline = (
     primitive: {
       topology: 'triangle-list',
     },
+    multisample: {
+      count: sampleCount,
+    },
   });
 
   residency.pipelines.set(cacheKey, pipeline);
@@ -2883,7 +2896,7 @@ const createSdfUniformData = (
   uniformData.set(camera.origin, 4);
   uniformData.set([...camera.right, 0], 8);
   uniformData.set([...camera.up, 0], 12);
-  uniformData.set([...camera.forward, 0], 16);
+  uniformData.set([...camera.forward, camera.projection === 'orthographic' ? 1 : 0], 16);
 
   items.slice(0, maxSdfPassItems).forEach((item, index) => {
     const offset = headerFloats + (index * floatsPerItem);
@@ -2912,7 +2925,7 @@ const createVolumeUniformData = (
     ...camera.up,
     0,
     ...camera.forward,
-    0,
+    camera.projection === 'orthographic' ? 1 : 0,
   ]);
 
 const createForwardMeshTransformUniformData = (
@@ -3054,6 +3067,15 @@ export const renderSdfRaymarchPass = (
 ): number => {
   const items = extractSdfPassItems(evaluatedScene);
   if (items.length === 0) {
+    const clearPass = encoder.beginRenderPass({
+      colorAttachments: [{
+        view: targetView,
+        clearValue: { r: 0.04, g: 0.05, b: 0.08, a: 1 },
+        loadOp: 'clear',
+        storeOp: 'store',
+      }],
+    });
+    clearPass.end();
     return 0;
   }
 
@@ -3500,9 +3522,44 @@ const createPathtracedAccumulationTexture = (
 const getRenderTargetSampleCount = (binding: RenderContextBinding): number =>
   'sampleCount' in binding.target ? binding.target.sampleCount : 1;
 
+const createPathtracedSceneKey = (
+  evaluatedScene: EvaluatedScene,
+): string => {
+  const activeCamera = evaluatedScene.activeCamera;
+  const cameraKey = activeCamera
+    ? [
+      activeCamera.camera.id,
+      activeCamera.camera.type,
+      activeCamera.camera.type === 'perspective'
+        ? activeCamera.camera.yfov ?? ''
+        : `${activeCamera.camera.xmag ?? ''},${activeCamera.camera.ymag ?? ''}`,
+      activeCamera.camera.znear,
+      activeCamera.camera.zfar,
+      activeCamera.worldMatrix.join(','),
+      activeCamera.viewMatrix.join(','),
+    ].join('|')
+    : 'default-camera';
+  const sdfKey = extractSdfPassItems(evaluatedScene)
+    .map((item) =>
+      [
+        item.nodeId,
+        item.sdfId,
+        item.op,
+        item.center.join(','),
+        item.radius,
+        item.halfExtents.join(','),
+        item.color.join(','),
+        item.worldToLocalRotation.join(','),
+      ].join('|')
+    )
+    .join('::');
+
+  return hashString(`${cameraKey}::${sdfKey}`);
+};
 const ensurePathtracedAccumulationState = (
   context: GpuRenderExecutionContext,
   binding: RenderContextBinding,
+  sceneKey: string,
 ): PathtracedAccumulationState => {
   const cached = pathtracedAccumulationStates.get(binding);
   if (
@@ -3511,6 +3568,12 @@ const ensurePathtracedAccumulationState = (
     cached.height === binding.target.height &&
     cached.format === binding.target.format
   ) {
+    if (cached.sceneKey !== sceneKey) {
+      cached.sceneKey = sceneKey;
+      cached.sampleCount = 0;
+      cached.frameIndex = 0;
+      cached.swap = false;
+    }
     return cached;
   }
 
@@ -3518,8 +3581,13 @@ const ensurePathtracedAccumulationState = (
     width: binding.target.width,
     height: binding.target.height,
     format: binding.target.format,
+    sceneKey,
     sampleCount: 0,
-    currentSampleTexture: createPathtracedAccumulationTexture(context, binding, 'pathtraced-current'),
+    currentSampleTexture: createPathtracedAccumulationTexture(
+      context,
+      binding,
+      'pathtraced-current',
+    ),
     accumulationA: createPathtracedAccumulationTexture(context, binding, 'pathtraced-accum-a'),
     accumulationB: createPathtracedAccumulationTexture(context, binding, 'pathtraced-accum-b'),
     frameIndex: 0,
@@ -3558,13 +3626,14 @@ const renderPostProcessPasses = (
 
   for (let index = 0; index < postProcessPasses.length; index += 1) {
     const postProcessPass = postProcessPasses[index];
+    const isLastPass = index === postProcessPasses.length - 1;
     const pipeline = ensurePostProcessPipeline(
       context,
       residency,
       postProcessPass.program,
       binding.target.format,
+      isLastPass ? getRenderTargetSampleCount(binding) : 1,
     );
-    const isLastPass = index === postProcessPasses.length - 1;
     const targetView = isLastPass
       ? acquireColorAttachmentView(context, binding)
       : intermediateViews[index % intermediateViews.length];
@@ -4013,7 +4082,8 @@ export const renderPathtracedFrame = (
     residency,
   );
 
-  const accumulationState = ensurePathtracedAccumulationState(context, binding);
+  const sceneKey = createPathtracedSceneKey(evaluatedScene);
+  const accumulationState = ensurePathtracedAccumulationState(context, binding, sceneKey);
   const currentSampleView = accumulationState.currentSampleTexture.createView();
   const previousAccumulationTexture = accumulationState.swap
     ? accumulationState.accumulationB
@@ -4029,7 +4099,10 @@ export const renderPathtracedFrame = (
   const encoder = context.device.createCommandEncoder({
     label: 'pathtraced-frame',
   });
-  const raymarchCamera = createRaymarchCameraFromEvaluatedCamera(binding, evaluatedScene.activeCamera);
+  const raymarchCamera = createRaymarchCameraFromEvaluatedCamera(
+    binding,
+    evaluatedScene.activeCamera,
+  );
 
   let drawCount = 0;
   drawCount += renderPathtracedSdfPass(

@@ -70,8 +70,8 @@ blended transparency still requires forward composition.
 
 - deferred rendering keeps a clear opaque/mask boundary instead of silently absorbing blended
   materials
-- uber rendering becomes the standard execution path for scenes that mix deferred-eligible opaque
-  or masked content with blended transparent content
+- uber rendering becomes the standard execution path for scenes that mix deferred-eligible opaque or
+  masked content with blended transparent content
 - dithered alpha has a principled home as a deferred-compatible masked coverage mode
 - prepass, shadow, G-buffer, and lighting-related passes must share one alpha-evaluation contract
   for masked materials so coverage and depth remain consistent

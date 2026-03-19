@@ -48,8 +48,8 @@ The initial renderer uses a lightweight pass graph:
 - Forward rendering also encodes a dedicated SDF raymarch pass for supported sphere and box
   primitives.
 - Forward rendering also encodes a first volume raymarch pass for volume primitives with residency.
-- Pathtraced rendering currently ships as an initial SDF-only fullscreen slice. It does not yet
-  path trace mesh geometry, custom materials, or resident volumes.
+- Pathtraced rendering currently ships as an initial SDF-only fullscreen slice. It does not yet path
+  trace mesh geometry, custom materials, resident volumes, or scene light nodes.
 - Built-in unlit WGSL is stored as a standalone shader file and imported as text.
 - Built-in forward lit WGSL is stored as a standalone shader file and consumes directional-light
   uniform data extracted from evaluated light nodes.
@@ -74,8 +74,8 @@ The initial renderer uses a lightweight pass graph:
 - Deferred custom WGSL programs may also target the G-buffer path when they write the same two
   render targets and match the deferred transform/material binding contract.
 - Deferred frames now reuse the existing SDF sphere/box and volume raymarch passes after lighting,
-  so mixed scenes can keep mesh shading in deferred while compositing raymarched primitives into
-  the same output target.
+  so mixed scenes can keep mesh shading in deferred while compositing raymarched primitives into the
+  same output target.
 - Forward and deferred rendering can now route scene output through an explicit intermediate
   scene-color texture when ordered post-process passes are requested.
 - The first post-process milestone ships a built-in fullscreen blit pass plus a minimal post-process

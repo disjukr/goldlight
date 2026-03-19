@@ -59,12 +59,22 @@ fn transformVector(matrix: mat4x4<f32>, vector: vec3<f32>) -> vec3<f32> {
 
 @fragment
 fn fsMain(in: VsOut) -> @location(0) vec4<f32> {
-  let rayDirection = normalize(
+  let isOrthographic = volume.cameraForward.w > 0.5;
+  let worldOrigin = select(
+    volume.cameraOrigin.xyz,
+    volume.cameraOrigin.xyz +
+      (in.uv.x * volume.cameraRight.xyz) -
+      (in.uv.y * volume.cameraUp.xyz),
+    isOrthographic,
+  );
+  let rayDirection = normalize(select(
     volume.cameraForward.xyz +
       (in.uv.x * volume.cameraRight.xyz) -
       (in.uv.y * volume.cameraUp.xyz),
-  );
-  let localOrigin = transformPoint(volume.worldToLocal, volume.cameraOrigin.xyz);
+    volume.cameraForward.xyz,
+    isOrthographic,
+  ));
+  let localOrigin = transformPoint(volume.worldToLocal, worldOrigin);
   let localDirection = transformVector(volume.worldToLocal, rayDirection);
   let boxMin = vec3<f32>(-0.5, -0.5, -0.5);
   let boxMax = vec3<f32>(0.5, 0.5, 0.5);

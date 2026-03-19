@@ -201,13 +201,19 @@ fn sampleDirectAreaLight(
 @fragment
 fn fsMain(in: VsOut) -> @location(0) vec4<f32> {
   var seed = (in.position.x * 12.9898) + (in.position.y * 78.233) + (sdf.frameIndex * 37.719);
-  let cameraOrigin = sdf.cameraOrigin;
-  let rayDirection = normalize(
+  let isOrthographic = sdf.cameraForward.w > 0.5;
+  var rayOrigin = sdf.cameraOrigin;
+  var rayDirection = normalize(
     sdf.cameraForward.xyz +
       (in.uv.x * sdf.cameraRight.xyz) +
       (in.uv.y * sdf.cameraUp.xyz),
   );
-  var rayOrigin = cameraOrigin;
+  if (isOrthographic) {
+    rayOrigin = sdf.cameraOrigin +
+      (in.uv.x * sdf.cameraRight.xyz) +
+      (in.uv.y * sdf.cameraUp.xyz);
+    rayDirection = normalize(sdf.cameraForward.xyz);
+  }
   var throughput = vec3<f32>(1.0);
   var radiance = vec3<f32>(0.0);
   var direction = rayDirection;

@@ -9,6 +9,9 @@ import {
   PerspectiveCamera,
 } from '@rieul3d/react/reconciler';
 
+const NullChild = () => null;
+const EmptyFragmentChild = () => <></>;
+
 Deno.test('createReactSceneRoot accepts live JSX alias intrinsics', () => {
   const root = createReactSceneRoot(
     <scene id='live-scene' activeCameraId='camera-main'>
@@ -67,4 +70,27 @@ Deno.test('reconciler convenience components route through the same live JSX ali
   assertEquals(root.getScene()?.cameras[0]?.type, 'perspective');
   assertEquals(root.getScene()?.lights[0]?.kind, 'directional');
   assertEquals(root.getScene()?.nodes.map((node) => node.id), ['camera-main', 'sun']);
+});
+
+Deno.test('live alias intrinsics keep bound nodes for composite children without host output', () => {
+  const root = createReactSceneRoot(
+    <scene id='composite-child-scene' activeCameraId='camera-main'>
+      <perspectiveCamera id='camera-main' yfov={0.7}>
+        <NullChild />
+      </perspectiveCamera>
+      <DirectionalLight
+        id='sun'
+        color={{ x: 1, y: 1, z: 1 }}
+        intensity={2}
+      >
+        <EmptyFragmentChild />
+      </DirectionalLight>
+    </scene>,
+  );
+
+  assertEquals(root.getScene()?.nodes.map((node) => node.id), ['camera-main', 'sun']);
+  assertEquals(root.getScene()?.nodes.map((node) => node.cameraId ?? node.lightId), [
+    'camera-main',
+    'sun',
+  ]);
 });

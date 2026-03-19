@@ -149,13 +149,14 @@ The initial renderer uses a lightweight pass graph:
   the same payload used by built-in materials:
   - `x`: `alphaCutoff`
   - `y`: alpha mode enum (`0 = opaque`, `1 = mask`, `2 = blend`)
-  - `z`: requested depth-write flag
-  - `w`: requested double-sided flag
+  - `z`: resolved depth-write flag after applying renderer defaults
+  - `w`: resolved double-sided flag
 - Custom WGSL programs that need sampled textures should declare matching texture/sampler bindings
   plus the texture semantic they expect from `Material.textures`.
 - The current renderer shape follows the proposed custom WGSL alpha-policy contract in
   [`../adr/0011-custom-wgsl-alpha-policy-binding.md`](../adr/0011-custom-wgsl-alpha-policy-binding.md),
-  which remains in proposal status until reviewed.
+  which remains in proposal status until reviewed; hybrid rendering still routes non-opaque custom
+  WGSL materials through the forward fallback instead of deferred G-buffer execution.
 - Capability preflight validates declared texture semantics, mesh UV requirements, and texture
   residency before the renderer starts encoding bind groups.
 

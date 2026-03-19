@@ -103,6 +103,41 @@ const createCornerWeightedCubemapSnapshot = (): CubemapSnapshotResult => {
   };
 };
 
+const createHorizontalGradientFaceBytes = (): Uint8Array => {
+  const width = 4;
+  const height = 4;
+  const ramp = [0, 64, 128, 255] as const;
+  const bytes = new Uint8Array(width * height * 4);
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const offset = ((y * width) + x) * 4;
+      bytes[offset] = ramp[x];
+      bytes[offset + 1] = 0;
+      bytes[offset + 2] = 0;
+      bytes[offset + 3] = 255;
+    }
+  }
+
+  return bytes;
+};
+
+const createStripCrossResampleSnapshot = (): CubemapSnapshotResult => {
+  const snapshot = createSyntheticCubemapSnapshot(4);
+
+  return {
+    ...snapshot,
+    faces: snapshot.faces.map((face) =>
+      face.face === 'positive-z'
+        ? {
+          ...face,
+          bytes: createHorizontalGradientFaceBytes(),
+        }
+        : face
+    ),
+  };
+};
+
 Deno.test('exportCubemapSnapshot lays faces out in strip order', () => {
   const result = exportCubemapSnapshot(createSyntheticCubemapSnapshot(2), { layout: 'strip' });
 
@@ -188,6 +223,32 @@ Deno.test('exportCubemapSnapshot supports custom cross dimensions', () => {
   assertEquals(result.height, 9);
   assertEquals(readPixel(result.bytes, result.width, 4, 1), faceColors['negative-y']);
   assertEquals(readPixel(result.bytes, result.width, 4, 7), faceColors['positive-y']);
+});
+
+Deno.test('exportCubemapSnapshot samples resized strip faces at pixel centers', () => {
+  const result = exportCubemapSnapshot(createStripCrossResampleSnapshot(), {
+    layout: 'strip',
+    width: 12,
+    sampling: 'linear',
+  });
+
+  assertEquals(result.width, 12);
+  assertEquals(result.height, 2);
+  assertEquals(readPixel(result.bytes, result.width, 8, 1), [48, 0, 0, 255]);
+  assertEquals(readPixel(result.bytes, result.width, 9, 1), [160, 0, 0, 255]);
+});
+
+Deno.test('exportCubemapSnapshot samples resized cross faces at pixel centers', () => {
+  const result = exportCubemapSnapshot(createStripCrossResampleSnapshot(), {
+    layout: 'cross',
+    width: 8,
+    sampling: 'linear',
+  });
+
+  assertEquals(result.width, 8);
+  assertEquals(result.height, 6);
+  assertEquals(readPixel(result.bytes, result.width, 2, 3), [48, 0, 0, 255]);
+  assertEquals(readPixel(result.bytes, result.width, 3, 3), [160, 0, 0, 255]);
 });
 
 Deno.test('exportCubemapSnapshot rejects incomplete cubemap snapshots', () => {

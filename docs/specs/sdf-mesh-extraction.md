@@ -11,7 +11,7 @@ primitives into `MeshPrimitive` geometry for baking, inspection, and mesh-pipeli
 - extraction runs over a caller-provided or inferred bounded regular grid
 - outputs are local-space `MeshPrimitive` values so callers can reuse the original node transform
 - two extraction modes are available:
-  - `marching-cubes`: per-cell edge intersection contouring with centroid fan triangulation
+  - `marching-cubes`: canonical edge/case-table contouring over each active cell
   - `surface-nets`: one vertex per active cell with shared indexed quads stitched across crossing
     edges
 
@@ -35,9 +35,10 @@ primitives into `MeshPrimitive` geometry for baking, inspection, and mesh-pipeli
 
 ## Algorithm Tradeoffs
 
-- `marching-cubes` currently emits per-cell contour polygons and triangulates them around the local
-  centroid. This is straightforward and stable for the current primitive set, but it duplicates
-  vertices across cells and does not yet implement the canonical ambiguous-case lookup tables.
+- `marching-cubes` now follows the standard 256-case lookup tables, which removes the previous
+  centroid-fan over-triangulation and gives deterministic edge wiring for face-saddle and other
+  ambiguous active-cell configurations. It still duplicates vertices across cells because the helper
+  prioritizes simple baking output over shared-vertex stitching.
 - `surface-nets` emits fewer vertices and shared indexed faces, which makes it a better fit for
   compact baked meshes. The first pass is intentionally naive and prioritizes deterministic output
   over feature-complete topology repair.
@@ -47,6 +48,8 @@ primitives into `MeshPrimitive` geometry for baking, inspection, and mesh-pipeli
 - unsupported SDF operators throw instead of silently returning empty meshes
 - extraction rejects non-positive primitive dimensions, non-finite scalar inputs, and non-positive
   grid resolutions
+- marching-cubes regression tests cover direct case-table wiring and guard against regressing back
+  to centroid-fan triangulation on multi-edge cells
 - surface-nets stitches boundary-touching contours instead of dropping cap faces when tight bounds
   place the iso-surface directly on the sampling box
 - regression tests cover deterministic output, mesh validity, and basic sphere/box shape fidelity
@@ -54,5 +57,4 @@ primitives into `MeshPrimitive` geometry for baking, inspection, and mesh-pipeli
 ## Follow-Up Direction
 
 - broaden primitive coverage when runtime SDF execution supports more operators
-- add canonical marching-cubes case-table handling for ambiguous cube configurations
 - evaluate optional world-space extraction helpers that consume evaluated node transforms directly

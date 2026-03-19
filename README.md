@@ -53,7 +53,8 @@ Implemented today:
   that share the existing deterministic seed model
 - forward SDF sphere and box raymarch execution with capability preflight alignment
 - local-space SDF-to-mesh extraction for supported sphere and box primitives, including
-  marching-cubes and naive surface-nets contouring helpers for baking or inspection workflows
+  canonical-table marching-cubes and naive surface-nets contouring helpers for baking or inspection
+  workflows
 - mesh node id-buffer picking snapshots with stable node-to-mesh id mapping and screen-pixel
   readback helpers
 - built-in unlit material registration, evaluated mesh transform uploads, base-color texture

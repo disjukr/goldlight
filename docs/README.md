@@ -40,6 +40,8 @@ Use this page as the main navigation hub.
   [`adr/0008-react-reconciler-scene-document.md`](./adr/0008-react-reconciler-scene-document.md)
 - Review the proposed cubemap capture boundary before 2D reprojection/export:
   [`adr/0009-cubemap-capture-boundary.md`](./adr/0009-cubemap-capture-boundary.md)
+- Review the proposed hybrid deferred-plus-forward alpha-material boundary:
+  [`adr/0010-hybrid-deferred-forward-alpha-materials.md`](./adr/0010-hybrid-deferred-forward-alpha-materials.md)
 - Review the JSX authoring boundary decision:
   [`adr/0004-react-jsx-authoring.md`](./adr/0004-react-jsx-authoring.md)
 - Review the accepted React scene update boundary decision:

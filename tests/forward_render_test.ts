@@ -808,7 +808,7 @@ Deno.test('renderDeferredFrame binds base-color textures for textured deferred u
   assertEquals(mocks.bindGroupEntries[4].map((entry) => entry.binding), [0]);
 });
 
-Deno.test('renderDeferredFrame binds base-color textures for textured deferred lit materials', () => {
+Deno.test('renderDeferredFrame forwards textured lit materials after deferred lighting', () => {
   const mocks = createRenderMocks();
   const runtimeResidency = createRuntimeResidency();
   let scene = createSceneIr('scene');
@@ -879,20 +879,22 @@ Deno.test('renderDeferredFrame binds base-color textures for textured deferred l
     evaluateScene(scene, { timeMs: 0 }),
   );
 
-  assertEquals(result.drawCount, 3);
+  assertEquals(result.drawCount, 2);
   assertEquals(mocks.pipelines.length, 3);
-  const deferredGbufferPipeline = mocks.pipelines.find((pipeline) =>
-    pipeline.descriptor.fragment?.targets?.length === 2
+  const forwardLitPipeline = mocks.pipelines.find((pipeline) =>
+    pipeline.descriptor.fragment?.targets?.length === 1 &&
+    (pipeline.descriptor.vertex?.buffers?.length ?? 0) === 3
   );
-  assertEquals(deferredGbufferPipeline?.descriptor.fragment?.targets?.length, 2);
-  const deferredVertexBuffers = deferredGbufferPipeline?.descriptor.vertex?.buffers ?? [];
-  assertEquals(deferredVertexBuffers.length, 3);
+  assertEquals(forwardLitPipeline?.descriptor.fragment?.targets?.length, 1);
+  const forwardVertexBuffers = forwardLitPipeline?.descriptor.vertex?.buffers ?? [];
+  assertEquals(forwardVertexBuffers.length, 3);
   assertEquals(
-    deferredVertexBuffers.map((buffer) => buffer?.attributes[0]?.shaderLocation ?? -1),
+    forwardVertexBuffers.map((buffer) => buffer?.attributes[0]?.shaderLocation ?? -1),
     [0, 1, 2],
   );
   assertEquals(mocks.bindGroupEntries.length, 5);
-  assertEquals(mocks.bindGroupEntries[2].map((entry) => entry.binding), [0, 1, 2]);
+  assertEquals(mocks.bindGroupEntries[2].map((entry) => entry.binding), [0]);
+  assertEquals(mocks.bindGroupEntries[3].map((entry) => entry.binding), [0, 1, 2]);
   assertEquals(mocks.bindGroupEntries[4].map((entry) => entry.binding), [0]);
 });
 
@@ -1276,6 +1278,25 @@ fn fsMain() -> @location(0) vec4<f32> {
       { preferTexturedUnlit: true },
     ).id,
     'built-in:unlit-textured',
+  );
+  assertEquals(
+    resolveMaterialProgram(
+      registry,
+      {
+        id: 'material-textured-lit',
+        kind: 'lit',
+        textures: [{
+          id: 'texture-0',
+          assetId: 'image-0',
+          semantic: 'baseColor',
+          colorSpace: 'srgb',
+          sampler: 'linear-repeat',
+        }],
+        parameters: {},
+      },
+      { preferTexturedLit: true },
+    ).id,
+    'built-in:lit-textured',
   );
   assertEquals(
     resolveMaterialProgram(registry, {

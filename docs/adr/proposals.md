@@ -5,6 +5,10 @@ ADR index.
 
 ## Proposed Decisions
 
+- [`0010-hybrid-deferred-forward-alpha-materials.md`](./0010-hybrid-deferred-forward-alpha-materials.md):
+  textured lit materials should use a hybrid deferred-plus-forward path until scene IR encodes
+  explicit alpha policy
+
 ## Related References
 
 - [`README.md`](./README.md): accepted ADR index

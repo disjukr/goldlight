@@ -4,11 +4,10 @@
 
 import { evaluateScene } from '../../packages/core/mod.ts';
 import {
+  applyRuntimeResidencyPlan,
   configureSurfaceContext,
   createRuntimeResidency,
   ensureSceneMeshResidency,
-  invalidateResidency,
-  invalidateResidencyResources,
   requestGpuContext,
 } from '../../packages/gpu/mod.ts';
 import { createBrowserSurfaceTarget } from '../../packages/platform/mod.ts';
@@ -70,18 +69,7 @@ const residency = createRuntimeResidency();
 
 sceneRoot.subscribe((commit) => {
   scene = commit.scene;
-  const residencyPlan = planSceneRootResidencyInvalidation(commit);
-  if (residencyPlan.reset) {
-    invalidateResidency(residency);
-    return;
-  }
-
-  invalidateResidencyResources(residency, {
-    meshIds: residencyPlan.meshIds,
-    materialIds: residencyPlan.materialIds,
-    textureIds: residencyPlan.textureIds,
-    volumeIds: residencyPlan.volumeIds,
-  });
+  applyRuntimeResidencyPlan(residency, planSceneRootResidencyInvalidation(commit));
 });
 sceneRoot.render(<TriangleScene />);
 

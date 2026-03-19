@@ -5,7 +5,7 @@ authors a scene with TSX, including the exported `PerspectiveCamera` convenience
 transform shorthands such as `position`, commits that tree through `createSceneRoot()`, then renders
 the published `SceneIr` snapshot through the browser forward pipeline. Because the bridge publishes
 whole-scene snapshots, the example also uses `planSceneRootResidencyInvalidation()` together with
-`@rieul3d/gpu` targeted invalidation helpers so cached GPU residency can drop changed
+`@rieul3d/gpu`'s `applyRuntimeResidencyPlan()` helper so cached GPU residency can drop changed
 mesh/material/texture/volume entries by ID, keep transform-only node updates on the lighter path,
 and still fall back to a full reset for node topology or binding changes.
 

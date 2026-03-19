@@ -81,6 +81,15 @@ export type ResidencyInvalidationPlan = Readonly<{
   pipelineKeys?: readonly string[];
 }>;
 
+export type RuntimeResidencyAdapterPlan = Readonly<{
+  reset: boolean;
+  meshIds?: readonly string[];
+  materialIds?: readonly string[];
+  textureIds?: readonly string[];
+  volumeIds?: readonly string[];
+  pipelineKeys?: readonly string[];
+}>;
+
 export const createRuntimeResidency = (): RuntimeResidency => ({
   textures: new Map(),
   geometry: new Map(),
@@ -163,6 +172,23 @@ export const invalidateResidency = (residency: RuntimeResidency): RuntimeResiden
     pipelineKeys: [...residency.pipelines.keys()],
   });
   return residency;
+};
+
+export const applyRuntimeResidencyPlan = (
+  residency: RuntimeResidency,
+  plan: RuntimeResidencyAdapterPlan,
+): RuntimeResidency => {
+  if (plan.reset) {
+    return invalidateResidency(residency);
+  }
+
+  return invalidateResidencyResources(residency, {
+    meshIds: plan.meshIds,
+    materialIds: plan.materialIds,
+    textureIds: plan.textureIds,
+    volumeIds: plan.volumeIds,
+    pipelineKeys: plan.pipelineKeys,
+  });
 };
 
 export type GpuUploadContext = Readonly<{

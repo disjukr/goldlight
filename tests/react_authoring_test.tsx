@@ -6,20 +6,20 @@ import { identityTransform } from '@rieul3d/ir';
 import React from 'npm:react@19.2.0';
 import {
   authoringTreeToSceneIr,
+  canApplySceneRootTransformUpdates,
   commitSummaryNeedsResidencyReset,
   createAuthoringElement,
+  createSceneRoot,
   createSceneRootForwardRenderer,
   createSceneRootFrameDriver,
-  createSceneRoot,
   DirectionalLight,
   Fragment,
   OrthographicCamera,
   PerspectiveCamera,
   planSceneRootCommitUpdates,
   planSceneRootResidencyInvalidation,
-  summarizeSceneRootCommit,
-  canApplySceneRootTransformUpdates,
   type SceneRootCommit,
+  summarizeSceneRootCommit,
 } from '@rieul3d/react';
 import { createRuntimeResidency } from '@rieul3d/gpu';
 import {
@@ -664,7 +664,9 @@ Deno.test('createSceneRoot publishes a data-only update payload alongside snapsh
   assertEquals(payloads.length, 2);
   assertEquals(latestCommit?.summary.nodes.updatedIds, ['animated-node']);
   assertEquals(latestCommit?.updatePlan.nodes.transformIds, ['animated-node']);
-  assertEquals(latestCommit?.updatePayload.nodes.transform.map((node) => node.id), ['animated-node']);
+  assertEquals(latestCommit?.updatePayload.nodes.transform.map((node) => node.id), [
+    'animated-node',
+  ]);
   assertEquals(latestCommit?.updatePayload.meshes.updated, []);
   assertEquals(latestCommit?.updatePayload.meshes.unchangedIds, ['triangle']);
 });
@@ -1514,7 +1516,9 @@ Deno.test('createSceneRootFrameDriver applies transform-only commits through par
   );
 
   const frame = driver.advanceFrame(16);
-  const animatedNode = frame.evaluatedScene.nodes.find((entry) => entry.node.id === 'animated-node');
+  const animatedNode = frame.evaluatedScene.nodes.find((entry) =>
+    entry.node.id === 'animated-node'
+  );
 
   assertEquals(frame.evaluationMode, 'partial');
   assertEquals(frame.residencyPlan, {

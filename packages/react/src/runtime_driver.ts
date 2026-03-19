@@ -1,8 +1,5 @@
-import { evaluateScene, reevaluateSceneTransforms, type EvaluatedScene } from '@rieul3d/core';
-import {
-  applyRuntimeResidencyPlan,
-  type RuntimeResidency,
-} from '@rieul3d/gpu';
+import { type EvaluatedScene, evaluateScene, reevaluateSceneTransforms } from '@rieul3d/core';
+import { applyRuntimeResidencyPlan, type RuntimeResidency } from '@rieul3d/gpu';
 import type { SceneIr } from '@rieul3d/ir';
 
 import {

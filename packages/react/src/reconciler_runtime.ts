@@ -64,7 +64,8 @@ const hasChildIntent = (children: ReactNode): boolean => {
 export const PerspectiveCamera = (
   props: ReconcilerPerspectiveCameraProps,
 ): React.ReactElement => {
-  const { id, children, nodeId, name, transform, position, rotation, scale, ...cameraProps } = props;
+  const { id, children, nodeId, name, transform, position, rotation, scale, ...cameraProps } =
+    props;
   const aliasNodeId = nodeId ?? id;
   const hasNodeIntent = hasChildIntent(children) || nodeId !== undefined || name !== undefined ||
     transform !== undefined || position !== undefined || rotation !== undefined ||
@@ -95,7 +96,8 @@ export const PerspectiveCamera = (
 export const OrthographicCamera = (
   props: ReconcilerOrthographicCameraProps,
 ): React.ReactElement => {
-  const { id, children, nodeId, name, transform, position, rotation, scale, ...cameraProps } = props;
+  const { id, children, nodeId, name, transform, position, rotation, scale, ...cameraProps } =
+    props;
   const aliasNodeId = nodeId ?? id;
   const hasNodeIntent = hasChildIntent(children) || nodeId !== undefined || name !== undefined ||
     transform !== undefined || position !== undefined || rotation !== undefined ||

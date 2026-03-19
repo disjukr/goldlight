@@ -7,8 +7,8 @@ This demo exercises:
 
 - ASCII PLY ingestion of the in-repo Stanford Bunny asset
 - real React reconciliation into the package-local scene document
-- normal TSX authoring against the `@rieul3d/react/reconciler` React-runtime JSX surface, using
-  the same primitive contract as the snapshot path plus the exported convenience components
+- normal TSX authoring against the `@rieul3d/react/reconciler` React-runtime JSX surface, using the
+  same primitive contract as the snapshot path plus the exported convenience components
 - hook-driven live scene updates that publish `SceneRootCommit` payloads and surface reconciler
   failures through the flush helper path used by tests/deterministic integrations
 - react-package frame-driver wiring that applies targeted residency invalidation and uses the

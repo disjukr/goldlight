@@ -16,8 +16,8 @@ import type { MeshPrimitive } from '../../packages/ir/mod.ts';
 import { loadPlyFromText } from '../../packages/loaders/mod.ts';
 import { createDenoSurfaceTarget } from '../../packages/platform/mod.ts';
 import {
-  createSceneRootForwardRenderer,
   createReactSceneRoot,
+  createSceneRootForwardRenderer,
   DirectionalLight,
   flushReactSceneUpdates,
   PerspectiveCamera,

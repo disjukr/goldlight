@@ -72,9 +72,13 @@ export type SceneRootCommitUpdatePayload = Readonly<{
   meshes: SceneRootCollectionUpdatePayload<SceneRootCollectionValueByName['meshes']>;
   cameras: SceneRootCollectionUpdatePayload<SceneRootCollectionValueByName['cameras']>;
   sdfPrimitives: SceneRootCollectionUpdatePayload<SceneRootCollectionValueByName['sdfPrimitives']>;
-  volumePrimitives: SceneRootCollectionUpdatePayload<SceneRootCollectionValueByName['volumePrimitives']>;
+  volumePrimitives: SceneRootCollectionUpdatePayload<
+    SceneRootCollectionValueByName['volumePrimitives']
+  >;
   nodes: SceneRootNodeUpdatePayload;
-  animationClips: SceneRootCollectionUpdatePayload<SceneRootCollectionValueByName['animationClips']>;
+  animationClips: SceneRootCollectionUpdatePayload<
+    SceneRootCollectionValueByName['animationClips']
+  >;
 }>;
 
 export type SceneRootResidencyInvalidationPlan = Readonly<{
@@ -550,7 +554,10 @@ export const createSceneRootCommit = (
       activeCameraChanged: updatePlan.activeCameraChanged,
       rootNodeIds: scene.rootNodeIds,
       rootNodeIdsChanged: updatePlan.rootNodeIdsChanged,
-      assets: toSceneRootCollectionUpdatePayload(getSceneCollection(scene, 'assets'), updatePlan.assets),
+      assets: toSceneRootCollectionUpdatePayload(
+        getSceneCollection(scene, 'assets'),
+        updatePlan.assets,
+      ),
       textures: toSceneRootCollectionUpdatePayload(
         getSceneCollection(scene, 'textures'),
         updatePlan.textures,
@@ -559,8 +566,14 @@ export const createSceneRootCommit = (
         getSceneCollection(scene, 'materials'),
         updatePlan.materials,
       ),
-      lights: toSceneRootCollectionUpdatePayload(getSceneCollection(scene, 'lights'), updatePlan.lights),
-      meshes: toSceneRootCollectionUpdatePayload(getSceneCollection(scene, 'meshes'), updatePlan.meshes),
+      lights: toSceneRootCollectionUpdatePayload(
+        getSceneCollection(scene, 'lights'),
+        updatePlan.lights,
+      ),
+      meshes: toSceneRootCollectionUpdatePayload(
+        getSceneCollection(scene, 'meshes'),
+        updatePlan.meshes,
+      ),
       cameras: toSceneRootCollectionUpdatePayload(
         getSceneCollection(scene, 'cameras'),
         updatePlan.cameras,

@@ -13,9 +13,8 @@ import {
 import { createBrowserSurfaceTarget } from '../../packages/platform/mod.ts';
 import {
   createSceneRoot,
-  planSceneRootResidencyInvalidation,
   PerspectiveCamera,
-  type SceneRootCommit,
+  planSceneRootResidencyInvalidation,
 } from '../../packages/react/mod.ts';
 import { createMaterialRegistry, renderForwardFrame } from '../../packages/renderer/mod.ts';
 

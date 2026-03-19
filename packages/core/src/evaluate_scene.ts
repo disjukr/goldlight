@@ -329,7 +329,9 @@ export const reevaluateSceneTransforms = (
   options: EvaluateSceneOptions,
 ): EvaluatedScene => {
   const nodes = applyAnimation(scene, options);
-  const previousByNodeId = new Map(previousEvaluatedScene.nodes.map((entry) => [entry.node.id, entry]));
+  const previousByNodeId = new Map(
+    previousEvaluatedScene.nodes.map((entry) => [entry.node.id, entry]),
+  );
   const meshById = new Map(scene.meshes.map((mesh) => [mesh.id, mesh]));
   const materialById = new Map(scene.materials.map((material) => [material.id, material]));
   const sdfById = new Map(scene.sdfPrimitives.map((primitive) => [primitive.id, primitive]));

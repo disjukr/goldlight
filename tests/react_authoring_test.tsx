@@ -551,15 +551,13 @@ Deno.test('createReactSceneRoot rejects unsupported intrinsic tags', () => {
         React.createElement(
           'scene',
           { id: 'jsx-scene' },
-          React.createElement('directionalLight', {
+          React.createElement('spotLight', {
             id: 'sun',
-            color: { x: 1, y: 0.95, z: 0.9 },
-            intensity: 1.5,
           }),
         ),
       ),
     Error,
-    '@rieul3d/react reconciler does not support the <directionalLight> intrinsic',
+    '@rieul3d/react reconciler does not support the <spotLight> intrinsic',
   );
 });
 
@@ -1352,11 +1350,7 @@ Deno.test('flushReactSceneUpdates surfaces pending reconciler errors from later 
       'scene',
       { id: 'faulty-scene' },
       invalid
-        ? React.createElement('directionalLight', {
-          id: 'unsupported-light',
-          color: { x: 1, y: 1, z: 1 },
-          intensity: 1,
-        })
+        ? React.createElement('spotLight', { id: 'unsupported-light' })
         : React.createElement('node', { id: 'safe-node' }),
     );
   };
@@ -1366,7 +1360,7 @@ Deno.test('flushReactSceneUpdates surfaces pending reconciler errors from later 
   assertThrows(
     () => flushReactSceneUpdates(() => setInvalid?.(true)),
     Error,
-    '@rieul3d/react reconciler does not support the <directionalLight> intrinsic',
+    '@rieul3d/react reconciler does not support the <spotLight> intrinsic',
   );
 });
 

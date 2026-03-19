@@ -4,6 +4,7 @@ import type {
   AssetJsxProps,
   CameraJsxProps,
   DirectionalLightJsxProps,
+  GroupJsxProps,
   LightJsxProps,
   MaterialJsxProps,
   MeshJsxProps,
@@ -26,6 +27,12 @@ export type ReconcilerNodeProps = Readonly<
   }
 >;
 
+export type ReconcilerGroupProps = Readonly<
+  Omit<GroupJsxProps, 'children'> & {
+    children?: ReactNode;
+  }
+>;
+
 export type ReconcilerPerspectiveCameraProps = Readonly<
   Omit<PerspectiveCameraJsxProps, 'children'> & {
     children?: ReactNode;
@@ -44,149 +51,33 @@ export type ReconcilerDirectionalLightProps = Readonly<
   }
 >;
 
-const hasNodeIntent = (
-  props: Pick<
-    ReconcilerPerspectiveCameraProps,
-    'nodeId' | 'name' | 'transform' | 'position' | 'rotation' | 'scale'
-  >,
-  children?: ReactNode,
-): boolean =>
-  props.nodeId !== undefined ||
-  props.name !== undefined ||
-  props.transform !== undefined ||
-  props.position !== undefined ||
-  props.rotation !== undefined ||
-  props.scale !== undefined ||
-  React.Children.toArray(children).length > 0;
-
 export const PerspectiveCamera = (
   props: ReconcilerPerspectiveCameraProps,
-): React.ReactElement => {
-  const {
-    id,
-    children,
-    nodeId,
-    name,
-    transform,
-    position,
-    rotation,
-    scale,
-    ...cameraProps
-  } = props;
-
-  if (!hasNodeIntent({ nodeId, name, transform, position, rotation, scale }, children)) {
-    return React.createElement('camera', { id, type: 'perspective', ...cameraProps });
-  }
-
-  return React.createElement(
-    React.Fragment,
-    null,
-    React.createElement('camera', { id, type: 'perspective', ...cameraProps }),
-    React.createElement(
-      'node',
-      {
-        id: nodeId ?? id,
-        name,
-        cameraId: id,
-        transform,
-        position,
-        rotation,
-        scale,
-      },
-      children,
-    ),
-  );
-};
+): React.ReactElement => React.createElement('perspectiveCamera', props);
 
 export const OrthographicCamera = (
   props: ReconcilerOrthographicCameraProps,
-): React.ReactElement => {
-  const {
-    id,
-    children,
-    nodeId,
-    name,
-    transform,
-    position,
-    rotation,
-    scale,
-    ...cameraProps
-  } = props;
-
-  if (!hasNodeIntent({ nodeId, name, transform, position, rotation, scale }, children)) {
-    return React.createElement('camera', { id, type: 'orthographic', ...cameraProps });
-  }
-
-  return React.createElement(
-    React.Fragment,
-    null,
-    React.createElement('camera', { id, type: 'orthographic', ...cameraProps }),
-    React.createElement(
-      'node',
-      {
-        id: nodeId ?? id,
-        name,
-        cameraId: id,
-        transform,
-        position,
-        rotation,
-        scale,
-      },
-      children,
-    ),
-  );
-};
+): React.ReactElement => React.createElement('orthographicCamera', props);
 
 export const DirectionalLight = (
   props: ReconcilerDirectionalLightProps,
-): React.ReactElement => {
-  const {
-    id,
-    children,
-    nodeId,
-    name,
-    transform,
-    position,
-    rotation,
-    scale,
-    ...lightProps
-  } = props;
-
-  if (!hasNodeIntent({ nodeId, name, transform, position, rotation, scale }, children)) {
-    return React.createElement('light', { id, kind: 'directional', ...lightProps });
-  }
-
-  return React.createElement(
-    React.Fragment,
-    null,
-    React.createElement('light', { id, kind: 'directional', ...lightProps }),
-    React.createElement(
-      'node',
-      {
-        id: nodeId ?? id,
-        name,
-        lightId: id,
-        transform,
-        position,
-        rotation,
-        scale,
-      },
-      children,
-    ),
-  );
-};
+): React.ReactElement => React.createElement('directionalLight', props);
 
 declare global {
   namespace JSX {
     interface IntrinsicElements {
       scene: ReconcilerSceneProps;
       node: ReconcilerNodeProps;
+      group: ReconcilerGroupProps;
       asset: AssetJsxProps;
       texture: TextureJsxProps;
       material: MaterialJsxProps;
       light: LightJsxProps;
       mesh: MeshJsxProps;
       camera: CameraJsxProps;
+      perspectiveCamera: ReconcilerPerspectiveCameraProps;
+      orthographicCamera: ReconcilerOrthographicCameraProps;
+      directionalLight: ReconcilerDirectionalLightProps;
     }
   }
 }

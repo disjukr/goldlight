@@ -7,7 +7,8 @@ This demo exercises:
 
 - ASCII PLY ingestion of the in-repo Stanford Bunny asset
 - real React reconciliation into the package-local scene document
-- normal TSX authoring against the `@rieul3d/react/reconciler` React-runtime JSX surface
+- normal TSX authoring against the `@rieul3d/react/reconciler` React-runtime JSX surface, including
+  the same lower-case alias intrinsics the snapshot path exposes
 - hook-driven live scene updates that publish refreshed `SceneIr` snapshots and surface reconciler
   failures through the flush helper path used by tests/deterministic integrations
 - reusable `@rieul3d/core` helpers for generated normals, mesh bounds, and Euler-authored light

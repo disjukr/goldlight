@@ -8,6 +8,7 @@ import {
   authoringTreeToSceneIr,
   commitSummaryNeedsResidencyReset,
   createAuthoringElement,
+  createSceneRootFrameDriver,
   createSceneRoot,
   DirectionalLight,
   Fragment,
@@ -19,6 +20,7 @@ import {
   canApplySceneRootTransformUpdates,
   type SceneRootCommit,
 } from '@rieul3d/react';
+import { createRuntimeResidency } from '@rieul3d/gpu';
 import {
   createReactSceneRoot,
   DirectionalLight as ReconcilerDirectionalLight,
@@ -1486,6 +1488,84 @@ Deno.test('createSceneRoot does not let mid-dispatch subscriber changes reorder 
     'late:2',
     'second:1',
   ]);
+});
+
+Deno.test('createSceneRootFrameDriver applies transform-only commits through partial evaluation', () => {
+  const root = createSceneRoot(
+    <scene id='driver-scene'>
+      <group id='root'>
+        <node id='animated-node' position={[0, 0, 0]} />
+      </group>
+    </scene>,
+  );
+  const residency = createRuntimeResidency();
+  const driver = createSceneRootFrameDriver(root, {
+    residency,
+    initialTimeMs: 0,
+  });
+
+  root.render(
+    <scene id='driver-scene'>
+      <group id='root'>
+        <node id='animated-node' position={[3, 0, 0]} />
+      </group>
+    </scene>,
+  );
+
+  const frame = driver.advanceFrame(16);
+  const animatedNode = frame.evaluatedScene.nodes.find((entry) => entry.node.id === 'animated-node');
+
+  assertEquals(frame.evaluationMode, 'partial');
+  assertEquals(frame.residencyPlan, {
+    reset: false,
+    meshIds: [],
+    materialIds: [],
+    textureIds: [],
+    volumeIds: [],
+    reasons: [],
+  });
+  assertEquals(animatedNode?.worldMatrix[12], 3);
+  assertEquals(frame.stats, {
+    partialUpdateCount: 1,
+    fullUpdateCount: 1,
+    targetedInvalidationCount: 1,
+    resetInvalidationCount: 0,
+  });
+});
+
+Deno.test('createSceneRootFrameDriver falls back to full evaluation for topology changes', () => {
+  const root = createSceneRoot(
+    <scene id='driver-scene'>
+      <group id='root'>
+        <node id='animated-node' position={[0, 0, 0]} />
+      </group>
+    </scene>,
+  );
+  const driver = createSceneRootFrameDriver(root, {
+    residency: createRuntimeResidency(),
+    initialTimeMs: 0,
+  });
+
+  root.render(
+    <scene id='driver-scene'>
+      <group id='root'>
+        <node id='animated-node' position={[0, 0, 0]} />
+        <node id='added-node' position={[1, 0, 0]} />
+      </group>
+    </scene>,
+  );
+
+  const frame = driver.advanceFrame(16);
+
+  assertEquals(frame.evaluationMode, 'full');
+  assertEquals(frame.residencyPlan?.reset, true);
+  assertEquals(frame.residencyPlan?.reasons.includes('nodeAdded'), true);
+  assertEquals(frame.stats, {
+    partialUpdateCount: 0,
+    fullUpdateCount: 2,
+    targetedInvalidationCount: 0,
+    resetInvalidationCount: 1,
+  });
 });
 
 Deno.test('createReactSceneRoot applies React state updates to the scene document', () => {

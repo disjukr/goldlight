@@ -11,7 +11,7 @@ This demo exercises:
   the same primitive contract as the snapshot path plus the exported convenience components
 - hook-driven live scene updates that publish `SceneRootCommit` payloads and surface reconciler
   failures through the flush helper path used by tests/deterministic integrations
-- partial-update runtime wiring that applies targeted residency invalidation and uses the
+- react-package frame-driver wiring that applies targeted residency invalidation and uses the
   transform-only reevaluation fast path whenever the rotating bunny only changes node transforms
 - reusable `@rieul3d/core` helpers for generated normals, mesh bounds, and Euler-authored light
   rotation

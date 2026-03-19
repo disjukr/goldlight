@@ -1,5 +1,6 @@
 import type { EvaluatedCamera, EvaluatedScene } from '@rieul3d/core';
 import type { Material } from '@rieul3d/ir';
+import { buildBvh, type BvhNode, type RaytraceTriangle } from '@rieul3d/raytrace';
 import {
   acquireColorAttachmentView,
   acquireDepthAttachmentView,
@@ -38,6 +39,9 @@ import builtInPathtracedAccumulateShader from './shaders/built_in_pathtraced_acc
   type: 'text',
 };
 import builtInPathtracedSdfShader from './shaders/built_in_pathtraced_sdf.wgsl' with {
+  type: 'text',
+};
+import builtInPathtracedMeshShader from './shaders/built_in_pathtraced_mesh.wgsl' with {
   type: 'text',
 };
 import builtInSdfRaymarchShader from './shaders/built_in_sdf_raymarch.wgsl' with { type: 'text' };
@@ -199,6 +203,35 @@ type PathtracedAccumulationState = {
   swap: boolean;
 };
 
+type PathtracedMeshTriangle = Readonly<{
+  a: readonly [number, number, number];
+  b: readonly [number, number, number];
+  c: readonly [number, number, number];
+  na: readonly [number, number, number];
+  nb: readonly [number, number, number];
+  nc: readonly [number, number, number];
+}>;
+
+type PathtracedMeshAsset = Readonly<{
+  meshId: string;
+  rootNodeIndex: number;
+}>;
+
+type PathtracedMeshSceneState = Readonly<{
+  meshCacheKey: string;
+  triangleBuffer: GPUBuffer;
+  bvhBuffer: GPUBuffer;
+  meshAssets: ReadonlyMap<string, PathtracedMeshAsset>;
+}>;
+
+type PathtracedMeshInstance = Readonly<{
+  rootNodeIndex: number;
+  localToWorld: readonly number[];
+  worldToLocal: readonly number[];
+  albedo: readonly [number, number, number];
+  emission: number;
+}>;
+
 export type NodePickItem = Readonly<{
   encodedId: number;
   nodeId: string;
@@ -346,6 +379,7 @@ const builtInDeferredGbufferTexturedUnlitProgramId = 'built-in:deferred-gbuffer-
 const builtInDeferredGbufferLitProgramId = 'built-in:deferred-gbuffer-lit';
 const builtInDeferredLightingProgramId = 'built-in:deferred-lighting';
 const builtInPathtracedAccumulateProgramId = 'built-in:pathtraced-accumulate';
+const builtInPathtracedMeshProgramId = 'built-in:pathtraced-mesh';
 const builtInPathtracedSdfProgramId = 'built-in:pathtraced-sdf';
 const builtInSdfRaymarchProgramId = 'built-in:sdf-raymarch';
 const builtInVolumeRaymarchProgramId = 'built-in:volume-raymarch';
@@ -355,6 +389,7 @@ const nodePickTargetFormat = 'rgba8unorm';
 const textureBindingUsage = 0x04;
 const renderAttachmentUsage = 0x10;
 const uniformUsage = 0x40;
+const storageUsage = 0x80;
 const bufferCopyDstUsage = 0x08;
 const deferredDepthFormat = 'depth24plus';
 const maxSdfPassItems = 16;
@@ -368,6 +403,7 @@ const pathtracedAccumulationStates = new WeakMap<
   RenderContextBinding,
   PathtracedAccumulationState
 >();
+const pathtracedMeshSceneStates = new WeakMap<RenderContextBinding, PathtracedMeshSceneState>();
 const alphaBlendState: GPUBlendState = {
   color: {
     srcFactor: 'src-alpha',
@@ -1579,11 +1615,11 @@ export const createPathtracedRenderer = (
   kind: 'pathtraced',
   label,
   capabilities: {
-    mesh: 'unsupported',
+    mesh: 'supported',
     sdf: 'supported',
     volume: 'unsupported',
     light: 'supported',
-    builtInMaterialKinds: [],
+    builtInMaterialKinds: ['unlit'],
     customShaders: 'unsupported',
   },
   passes: [
@@ -2024,6 +2060,87 @@ const getWorldToLocalRotation = (
     axisZy,
     axisZz,
   ];
+};
+
+const getMeshPositionValues = (
+  attributes: readonly { semantic: string; values: readonly number[] }[],
+) => attributes.find((attribute) => attribute.semantic === 'POSITION')?.values;
+
+const getMeshNormalValues = (
+  attributes: readonly { semantic: string; values: readonly number[] }[],
+) => attributes.find((attribute) => attribute.semantic === 'NORMAL')?.values;
+
+const createPathtracedMeshTriangles = (
+  attributes: readonly { semantic: string; values: readonly number[] }[],
+  indices: readonly number[] | undefined,
+): readonly PathtracedMeshTriangle[] => {
+  const positions = getMeshPositionValues(attributes);
+  const normals = getMeshNormalValues(attributes);
+  if (!positions || positions.length === 0 || positions.length % 3 !== 0) {
+    return [];
+  }
+
+  const vertexCount = positions.length / 3;
+  const triangleIndices = indices && indices.length > 0
+    ? indices
+    : Array.from({ length: vertexCount }, (_, index) => index);
+  if (triangleIndices.length % 3 !== 0) {
+    return [];
+  }
+
+  const triangles: PathtracedMeshTriangle[] = [];
+  for (let index = 0; index < triangleIndices.length; index += 3) {
+    const aIndex = triangleIndices[index] ?? -1;
+    const bIndex = triangleIndices[index + 1] ?? -1;
+    const cIndex = triangleIndices[index + 2] ?? -1;
+    if (
+      aIndex < 0 || aIndex >= vertexCount || bIndex < 0 || bIndex >= vertexCount ||
+      cIndex < 0 || cIndex >= vertexCount
+    ) {
+      continue;
+    }
+
+    triangles.push({
+      a: [
+        positions[aIndex * 3] ?? 0,
+        positions[(aIndex * 3) + 1] ?? 0,
+        positions[(aIndex * 3) + 2] ?? 0,
+      ],
+      b: [
+        positions[bIndex * 3] ?? 0,
+        positions[(bIndex * 3) + 1] ?? 0,
+        positions[(bIndex * 3) + 2] ?? 0,
+      ],
+      c: [
+        positions[cIndex * 3] ?? 0,
+        positions[(cIndex * 3) + 1] ?? 0,
+        positions[(cIndex * 3) + 2] ?? 0,
+      ],
+      na: normals
+        ? [
+          normals[aIndex * 3] ?? 0,
+          normals[(aIndex * 3) + 1] ?? 0,
+          normals[(aIndex * 3) + 2] ?? 0,
+        ]
+        : [0, 0, 0],
+      nb: normals
+        ? [
+          normals[bIndex * 3] ?? 0,
+          normals[(bIndex * 3) + 1] ?? 0,
+          normals[(bIndex * 3) + 2] ?? 0,
+        ]
+        : [0, 0, 0],
+      nc: normals
+        ? [
+          normals[cIndex * 3] ?? 0,
+          normals[(cIndex * 3) + 1] ?? 0,
+          normals[(cIndex * 3) + 2] ?? 0,
+        ]
+        : [0, 0, 0],
+    });
+  }
+
+  return triangles;
 };
 
 const invertAffineMatrix = (worldMatrix: readonly number[]): readonly number[] => {
@@ -2751,6 +2868,42 @@ export const ensurePathtracedSdfPipeline = (
   return pipeline;
 };
 
+export const ensurePathtracedMeshPipeline = (
+  context: GpuRenderExecutionContext,
+  residency: RuntimeResidency,
+  format: GPUTextureFormat,
+): GPURenderPipeline => {
+  const cacheKey = `${builtInPathtracedMeshProgramId}:${format}`;
+  const cached = residency.pipelines.get(cacheKey);
+  if (cached) {
+    return cached as GPURenderPipeline;
+  }
+
+  const shader = context.device.createShaderModule({
+    label: cacheKey,
+    code: builtInPathtracedMeshShader,
+  });
+  const pipeline = context.device.createRenderPipeline({
+    label: cacheKey,
+    layout: 'auto',
+    vertex: {
+      module: shader,
+      entryPoint: 'vsMain',
+    },
+    fragment: {
+      module: shader,
+      entryPoint: 'fsMain',
+      targets: [{ format }],
+    },
+    primitive: {
+      topology: 'triangle-list',
+    },
+  });
+
+  residency.pipelines.set(cacheKey, pipeline);
+  return pipeline;
+};
+
 export const ensurePathtracedAccumulatePipeline = (
   context: GpuRenderExecutionContext,
   residency: RuntimeResidency,
@@ -3157,6 +3310,307 @@ export const renderPathtracedSdfPass = (
   return 1;
 };
 
+const destroyPathtracedMeshSceneState = (state: PathtracedMeshSceneState): void => {
+  state.triangleBuffer.destroy?.();
+  state.bvhBuffer.destroy?.();
+};
+
+const createPathtracedMeshTriangleBufferData = (
+  triangles: readonly PathtracedMeshTriangle[],
+  triangleIndices: readonly number[],
+): Float32Array => {
+  const data = new Float32Array(triangleIndices.length * 24);
+
+  triangleIndices.forEach((triangleIndex, outputIndex) => {
+    const triangle = triangles[triangleIndex];
+    const baseIndex = outputIndex * 24;
+    data.set([...triangle.a, 1], baseIndex);
+    data.set([...triangle.b, 1], baseIndex + 4);
+    data.set([...triangle.c, 1], baseIndex + 8);
+    data.set([...triangle.na, 0], baseIndex + 12);
+    data.set([...triangle.nb, 0], baseIndex + 16);
+    data.set([...triangle.nc, 0], baseIndex + 20);
+  });
+
+  return data;
+};
+
+const createPathtracedMeshBvhBufferData = (
+  nodes: readonly BvhNode[],
+  nodeOffset: number,
+  triangleOffset: number,
+): Float32Array => {
+  const data = new Float32Array(nodes.length * 12);
+
+  nodes.forEach((node, index) => {
+    const baseIndex = index * 12;
+    data.set([...node.boundsMin, 0], baseIndex);
+    data.set([...node.boundsMax, 0], baseIndex + 4);
+    data.set(
+      [
+        node.leftChild >= 0 ? node.leftChild + nodeOffset : -1,
+        node.rightChild >= 0 ? node.rightChild + nodeOffset : -1,
+        node.triangleOffset >= 0 ? node.triangleOffset + triangleOffset : -1,
+        node.triangleCount,
+      ],
+      baseIndex + 8,
+    );
+  });
+
+  return data;
+};
+
+const createPathtracedMeshInstances = (
+  evaluatedScene: EvaluatedScene,
+  meshAssets: ReadonlyMap<string, PathtracedMeshAsset>,
+): readonly PathtracedMeshInstance[] =>
+  evaluatedScene.nodes.flatMap((node) => {
+    if (!node.mesh) {
+      return [];
+    }
+
+    const asset = meshAssets.get(node.mesh.id);
+    if (!asset) {
+      return [];
+    }
+
+    const color = node.material?.parameters.color ?? { x: 0.82, y: 0.82, z: 0.82, w: 1 };
+    return [{
+      rootNodeIndex: asset.rootNodeIndex,
+      localToWorld: node.worldMatrix,
+      worldToLocal: invertAffineMatrix(node.worldMatrix),
+      albedo: [color.x, color.y, color.z],
+      emission: 0,
+    }];
+  });
+
+const createPathtracedMeshInstanceBufferData = (
+  instances: readonly PathtracedMeshInstance[],
+): Float32Array => {
+  const data = new Float32Array(instances.length * 40);
+
+  instances.forEach((instance, index) => {
+    const baseIndex = index * 40;
+    data.set(instance.localToWorld.slice(0, 16), baseIndex);
+    data.set(instance.worldToLocal.slice(0, 16), baseIndex + 16);
+    data.set([instance.rootNodeIndex, 0, 0, 0], baseIndex + 32);
+    data.set([...instance.albedo, instance.emission], baseIndex + 36);
+  });
+
+  return data;
+};
+
+const ensurePathtracedMeshSceneState = (
+  context: GpuRenderExecutionContext,
+  binding: RenderContextBinding,
+  evaluatedScene: EvaluatedScene,
+  meshCacheKey: string,
+): PathtracedMeshSceneState | undefined => {
+  const cached = pathtracedMeshSceneStates.get(binding);
+  if (cached?.meshCacheKey === meshCacheKey) {
+    return cached;
+  }
+
+  if (cached) {
+    destroyPathtracedMeshSceneState(cached);
+    pathtracedMeshSceneStates.delete(binding);
+  }
+
+  const meshEntries = [
+    ...new Map(
+      evaluatedScene.nodes
+        .filter((node): node is typeof node & { mesh: NonNullable<typeof node.mesh> } =>
+          !!node.mesh
+        )
+        .map((node) => [node.mesh.id, node.mesh]),
+    ).values(),
+  ];
+  if (meshEntries.length === 0) {
+    return undefined;
+  }
+
+  const triangleDataParts: Float32Array[] = [];
+  const bvhDataParts: Float32Array[] = [];
+  const meshAssets = new Map<string, PathtracedMeshAsset>();
+  let triangleOffset = 0;
+  let nodeOffset = 0;
+
+  for (const mesh of meshEntries) {
+    const triangles = createPathtracedMeshTriangles(mesh.attributes, mesh.indices);
+    if (triangles.length === 0) {
+      continue;
+    }
+
+    const bvh = buildBvh(
+      triangles.map<RaytraceTriangle>((triangle) => ({
+        a: triangle.a,
+        b: triangle.b,
+        c: triangle.c,
+      })),
+    );
+    triangleDataParts.push(createPathtracedMeshTriangleBufferData(triangles, bvh.triangleIndices));
+    bvhDataParts.push(createPathtracedMeshBvhBufferData(bvh.nodes, nodeOffset, triangleOffset));
+    meshAssets.set(mesh.id, {
+      meshId: mesh.id,
+      rootNodeIndex: nodeOffset,
+    });
+    triangleOffset += bvh.triangleIndices.length;
+    nodeOffset += bvh.nodes.length;
+  }
+
+  if (triangleDataParts.length === 0 || bvhDataParts.length === 0) {
+    return undefined;
+  }
+
+  const triangleData = Float32Array.from(triangleDataParts.flatMap((part) => Array.from(part)));
+  const triangleBuffer = context.device.createBuffer({
+    label: 'pathtraced-mesh-triangles',
+    size: triangleData.byteLength,
+    usage: storageUsage | bufferCopyDstUsage,
+  });
+  context.queue.writeBuffer(triangleBuffer, 0, toBufferSource(triangleData));
+
+  const bvhData = Float32Array.from(bvhDataParts.flatMap((part) => Array.from(part)));
+  const bvhBuffer = context.device.createBuffer({
+    label: 'pathtraced-mesh-bvh',
+    size: bvhData.byteLength,
+    usage: storageUsage | bufferCopyDstUsage,
+  });
+  context.queue.writeBuffer(bvhBuffer, 0, toBufferSource(bvhData));
+
+  const state: PathtracedMeshSceneState = {
+    meshCacheKey,
+    triangleBuffer,
+    bvhBuffer,
+    meshAssets,
+  };
+  pathtracedMeshSceneStates.set(binding, state);
+  return state;
+};
+
+const createPathtracedMeshUniformData = (
+  instanceCount: number,
+  camera: RaymarchCamera,
+  frameIndex: number,
+): Float32Array =>
+  Float32Array.from([
+    instanceCount,
+    frameIndex,
+    0,
+    0,
+    ...camera.origin,
+    0,
+    ...camera.right,
+    camera.projection === 'orthographic' ? 1 : 0,
+    ...camera.up,
+    0,
+    ...camera.forward,
+    camera.projection === 'orthographic' ? 1 : 0,
+  ]);
+
+export const renderPathtracedMeshPass = (
+  context: GpuRenderExecutionContext,
+  encoder: GPUCommandEncoder,
+  binding: RenderContextBinding,
+  residency: RuntimeResidency,
+  evaluatedScene: EvaluatedScene,
+  meshCacheKey: string,
+  targetView = acquireColorAttachmentView(context, binding),
+  targetFormat = binding.target.format,
+  camera: RaymarchCamera = defaultRaymarchCamera,
+  frameIndex = 0,
+): number => {
+  const sceneState = ensurePathtracedMeshSceneState(
+    context,
+    binding,
+    evaluatedScene,
+    meshCacheKey,
+  );
+  if (!sceneState) {
+    return 0;
+  }
+  const instances = createPathtracedMeshInstances(evaluatedScene, sceneState.meshAssets);
+  if (instances.length === 0) {
+    return 0;
+  }
+
+  const pipeline = ensurePathtracedMeshPipeline(context, residency, targetFormat);
+  const uniformData = createPathtracedMeshUniformData(instances.length, camera, frameIndex);
+  const sdfItems = extractSdfPassItems(evaluatedScene);
+  const sdfUniformData = createSdfUniformData(sdfItems, camera, frameIndex);
+  const uniformBuffer = context.device.createBuffer({
+    label: 'pathtraced-mesh-uniforms',
+    size: uniformData.byteLength,
+    usage: uniformUsage | bufferCopyDstUsage,
+  });
+  context.queue.writeBuffer(uniformBuffer, 0, toBufferSource(uniformData));
+  const sdfUniformBuffer = context.device.createBuffer({
+    label: 'pathtraced-mesh-sdf-uniforms',
+    size: sdfUniformData.byteLength,
+    usage: uniformUsage | bufferCopyDstUsage,
+  });
+  context.queue.writeBuffer(sdfUniformBuffer, 0, toBufferSource(sdfUniformData));
+  const instanceData = createPathtracedMeshInstanceBufferData(instances);
+  const instanceBuffer = context.device.createBuffer({
+    label: 'pathtraced-mesh-instances',
+    size: instanceData.byteLength,
+    usage: storageUsage | bufferCopyDstUsage,
+  });
+  context.queue.writeBuffer(instanceBuffer, 0, toBufferSource(instanceData));
+
+  const bindGroup = context.device.createBindGroup({
+    layout: pipeline.getBindGroupLayout(0),
+    entries: [
+      {
+        binding: 0,
+        resource: {
+          buffer: uniformBuffer,
+        },
+      },
+      {
+        binding: 1,
+        resource: {
+          buffer: sceneState.triangleBuffer,
+        },
+      },
+      {
+        binding: 2,
+        resource: {
+          buffer: sceneState.bvhBuffer,
+        },
+      },
+      {
+        binding: 3,
+        resource: {
+          buffer: instanceBuffer,
+        },
+      },
+      {
+        binding: 4,
+        resource: {
+          buffer: sdfUniformBuffer,
+        },
+      },
+    ],
+  });
+
+  const pass = encoder.beginRenderPass({
+    colorAttachments: [{
+      view: targetView,
+      clearValue: { r: 0.04, g: 0.05, b: 0.08, a: 1 },
+      loadOp: 'clear',
+      storeOp: 'store',
+    }],
+  });
+
+  pass.setPipeline(pipeline);
+  pass.setBindGroup(0, bindGroup);
+  pass.draw(6, 1, 0, 0);
+  pass.end();
+
+  return 1;
+};
+
 const renderPathtracedAccumulationPass = (
   context: GpuRenderExecutionContext,
   encoder: GPUCommandEncoder,
@@ -3544,9 +3998,35 @@ const createPathtracedSceneKey = (
       ].join('|')
     )
     .join('::');
+  const meshKey = evaluatedScene.nodes
+    .filter((node) => node.mesh)
+    .map((node) => [node.node.id, node.worldMatrix.join(',')].join('|'))
+    .join('::');
 
-  return hashString(`${cameraKey}::${sdfKey}`);
+  return hashString(`${cameraKey}::${sdfKey}::${meshKey}`);
 };
+
+const createPathtracedMeshCacheKey = (evaluatedScene: EvaluatedScene): string =>
+  hashString(
+    [
+      ...new Map(
+        evaluatedScene.nodes
+          .filter((node): node is typeof node & { mesh: NonNullable<typeof node.mesh> } =>
+            !!node.mesh
+          )
+          .map((node) => [node.mesh.id, node.mesh]),
+      ).values(),
+    ]
+      .map((mesh) =>
+        [
+          mesh.id,
+          mesh.indices?.join(',') ?? '',
+          getMeshPositionValues(mesh.attributes)?.join(',') ?? '',
+        ]
+          .join('|')
+      )
+      .join('::'),
+  );
 const ensurePathtracedAccumulationState = (
   context: GpuRenderExecutionContext,
   binding: RenderContextBinding,
@@ -4073,7 +4553,9 @@ export const renderPathtracedFrame = (
     residency,
   );
 
+  const hasMeshScene = evaluatedScene.nodes.some((node) => node.mesh);
   const sceneKey = createPathtracedSceneKey(evaluatedScene);
+  const meshCacheKey = hasMeshScene ? createPathtracedMeshCacheKey(evaluatedScene) : '';
   const accumulationState = ensurePathtracedAccumulationState(context, binding, sceneKey);
   const currentSampleView = accumulationState.currentSampleTexture.createView();
   const previousAccumulationTexture = accumulationState.swap
@@ -4096,17 +4578,30 @@ export const renderPathtracedFrame = (
   );
 
   let drawCount = 0;
-  drawCount += renderPathtracedSdfPass(
-    context,
-    encoder,
-    binding,
-    residency,
-    evaluatedScene,
-    currentSampleView,
-    binding.target.format,
-    raymarchCamera,
-    accumulationState.frameIndex,
-  );
+  drawCount += hasMeshScene
+    ? renderPathtracedMeshPass(
+      context,
+      encoder,
+      binding,
+      residency,
+      evaluatedScene,
+      meshCacheKey,
+      currentSampleView,
+      binding.target.format,
+      raymarchCamera,
+      accumulationState.frameIndex,
+    )
+    : renderPathtracedSdfPass(
+      context,
+      encoder,
+      binding,
+      residency,
+      evaluatedScene,
+      currentSampleView,
+      binding.target.format,
+      raymarchCamera,
+      accumulationState.frameIndex,
+    );
   drawCount += renderPathtracedAccumulationPass(
     context,
     encoder,

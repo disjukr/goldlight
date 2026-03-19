@@ -887,6 +887,160 @@ Deno.test('renderPathtracedFrame encodes a fullscreen sdf pass', () => {
   );
 });
 
+Deno.test('renderPathtracedFrame encodes a fullscreen mesh pathtrace pass when mesh nodes exist', () => {
+  const mocks = createRenderMocks();
+  const runtimeResidency = createRuntimeResidency();
+  let scene = createSceneIr('scene');
+  scene = appendMaterial(scene, {
+    id: 'mesh-material',
+    kind: 'unlit',
+    textures: [],
+    parameters: {
+      color: { x: 0.8, y: 0.82, z: 0.86, w: 1 },
+    },
+  });
+  scene = appendMesh(scene, {
+    id: 'mesh-0',
+    materialId: 'mesh-material',
+    attributes: [{ semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0, 0, 1, 0] }],
+  });
+  scene = appendNode(scene, createNode('mesh-node', { meshId: 'mesh-0' }));
+
+  const binding = createOffscreenBinding({
+    device: mocks.device as unknown as GPUDevice,
+    target: { kind: 'offscreen', width: 64, height: 64, format: 'rgba8unorm', sampleCount: 1 },
+  });
+
+  const result = renderPathtracedFrame(
+    mocks as unknown as GpuRenderExecutionContext,
+    binding,
+    runtimeResidency,
+    evaluateScene(scene, { timeMs: 0 }),
+  );
+
+  assertEquals(result.drawCount, 3);
+  assertEquals(result.submittedCommandBufferCount, 1);
+  assertEquals(mocks.renderPassCount.current, 3);
+  assertEquals(
+    mocks.pipelines.some((pipeline) => pipeline.descriptor.label?.includes('pathtraced-mesh')),
+    true,
+  );
+});
+
+Deno.test('renderPathtracedFrame keeps the mesh pathtrace pass for mixed mesh and sdf scenes', () => {
+  const mocks = createRenderMocks();
+  const runtimeResidency = createRuntimeResidency();
+  let scene = createSceneIr('scene');
+  scene = appendMaterial(scene, {
+    id: 'mesh-material',
+    kind: 'unlit',
+    textures: [],
+    parameters: {
+      color: { x: 0.8, y: 0.82, z: 0.86, w: 1 },
+    },
+  });
+  scene = appendMesh(scene, {
+    id: 'mesh-0',
+    materialId: 'mesh-material',
+    attributes: [{ semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0, 0, 1, 0] }],
+  });
+  scene = {
+    ...scene,
+    sdfPrimitives: [{
+      id: 'sdf-0',
+      op: 'sphere',
+      parameters: {
+        radius: { x: 0.5, y: 0, z: 0, w: 0 },
+      },
+    }],
+  };
+  scene = appendNode(scene, createNode('mesh-node', { meshId: 'mesh-0' }));
+  scene = appendNode(scene, createNode('sdf-node', { sdfId: 'sdf-0' }));
+
+  const binding = createOffscreenBinding({
+    device: mocks.device as unknown as GPUDevice,
+    target: { kind: 'offscreen', width: 64, height: 64, format: 'rgba8unorm', sampleCount: 1 },
+  });
+
+  const result = renderPathtracedFrame(
+    mocks as unknown as GpuRenderExecutionContext,
+    binding,
+    runtimeResidency,
+    evaluateScene(scene, { timeMs: 0 }),
+  );
+
+  assertEquals(result.drawCount, 3);
+  assertEquals(mocks.renderPassCount.current, 3);
+  assertEquals(
+    mocks.pipelines.some((pipeline) => pipeline.descriptor.label?.includes('pathtraced-mesh')),
+    true,
+  );
+});
+
+Deno.test('renderPathtracedFrame reuses mesh-local BVH uploads when only node transforms change', () => {
+  const mocks = createRenderMocks();
+  const runtimeResidency = createRuntimeResidency();
+  let scene = createSceneIr('scene');
+  scene = appendMaterial(scene, {
+    id: 'mesh-material',
+    kind: 'unlit',
+    textures: [],
+    parameters: {
+      color: { x: 0.8, y: 0.82, z: 0.86, w: 1 },
+    },
+  });
+  scene = appendMesh(scene, {
+    id: 'mesh-0',
+    materialId: 'mesh-material',
+    attributes: [{ semantic: 'POSITION', itemSize: 3, values: [0, 0, 0, 1, 0, 0, 0, 1, 0] }],
+  });
+  scene = appendNode(scene, createNode('mesh-node', { meshId: 'mesh-0' }));
+  const binding = createOffscreenBinding({
+    device: mocks.device as unknown as GPUDevice,
+    target: { kind: 'offscreen', width: 64, height: 64, format: 'rgba8unorm', sampleCount: 1 },
+  });
+
+  renderPathtracedFrame(
+    mocks as unknown as GpuRenderExecutionContext,
+    binding,
+    runtimeResidency,
+    evaluateScene(scene, { timeMs: 0 }),
+  );
+  const meshUploadWriteSizes = mocks.writeBufferCalls
+    .map((call) => call.bytes.byteLength)
+    .filter((size) => size === 96 || size === 48);
+  const writeCountAfterFirstRender = mocks.writeBufferCalls.length;
+
+  let movedScene = createSceneIr('scene');
+  movedScene = appendMaterial(movedScene, scene.materials[0]!);
+  movedScene = appendMesh(movedScene, scene.meshes[0]!);
+  movedScene = appendNode(
+    movedScene,
+    createNode('mesh-node', {
+      meshId: 'mesh-0',
+      transform: {
+        translation: { x: 1.5, y: 0, z: 0 },
+        rotation: { x: 0, y: 0, z: 0, w: 1 },
+        scale: { x: 1, y: 1, z: 1 },
+      },
+    }),
+  );
+
+  renderPathtracedFrame(
+    mocks as unknown as GpuRenderExecutionContext,
+    binding,
+    runtimeResidency,
+    evaluateScene(movedScene, { timeMs: 0 }),
+  );
+
+  const secondMeshUploadWriteSizes = mocks.writeBufferCalls
+    .slice(writeCountAfterFirstRender)
+    .map((call) => call.bytes.byteLength)
+    .filter((size) => size === 96 || size === 48);
+  assertEquals(meshUploadWriteSizes, [96, 48]);
+  assertEquals(secondMeshUploadWriteSizes.length, 0);
+});
+
 Deno.test('renderPathtracedFrame resets accumulation when the sdf scene changes', () => {
   const mocks = createRenderMocks();
   const runtimeResidency = createRuntimeResidency();

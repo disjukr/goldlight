@@ -60,6 +60,8 @@ Implemented today:
   with optional filtered reprojection and caller-controlled output dimensions
 - Perlin gradient-noise samplers in `@rieul3d/math` plus grayscale texture/volume generators in
   `@rieul3d/procedural` that share the existing deterministic seed model
+- triangle BVH construction in `@rieul3d/raytrace` plus a mesh pathtraced renderer slice for static
+  mesh scenes
 - forward SDF sphere and box raymarch execution with capability preflight alignment
 - local-space SDF-to-mesh extraction for supported sphere and box primitives, including
   canonical-table marching-cubes and naive surface-nets contouring helpers for baking or inspection
@@ -80,6 +82,10 @@ Implemented today:
   package
 - browser canvas examples, Windows BYOW native textured demo, headless PNG snapshot workflow, and
   PNG snapshot encoding
+- Windows BYOW Damaged Helmet pathtraced demo using the vendored GLB asset and triangle-BVH mesh
+  path tracing
+- Windows BYOW Cornell Helmet pathtraced demo combining the Damaged Helmet mesh with Cornell-box SDF
+  walls and light
 - Windows BYOW primitives demo using `@rieul3d/geometry`, a reusable BYOW runner script, built-in
   `lit` materials, and directional-light shading
 - Windows BYOW Stanford Bunny demo authored through `@rieul3d/react`, loading the vendored ASCII PLY
@@ -173,6 +179,16 @@ Read in this order when onboarding:
 - `deno task example:byow:triangle:run`: open the Windows BYOW triangle smoke test
 - `deno task example:byow:primitives:check`: type-check the Windows BYOW primitives demo
 - `deno task example:byow:primitives:run`: open the Windows BYOW primitives demo
+- `deno task example:byow:cornell-helmet:check`: type-check the Windows BYOW Cornell Helmet
+  pathtraced demo
+- `deno task example:byow:cornell-helmet:run`: open the Windows BYOW Cornell Helmet pathtraced demo
+- `deno task example:byow:pathtraced:check`: type-check the default Windows BYOW mesh pathtraced
+  demo
+- `deno task example:byow:pathtraced:run`: open the default Windows BYOW mesh pathtraced demo
+- `deno task example:byow:helmet-pathtraced:check`: type-check the Windows BYOW Damaged Helmet
+  pathtraced demo
+- `deno task example:byow:helmet-pathtraced:run`: open the Windows BYOW Damaged Helmet pathtraced
+  demo
 - `deno task example:byow:react-bunny:check`: type-check the Windows BYOW React Stanford Bunny demo
 - `deno task example:byow:react-bunny:run`: open the Windows BYOW React Stanford Bunny demo Golden
   snapshot fixtures live in [`tests/fixtures/golden-snapshots`](./tests/fixtures/golden-snapshots).

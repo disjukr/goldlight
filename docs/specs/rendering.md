@@ -48,8 +48,9 @@ The initial renderer uses a lightweight pass graph:
 - Forward rendering also encodes a dedicated SDF raymarch pass for supported sphere and box
   primitives.
 - Forward rendering also encodes a first volume raymarch pass for volume primitives with residency.
-- Pathtraced rendering currently ships as an initial SDF-only fullscreen slice. It does not yet path
-  trace mesh geometry, custom materials, resident volumes, or scene light nodes.
+- Pathtraced rendering now ships with two fullscreen slices: the original SDF path and a
+  triangle-BVH mesh path for static mesh scenes, including mixed mesh+SDF pathtraced composition. It
+  does not yet support custom materials, resident volumes, or scene light nodes.
 - Built-in unlit WGSL is stored as a standalone shader file and imported as text.
 - Built-in forward lit WGSL is stored as a standalone shader file and consumes directional-light
   uniform data extracted from evaluated light nodes.
@@ -175,8 +176,9 @@ The initial renderer uses a lightweight pass graph:
 
 - Post-processing currently exposes a renderer-owned fullscreen pass contract only; scene IR does
   not declare effect graphs yet.
-- The initial pathtraced renderer slice currently supports only sphere and box SDF scene content and
-  should be treated as a renderer-boundary milestone rather than the final path-tracing feature set.
+- The current pathtraced renderer slices support sphere/box SDF scenes and static triangle-mesh
+  scenes with BVHs derived from mesh geometry, but should still be treated as a renderer-boundary
+  milestone rather than the final path-tracing feature set.
 - Custom WGSL materials do not yet receive a first-class shared alpha-policy binding, so uber
   partitioning currently treats non-opaque custom materials as forward-only.
 - Renderer-side picking currently targets mesh nodes only; SDF, volume, and per-triangle picking are

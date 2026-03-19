@@ -6,7 +6,7 @@ import {
   rebuildRuntimeResidency,
   requestGpuContext,
 } from '@rieul3d/gpu';
-import { encodePngRgba } from '@rieul3d/exporters';
+import { exportPngRgba } from '@rieul3d/exporters';
 import { renderForwardSnapshot } from '@rieul3d/renderer';
 import {
   createClearScene,
@@ -51,7 +51,7 @@ const renderFixture = async (
       runtimeResidency,
       evaluatedScene,
     );
-    const png = encodePngRgba(snapshot);
+    const png = exportPngRgba(snapshot);
     const fixturePath = join(fixtureDirectory, `${name}.png`);
     await Deno.mkdir(dirname(fixturePath), { recursive: true });
     await Deno.writeFile(fixturePath, png);
@@ -95,7 +95,7 @@ const renderRecoveryFixture = async (
       residency,
       evaluatedScene,
     );
-    const png = encodePngRgba(snapshot);
+    const png = exportPngRgba(snapshot);
     const fixturePath = join(fixtureDirectory, `${name}.png`);
     await Deno.mkdir(dirname(fixturePath), { recursive: true });
     await Deno.writeFile(fixturePath, png);

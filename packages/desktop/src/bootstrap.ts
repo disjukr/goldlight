@@ -52,9 +52,21 @@ export const installDesktopWindowGlobals = (
   });
 
   return () => {
-    globals.requestAnimationFrame = snapshot.requestAnimationFrame;
-    globals.cancelAnimationFrame = snapshot.cancelAnimationFrame;
-    globals.postMessage = snapshot.postMessage;
+    if (snapshot.requestAnimationFrame) {
+      globals.requestAnimationFrame = snapshot.requestAnimationFrame;
+    } else {
+      Reflect.deleteProperty(globals, 'requestAnimationFrame');
+    }
+    if (snapshot.cancelAnimationFrame) {
+      globals.cancelAnimationFrame = snapshot.cancelAnimationFrame;
+    } else {
+      Reflect.deleteProperty(globals, 'cancelAnimationFrame');
+    }
+    if (snapshot.postMessage) {
+      globals.postMessage = snapshot.postMessage;
+    } else {
+      Reflect.deleteProperty(globals, 'postMessage');
+    }
     Object.defineProperty(globals, 'onmessage', {
       configurable: true,
       enumerable: true,

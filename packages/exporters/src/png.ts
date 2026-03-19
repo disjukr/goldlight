@@ -1,4 +1,4 @@
-export type RgbaSnapshot = Readonly<{
+export type PngRgbaExport = Readonly<{
   width: number;
   height: number;
   bytes: Uint8Array;
@@ -54,7 +54,7 @@ const createChunk = (type: string, data: Uint8Array): Uint8Array => {
   return chunk;
 };
 
-const createRawScanlines = (snapshot: RgbaSnapshot): Uint8Array => {
+const createRawScanlines = (snapshot: PngRgbaExport): Uint8Array => {
   const stride = snapshot.width * 4;
   const expectedLength = stride * snapshot.height;
   if (snapshot.bytes.length !== expectedLength) {
@@ -104,7 +104,7 @@ const encodeStoredDeflate = (raw: Uint8Array): Uint8Array => {
   return compressed;
 };
 
-export const encodePngRgba = (snapshot: RgbaSnapshot): Uint8Array => {
+export const exportPngRgba = (snapshot: PngRgbaExport): Uint8Array => {
   const ihdr = new Uint8Array(13);
   writeUint32(ihdr, 0, snapshot.width);
   writeUint32(ihdr, 4, snapshot.height);

@@ -7,7 +7,7 @@ import {
   rebuildRuntimeResidency,
   requestGpuContext,
 } from '@rieul3d/gpu';
-import { encodePngRgba } from '@rieul3d/exporters';
+import { exportPngRgba } from '@rieul3d/exporters';
 import { renderForwardSnapshot } from '@rieul3d/renderer';
 import clearOnlyFrameFixture from './fixtures/golden-snapshots/clear-only-frame.png' with {
   type: 'bytes',
@@ -138,7 +138,7 @@ const assertGoldenSnapshot = async (
         `golden snapshot "${name}" matched the clear-only frame and did not render visible content`,
       );
     }
-    const actualPng = encodePngRgba(snapshot);
+    const actualPng = exportPngRgba(snapshot);
     const { mismatchCount, firstMismatchIndex } = compareBytes(expectedPng, actualPng);
     if (mismatchCount === 0) {
       return;
@@ -214,7 +214,7 @@ const assertGoldenSnapshotAfterRecovery = async (
         `golden recovery snapshot "${name}" matched the clear-only frame and did not render visible content`,
       );
     }
-    const actualPng = encodePngRgba(recoveredSnapshot);
+    const actualPng = exportPngRgba(recoveredSnapshot);
     const { mismatchCount, firstMismatchIndex } = compareBytes(expectedPng, actualPng);
     if (mismatchCount === 0) {
       return;

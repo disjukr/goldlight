@@ -60,7 +60,7 @@ const parsePlyElementDefinition = (
   };
 };
 
-export const loadPlyFromText = (source: string, sceneId = 'ply-scene'): SceneIr => {
+export const importPlyFromText = (source: string, sceneId = 'ply-scene'): SceneIr => {
   const lines = source.split(/\r?\n/);
   if (lines[0]?.trim() !== 'ply') {
     throw new Error('PLY source must start with "ply"');

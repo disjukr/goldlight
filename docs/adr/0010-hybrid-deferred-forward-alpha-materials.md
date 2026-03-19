@@ -75,8 +75,8 @@ blended transparency still requires forward composition.
 - dithered alpha has a principled home as a deferred-compatible masked coverage mode
 - prepass, shadow, G-buffer, and lighting-related passes must share one alpha-evaluation contract
   for masked materials so coverage and depth remain consistent
-- loader and authoring layers must preserve semantic alpha intent instead of reducing everything to
-  texture presence
+- importer and authoring layers must preserve semantic alpha intent instead of reducing everything
+  to texture presence
 - custom WGSL materials need a compatible alpha-policy surface if they want to participate cleanly
   in renderer partitioning
 - renderer capability docs and validation need to distinguish masked coverage support from blended

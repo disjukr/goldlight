@@ -10,9 +10,9 @@
 ## Naming
 
 - Treat acronyms as ordinary words in identifiers.
-- Prefer `createSceneIr`, `requestGpuContext`, `loadGltfFromJson`, and `loadObjFromText`.
+- Prefer `createSceneIr`, `requestGpuContext`, `importGltfFromJson`, and `importObjFromText`.
 - Avoid all-caps acronym segments in exported TypeScript names such as `createSceneIR`,
-  `requestGPUContext`, or `loadGLTFFromJson`.
+  `requestGPUContext`, or `importGLTFFromJson`.
 - Apply the same rule to type names unless an external platform type forces a different spelling.
 
 ## Allowed Mutation

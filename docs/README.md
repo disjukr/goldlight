@@ -18,7 +18,7 @@ Use this page as the main navigation hub.
 - Understand current rendering scope and gaps: [`specs/rendering.md`](./specs/rendering.md)
 - Understand forward vs. minimal deferred capability boundaries:
   [`specs/renderer-capabilities.md`](./specs/renderer-capabilities.md)
-- Understand loader and interchange direction: [`specs/interop-gltf.md`](./specs/interop-gltf.md)
+- Understand importer and interchange direction: [`specs/interop-gltf.md`](./specs/interop-gltf.md)
 - Understand JSX authoring boundaries: [`specs/react-authoring.md`](./specs/react-authoring.md)
 - Understand the desktop shell host/runtime split and host-driven RAF boundary:
   [`specs/desktop-shell.md`](./specs/desktop-shell.md)

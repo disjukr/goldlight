@@ -15,7 +15,7 @@ import {
   createVec3,
   identityTransform,
 } from '@rieul3d/ir';
-import { encodePngRgba } from '@rieul3d/exporters';
+import { exportPngRgba } from '@rieul3d/exporters';
 import { renderForwardSnapshot } from '@rieul3d/renderer';
 
 const defaultWidth = 512;
@@ -132,7 +132,7 @@ const main = async () => {
 
   const binding = createOffscreenBinding(context);
   const snapshot = await renderForwardSnapshot(context, binding, residency, evaluatedScene);
-  const pngBytes = encodePngRgba(snapshot);
+  const pngBytes = exportPngRgba(snapshot);
 
   await Deno.mkdir(dirname(outputPath), { recursive: true });
   await Deno.writeFile(outputPath, pngBytes);

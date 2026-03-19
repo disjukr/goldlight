@@ -2,12 +2,12 @@ import { assertEquals } from 'jsr:@std/assert@^1.0.14';
 import { join, resolve as resolvePath } from '@std/path';
 import {
   fetchGltfExternalResources,
+  importGltfFromGlb,
+  importGltfFromJson,
+  importObjFromText,
+  importPlyFromText,
+  importStlFromText,
   listExternalGltfResourceUris,
-  loadGltfFromGlb,
-  loadGltfFromJson,
-  loadObjFromText,
-  loadPlyFromText,
-  loadStlFromText,
   readDenoGltfExternalResources,
 } from '@rieul3d/importers';
 
@@ -60,8 +60,8 @@ const createGlb = (json: unknown, binaryChunk: Uint8Array): Uint8Array => {
   return glb;
 };
 
-Deno.test('loadObjFromText builds a mesh scene', () => {
-  const scene = loadObjFromText(
+Deno.test('importObjFromText builds a mesh scene', () => {
+  const scene = importObjFromText(
     ['v 0 0 0', 'v 1 0 0', 'v 0 1 0', 'f 1 2 3'].join('\n'),
     'obj',
   );
@@ -71,8 +71,8 @@ Deno.test('loadObjFromText builds a mesh scene', () => {
   assertEquals(scene.meshes[0].indices, [0, 1, 2]);
 });
 
-Deno.test('loadStlFromText builds an indexed mesh scene', () => {
-  const scene = loadStlFromText(
+Deno.test('importStlFromText builds an indexed mesh scene', () => {
+  const scene = importStlFromText(
     [
       'solid triangle',
       'facet normal 0 0 1',
@@ -90,8 +90,8 @@ Deno.test('loadStlFromText builds an indexed mesh scene', () => {
   assertEquals(scene.meshes[0].indices, [0, 1, 2]);
 });
 
-Deno.test('loadPlyFromText accepts obj_info headers and triangulates faces', () => {
-  const scene = loadPlyFromText(
+Deno.test('importPlyFromText accepts obj_info headers and triangulates faces', () => {
+  const scene = importPlyFromText(
     [
       'ply',
       'format ascii 1.0',
@@ -130,8 +130,8 @@ Deno.test('loadPlyFromText accepts obj_info headers and triangulates faces', () 
   assertEquals(scene.meshes[0].indices, [0, 1, 2, 0, 2, 3]);
 });
 
-Deno.test('loadPlyFromText reads face indices from the declared list property', () => {
-  const scene = loadPlyFromText(
+Deno.test('importPlyFromText reads face indices from the declared list property', () => {
+  const scene = importPlyFromText(
     [
       'ply',
       'format ascii 1.0',
@@ -154,8 +154,8 @@ Deno.test('loadPlyFromText reads face indices from the declared list property', 
   assertEquals(scene.meshes[0].indices, [0, 1, 2]);
 });
 
-Deno.test('loadPlyFromText builds an indexed mesh scene from ascii faces', () => {
-  const scene = loadPlyFromText(
+Deno.test('importPlyFromText builds an indexed mesh scene from ascii faces', () => {
+  const scene = importPlyFromText(
     [
       'ply',
       'format ascii 1.0',
@@ -195,7 +195,7 @@ Deno.test('loadPlyFromText builds an indexed mesh scene from ascii faces', () =>
 });
 
 Deno.test({
-  name: 'loadPlyFromText ingests the vendored Stanford Bunny asset',
+  name: 'importPlyFromText ingests the vendored Stanford Bunny asset',
   async fn() {
     const readPermission = await Deno.permissions.query({
       name: 'read',
@@ -206,7 +206,7 @@ Deno.test({
     }
 
     const bunnySource = await Deno.readTextFile('examples/assets/stanford-bunny/bun_zipper.ply');
-    const scene = loadPlyFromText(bunnySource, 'bunny');
+    const scene = importPlyFromText(bunnySource, 'bunny');
     const bunnyMesh = scene.meshes[0];
 
     assertEquals(scene.meshes.length, 1);
@@ -216,8 +216,8 @@ Deno.test({
   },
 });
 
-Deno.test('loadGltfFromJson normalizes nodes, meshes, and animations', () => {
-  const scene = loadGltfFromJson({
+Deno.test('importGltfFromJson normalizes nodes, meshes, and animations', () => {
+  const scene = importGltfFromJson({
     meshes: [{
       primitives: [{
         attributes: {
@@ -244,7 +244,7 @@ Deno.test('loadGltfFromJson normalizes nodes, meshes, and animations', () => {
   assertEquals(scene.animationClips[0].durationMs, 1000);
 });
 
-Deno.test('loadGltfFromJson ingests buffer views, accessors, images, and materials', () => {
+Deno.test('importGltfFromJson ingests buffer views, accessors, images, and materials', () => {
   const positions = new Float32Array([
     0,
     0,
@@ -276,7 +276,7 @@ Deno.test('loadGltfFromJson ingests buffer views, accessors, images, and materia
     new Uint8Array(animationValues.buffer),
   );
 
-  const scene = loadGltfFromJson({
+  const scene = importGltfFromJson({
     buffers: [{
       uri: encodeDataUri(combinedBuffer),
       byteLength: combinedBuffer.byteLength,
@@ -380,7 +380,7 @@ Deno.test('loadGltfFromJson ingests buffer views, accessors, images, and materia
   });
 });
 
-Deno.test('loadGltfFromJson resolves external buffer and image URIs from provided resources', () => {
+Deno.test('importGltfFromJson resolves external buffer and image URIs from provided resources', () => {
   const positions = new Float32Array([
     0,
     0,
@@ -393,7 +393,7 @@ Deno.test('loadGltfFromJson resolves external buffer and image URIs from provide
     0,
   ]);
   const externalBuffer = new Uint8Array(positions.buffer);
-  const scene = loadGltfFromJson(
+  const scene = importGltfFromJson(
     {
       buffers: [{
         uri: 'geometry.bin',
@@ -548,7 +548,7 @@ Deno.test('readDenoGltfExternalResources reads relative files and remote URLs', 
   });
 });
 
-Deno.test('loadGltfFromGlb ingests binary buffers and bufferView-backed images', () => {
+Deno.test('importGltfFromGlb ingests binary buffers and bufferView-backed images', () => {
   const positions = new Float32Array([
     0,
     0,
@@ -605,7 +605,7 @@ Deno.test('loadGltfFromGlb ingests binary buffers and bufferView-backed images',
     scene: 0,
   }, glbBinary);
 
-  const scene = loadGltfFromGlb(glb, 'glb');
+  const scene = importGltfFromGlb(glb, 'glb');
 
   assertEquals(scene.meshes[0].indices, [0, 1, 2]);
   assertEquals(scene.meshes[0].attributes[0].values, [0, 0, 0, 1, 0, 0, 0, 1, 0]);

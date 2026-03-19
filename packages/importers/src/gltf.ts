@@ -131,7 +131,7 @@ type GltfJson = Readonly<{
 
 export type GltfExternalResourceMap = Readonly<Record<string, Uint8Array>>;
 
-export type GltfLoadOptions = Readonly<{
+export type GltfImportOptions = Readonly<{
   baseUri?: string;
   resources?: GltfExternalResourceMap;
 }>;
@@ -276,7 +276,7 @@ const resolveUri = (uri: string, baseUri?: string): string => {
 
 const resolveResource = (
   uri: string,
-  options: GltfLoadOptions,
+  options: GltfImportOptions,
 ): ResolvedResource => {
   const resolvedUri = resolveUri(uri, options.baseUri);
   const bytes = options.resources?.[resolvedUri] ?? options.resources?.[uri];
@@ -423,7 +423,7 @@ const getBufferBytes = (
   buffer: GltfBuffer,
   sceneId: string,
   bufferIndex: number,
-  options: GltfLoadOptions,
+  options: GltfImportOptions,
   binaryChunk?: Uint8Array,
 ): Uint8Array => {
   if (!buffer.uri) {
@@ -454,7 +454,7 @@ const getImageResource = (
   image: GltfImage,
   buffers: readonly Uint8Array[],
   bufferViews: readonly GltfBufferView[],
-  options: GltfLoadOptions,
+  options: GltfImportOptions,
   sceneId: string,
   imageIndex: number,
 ): ResolvedResource => {
@@ -605,7 +605,7 @@ const createTextureRefs = (
   sceneId: string,
   json: GltfJson,
   buffers: readonly Uint8Array[],
-  options: GltfLoadOptions,
+  options: GltfImportOptions,
 ): { assets: AssetRef[]; textures: TextureRef[] } => {
   const assets: AssetRef[] = [];
   const textures: TextureRef[] = [];
@@ -755,10 +755,10 @@ const createAnimationClips = (
     };
   });
 
-const loadGltfScene = (
+const importGltfScene = (
   json: GltfJson,
   sceneId: string,
-  options: GltfLoadOptions,
+  options: GltfImportOptions,
   binaryChunk?: Uint8Array,
 ): SceneIr => {
   const nodes = json.nodes ?? [];
@@ -840,11 +840,11 @@ const loadGltfScene = (
   return scene;
 };
 
-export const loadGltfFromJson = (
+export const importGltfFromJson = (
   json: GltfJson,
   sceneId = 'gltf-scene',
-  options: GltfLoadOptions = {},
-): SceneIr => loadGltfScene(json, sceneId, options);
+  options: GltfImportOptions = {},
+): SceneIr => importGltfScene(json, sceneId, options);
 
 export const listExternalGltfResourceUris = (
   json: GltfJson,
@@ -893,11 +893,11 @@ export const readDenoGltfExternalResources = async (
   return Object.fromEntries(resources);
 };
 
-export const loadGltfFromGlb = (
+export const importGltfFromGlb = (
   glbBytes: Uint8Array,
   sceneId = 'gltf-scene',
-  options: GltfLoadOptions = {},
+  options: GltfImportOptions = {},
 ): SceneIr => {
   const { json, binaryChunk } = parseGlb(glbBytes);
-  return loadGltfScene(json, sceneId, options, binaryChunk);
+  return importGltfScene(json, sceneId, options, binaryChunk);
 };

@@ -19,20 +19,21 @@ Blender interoperability is `glTF-first`. The primary interchange path is:
 
 - The current glTF path ingests JSON scenes, GLB containers, data-URI buffers, bufferViews,
   accessors, images, textures, materials, meshes, nodes, and animations into Scene IR.
-- Runtime support behind the loader includes mesh, texture, material, forward rendering, headless
+- Runtime support behind the importer includes mesh, texture, material, forward rendering, headless
   snapshotting, and first volume residency paths.
 - External buffer and image URIs are supported when callers provide the referenced bytes through
-  `loadGltfFromJson(..., { baseUri, resources })`.
+  `importGltfFromJson(..., { baseUri, resources })`.
 - `fetchGltfExternalResources` and `readDenoGltfExternalResources` provide supported helper paths
-  for collecting those bytes in browser and Deno workflows without changing loader purity.
+  for collecting those bytes in browser and Deno workflows without changing importer purity.
 
-## Loader Notes
+## Importer Notes
 
-- `loadGltfFromJson` remains synchronous. External binary payloads must be resolved by the caller
+- `importGltfFromJson` remains synchronous. External binary payloads must be resolved by the caller
   ahead of time and passed through `resources`.
 - `listExternalGltfResourceUris` exposes the normalized external URI set when callers want to
   inspect or cache resource fetch plans themselves.
-- `loadGltfFromGlb` parses glTF 2.0 GLB containers and uses the embedded BIN chunk for buffer data.
+- `importGltfFromGlb` parses glTF 2.0 GLB containers and uses the embedded BIN chunk for buffer
+  data.
 - External image URIs are normalized against `baseUri` and preserved on emitted `SceneIr.assets`
   entries so runtime-side asset loading can still occur later.
 
@@ -45,7 +46,7 @@ const resources = await fetchGltfExternalResources(json, {
   baseUri: 'https://example.test/models/scene.gltf',
 });
 
-const scene = loadGltfFromJson(json, 'scene', {
+const scene = importGltfFromJson(json, 'scene', {
   baseUri: 'https://example.test/models/scene.gltf',
   resources,
 });
@@ -58,7 +59,7 @@ const resources = await readDenoGltfExternalResources(json, {
   baseUri: '/workspace/assets/scene.gltf',
 });
 
-const scene = loadGltfFromJson(json, 'scene', {
+const scene = importGltfFromJson(json, 'scene', {
   baseUri: '/workspace/assets/scene.gltf',
   resources,
 });

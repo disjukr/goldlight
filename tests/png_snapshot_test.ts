@@ -1,10 +1,10 @@
 import { assertEquals, assertThrows } from 'jsr:@std/assert@^1.0.14';
-import { encodePngRgba } from '@rieul3d/exporters';
+import { exportPngRgba } from '@rieul3d/exporters';
 
 const decodeAscii = (bytes: Uint8Array): string => new TextDecoder().decode(bytes);
 
-Deno.test('encodePngRgba writes a deterministic PNG with signature and core chunks', () => {
-  const png = encodePngRgba({
+Deno.test('exportPngRgba writes a deterministic PNG with signature and core chunks', () => {
+  const png = exportPngRgba({
     width: 2,
     height: 1,
     bytes: new Uint8Array([
@@ -25,9 +25,9 @@ Deno.test('encodePngRgba writes a deterministic PNG with signature and core chun
   assertEquals(decodeAscii(png.slice(png.length - 8, png.length - 4)), 'IEND');
 });
 
-Deno.test('encodePngRgba rejects invalid byte lengths', () => {
+Deno.test('exportPngRgba rejects invalid byte lengths', () => {
   assertThrows(() =>
-    encodePngRgba({
+    exportPngRgba({
       width: 2,
       height: 2,
       bytes: new Uint8Array([0, 0, 0, 0]),

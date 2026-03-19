@@ -1,7 +1,7 @@
 import { appendMesh, appendNode, createNode, createSceneIr } from '@rieul3d/ir';
 import type { MeshAttribute, SceneIr } from '@rieul3d/ir';
 
-export const loadObjFromText = (source: string, sceneId = 'obj-scene'): SceneIr => {
+export const importObjFromText = (source: string, sceneId = 'obj-scene'): SceneIr => {
   const positions: number[] = [];
   const faceIndices: number[] = [];
 

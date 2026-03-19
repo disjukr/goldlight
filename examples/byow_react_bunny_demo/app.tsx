@@ -1,6 +1,7 @@
 /** @jsx React.createElement */
 /** @jsxFrag React.Fragment */
 /// <reference lib="deno.unstable" />
+/// <reference lib="dom" />
 
 import React from 'npm:react@19.2.0';
 import {
@@ -16,7 +17,7 @@ import {
   resizeSurfaceBindingTarget,
 } from '@rieul3d/gpu';
 import type { MeshPrimitive } from '@rieul3d/ir';
-import { loadPlyFromText } from '@rieul3d/importers';
+import { importPlyFromText } from '@rieul3d/importers';
 import {
   createReactSceneRoot,
   createSceneRootForwardRenderer,
@@ -28,7 +29,7 @@ import { createMaterialRegistry } from '@rieul3d/renderer';
 const bunnySource = await Deno.readTextFile(
   new URL('../assets/stanford-bunny/bun_zipper.ply', import.meta.url),
 );
-const bunnyScene = loadPlyFromText(bunnySource, 'stanford-bunny');
+const bunnyScene = importPlyFromText(bunnySource, 'stanford-bunny');
 const bunnyMesh = bunnyScene.meshes[0];
 
 if (!bunnyMesh) {

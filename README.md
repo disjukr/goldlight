@@ -32,7 +32,7 @@ The design source of truth lives in [`docs/specs`](./docs/specs) and [`docs/adr`
 ## Status
 
 This is an initial scaffold that establishes package boundaries, Scene IR, residency separation,
-loader entry points, and frame-planning contracts. It is intentionally functional-first and avoids
+importer entry points, and frame-planning contracts. It is intentionally functional-first and avoids
 object-oriented API design.
 
 Implemented today:
@@ -68,7 +68,7 @@ Implemented today:
 - depth-tested forward mesh rendering with per-target depth attachments and back-face culling
 - glTF JSON, GLB, data-URI buffers, and caller-provided external glTF resource ingestion
 - ASCII PLY ingestion for in-repo meshes such as the Stanford Bunny reconstruction asset
-- browser/Deno helpers for resolving external glTF buffers and images into the existing loader
+- browser/Deno helpers for resolving external glTF buffers and images into the existing importer
   contract
 - direct surface/offscreen target literals at the call site instead of a dedicated target-helper
   package

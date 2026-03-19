@@ -1,7 +1,7 @@
 import { appendMesh, appendNode, createNode, createSceneIr } from '@rieul3d/ir';
 import type { MeshAttribute, SceneIr } from '@rieul3d/ir';
 
-export const loadStlFromText = (source: string, sceneId = 'stl-scene'): SceneIr => {
+export const importStlFromText = (source: string, sceneId = 'stl-scene'): SceneIr => {
   const positions: number[] = [];
 
   for (const line of source.split(/\r?\n/)) {

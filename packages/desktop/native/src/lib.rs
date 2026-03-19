@@ -95,6 +95,19 @@ impl DesktopHostApplication {
 
         self.events.push_back(event);
     }
+
+    fn push_frame_event(&mut self, window_id: u64) {
+        let elapsed = self.start_time.elapsed();
+        self.push_event(DesktopHostEvent {
+            kind: EVENT_FRAME,
+            reserved: 0,
+            window_id,
+            arg0: elapsed.as_micros() as i64,
+            arg1: 0,
+            arg2: 0,
+            arg3: 0,
+        });
+    }
 }
 
 struct HostRuntime {
@@ -187,16 +200,7 @@ impl ApplicationHandler for DesktopHostApplication {
                 event_loop.exit();
             }
             WindowEvent::RedrawRequested => {
-                let elapsed = self.start_time.elapsed();
-                self.push_event(DesktopHostEvent {
-                    kind: EVENT_FRAME,
-                    reserved: 0,
-                    window_id: state.id,
-                    arg0: elapsed.as_micros() as i64,
-                    arg1: 0,
-                    arg2: 0,
-                    arg3: 0,
-                });
+                self.push_frame_event(state.id);
             }
             WindowEvent::Resized(size) => {
                 state.width = size.width;
@@ -213,6 +217,11 @@ impl ApplicationHandler for DesktopHostApplication {
                     arg2: 0,
                     arg3: 0,
                 });
+                self.push_frame_event(state.id);
+            }
+            WindowEvent::Moved(_) => {
+                self.window_state = Some(state);
+                self.push_frame_event(state.id);
             }
             WindowEvent::Focused(focused) => {
                 state.focused = focused;
@@ -386,6 +395,7 @@ pub extern "C" fn desktop_host_request_redraw(window_id: u64) -> u8 {
             return 0;
         }
 
+        runtime.app.push_frame_event(window_id);
         if let Some(window) = runtime.app.window.as_ref() {
             window.request_redraw();
             HOST_RESULT_OK

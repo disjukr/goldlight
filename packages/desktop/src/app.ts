@@ -11,6 +11,10 @@ import type {
   DesktopWindowState,
   DesktopWindowSurfaceInfo,
 } from './types.ts';
+import type {
+  DesktopWindowManagerInboundMessage,
+  DesktopWindowManagerOutboundMessage,
+} from './window_manager_protocol.ts';
 
 export type DesktopWindow = Readonly<{
   id: bigint;
@@ -39,12 +43,6 @@ export type DesktopApp = Readonly<{
 }>;
 
 export type DesktopModuleCleanup = () => void | Promise<void>;
-
-type DesktopModuleExports = Readonly<{
-  default?: (
-    context: DesktopModuleContext,
-  ) => void | DesktopModuleCleanup | Promise<void | DesktopModuleCleanup>;
-}>;
 
 type CoalescedWindowEvents = Readonly<{
   resized?: DesktopWindowEvent;
@@ -219,27 +217,87 @@ export const createDesktopApp = async (
 export const runDesktopModule = async (
   options: DesktopModuleOptions,
 ): Promise<void> => {
-  const app = await createDesktopApp(options);
-  const restoreGlobals = installDesktopWindowGlobals(app.window.runtime);
-  let cleanup: DesktopModuleCleanup | undefined;
+  const managerWorker = new Worker(new URL('./window_manager_worker.ts', import.meta.url).href, {
+    type: 'module',
+  });
 
-  try {
-    const module = await import(
-      options.module instanceof URL ? options.module.href : options.module
-    ) as DesktopModuleExports;
-    if (typeof module.default === 'function') {
-      const result = await module.default({
-        host: app.host,
-        window: app.window,
-      });
-      if (typeof result === 'function') {
-        cleanup = result;
+  let exited = false;
+  let ready = false;
+  let startupError: Error | undefined;
+  let readyResolve: (() => void) | undefined;
+  let readyReject: ((reason?: unknown) => void) | undefined;
+  const readyPromise = new Promise<void>((resolve, reject) => {
+    readyResolve = resolve;
+    readyReject = reject;
+  });
+  let exitResolve: (() => void) | undefined;
+  const exitPromise = new Promise<void>((resolve) => {
+    exitResolve = resolve;
+  });
+
+  managerWorker.onmessage = (event: MessageEvent<DesktopWindowManagerOutboundMessage>) => {
+    switch (event.data.kind) {
+      case 'ready':
+        ready = true;
+        readyResolve?.();
+        return;
+      case 'exited':
+        exited = true;
+        if (!ready) {
+          readyReject?.(
+            startupError ??
+              new Error(
+                `Window manager worker exited before initialization completed${
+                  event.data.reason ? ` (${event.data.reason})` : ''
+                }`,
+              ),
+          );
+        }
+        exitResolve?.();
+        return;
+      case 'error': {
+        const error = new Error(event.data.message);
+        if (event.data.stack) {
+          error.stack = event.data.stack;
+        }
+        startupError = error;
+        readyReject?.(error);
+        return;
       }
     }
-    await app.run();
+  };
+  managerWorker.onerror = (event: ErrorEvent) => {
+    const error = event.error instanceof Error
+      ? event.error
+      : new Error(event.message || 'Window manager worker failed');
+    startupError = error;
+    readyReject?.(error);
+  };
+  managerWorker.onmessageerror = () => {
+    startupError = new Error('Window manager worker message deserialization failed');
+    readyReject?.(startupError);
+  };
+
+  const postToManager = (message: DesktopWindowManagerInboundMessage): void => {
+    managerWorker.postMessage(message);
+  };
+
+  try {
+    postToManager({
+      kind: 'init',
+      options,
+      module: options.module instanceof URL ? options.module.href : options.module,
+    });
+    await readyPromise;
+    await exitPromise;
   } finally {
-    await cleanup?.();
-    restoreGlobals();
-    app.close();
+    if (!exited) {
+      postToManager({ kind: 'shutdown' });
+      const shutdownDeadline = Date.now() + 250;
+      while (!exited && Date.now() < shutdownDeadline) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+    }
+    managerWorker.terminate();
   }
 };

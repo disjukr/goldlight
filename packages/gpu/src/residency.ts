@@ -251,6 +251,27 @@ const encodeMaterialAlphaMode = (material: Material): number => {
   }
 };
 
+const resolveMaterialAlphaPolicy = (
+  material: Material,
+): Readonly<{
+  alphaCutoff: number;
+  alphaMode: number;
+  depthWrite: number;
+  doubleSided: number;
+}> => {
+  const alphaMode = material.alphaMode === 'mask' || material.alphaMode === 'blend'
+    ? material.alphaMode
+    : 'opaque';
+  const depthWrite = material.depthWrite ?? (alphaMode !== 'blend');
+
+  return {
+    alphaCutoff: material.alphaCutoff ?? 0.5,
+    alphaMode: encodeMaterialAlphaMode({ ...material, alphaMode }),
+    depthWrite: depthWrite ? 1 : 0,
+    doubleSided: material.doubleSided ? 1 : 0,
+  };
+};
+
 const createAttributeArray = (attribute: MeshAttribute): Float32Array =>
   Float32Array.from(attribute.values);
 
@@ -395,12 +416,7 @@ export const createMaterialUploadPlan = (material: Material): MaterialUploadPlan
 };
 
 export const createMaterialAlphaPolicyData = (material: Material): Float32Array =>
-  new Float32Array([
-    material.alphaCutoff ?? 0.5,
-    encodeMaterialAlphaMode(material),
-    material.depthWrite === false ? 0 : 1,
-    material.doubleSided ? 1 : 0,
-  ]);
+  new Float32Array(Object.values(resolveMaterialAlphaPolicy(material)));
 
 export const uploadMaterialResidency = (
   context: GpuUploadContext,

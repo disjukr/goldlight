@@ -113,6 +113,18 @@ Deno.test('createMaterialAlphaPolicyData encodes explicit renderer policy fields
   assertEquals([...data], [0.25, 1, 0, 1]);
 });
 
+Deno.test('createMaterialAlphaPolicyData uses renderer depth-write defaults for blend materials', () => {
+  const data = createMaterialAlphaPolicyData({
+    id: 'material-blend',
+    kind: 'custom',
+    alphaMode: 'blend',
+    textures: [],
+    parameters: {},
+  });
+
+  assertEquals([...data], [0.5, 2, 0, 0]);
+});
+
 Deno.test('ensureMaterialResidency reuses cached material buffers', () => {
   const context = createMockUploadContext();
   const runtimeResidency = createRuntimeResidency();

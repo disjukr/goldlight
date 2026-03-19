@@ -10,7 +10,7 @@ import {
 } from '@rieul3d/react/reconciler';
 
 const NullChild = () => null;
-const EmptyFragmentChild = () => <></>;
+const EmptyChildren = () => [];
 
 Deno.test('createReactSceneRoot accepts live JSX alias intrinsics', () => {
   const root = createReactSceneRoot(
@@ -83,7 +83,7 @@ Deno.test('live alias intrinsics keep bound nodes for composite children without
         color={{ x: 1, y: 1, z: 1 }}
         intensity={2}
       >
-        <EmptyFragmentChild />
+        <EmptyChildren />
       </DirectionalLight>
     </scene>,
   );

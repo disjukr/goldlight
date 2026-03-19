@@ -77,6 +77,15 @@ export type SceneRootCommitUpdatePayload = Readonly<{
   animationClips: SceneRootCollectionUpdatePayload<SceneRootCollectionValueByName['animationClips']>;
 }>;
 
+export type SceneRootResidencyInvalidationPlan = Readonly<{
+  reset: boolean;
+  meshIds: readonly string[];
+  materialIds: readonly string[];
+  textureIds: readonly string[];
+  volumeIds: readonly string[];
+  reasons: readonly string[];
+}>;
+
 export type SceneRootCommit = Readonly<
   & SceneRootCommitBase
   & {
@@ -548,6 +557,115 @@ export const createSceneRootCommit = (
         updatePlan.animationClips,
       ),
     },
+  };
+};
+
+const appendUniqueIds = (target: Set<string>, ids: readonly string[]): void => {
+  for (const id of ids) {
+    target.add(id);
+  }
+};
+
+const collectAssetLinkedIds = (
+  commit: SceneRootCommit,
+  assetIds: readonly string[],
+): Readonly<{
+  textureIds: readonly string[];
+  volumeIds: readonly string[];
+}> => {
+  const changedAssetIds = new Set(assetIds);
+  const scenes = [commit.previousScene, commit.scene].filter((candidate): candidate is SceneIr =>
+    candidate !== undefined
+  );
+  const textureIds = new Set<string>();
+  const volumeIds = new Set<string>();
+
+  for (const candidateScene of scenes) {
+    for (const texture of candidateScene.textures) {
+      if (texture.assetId && changedAssetIds.has(texture.assetId)) {
+        textureIds.add(texture.id);
+      }
+    }
+
+    for (const volume of candidateScene.volumePrimitives) {
+      if (volume.assetId && changedAssetIds.has(volume.assetId)) {
+        volumeIds.add(volume.id);
+      }
+    }
+  }
+
+  return {
+    textureIds: [...textureIds],
+    volumeIds: [...volumeIds],
+  };
+};
+
+export const planSceneRootResidencyInvalidation = (
+  commit: SceneRootCommit,
+): SceneRootResidencyInvalidationPlan => {
+  const { updatePlan } = commit;
+  const reasons: string[] = [];
+
+  if (updatePlan.sceneIdChanged) reasons.push('sceneIdChanged');
+  if (updatePlan.rootNodeIdsChanged) reasons.push('rootNodeIdsChanged');
+  if (updatePlan.nodes.addedIds.length > 0) reasons.push('nodeAdded');
+  if (updatePlan.nodes.removedIds.length > 0) reasons.push('nodeRemoved');
+  if (updatePlan.nodes.parentingIds.length > 0) reasons.push('nodeParentingChanged');
+  if (updatePlan.nodes.resourceBindingIds.length > 0) reasons.push('nodeResourceBindingChanged');
+  if (updatePlan.nodes.metadataIds.length > 0) reasons.push('nodeMetadataChanged');
+  if (updatePlan.nodes.otherUpdatedIds.length > 0) reasons.push('nodeOtherChanged');
+  if (updatePlan.sdfPrimitives.addedIds.length > 0) reasons.push('sdfAdded');
+  if (updatePlan.sdfPrimitives.removedIds.length > 0) reasons.push('sdfRemoved');
+  if (updatePlan.sdfPrimitives.updatedIds.length > 0) reasons.push('sdfUpdated');
+
+  const reset = reasons.length > 0;
+  if (reset) {
+    return {
+      reset,
+      meshIds: [],
+      materialIds: [],
+      textureIds: [],
+      volumeIds: [],
+      reasons,
+    };
+  }
+
+  const meshIds = new Set<string>();
+  const materialIds = new Set<string>();
+  const textureIds = new Set<string>();
+  const volumeIds = new Set<string>();
+
+  appendUniqueIds(meshIds, updatePlan.meshes.addedIds);
+  appendUniqueIds(meshIds, updatePlan.meshes.removedIds);
+  appendUniqueIds(meshIds, updatePlan.meshes.updatedIds);
+
+  appendUniqueIds(materialIds, updatePlan.materials.addedIds);
+  appendUniqueIds(materialIds, updatePlan.materials.removedIds);
+  appendUniqueIds(materialIds, updatePlan.materials.updatedIds);
+
+  appendUniqueIds(textureIds, updatePlan.textures.addedIds);
+  appendUniqueIds(textureIds, updatePlan.textures.removedIds);
+  appendUniqueIds(textureIds, updatePlan.textures.updatedIds);
+
+  appendUniqueIds(volumeIds, updatePlan.volumePrimitives.addedIds);
+  appendUniqueIds(volumeIds, updatePlan.volumePrimitives.removedIds);
+  appendUniqueIds(volumeIds, updatePlan.volumePrimitives.updatedIds);
+
+  const assetLinkedIds = collectAssetLinkedIds(commit, [
+    ...updatePlan.assets.addedIds,
+    ...updatePlan.assets.removedIds,
+    ...updatePlan.assets.updatedIds,
+  ]);
+  appendUniqueIds(textureIds, assetLinkedIds.textureIds);
+  appendUniqueIds(volumeIds, assetLinkedIds.volumeIds);
+
+  return {
+    reset: false,
+    meshIds: [...meshIds],
+    materialIds: [...materialIds],
+    textureIds: [...textureIds],
+    volumeIds: [...volumeIds],
+    reasons: [],
   };
 };
 

@@ -14,6 +14,7 @@ import {
   OrthographicCamera,
   PerspectiveCamera,
   planSceneRootCommitUpdates,
+  planSceneRootResidencyInvalidation,
   summarizeSceneRootCommit,
   type SceneRootCommit,
 } from '@rieul3d/react';
@@ -662,6 +663,117 @@ Deno.test('createSceneRoot publishes a data-only update payload alongside snapsh
   assertEquals(latestCommit?.updatePayload.nodes.transform.map((node) => node.id), ['animated-node']);
   assertEquals(latestCommit?.updatePayload.meshes.updated, []);
   assertEquals(latestCommit?.updatePayload.meshes.unchangedIds, ['triangle']);
+});
+
+Deno.test('planSceneRootResidencyInvalidation returns targeted ids for resource-only updates', () => {
+  const root = createSceneRoot();
+  let latestCommit: SceneRootCommit | undefined;
+
+  root.subscribe((commit) => {
+    latestCommit = commit;
+  });
+
+  root.render(
+    <scene id='residency-scene'>
+      <asset id='texture-asset' uri='./checker-a.png' mimeType='image/png' />
+      <texture
+        id='base-color'
+        assetId='texture-asset'
+        semantic='baseColor'
+        colorSpace='srgb'
+        sampler='linear-repeat'
+      />
+      <material
+        id='triangle-material'
+        kind='unlit'
+        textures={[]}
+        parameters={{ color: { x: 1, y: 1, z: 1, w: 1 } }}
+      />
+      <mesh
+        id='triangle'
+        materialId='triangle-material'
+        attributes={[{
+          semantic: 'POSITION',
+          itemSize: 3,
+          values: [0, 0.7, 0, -0.7, -0.7, 0, 0.7, -0.7, 0],
+        }]}
+      />
+      <group id='root'>
+        <node id='mesh-node' meshId='triangle' />
+      </group>
+    </scene>,
+  );
+
+  root.render(
+    <scene id='residency-scene'>
+      <asset id='texture-asset' uri='./checker-b.png' mimeType='image/png' />
+      <texture
+        id='base-color'
+        assetId='texture-asset'
+        semantic='baseColor'
+        colorSpace='srgb'
+        sampler='linear-repeat'
+      />
+      <material
+        id='triangle-material'
+        kind='unlit'
+        textures={[]}
+        parameters={{ color: { x: 0.2, y: 0.4, z: 0.6, w: 1 } }}
+      />
+      <mesh
+        id='triangle'
+        materialId='triangle-material'
+        attributes={[{
+          semantic: 'POSITION',
+          itemSize: 3,
+          values: [0, 0.7, 0, -0.7, -0.7, 0, 0.7, -0.7, 0],
+        }]}
+      />
+      <group id='root'>
+        <node id='mesh-node' meshId='triangle' />
+      </group>
+    </scene>,
+  );
+
+  const invalidation = latestCommit ? planSceneRootResidencyInvalidation(latestCommit) : undefined;
+  assertEquals(invalidation, {
+    reset: false,
+    meshIds: [],
+    materialIds: ['triangle-material'],
+    textureIds: ['base-color'],
+    volumeIds: [],
+    reasons: [],
+  });
+});
+
+Deno.test('planSceneRootResidencyInvalidation requests full reset for topology changes', () => {
+  const root = createSceneRoot();
+  let latestCommit: SceneRootCommit | undefined;
+
+  root.subscribe((commit) => {
+    latestCommit = commit;
+  });
+
+  root.render(
+    <scene id='residency-scene'>
+      <group id='root'>
+        <node id='mesh-node' />
+      </group>
+    </scene>,
+  );
+
+  root.render(
+    <scene id='residency-scene'>
+      <group id='root'>
+        <node id='mesh-node' />
+        <node id='new-node' />
+      </group>
+    </scene>,
+  );
+
+  const invalidation = latestCommit ? planSceneRootResidencyInvalidation(latestCommit) : undefined;
+  assertEquals(invalidation?.reset, true);
+  assertEquals(invalidation?.reasons.includes('nodeAdded'), true);
 });
 
 Deno.test('createReactSceneRoot rejects unsupported intrinsic tags', () => {

@@ -353,11 +353,19 @@ fn fsMain() -> @location(0) vec4<f32> {
     },
     'rgba8unorm',
   );
+  const changedSampleCount = ensurePostProcessPipeline(
+    mocks as unknown as GpuRenderExecutionContext,
+    runtimeResidency,
+    baseProgram,
+    'rgba8unorm',
+    4,
+  );
 
   assertStrictEquals(first, same);
   assertEquals(first === changedShader, false);
   assertEquals(changedShader === changedLayout, false);
-  assertEquals(mocks.pipelines.length, 3);
+  assertEquals(changedLayout === changedSampleCount, false);
+  assertEquals(mocks.pipelines.length, 4);
 });
 
 Deno.test('renderForwardFrame encodes indexed and non-indexed draws from mesh residency', () => {
@@ -542,7 +550,7 @@ Deno.test('renderDeferredFrame encodes depth, gbuffer, and lighting passes for m
 
   assertEquals(result.drawCount, 3);
   assertEquals(result.submittedCommandBufferCount, 1);
-  assertEquals(mocks.renderPassCount.current, 3);
+  assertEquals(mocks.renderPassCount.current, 4);
   assertEquals(mocks.pipelines.length, 3);
   assertEquals(
     mocks.passActions.filter((action) => action.type === 'draw').length,
@@ -642,7 +650,7 @@ Deno.test('renderForwardFrame runs a post-process pass after scene rendering whe
   );
 
   assertEquals(result.drawCount, 2);
-  assertEquals(mocks.renderPassCount.current, 2);
+  assertEquals(mocks.renderPassCount.current, 3);
   assertEquals(
     mocks.passActions.filter((action) => action.type === 'draw').length,
     2,
@@ -741,7 +749,7 @@ Deno.test('renderForwardFrame composites transparent meshes in a second blended 
   );
 
   assertEquals(result.drawCount, 2);
-  assertEquals(mocks.renderPassCount.current, 2);
+  assertEquals(mocks.renderPassCount.current, 3);
   const transparentPipeline = mocks.pipelines.find((pipeline) =>
     pipeline.descriptor.fragment?.targets?.[0]?.blend !== undefined
   );
@@ -805,7 +813,7 @@ Deno.test('renderUberFrame preserves the deferred-plus-forward composition behav
   );
 
   assertEquals(result.drawCount, 4);
-  assertEquals(mocks.renderPassCount.current, 4);
+  assertEquals(mocks.renderPassCount.current, 5);
 });
 
 Deno.test('renderPathtracedFrame encodes a fullscreen sdf pass', () => {
@@ -840,9 +848,182 @@ Deno.test('renderPathtracedFrame encodes a fullscreen sdf pass', () => {
   assertEquals(result.submittedCommandBufferCount, 1);
   assertEquals(mocks.renderPassCount.current, 3);
   assertEquals(mocks.passActions.filter((action) => action.type === 'draw').length, 3);
-  assertEquals(mocks.pipelines.some((pipeline) => pipeline.descriptor.label?.includes('pathtraced')), true);
+  assertEquals(
+    mocks.pipelines.some((pipeline) => pipeline.descriptor.label?.includes('pathtraced')),
+    true,
+  );
 });
 
+Deno.test('renderPathtracedFrame resets accumulation when the sdf scene changes', () => {
+  const mocks = createRenderMocks();
+  const runtimeResidency = createRuntimeResidency();
+  let scene = createSceneIr('scene');
+  scene = {
+    ...scene,
+    sdfPrimitives: [{
+      id: 'sdf-0',
+      op: 'sphere',
+      parameters: {
+        radius: { x: 0.5, y: 0, z: 0, w: 0 },
+      },
+    }],
+  };
+  scene = appendNode(scene, createNode('sdf-node', { sdfId: 'sdf-0' }));
+  const binding = createOffscreenBinding({
+    device: mocks.device as unknown as GPUDevice,
+    target: { kind: 'offscreen', width: 4, height: 4, format: 'rgba8unorm', sampleCount: 1 },
+  });
+
+  renderPathtracedFrame(
+    mocks as unknown as GpuRenderExecutionContext,
+    binding,
+    runtimeResidency,
+    evaluateScene(scene, { timeMs: 0 }),
+  );
+
+  let movedScene = createSceneIr('scene');
+  movedScene = {
+    ...movedScene,
+    sdfPrimitives: scene.sdfPrimitives,
+  };
+  movedScene = appendNode(
+    movedScene,
+    createNode('sdf-node', {
+      sdfId: 'sdf-0',
+      transform: {
+        translation: { x: 0.2, y: 0, z: 0 },
+        rotation: { x: 0, y: 0, z: 0, w: 1 },
+        scale: { x: 1, y: 1, z: 1 },
+      },
+    }),
+  );
+
+  renderPathtracedFrame(
+    mocks as unknown as GpuRenderExecutionContext,
+    binding,
+    runtimeResidency,
+    evaluateScene(movedScene, { timeMs: 0 }),
+  );
+
+  const accumulationWrites = mocks.writeBufferCalls
+    .filter((call) => call.bytes.byteLength === 16)
+    .map((call) => new Float32Array(call.bytes.buffer.slice(0))[0]);
+  assertEquals(accumulationWrites.slice(-2), [0, 0]);
+});
+
+Deno.test('renderPathtracedFrame marks orthographic camera uniforms for parallel rays', () => {
+  const mocks = createRenderMocks();
+  const runtimeResidency = createRuntimeResidency();
+  let scene = createSceneIr('scene');
+  scene = {
+    ...scene,
+    activeCameraId: 'camera-ortho',
+    cameras: [{
+      id: 'camera-ortho',
+      type: 'orthographic',
+      xmag: 1.5,
+      ymag: 1,
+      znear: 0.1,
+      zfar: 100,
+    }],
+    sdfPrimitives: [{
+      id: 'sdf-0',
+      op: 'sphere',
+      parameters: {
+        radius: { x: 0.5, y: 0, z: 0, w: 0 },
+      },
+    }],
+  };
+  scene = appendNode(scene, createNode('camera-node', { cameraId: 'camera-ortho' }));
+  scene = appendNode(scene, createNode('sdf-node', { sdfId: 'sdf-0' }));
+
+  renderPathtracedFrame(
+    mocks as unknown as GpuRenderExecutionContext,
+    createOffscreenBinding({
+      device: mocks.device as unknown as GPUDevice,
+      target: { kind: 'offscreen', width: 32, height: 32, format: 'rgba8unorm', sampleCount: 1 },
+    }),
+    runtimeResidency,
+    evaluateScene(scene, { timeMs: 0 }),
+  );
+
+  const sdfUniformWrite = mocks.writeBufferCalls.find((call) => call.bytes.byteLength === 1616);
+  const sdfUniformFloats = new Float32Array(
+    sdfUniformWrite?.bytes.buffer.slice(0) ?? new ArrayBuffer(0),
+  );
+  assertEquals(sdfUniformFloats[19], 1);
+});
+
+Deno.test('renderPathtracedFrame uses a sample-count-matched final blit on msaa targets', () => {
+  const mocks = createRenderMocks();
+  const runtimeResidency = createRuntimeResidency();
+  let scene = createSceneIr('scene');
+  scene = {
+    ...scene,
+    sdfPrimitives: [{
+      id: 'sdf-0',
+      op: 'sphere',
+      parameters: {
+        radius: { x: 0.5, y: 0, z: 0, w: 0 },
+      },
+    }],
+  };
+  scene = appendNode(scene, createNode('sdf-node', { sdfId: 'sdf-0' }));
+
+  renderPathtracedFrame(
+    mocks as unknown as GpuRenderExecutionContext,
+    createOffscreenBinding({
+      device: mocks.device as unknown as GPUDevice,
+      target: { kind: 'offscreen', width: 32, height: 32, format: 'rgba8unorm', sampleCount: 4 },
+    }),
+    runtimeResidency,
+    evaluateScene(scene, { timeMs: 0 }),
+  );
+
+  const postProcessPipeline = mocks.pipelines.find((pipeline) =>
+    pipeline.descriptor.label?.includes('built-in:post-process-blit')
+  );
+  assertEquals(postProcessPipeline?.descriptor.multisample?.count, 4);
+});
+
+Deno.test('renderPathtracedFrame clears the current sample when the scene has no sdf nodes', () => {
+  const mocks = createRenderMocks();
+  const runtimeResidency = createRuntimeResidency();
+  let scene = createSceneIr('scene');
+  scene = {
+    ...scene,
+    sdfPrimitives: [{
+      id: 'sdf-0',
+      op: 'sphere',
+      parameters: {
+        radius: { x: 0.5, y: 0, z: 0, w: 0 },
+      },
+    }],
+  };
+  scene = appendNode(scene, createNode('sdf-node', { sdfId: 'sdf-0' }));
+  const binding = createOffscreenBinding({
+    device: mocks.device as unknown as GPUDevice,
+    target: { kind: 'offscreen', width: 32, height: 32, format: 'rgba8unorm', sampleCount: 1 },
+  });
+
+  renderPathtracedFrame(
+    mocks as unknown as GpuRenderExecutionContext,
+    binding,
+    runtimeResidency,
+    evaluateScene(scene, { timeMs: 0 }),
+  );
+  const passCountBeforeEmptyScene = mocks.renderPassCount.current;
+
+  renderPathtracedFrame(
+    mocks as unknown as GpuRenderExecutionContext,
+    binding,
+    runtimeResidency,
+    evaluateScene(createSceneIr('empty-scene'), { timeMs: 0 }),
+  );
+
+  assertEquals(mocks.renderPassCount.current - passCountBeforeEmptyScene, 2);
+  assertEquals(mocks.passActions.filter((action) => action.type === 'draw').length, 5);
+});
 Deno.test('renderDeferredFrame runs a post-process pass after deferred lighting when requested', () => {
   const mocks = createRenderMocks();
   const runtimeResidency = createRuntimeResidency();
@@ -881,7 +1062,7 @@ Deno.test('renderDeferredFrame runs a post-process pass after deferred lighting 
   );
 
   assertEquals(result.drawCount, 4);
-  assertEquals(mocks.renderPassCount.current, 4);
+  assertEquals(mocks.renderPassCount.current, 5);
   assertEquals(
     mocks.passActions.filter((action) => action.type === 'draw').length,
     4,
@@ -1319,7 +1500,7 @@ Deno.test('renderForwardFrame keeps rotated volume nodes in local raymarch space
 
   assertEquals(result.drawCount, 1);
   assertEquals(result.submittedCommandBufferCount, 1);
-  assertEquals(mocks.renderPassCount.current, 2);
+  assertEquals(mocks.renderPassCount.current, 3);
   assertEquals(
     mocks.passActions.filter((action) => action.type === 'draw').length,
     1,

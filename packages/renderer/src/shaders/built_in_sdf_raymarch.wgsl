@@ -72,12 +72,19 @@ fn sceneSdf(point: vec3<f32>) -> vec4<f32> {
 
 @fragment
 fn fsMain(in: VsOut) -> @location(0) vec4<f32> {
-  let cameraOrigin = sdf.cameraOrigin;
-  let rayDirection = normalize(
+  let isOrthographic = sdf.cameraForward.w > 0.5;
+  let cameraOrigin = select(
+    sdf.cameraOrigin,
+    sdf.cameraOrigin + (in.uv.x * sdf.cameraRight.xyz) + (in.uv.y * sdf.cameraUp.xyz),
+    isOrthographic,
+  );
+  let rayDirection = normalize(select(
     sdf.cameraForward.xyz +
       (in.uv.x * sdf.cameraRight.xyz) +
       (in.uv.y * sdf.cameraUp.xyz),
-  );
+    sdf.cameraForward.xyz,
+    isOrthographic,
+  ));
   var travel = 0.0;
 
   for (var step: u32 = 0u; step < 48u; step = step + 1u) {

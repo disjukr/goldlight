@@ -4,6 +4,7 @@ import { createOffscreenBinding, createRuntimeResidency } from '@rieul3d/gpu';
 import { appendMaterial, appendMesh, appendNode, createNode, createSceneIr } from '@rieul3d/ir';
 import {
   createMaterialRegistry,
+  ensureMaterialPipeline,
   type GpuRenderExecutionContext,
   registerWgslMaterial,
   registerWgslMaterialTemplate,
@@ -18,10 +19,14 @@ type MockBindGroup = Readonly<{
 const createRenderMocks = () => {
   const bindGroups: MockBindGroup[] = [];
   const buffers: GPUBuffer[] = [];
+  const shaderModules: GPUShaderModule[] = [];
 
   const device = {
-    createShaderModule: ({ code }: GPUShaderModuleDescriptor) =>
-      ({ code }) as unknown as GPUShaderModule,
+    createShaderModule: ({ code }: GPUShaderModuleDescriptor) => {
+      const shaderModule = ({ code }) as unknown as GPUShaderModule;
+      shaderModules.push(shaderModule);
+      return shaderModule;
+    },
     createRenderPipeline: (_descriptor: GPURenderPipelineDescriptor) =>
       ({
         getBindGroupLayout: () => ({}) as GPUBindGroupLayout,
@@ -71,6 +76,7 @@ const createRenderMocks = () => {
     queue,
     bindGroups,
     buffers,
+    shaderModules,
   };
 };
 
@@ -281,6 +287,39 @@ Deno.test('createMaterialRegistry exposes a built-in unlit template that selects
   assertEquals(texturedProgram.id, 'built-in:unlit-textured');
 });
 
+Deno.test('createMaterialRegistry exposes a built-in lit template that selects textured variants', () => {
+  const template = createMaterialRegistry().templates.get('built-in:lit-template');
+  assert(template);
+
+  const plainProgram = template.prepareProgram({
+    materialId: 'plain-material',
+    programId: 'built-in:lit',
+    shaderFamily: 'lit',
+    alphaMode: 'opaque',
+    renderQueue: 'opaque',
+    doubleSided: false,
+    depthWrite: true,
+    usesCustomShader: false,
+    usesBaseColorTexture: false,
+    usesTexcoord0: false,
+  });
+  const texturedProgram = template.prepareProgram({
+    materialId: 'textured-material',
+    programId: 'built-in:lit',
+    shaderFamily: 'lit',
+    alphaMode: 'opaque',
+    renderQueue: 'opaque',
+    doubleSided: false,
+    depthWrite: true,
+    usesCustomShader: false,
+    usesBaseColorTexture: true,
+    usesTexcoord0: true,
+  });
+
+  assertEquals(plainProgram.id, 'built-in:lit');
+  assertEquals(texturedProgram.id, 'built-in:lit-textured');
+});
+
 Deno.test('renderForwardFrame can prepare a custom WGSL template from material variant inputs', () => {
   const mocks = createRenderMocks();
   const residency = createRuntimeResidency();
@@ -390,4 +429,71 @@ fn fsMain() -> @location(0) vec4<f32> {
   );
 
   assertEquals(capturedProgramId, 'custom:template:textured');
+});
+
+Deno.test('ensureMaterialPipeline reuses shader modules across pipeline variants', () => {
+  const mocks = createRenderMocks();
+  const residency = createRuntimeResidency();
+  const program = {
+    id: 'custom:shared-module',
+    label: 'custom shared module',
+    wgsl: `
+struct TransformUniforms {
+  world: mat4x4<f32>,
+  viewProjection: mat4x4<f32>,
+};
+
+@group(0) @binding(0) var<uniform> transform: TransformUniforms;
+
+@vertex
+fn vsMain(@location(0) position: vec3<f32>) -> @builtin(position) vec4<f32> {
+  return transform.viewProjection * transform.world * vec4<f32>(position, 1.0);
+}
+
+@fragment
+fn fsMain() -> @location(0) vec4<f32> {
+  return vec4<f32>(1.0, 1.0, 1.0, 1.0);
+}
+    `,
+    vertexEntryPoint: 'vsMain',
+    fragmentEntryPoint: 'fsMain',
+    vertexAttributes: [{
+      semantic: 'POSITION',
+      shaderLocation: 0,
+      format: 'float32x3',
+      offset: 0,
+      arrayStride: 12,
+    }],
+    usesTransformBindings: true,
+  } as const;
+
+  ensureMaterialPipeline(
+    mocks as unknown as GpuRenderExecutionContext,
+    residency,
+    program,
+    'rgba8unorm',
+  );
+  ensureMaterialPipeline(
+    mocks as unknown as GpuRenderExecutionContext,
+    residency,
+    program,
+    'rgba8unorm',
+    {
+      blend: {
+        color: {
+          srcFactor: 'src-alpha',
+          dstFactor: 'one-minus-src-alpha',
+          operation: 'add',
+        },
+        alpha: {
+          srcFactor: 'one',
+          dstFactor: 'one-minus-src-alpha',
+          operation: 'add',
+        },
+      },
+      depthWriteEnabled: false,
+    },
+  );
+
+  assertEquals(mocks.shaderModules.length, 1);
 });

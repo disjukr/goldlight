@@ -438,6 +438,7 @@ const builtInLitProgramId = 'built-in:lit';
 const builtInTexturedUnlitProgramId = 'built-in:unlit-textured';
 const builtInTexturedLitProgramId = 'built-in:lit-textured';
 const builtInUnlitTemplateId = 'built-in:unlit-template';
+const builtInLitTemplateId = 'built-in:lit-template';
 const builtInDeferredDepthPrepassProgramId = 'built-in:deferred-depth-prepass';
 const builtInDeferredGbufferUnlitProgramId = 'built-in:deferred-gbuffer-unlit';
 const builtInDeferredGbufferTexturedUnlitProgramId = 'built-in:deferred-gbuffer-unlit-textured';
@@ -1271,6 +1272,15 @@ const builtInUnlitProgramTemplate: MaterialProgramTemplate = {
       : builtInUnlitProgram,
 };
 
+const builtInLitProgramTemplate: MaterialProgramTemplate = {
+  id: builtInLitTemplateId,
+  label: 'Built-in Lit Template',
+  prepareProgram: (variant) =>
+    variant.usesBaseColorTexture && variant.usesTexcoord0
+      ? builtInTexturedLitProgram
+      : builtInLitProgram,
+};
+
 const builtInDeferredGbufferUnlitProgram: MaterialProgram = {
   id: builtInDeferredGbufferUnlitProgramId,
   label: 'Built-in Deferred G-buffer Unlit',
@@ -1414,9 +1424,11 @@ export const createMaterialRegistry = (): MaterialRegistry => ({
     [builtInUnlitProgramId, builtInUnlitProgram],
     [builtInLitProgramId, builtInLitProgram],
     [builtInTexturedUnlitProgramId, builtInTexturedUnlitProgram],
+    [builtInTexturedLitProgramId, builtInTexturedLitProgram],
   ]),
   templates: new Map([
     [builtInUnlitTemplateId, builtInUnlitProgramTemplate],
+    [builtInLitTemplateId, builtInLitProgramTemplate],
   ]),
 });
 
@@ -1546,8 +1558,10 @@ const prepareMaterialProgram = (
   resolutionOptions: MaterialVariantResolutionOptions = {},
 ): PreparedMaterialProgram => {
   const variant = resolveMaterialVariant(material, options, resolutionOptions);
-  const builtInTemplate = !material?.shaderId && material?.kind === 'unlit'
-    ? registry.templates.get(builtInUnlitTemplateId)
+  const builtInTemplate = !material?.shaderId
+    ? material?.kind === 'lit'
+      ? registry.templates.get(builtInLitTemplateId)
+      : registry.templates.get(builtInUnlitTemplateId)
     : undefined;
   const program = material?.shaderId
     ? registry.programs.get(material.shaderId) ??
@@ -2717,6 +2731,25 @@ export const ensureBuiltInForwardPipeline = (
   return ensureMaterialPipeline(context, residency, builtInUnlitProgram, format);
 };
 
+const ensureShaderModule = (
+  context: GpuRenderExecutionContext,
+  residency: RuntimeResidency,
+  key: string,
+  code: string,
+): GPUShaderModule => {
+  const cached = residency.shaderModules.get(key);
+  if (cached) {
+    return cached;
+  }
+
+  const shader = context.device.createShaderModule({
+    label: key,
+    code,
+  });
+  residency.shaderModules.set(key, shader);
+  return shader;
+};
+
 export const ensureNodePickPipeline = (
   context: GpuRenderExecutionContext,
   residency: RuntimeResidency,
@@ -2728,10 +2761,12 @@ export const ensureNodePickPipeline = (
     return cached as GPURenderPipeline;
   }
 
-  const shader = context.device.createShaderModule({
-    label: cacheKey,
-    code: builtInNodePickShader,
-  });
+  const shader = ensureShaderModule(
+    context,
+    residency,
+    builtInNodePickProgramId,
+    builtInNodePickShader,
+  );
   const pipeline = context.device.createRenderPipeline({
     label: cacheKey,
     layout: 'auto',
@@ -2778,10 +2813,12 @@ export const ensureDeferredDepthPrepassPipeline = (
     return cached as GPURenderPipeline;
   }
 
-  const shader = context.device.createShaderModule({
-    label: cacheKey,
-    code: builtInDeferredDepthPrepassShader,
-  });
+  const shader = ensureShaderModule(
+    context,
+    residency,
+    builtInDeferredDepthPrepassProgramId,
+    builtInDeferredDepthPrepassShader,
+  );
   const pipeline = context.device.createRenderPipeline({
     label: cacheKey,
     layout: 'auto',
@@ -2826,10 +2863,12 @@ export const ensureDeferredGbufferPipeline = (
     return cached as GPURenderPipeline;
   }
 
-  const shader = context.device.createShaderModule({
-    label: cacheKey,
-    code: preparedProgram.program.wgsl,
-  });
+  const shader = ensureShaderModule(
+    context,
+    residency,
+    preparedProgram.key,
+    preparedProgram.program.wgsl,
+  );
   const pipeline = context.device.createRenderPipeline({
     label: cacheKey,
     layout: 'auto',
@@ -2869,10 +2908,12 @@ export const ensureDeferredLightingPipeline = (
     return cached as GPURenderPipeline;
   }
 
-  const shader = context.device.createShaderModule({
-    label: cacheKey,
-    code: builtInDeferredLightingShader,
-  });
+  const shader = ensureShaderModule(
+    context,
+    residency,
+    builtInDeferredLightingProgramId,
+    builtInDeferredLightingShader,
+  );
   const pipeline = context.device.createRenderPipeline({
     label: cacheKey,
     layout: 'auto',
@@ -2913,10 +2954,12 @@ export const ensureMaterialPipeline = (
     return cached as GPURenderPipeline;
   }
 
-  const shader = context.device.createShaderModule({
-    label: cacheKey,
-    code: preparedProgram.program.wgsl,
-  });
+  const shader = ensureShaderModule(
+    context,
+    residency,
+    preparedProgram.key,
+    preparedProgram.program.wgsl,
+  );
   const pipeline = context.device.createRenderPipeline({
     label: cacheKey,
     layout: 'auto',
@@ -2959,10 +3002,12 @@ export const ensureSdfRaymarchPipeline = (
     return cached as GPURenderPipeline;
   }
 
-  const shader = context.device.createShaderModule({
-    label: cacheKey,
-    code: builtInSdfRaymarchShader,
-  });
+  const shader = ensureShaderModule(
+    context,
+    residency,
+    builtInSdfRaymarchProgramId,
+    builtInSdfRaymarchShader,
+  );
   const pipeline = context.device.createRenderPipeline({
     label: cacheKey,
     layout: 'auto',
@@ -3009,10 +3054,12 @@ export const ensurePathtracedSdfPipeline = (
     return cached as GPURenderPipeline;
   }
 
-  const shader = context.device.createShaderModule({
-    label: cacheKey,
-    code: builtInPathtracedSdfShader,
-  });
+  const shader = ensureShaderModule(
+    context,
+    residency,
+    builtInPathtracedSdfProgramId,
+    builtInPathtracedSdfShader,
+  );
   const pipeline = context.device.createRenderPipeline({
     label: cacheKey,
     layout: 'auto',
@@ -3045,10 +3092,12 @@ export const ensurePathtracedMeshPipeline = (
     return cached as GPURenderPipeline;
   }
 
-  const shader = context.device.createShaderModule({
-    label: cacheKey,
-    code: builtInPathtracedMeshShader,
-  });
+  const shader = ensureShaderModule(
+    context,
+    residency,
+    builtInPathtracedMeshProgramId,
+    builtInPathtracedMeshShader,
+  );
   const pipeline = context.device.createRenderPipeline({
     label: cacheKey,
     layout: 'auto',
@@ -3081,10 +3130,12 @@ export const ensurePathtracedAccumulatePipeline = (
     return cached as GPURenderPipeline;
   }
 
-  const shader = context.device.createShaderModule({
-    label: cacheKey,
-    code: builtInPathtracedAccumulateShader,
-  });
+  const shader = ensureShaderModule(
+    context,
+    residency,
+    builtInPathtracedAccumulateProgramId,
+    builtInPathtracedAccumulateShader,
+  );
   const pipeline = context.device.createRenderPipeline({
     label: cacheKey,
     layout: 'auto',
@@ -3117,10 +3168,12 @@ export const ensurePathtracedPresentPipeline = (
     return cached as GPURenderPipeline;
   }
 
-  const shader = context.device.createShaderModule({
-    label: cacheKey,
-    code: builtInPathtracedPresentShader,
-  });
+  const shader = ensureShaderModule(
+    context,
+    residency,
+    builtInPathtracedPresentProgramId,
+    builtInPathtracedPresentShader,
+  );
   const pipeline = context.device.createRenderPipeline({
     label: cacheKey,
     layout: 'auto',
@@ -3153,10 +3206,12 @@ export const ensureVolumeRaymarchPipeline = (
     return cached as GPURenderPipeline;
   }
 
-  const shader = context.device.createShaderModule({
-    label: cacheKey,
-    code: builtInVolumeRaymarchShader,
-  });
+  const shader = ensureShaderModule(
+    context,
+    residency,
+    builtInVolumeRaymarchProgramId,
+    builtInVolumeRaymarchShader,
+  );
   const pipeline = context.device.createRenderPipeline({
     label: cacheKey,
     layout: 'auto',
@@ -3210,10 +3265,12 @@ export const ensurePostProcessPipeline = (
     return cached as GPURenderPipeline;
   }
 
-  const shader = context.device.createShaderModule({
-    label: cacheKey,
-    code: program.wgsl,
-  });
+  const shader = ensureShaderModule(
+    context,
+    residency,
+    `${program.id}:${programSignature}`,
+    program.wgsl,
+  );
   const pipeline = context.device.createRenderPipeline({
     label: cacheKey,
     layout: 'auto',

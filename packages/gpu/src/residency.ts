@@ -49,6 +49,7 @@ export type RuntimeResidency = {
   readonly textures: Map<string, TextureResidency>;
   readonly geometry: Map<string, GeometryResidency>;
   readonly materials: Map<string, MaterialResidency>;
+  readonly shaderModules: Map<string, GPUShaderModule>;
   readonly pipelines: Map<string, GPURenderPipeline | GPUComputePipeline>;
 };
 
@@ -71,6 +72,7 @@ export const createRuntimeResidency = (): RuntimeResidency => ({
   textures: new Map(),
   geometry: new Map(),
   materials: new Map(),
+  shaderModules: new Map(),
   pipelines: new Map(),
 });
 
@@ -142,6 +144,7 @@ export const invalidateResidency = (residency: RuntimeResidency): RuntimeResiden
     textureIds: [...residency.textures.keys()],
     pipelineKeys: [...residency.pipelines.keys()],
   });
+  residency.shaderModules.clear();
   return residency;
 };
 

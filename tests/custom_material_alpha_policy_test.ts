@@ -6,6 +6,8 @@ import {
   createMaterialRegistry,
   ensureMaterialPipeline,
   type GpuRenderExecutionContext,
+  inspectMaterialTemplateBake,
+  invalidateTemplateProgramResidency,
   registerWgslMaterial,
   registerWgslMaterialTemplate,
   renderForwardFrame,
@@ -285,6 +287,46 @@ Deno.test('createMaterialRegistry exposes a built-in unlit template that selects
 
   assertEquals(plainProgram.id, 'built-in:unlit');
   assertEquals(texturedProgram.id, 'built-in:unlit-textured');
+  assertEquals(
+    texturedProgram.materialBindings,
+    [
+      { kind: 'uniform', binding: 0 },
+      { kind: 'texture', binding: 1, textureSemantic: 'baseColor' },
+      { kind: 'sampler', binding: 2, textureSemantic: 'baseColor' },
+    ],
+  );
+  assert(
+    texturedProgram.wgsl.includes('@group(1) @binding(1) var baseColorTexture: texture_2d<f32>;'),
+  );
+  assert(texturedProgram.wgsl.includes('out.texCoord = texCoord;'));
+  assert(
+    texturedProgram.wgsl.includes('textureSample(baseColorTexture, baseColorSampler, in.texCoord)'),
+  );
+});
+
+Deno.test('inspectMaterialTemplateBake reports active features and baked WGSL for built-in templates', () => {
+  const report = inspectMaterialTemplateBake(createMaterialRegistry(), 'built-in:unlit-template', {
+    materialId: 'textured-material',
+    programId: 'built-in:unlit',
+    shaderFamily: 'unlit',
+    alphaMode: 'opaque',
+    renderQueue: 'opaque',
+    doubleSided: false,
+    depthWrite: true,
+    usesCustomShader: false,
+    usesBaseColorTexture: true,
+    usesTexcoord0: true,
+  });
+
+  assertEquals(report.templateId, 'built-in:unlit-template');
+  assertEquals(report.program.id, 'built-in:unlit-textured');
+  assertEquals(report.activeFeatureIds, ['base_color_texture', 'alpha_mask']);
+  assertEquals(report.bindings, [
+    { kind: 'uniform', binding: 0 },
+    { kind: 'texture', binding: 1, textureSemantic: 'baseColor' },
+    { kind: 'sampler', binding: 2, textureSemantic: 'baseColor' },
+  ]);
+  assert(report.wgsl.includes('textureSample(baseColorTexture, baseColorSampler, in.texCoord)'));
 });
 
 Deno.test('createMaterialRegistry exposes a built-in lit template that selects textured variants', () => {
@@ -318,9 +360,26 @@ Deno.test('createMaterialRegistry exposes a built-in lit template that selects t
 
   assertEquals(plainProgram.id, 'built-in:lit');
   assertEquals(texturedProgram.id, 'built-in:lit-textured');
+  assert(
+    texturedProgram.wgsl.includes('@group(2) @binding(0) var<uniform> lighting: LightingUniforms;'),
+  );
+  assert(
+    texturedProgram.wgsl.includes('textureSample(baseColorTexture, baseColorSampler, in.texCoord)'),
+  );
+  assert(texturedProgram.wgsl.includes('let alphaPolicy = material.values[1];'));
 });
 
 Deno.test('renderForwardFrame can prepare a custom WGSL template from material variant inputs', () => {
+  type CustomTemplateVariant = {
+    materialId: string;
+    alphaMode: 'opaque' | 'mask' | 'blend';
+    renderQueue: 'opaque' | 'transparent';
+    doubleSided: boolean;
+    depthWrite: boolean;
+    usesBaseColorTexture: boolean;
+    usesTexcoord0: boolean;
+  };
+
   const mocks = createRenderMocks();
   const residency = createRuntimeResidency();
   residency.textures.set('base-color-texture', {
@@ -334,7 +393,7 @@ Deno.test('renderForwardFrame can prepare a custom WGSL template from material v
   });
 
   let capturedProgramId = '';
-  const registry = registerWgslMaterialTemplate(createMaterialRegistry(), {
+  const registry = registerWgslMaterialTemplate<CustomTemplateVariant>(createMaterialRegistry(), {
     id: 'custom:template',
     label: 'custom template',
     prepareProgram: (variant) => {
@@ -431,6 +490,92 @@ fn fsMain() -> @location(0) vec4<f32> {
   assertEquals(capturedProgramId, 'custom:template:textured');
 });
 
+Deno.test('custom material templates can provide template-specific variant resolvers', () => {
+  type CustomResolvedTemplateVariant = {
+    materialId: string;
+    alphaMode: 'opaque';
+    renderQueue: 'opaque';
+    doubleSided: false;
+    depthWrite: true;
+    usesTexcoord0: boolean;
+    customMode: 'resolved';
+  };
+
+  let inspectedVariant: Record<string, unknown> | undefined;
+  const registry = registerWgslMaterialTemplate<CustomResolvedTemplateVariant>(
+    createMaterialRegistry(),
+    {
+      id: 'custom:resolved-template',
+      label: 'custom resolved template',
+      resolveVariant: (_material, _options, resolutionOptions) => ({
+        materialId: 'resolved-material',
+        alphaMode: 'opaque',
+        renderQueue: 'opaque',
+        doubleSided: false,
+        depthWrite: true,
+        usesTexcoord0: Boolean(
+          resolutionOptions.geometry &&
+            'attributeBuffers' in resolutionOptions.geometry &&
+            resolutionOptions.geometry.attributeBuffers.TEXCOORD_0,
+        ),
+        customMode: 'resolved',
+      }),
+      prepareProgram: (variant) => {
+        inspectedVariant = variant as Record<string, unknown>;
+        return {
+          id: 'custom:resolved-template:program',
+          label: 'custom resolved template program',
+          wgsl: `
+struct TransformUniforms {
+  world: mat4x4<f32>,
+  viewProjection: mat4x4<f32>,
+};
+
+@group(0) @binding(0) var<uniform> transform: TransformUniforms;
+
+@vertex
+fn vsMain(@location(0) position: vec3<f32>) -> @builtin(position) vec4<f32> {
+  return transform.viewProjection * transform.world * vec4<f32>(position, 1.0);
+}
+
+@fragment
+fn fsMain() -> @location(0) vec4<f32> {
+  return vec4<f32>(1.0);
+}
+        `,
+          vertexEntryPoint: 'vsMain',
+          fragmentEntryPoint: 'fsMain',
+          vertexAttributes: [{
+            semantic: 'POSITION',
+            shaderLocation: 0,
+            format: 'float32x3',
+            offset: 0,
+            arrayStride: 12,
+          }],
+          usesTransformBindings: true,
+        };
+      },
+    },
+  );
+
+  const report = inspectMaterialTemplateBake(
+    registry,
+    'custom:resolved-template',
+    {
+      materialId: 'ignored',
+      alphaMode: 'opaque',
+      renderQueue: 'opaque',
+      doubleSided: false,
+      depthWrite: true,
+      usesTexcoord0: true,
+      customMode: 'resolved',
+    } as never,
+  );
+
+  assertEquals(report.program.id, 'custom:resolved-template:program');
+  assertEquals(inspectedVariant?.customMode, 'resolved');
+});
+
 Deno.test('ensureMaterialPipeline reuses shader modules across pipeline variants', () => {
   const mocks = createRenderMocks();
   const residency = createRuntimeResidency();
@@ -496,4 +641,17 @@ fn fsMain() -> @location(0) vec4<f32> {
   );
 
   assertEquals(mocks.shaderModules.length, 1);
+});
+
+Deno.test('invalidateTemplateProgramResidency clears cached shader modules and pipelines by template id', () => {
+  const residency = createRuntimeResidency();
+  residency.shaderModules.set('built-in:unlit-template:shader-a', {} as GPUShaderModule);
+  residency.shaderModules.set('custom:template:shader-a', {} as GPUShaderModule);
+  residency.pipelines.set('built-in:unlit-template:pipeline-a', {} as GPURenderPipeline);
+  residency.pipelines.set('custom:template:pipeline-a', {} as GPURenderPipeline);
+
+  invalidateTemplateProgramResidency(residency, 'built-in:unlit-template');
+
+  assertEquals([...residency.shaderModules.keys()], ['custom:template:shader-a']);
+  assertEquals([...residency.pipelines.keys()], ['custom:template:pipeline-a']);
 });

@@ -55,6 +55,16 @@ import builtInNodePickShader from './shaders/built_in_node_pick.wgsl' with { typ
 import builtInPostProcessBlitShader from './shaders/built_in_post_process_blit.wgsl' with {
   type: 'text',
 };
+import {
+  type BuiltInLitTemplateVariant as BuiltInLitTemplateVariantFromTemplate,
+  inspectBuiltInLitTemplateProgram,
+  prepareBuiltInLitTemplateProgram,
+} from './templates/builtins/lit/template.ts';
+import {
+  type BuiltInUnlitTemplateVariant,
+  inspectBuiltInUnlitTemplateProgram,
+  prepareBuiltInUnlitTemplateProgram,
+} from './templates/builtins/unlit/template.ts';
 
 export type RendererKind = 'forward' | 'deferred' | 'pathtraced' | 'uber';
 export type PassKind =
@@ -310,35 +320,81 @@ export type MaterialBindingDescriptor = Readonly<
   }
 >;
 
-export type MaterialRegistry = Readonly<{
-  programs: Map<string, MaterialProgram>;
-  templates: Map<string, MaterialProgramTemplate>;
-}>;
-
-export type MaterialVariant = Readonly<{
+export type BaseMaterialVariant = Readonly<{
   materialId: string;
-  programId: string;
-  shaderFamily: string;
   alphaMode: 'opaque' | 'mask' | 'blend';
   renderQueue: 'opaque' | 'transparent';
   doubleSided: boolean;
   depthWrite: boolean;
-  usesCustomShader: boolean;
-  usesBaseColorTexture: boolean;
-  usesTexcoord0: boolean;
 }>;
+
+export type MaterialVariant =
+  & BaseMaterialVariant
+  & Readonly<{
+    programId: string;
+    shaderFamily: string;
+    usesCustomShader: boolean;
+    usesBaseColorTexture: boolean;
+    usesTexcoord0: boolean;
+  }>;
+
+export type BuiltInLitTemplateVariant = BuiltInLitTemplateVariantFromTemplate;
 
 type PreparedMaterialProgram = Readonly<{
   key: string;
-  variant: MaterialVariant;
+  variant: Readonly<Record<string, unknown>>;
   program: MaterialProgram;
 }>;
 
-export type MaterialProgramTemplate = Readonly<{
+export type MaterialProgramTemplate<TVariant extends BaseMaterialVariant = MaterialVariant> =
+  Readonly<{
+    id: string;
+    label: string;
+    prepareProgram: (variant: TVariant) => MaterialProgram;
+    inspectProgram?: (variant: TVariant) => MaterialTemplateBakeReport<TVariant>;
+    resolveVariant?: (
+      material: Material | undefined,
+      options: ResolveMaterialProgramOptions,
+      resolutionOptions: MaterialVariantResolutionOptions,
+    ) => TVariant;
+  }>;
+
+export type MaterialTemplateBakeReport<TVariant extends BaseMaterialVariant = BaseMaterialVariant> =
+  Readonly<{
+    templateId: string;
+    templateLabel: string;
+    variant: TVariant;
+    program: MaterialProgram;
+    activeFeatureIds: readonly string[];
+    wgsl: string;
+    bindings: readonly MaterialBindingDescriptor[];
+    vertexAttributes: readonly MaterialVertexAttribute[];
+  }>;
+
+type RegisteredMaterialTemplateVariant = BaseMaterialVariant & Readonly<Record<string, unknown>>;
+
+type RegisteredMaterialProgramTemplate = Readonly<{
   id: string;
   label: string;
-  prepareProgram: (variant: MaterialVariant) => MaterialProgram;
+  prepareProgram: (variant: RegisteredMaterialTemplateVariant) => MaterialProgram;
+  inspectProgram?: (
+    variant: RegisteredMaterialTemplateVariant,
+  ) => MaterialTemplateBakeReport<RegisteredMaterialTemplateVariant>;
+  resolveVariant?: (
+    material: Material | undefined,
+    options: ResolveMaterialProgramOptions,
+    resolutionOptions: MaterialVariantResolutionOptions,
+  ) => RegisteredMaterialTemplateVariant;
 }>;
+
+export type MaterialRegistry = Readonly<{
+  programs: Map<string, MaterialProgram>;
+  templates: Map<string, RegisteredMaterialProgramTemplate>;
+}>;
+
+const eraseMaterialProgramTemplate = <TVariant extends BaseMaterialVariant>(
+  template: MaterialProgramTemplate<TVariant>,
+): RegisteredMaterialProgramTemplate => template as unknown as RegisteredMaterialProgramTemplate;
 
 export type PostProcessProgram = Readonly<{
   id: string;
@@ -1263,22 +1319,100 @@ const builtInTexturedLitProgram: MaterialProgram = {
   ],
 };
 
-const builtInUnlitProgramTemplate: MaterialProgramTemplate = {
+const builtInUnlitProgramTemplate: MaterialProgramTemplate<BuiltInUnlitTemplateVariant> = {
   id: builtInUnlitTemplateId,
   label: 'Built-in Unlit Template',
-  prepareProgram: (variant) =>
-    variant.usesBaseColorTexture && variant.usesTexcoord0
-      ? builtInTexturedUnlitProgram
-      : builtInUnlitProgram,
+  resolveVariant: (
+    material,
+    _options,
+    resolutionOptions,
+  ): BuiltInUnlitTemplateVariant => {
+    const policy = resolveMaterialRenderPolicy(material);
+    const geometry = resolutionOptions.geometry;
+    const residency = resolutionOptions.residency;
+    const usesBaseColorTexture = Boolean(
+      material &&
+        residency &&
+        getBaseColorTextureResidency(residency, material),
+    );
+    const usesTexcoord0 = geometry
+      ? 'attributeBuffers' in geometry
+        ? Boolean(geometry.attributeBuffers.TEXCOORD_0)
+        : geometry.attributes.some((attribute) => attribute.semantic === 'TEXCOORD_0')
+      : false;
+    return {
+      templateId: 'built-in:unlit-template',
+      materialId: material?.id ?? 'built-in:default-unlit-material',
+      alphaMode: policy.alphaMode,
+      renderQueue: policy.renderQueue,
+      doubleSided: policy.doubleSided,
+      depthWrite: policy.depthWrite,
+      usesBaseColorTexture,
+      usesTexcoord0,
+    };
+  },
+  prepareProgram: (variant) => prepareBuiltInUnlitTemplateProgram(variant),
+  inspectProgram: (variant) => {
+    const report = inspectBuiltInUnlitTemplateProgram(variant);
+    return {
+      templateId: builtInUnlitTemplateId,
+      templateLabel: 'Built-in Unlit Template',
+      variant,
+      program: report.program,
+      activeFeatureIds: report.activeFeatureIds,
+      wgsl: report.spec.wgsl,
+      bindings: report.spec.bindings,
+      vertexAttributes: report.spec.vertexAttributes,
+    };
+  },
 };
 
-const builtInLitProgramTemplate: MaterialProgramTemplate = {
+const builtInLitProgramTemplate: MaterialProgramTemplate<BuiltInLitTemplateVariant> = {
   id: builtInLitTemplateId,
   label: 'Built-in Lit Template',
-  prepareProgram: (variant) =>
-    variant.usesBaseColorTexture && variant.usesTexcoord0
-      ? builtInTexturedLitProgram
-      : builtInLitProgram,
+  resolveVariant: (
+    material,
+    _options,
+    resolutionOptions,
+  ): BuiltInLitTemplateVariant => {
+    const policy = resolveMaterialRenderPolicy(material);
+    const geometry = resolutionOptions.geometry;
+    const residency = resolutionOptions.residency;
+    const usesBaseColorTexture = Boolean(
+      material &&
+        residency &&
+        getBaseColorTextureResidency(residency, material),
+    );
+    const usesTexcoord0 = geometry
+      ? 'attributeBuffers' in geometry
+        ? Boolean(geometry.attributeBuffers.TEXCOORD_0)
+        : geometry.attributes.some((attribute) => attribute.semantic === 'TEXCOORD_0')
+      : false;
+    return {
+      templateId: 'built-in:lit-template',
+      materialId: material?.id ?? 'built-in:default-lit-material',
+      alphaMode: policy.alphaMode,
+      renderQueue: policy.renderQueue,
+      doubleSided: policy.doubleSided,
+      depthWrite: policy.depthWrite,
+      usesBaseColorTexture,
+      usesTexcoord0,
+    };
+  },
+  prepareProgram: (variant) => prepareBuiltInLitTemplateProgram(variant),
+  inspectProgram: (variant) => {
+    const report = inspectBuiltInLitTemplateProgram(variant);
+    return {
+      templateId: builtInLitTemplateId,
+      templateLabel: 'Built-in Lit Template',
+      variant,
+      program: report.program,
+      activeFeatureIds: report.activeFeatureIds,
+      wgsl: report.spec.wgsl,
+      bindings: report.spec.bindings,
+      vertexAttributes: report.spec.vertexAttributes,
+    };
+  },
 };
 
 const builtInDeferredGbufferUnlitProgram: MaterialProgram = {
@@ -1426,9 +1560,9 @@ export const createMaterialRegistry = (): MaterialRegistry => ({
     [builtInTexturedUnlitProgramId, builtInTexturedUnlitProgram],
     [builtInTexturedLitProgramId, builtInTexturedLitProgram],
   ]),
-  templates: new Map([
-    [builtInUnlitTemplateId, builtInUnlitProgramTemplate],
-    [builtInLitTemplateId, builtInLitProgramTemplate],
+  templates: new Map<string, RegisteredMaterialProgramTemplate>([
+    [builtInUnlitTemplateId, eraseMaterialProgramTemplate(builtInUnlitProgramTemplate)],
+    [builtInLitTemplateId, eraseMaterialProgramTemplate(builtInLitProgramTemplate)],
   ]),
 });
 
@@ -1452,12 +1586,54 @@ export const registerWgslMaterial = (
   return registry;
 };
 
-export const registerWgslMaterialTemplate = (
+export const registerWgslMaterialTemplate = <TVariant extends BaseMaterialVariant>(
   registry: MaterialRegistry,
-  template: MaterialProgramTemplate,
+  template: MaterialProgramTemplate<TVariant>,
 ): MaterialRegistry => {
-  registry.templates.set(template.id, template);
+  registry.templates.set(template.id, eraseMaterialProgramTemplate(template));
   return registry;
+};
+
+export const inspectMaterialTemplateBake = <TVariant extends BaseMaterialVariant>(
+  registry: MaterialRegistry,
+  templateId: string,
+  variant: TVariant,
+): MaterialTemplateBakeReport<TVariant> => {
+  const template = registry.templates.get(templateId) as
+    | RegisteredMaterialProgramTemplate
+    | undefined;
+  if (!template) {
+    throw new Error(`material template "${templateId}" is not registered`);
+  }
+
+  if (template.inspectProgram) {
+    return template.inspectProgram(variant) as MaterialTemplateBakeReport<TVariant>;
+  }
+
+  const program = template.prepareProgram(variant);
+  return {
+    templateId: template.id,
+    templateLabel: template.label,
+    variant,
+    program,
+    activeFeatureIds: [],
+    wgsl: program.wgsl,
+    bindings: getMaterialBindingDescriptors(program),
+    vertexAttributes: program.vertexAttributes,
+  };
+};
+
+const resolveTemplateVariant = (
+  template: RegisteredMaterialProgramTemplate,
+  material: Material | undefined,
+  options: ResolveMaterialProgramOptions,
+  resolutionOptions: MaterialVariantResolutionOptions,
+): RegisteredMaterialTemplateVariant => {
+  if (template.resolveVariant) {
+    return template.resolveVariant(material, options, resolutionOptions);
+  }
+
+  return resolveMaterialVariant(material, options, resolutionOptions);
 };
 
 export const resolveMaterialProgram = (
@@ -1536,20 +1712,42 @@ export const resolveMaterialVariant = (
 
 const createPreparedMaterialProgramKey = (
   program: MaterialProgram,
-  variant: MaterialVariant,
-): string =>
-  hashString(JSON.stringify({
-    variant,
-    shader: {
-      id: program.id,
-      vertexEntryPoint: program.vertexEntryPoint,
-      fragmentEntryPoint: program.fragmentEntryPoint,
-      usesTransformBindings: program.usesTransformBindings ?? false,
-      bindings: getMaterialBindingDescriptors(program),
-      vertexAttributes: program.vertexAttributes,
-      wgsl: program.wgsl,
-    },
-  }));
+  variant: Readonly<Record<string, unknown>>,
+): string => {
+  const templateId = typeof variant.templateId === 'string' ? variant.templateId : program.id;
+  return `${templateId}:${
+    hashString(JSON.stringify({
+      variant,
+      shader: {
+        id: program.id,
+        vertexEntryPoint: program.vertexEntryPoint,
+        fragmentEntryPoint: program.fragmentEntryPoint,
+        usesTransformBindings: program.usesTransformBindings ?? false,
+        bindings: getMaterialBindingDescriptors(program),
+        vertexAttributes: program.vertexAttributes,
+        wgsl: program.wgsl,
+      },
+    }))
+  }`;
+};
+
+export const invalidateTemplateProgramResidency = (
+  residency: RuntimeResidency,
+  templateId: string,
+): RuntimeResidency => {
+  const prefix = `${templateId}:`;
+  for (const key of [...residency.shaderModules.keys()]) {
+    if (key.startsWith(prefix)) {
+      residency.shaderModules.delete(key);
+    }
+  }
+  for (const key of [...residency.pipelines.keys()]) {
+    if (key.startsWith(prefix)) {
+      residency.pipelines.delete(key);
+    }
+  }
+  return residency;
+};
 
 const prepareMaterialProgram = (
   registry: MaterialRegistry,
@@ -1557,18 +1755,33 @@ const prepareMaterialProgram = (
   options: ResolveMaterialProgramOptions = {},
   resolutionOptions: MaterialVariantResolutionOptions = {},
 ): PreparedMaterialProgram => {
-  const variant = resolveMaterialVariant(material, options, resolutionOptions);
+  const directVariant = resolveMaterialVariant(material, options, resolutionOptions);
   const builtInTemplate = !material?.shaderId
     ? material?.kind === 'lit'
       ? registry.templates.get(builtInLitTemplateId)
       : registry.templates.get(builtInUnlitTemplateId)
     : undefined;
-  const program = material?.shaderId
-    ? registry.programs.get(material.shaderId) ??
-      registry.templates.get(material.shaderId)?.prepareProgram(variant) ??
-      resolveMaterialProgram(registry, material, options)
-    : builtInTemplate?.prepareProgram(variant) ??
+  const selectedTemplate = material?.shaderId
+    ? registry.templates.get(material.shaderId)
+    : builtInTemplate;
+  if (selectedTemplate) {
+    const variant = resolveTemplateVariant(selectedTemplate, material, options, resolutionOptions);
+    const program = selectedTemplate.prepareProgram(variant);
+    return {
+      key: createPreparedMaterialProgramKey(program, variant),
+      variant,
+      program,
+    };
+  }
+
+  const variant = directVariant;
+  let program: MaterialProgram;
+  if (material?.shaderId) {
+    program = registry.programs.get(material.shaderId) ??
       resolveMaterialProgram(registry, material, options);
+  } else {
+    program = resolveMaterialProgram(registry, material, options);
+  }
   return {
     key: createPreparedMaterialProgramKey(program, variant),
     variant,
@@ -1582,7 +1795,9 @@ const createPreparedBuiltInProgram = (
   options: ResolveMaterialProgramOptions = {},
   resolutionOptions: MaterialVariantResolutionOptions = {},
 ): PreparedMaterialProgram => {
-  const variant = resolveMaterialVariant(material, options, resolutionOptions);
+  const variant = resolveMaterialVariant(material, options, resolutionOptions) as Readonly<
+    Record<string, unknown>
+  >;
   return {
     key: createPreparedMaterialProgramKey(program, variant),
     variant,
@@ -1989,12 +2204,27 @@ export const collectRendererCapabilityIssues = (
           `renderer "${renderer.label}" does not support custom shader materials`,
         );
       } else {
-        let preparedProgram: PreparedMaterialProgram | undefined;
+        let bindingDescriptors: readonly MaterialBindingDescriptor[] | undefined;
         try {
-          preparedProgram = prepareMaterialProgram(materialRegistry, material, {}, {
-            geometry: node.mesh,
-            residency,
-          });
+          const template = materialRegistry.templates.get(material.shaderId);
+          if (template) {
+            const variant = resolveTemplateVariant(template, material, {}, {
+              geometry: node.mesh,
+              residency,
+            });
+            bindingDescriptors = inspectMaterialTemplateBake(
+              materialRegistry,
+              material.shaderId,
+              variant,
+            ).bindings;
+          } else {
+            bindingDescriptors = getMaterialBindingDescriptors(
+              prepareMaterialProgram(materialRegistry, material, {}, {
+                geometry: node.mesh,
+                residency,
+              }).program,
+            );
+          }
         } catch {
           pushIssue(
             'material-binding',
@@ -2003,8 +2233,8 @@ export const collectRendererCapabilityIssues = (
           );
         }
 
-        if (preparedProgram) {
-          for (const descriptor of getMaterialBindingDescriptors(preparedProgram.program)) {
+        if (bindingDescriptors) {
+          for (const descriptor of bindingDescriptors) {
             if (descriptor.kind === 'uniform' || descriptor.kind === 'alpha-policy') {
               continue;
             }

@@ -41,6 +41,7 @@
     "check": "deno fmt --check && deno task generate:ir:check && deno lint && deno test --allow-env=NODE_ENV --unstable-raw-imports && deno bench --unstable-raw-imports --no-run",
     "test": "deno test --allow-env=NODE_ENV --unstable-raw-imports",
     "bench": "deno bench --unstable-raw-imports",
+    "renderer:template:inspect": "deno run -A --unstable-raw-imports ./scripts/inspect_template_bake.ts",
     "docs:check": "deno fmt --check --ignore=examples/browser_forward/dist,examples/browser_textured_forward/dist,examples/browser_react_authoring/dist,examples/browser_custom_textured_forward/dist docs packages tests benches examples",
     "asset:examples": "deno run -A ./scripts/fetch_example_asset.ts included",
     "asset:stanford-bunny": "deno run -A ./scripts/fetch_example_asset.ts stanford-bunny",

@@ -314,6 +314,25 @@ export type MaterialRegistry = Readonly<{
   programs: Map<string, MaterialProgram>;
 }>;
 
+type MaterialVariant = Readonly<{
+  materialId: string;
+  programId: string;
+  shaderFamily: string;
+  alphaMode: 'opaque' | 'mask' | 'blend';
+  renderQueue: 'opaque' | 'transparent';
+  doubleSided: boolean;
+  depthWrite: boolean;
+  usesCustomShader: boolean;
+  usesBaseColorTexture: boolean;
+  usesTexcoord0: boolean;
+}>;
+
+type PreparedMaterialProgram = Readonly<{
+  key: string;
+  variant: MaterialVariant;
+  program: MaterialProgram;
+}>;
+
 export type PostProcessProgram = Readonly<{
   id: string;
   label: string;
@@ -1386,6 +1405,11 @@ export type ResolveMaterialProgramOptions = Readonly<{
   preferTexturedLit?: boolean;
 }>;
 
+type MaterialVariantResolutionOptions = Readonly<{
+  geometry?: NonNullable<RuntimeResidency['geometry'] extends Map<string, infer T> ? T : never>;
+  residency?: RuntimeResidency;
+}>;
+
 export const registerWgslMaterial = (
   registry: MaterialRegistry,
   program: MaterialProgram,
@@ -1427,6 +1451,95 @@ export const resolveMaterialProgram = (
 
   throw new Error(`material "${material.id}" uses unsupported kind "${material.kind}"`);
 };
+
+export const resolveMaterialVariant = (
+  material?: Material,
+  options: ResolveMaterialProgramOptions = {},
+  resolutionOptions: MaterialVariantResolutionOptions = {},
+): MaterialVariant => {
+  const policy = resolveMaterialRenderPolicy(material);
+  const geometry = resolutionOptions.geometry;
+  const residency = resolutionOptions.residency;
+  const usesBaseColorTexture = Boolean(
+    material &&
+      residency &&
+      getBaseColorTextureResidency(residency, material),
+  );
+  const usesTexcoord0 = Boolean(geometry?.attributeBuffers.TEXCOORD_0);
+  const fallbackProgramId = options.preferTexturedLit
+    ? builtInTexturedLitProgramId
+    : options.preferTexturedUnlit
+    ? builtInTexturedUnlitProgramId
+    : material?.kind === 'lit'
+    ? builtInLitProgramId
+    : builtInUnlitProgramId;
+
+  return {
+    materialId: material?.id ?? 'built-in:default-unlit-material',
+    programId: material?.shaderId ?? fallbackProgramId,
+    shaderFamily: material?.shaderId ? 'custom' : material?.kind === 'lit' ? 'lit' : 'unlit',
+    alphaMode: policy.alphaMode,
+    renderQueue: policy.renderQueue,
+    doubleSided: policy.doubleSided,
+    depthWrite: policy.depthWrite,
+    usesCustomShader: Boolean(material?.shaderId),
+    usesBaseColorTexture,
+    usesTexcoord0,
+  };
+};
+
+const createPreparedMaterialProgramKey = (
+  program: MaterialProgram,
+  variant: MaterialVariant,
+): string =>
+  hashString(JSON.stringify({
+    variant,
+    shader: {
+      id: program.id,
+      vertexEntryPoint: program.vertexEntryPoint,
+      fragmentEntryPoint: program.fragmentEntryPoint,
+      usesTransformBindings: program.usesTransformBindings ?? false,
+      bindings: getMaterialBindingDescriptors(program),
+      vertexAttributes: program.vertexAttributes,
+      wgsl: program.wgsl,
+    },
+  }));
+
+const prepareMaterialProgram = (
+  registry: MaterialRegistry,
+  material?: Material,
+  options: ResolveMaterialProgramOptions = {},
+  resolutionOptions: MaterialVariantResolutionOptions = {},
+): PreparedMaterialProgram => {
+  const program = resolveMaterialProgram(registry, material, options);
+  const variant = resolveMaterialVariant(material, options, resolutionOptions);
+  return {
+    key: createPreparedMaterialProgramKey(program, variant),
+    variant,
+    program,
+  };
+};
+
+const createPreparedBuiltInProgram = (
+  program: MaterialProgram,
+  material?: Material,
+  options: ResolveMaterialProgramOptions = {},
+  resolutionOptions: MaterialVariantResolutionOptions = {},
+): PreparedMaterialProgram => {
+  const variant = resolveMaterialVariant(material, options, resolutionOptions);
+  return {
+    key: createPreparedMaterialProgramKey(program, variant),
+    variant,
+    program,
+  };
+};
+
+const getPreparedMaterialProgram = (
+  preparedOrProgram: PreparedMaterialProgram | MaterialProgram,
+): PreparedMaterialProgram =>
+  'program' in preparedOrProgram
+    ? preparedOrProgram
+    : createPreparedBuiltInProgram(preparedOrProgram);
 
 const getBaseColorTextureResidency = (
   residency: RuntimeResidency,
@@ -2421,20 +2534,27 @@ const renderForwardMeshPass = (
     }
 
     const material = node.material ?? createDefaultMaterial();
-    const resolvedProgram = resolveMaterialProgram(materialRegistry, node.material);
+    const resolvedPreparedProgram = prepareMaterialProgram(materialRegistry, node.material, {}, {
+      geometry,
+      residency,
+    });
     const programOptions = prefersTexturedMaterialProgram(
-      resolvedProgram,
+      resolvedPreparedProgram.program,
       material,
       geometry,
       residency,
     );
-    const program = Object.keys(programOptions).length > 0
-      ? resolveMaterialProgram(materialRegistry, node.material, programOptions)
-      : resolvedProgram;
+    const preparedProgram = Object.keys(programOptions).length > 0
+      ? prepareMaterialProgram(materialRegistry, node.material, programOptions, {
+        geometry,
+        residency,
+      })
+      : resolvedPreparedProgram;
+    const program = preparedProgram.program;
     const pipeline = ensureMaterialPipeline(
       context,
       residency,
-      program,
+      preparedProgram,
       format,
       createMaterialPipelineOptions(material, passKind),
     );
@@ -2646,11 +2766,12 @@ export const ensureDeferredGbufferPipeline = (
   context: GpuRenderExecutionContext,
   residency: RuntimeResidency,
   format: GPUTextureFormat,
-  program: MaterialProgram = builtInDeferredGbufferUnlitProgram,
+  program: MaterialProgram | PreparedMaterialProgram = builtInDeferredGbufferUnlitProgram,
   options: MaterialPipelineOptions = {},
 ): GPURenderPipeline => {
+  const preparedProgram = getPreparedMaterialProgram(program);
   const cullMode = options.cullMode === 'none' ? 'none' : options.cullMode ?? 'back';
-  const cacheKey = `${program.id}:${format}:${cullMode}`;
+  const cacheKey = `${preparedProgram.key}:${format}:${cullMode}`;
   const cached = residency.pipelines.get(cacheKey);
   if (cached) {
     return cached as GPURenderPipeline;
@@ -2658,19 +2779,19 @@ export const ensureDeferredGbufferPipeline = (
 
   const shader = context.device.createShaderModule({
     label: cacheKey,
-    code: program.wgsl,
+    code: preparedProgram.program.wgsl,
   });
   const pipeline = context.device.createRenderPipeline({
     label: cacheKey,
     layout: 'auto',
     vertex: {
       module: shader,
-      entryPoint: program.vertexEntryPoint,
-      buffers: createVertexBufferLayouts(program.vertexAttributes),
+      entryPoint: preparedProgram.program.vertexEntryPoint,
+      buffers: createVertexBufferLayouts(preparedProgram.program.vertexAttributes),
     },
     fragment: {
       module: shader,
-      entryPoint: program.fragmentEntryPoint,
+      entryPoint: preparedProgram.program.fragmentEntryPoint,
       targets: [{ format }, { format }],
     },
     primitive: {
@@ -2727,14 +2848,15 @@ export const ensureDeferredLightingPipeline = (
 export const ensureMaterialPipeline = (
   context: GpuRenderExecutionContext,
   residency: RuntimeResidency,
-  program: MaterialProgram,
+  program: MaterialProgram | PreparedMaterialProgram,
   format: GPUTextureFormat,
   options: MaterialPipelineOptions = {},
 ): GPURenderPipeline => {
+  const preparedProgram = getPreparedMaterialProgram(program);
   const blendKey = options.blend ? 'alpha-blend' : 'opaque';
   const depthWriteEnabled = options.depthWriteEnabled ?? true;
   const cullMode = options.cullMode === 'none' ? 'none' : options.cullMode ?? 'back';
-  const cacheKey = `${program.id}:${format}:${blendKey}:${
+  const cacheKey = `${preparedProgram.key}:${format}:${blendKey}:${
     depthWriteEnabled ? 'depth' : 'nodepth'
   }:${cullMode}`;
   const cached = residency.pipelines.get(cacheKey);
@@ -2744,19 +2866,19 @@ export const ensureMaterialPipeline = (
 
   const shader = context.device.createShaderModule({
     label: cacheKey,
-    code: program.wgsl,
+    code: preparedProgram.program.wgsl,
   });
   const pipeline = context.device.createRenderPipeline({
     label: cacheKey,
     layout: 'auto',
     vertex: {
       module: shader,
-      entryPoint: program.vertexEntryPoint,
-      buffers: createVertexBufferLayouts(program.vertexAttributes),
+      entryPoint: preparedProgram.program.vertexEntryPoint,
+      buffers: createVertexBufferLayouts(preparedProgram.program.vertexAttributes),
     },
     fragment: {
       module: shader,
-      entryPoint: program.fragmentEntryPoint,
+      entryPoint: preparedProgram.program.fragmentEntryPoint,
       targets: [{
         format,
         blend: options.blend,
@@ -3951,19 +4073,30 @@ const resolveDeferredGbufferProgram = (
   material: Material,
   geometry: NonNullable<RuntimeResidency['geometry'] extends Map<string, infer T> ? T : never>,
   residency: RuntimeResidency,
-): MaterialProgram => {
+): PreparedMaterialProgram => {
   if (material.shaderId) {
-    return resolveMaterialProgram(materialRegistry, material);
+    return prepareMaterialProgram(materialRegistry, material);
   }
 
   if (material.kind === 'lit') {
-    return builtInDeferredGbufferLitProgram;
+    return createPreparedBuiltInProgram(builtInDeferredGbufferLitProgram, material, {}, {
+      geometry,
+      residency,
+    });
   }
 
   const baseColorTexture = getBaseColorTextureResidency(residency, material);
   return baseColorTexture && geometry.attributeBuffers.TEXCOORD_0
-    ? builtInDeferredGbufferTexturedUnlitProgram
-    : builtInDeferredGbufferUnlitProgram;
+    ? createPreparedBuiltInProgram(
+      builtInDeferredGbufferTexturedUnlitProgram,
+      material,
+      { preferTexturedUnlit: true },
+      { geometry, residency },
+    )
+    : createPreparedBuiltInProgram(builtInDeferredGbufferUnlitProgram, material, {}, {
+      geometry,
+      residency,
+    });
 };
 
 export const renderForwardFrame = (
@@ -4518,10 +4651,11 @@ export const renderDeferredFrame = (
         cullMode: resolveMaterialRenderPolicy(material).doubleSided ? 'none' : 'back',
       },
     );
+    const materialProgram = gbufferProgram.program;
 
     let isDrawable = true;
-    for (let index = 0; index < gbufferProgram.vertexAttributes.length; index += 1) {
-      const attribute = gbufferProgram.vertexAttributes[index];
+    for (let index = 0; index < materialProgram.vertexAttributes.length; index += 1) {
+      const attribute = materialProgram.vertexAttributes[index];
       if (attribute.offset !== 0) {
         isDrawable = false;
         break;
@@ -4561,7 +4695,7 @@ export const renderDeferredFrame = (
       }),
     );
 
-    const materialBindings = getMaterialBindingDescriptors(gbufferProgram);
+    const materialBindings = getMaterialBindingDescriptors(materialProgram);
     const materialResidency = {
       current: undefined as ReturnType<typeof ensureMaterialResidency> | undefined,
     };
@@ -4995,10 +5129,11 @@ export const renderUberFrame = (
         cullMode: resolveMaterialRenderPolicy(material).doubleSided ? 'none' : 'back',
       },
     );
+    const materialProgram = gbufferProgram.program;
 
     let isDrawable = true;
-    for (let index = 0; index < gbufferProgram.vertexAttributes.length; index += 1) {
-      const attribute = gbufferProgram.vertexAttributes[index];
+    for (let index = 0; index < materialProgram.vertexAttributes.length; index += 1) {
+      const attribute = materialProgram.vertexAttributes[index];
       if (attribute.offset !== 0) {
         isDrawable = false;
         break;
@@ -5038,7 +5173,7 @@ export const renderUberFrame = (
       }),
     );
 
-    const materialBindings = getMaterialBindingDescriptors(gbufferProgram);
+    const materialBindings = getMaterialBindingDescriptors(materialProgram);
     const materialResidency = {
       current: undefined as ReturnType<typeof ensureMaterialResidency> | undefined,
     };

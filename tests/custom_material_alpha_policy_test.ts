@@ -7,6 +7,7 @@ import {
   type GpuRenderExecutionContext,
   registerWgslMaterial,
   renderForwardFrame,
+  resolveMaterialVariant,
 } from '@rieul3d/renderer';
 
 type MockBindGroup = Readonly<{
@@ -175,4 +176,73 @@ fn fsMain() -> @location(0) vec4<f32> {
     alphaPolicyBindGroup?.entries.map((entry) => entry.binding),
     [0],
   );
+});
+
+Deno.test('resolveMaterialVariant captures shader-structure features for built-in materials', () => {
+  const residency = createRuntimeResidency();
+  residency.textures.set('base-color-texture', {
+    textureId: 'base-color-texture',
+    texture: {} as GPUTexture,
+    view: {} as GPUTextureView,
+    sampler: {} as GPUSampler,
+    width: 1,
+    height: 1,
+    format: 'rgba8unorm',
+  });
+
+  const variant = resolveMaterialVariant(
+    {
+      id: 'lit-material',
+      kind: 'lit',
+      textures: [{
+        id: 'base-color-texture',
+        semantic: 'baseColor',
+        colorSpace: 'srgb',
+        sampler: 'linear-repeat',
+      }],
+      parameters: {
+        color: { x: 0.2, y: 0.3, z: 0.4, w: 1 },
+      },
+    },
+    { preferTexturedLit: true },
+    {
+      geometry: {
+        meshId: 'mesh-0',
+        attributeBuffers: {
+          POSITION: {} as GPUBuffer,
+          TEXCOORD_0: {} as GPUBuffer,
+        },
+        vertexCount: 3,
+        indexCount: 0,
+      },
+      residency,
+    },
+  );
+
+  assertEquals(variant.programId, 'built-in:lit-textured');
+  assertEquals(variant.shaderFamily, 'lit');
+  assertEquals(variant.usesCustomShader, false);
+  assertEquals(variant.usesBaseColorTexture, true);
+  assertEquals(variant.usesTexcoord0, true);
+});
+
+Deno.test('resolveMaterialVariant marks custom shader materials separately', () => {
+  const variant = resolveMaterialVariant({
+    id: 'custom-material',
+    kind: 'custom',
+    shaderId: 'custom:program',
+    alphaMode: 'mask',
+    alphaCutoff: 0.2,
+    textures: [],
+    parameters: {
+      color: { x: 1, y: 0, z: 0, w: 1 },
+    },
+  });
+
+  assertEquals(variant.programId, 'custom:program');
+  assertEquals(variant.shaderFamily, 'custom');
+  assertEquals(variant.alphaMode, 'mask');
+  assertEquals(variant.usesCustomShader, true);
+  assertEquals(variant.usesBaseColorTexture, false);
+  assertEquals(variant.usesTexcoord0, false);
 });

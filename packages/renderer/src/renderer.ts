@@ -312,9 +312,10 @@ export type MaterialBindingDescriptor = Readonly<
 
 export type MaterialRegistry = Readonly<{
   programs: Map<string, MaterialProgram>;
+  templates: Map<string, MaterialProgramTemplate>;
 }>;
 
-type MaterialVariant = Readonly<{
+export type MaterialVariant = Readonly<{
   materialId: string;
   programId: string;
   shaderFamily: string;
@@ -331,6 +332,12 @@ type PreparedMaterialProgram = Readonly<{
   key: string;
   variant: MaterialVariant;
   program: MaterialProgram;
+}>;
+
+export type MaterialProgramTemplate = Readonly<{
+  id: string;
+  label: string;
+  prepareProgram: (variant: MaterialVariant) => MaterialProgram;
 }>;
 
 export type PostProcessProgram = Readonly<{
@@ -1398,6 +1405,7 @@ export const createMaterialRegistry = (): MaterialRegistry => ({
     [builtInLitProgramId, builtInLitProgram],
     [builtInTexturedUnlitProgramId, builtInTexturedUnlitProgram],
   ]),
+  templates: new Map(),
 });
 
 export type ResolveMaterialProgramOptions = Readonly<{
@@ -1406,7 +1414,9 @@ export type ResolveMaterialProgramOptions = Readonly<{
 }>;
 
 type MaterialVariantResolutionOptions = Readonly<{
-  geometry?: NonNullable<RuntimeResidency['geometry'] extends Map<string, infer T> ? T : never>;
+  geometry?:
+    | NonNullable<RuntimeResidency['geometry'] extends Map<string, infer T> ? T : never>
+    | NonNullable<EvaluatedScene['nodes'][number]['mesh']>;
   residency?: RuntimeResidency;
 }>;
 
@@ -1415,6 +1425,14 @@ export const registerWgslMaterial = (
   program: MaterialProgram,
 ): MaterialRegistry => {
   registry.programs.set(program.id, program);
+  return registry;
+};
+
+export const registerWgslMaterialTemplate = (
+  registry: MaterialRegistry,
+  template: MaterialProgramTemplate,
+): MaterialRegistry => {
+  registry.templates.set(template.id, template);
   return registry;
 };
 
@@ -1465,7 +1483,11 @@ export const resolveMaterialVariant = (
       residency &&
       getBaseColorTextureResidency(residency, material),
   );
-  const usesTexcoord0 = Boolean(geometry?.attributeBuffers.TEXCOORD_0);
+  const usesTexcoord0 = geometry
+    ? 'attributeBuffers' in geometry
+      ? Boolean(geometry.attributeBuffers.TEXCOORD_0)
+      : geometry.attributes.some((attribute) => attribute.semantic === 'TEXCOORD_0')
+    : false;
   const fallbackProgramId = options.preferTexturedLit
     ? builtInTexturedLitProgramId
     : options.preferTexturedUnlit
@@ -1511,8 +1533,12 @@ const prepareMaterialProgram = (
   options: ResolveMaterialProgramOptions = {},
   resolutionOptions: MaterialVariantResolutionOptions = {},
 ): PreparedMaterialProgram => {
-  const program = resolveMaterialProgram(registry, material, options);
   const variant = resolveMaterialVariant(material, options, resolutionOptions);
+  const program = material?.shaderId
+    ? registry.programs.get(material.shaderId) ??
+      registry.templates.get(material.shaderId)?.prepareProgram(variant) ??
+      resolveMaterialProgram(registry, material, options)
+    : resolveMaterialProgram(registry, material, options);
   return {
     key: createPreparedMaterialProgramKey(program, variant),
     variant,
@@ -1933,15 +1959,22 @@ export const collectRendererCapabilityIssues = (
           `renderer "${renderer.label}" does not support custom shader materials`,
         );
       } else {
-        const program = materialRegistry.programs.get(material.shaderId);
-        if (!program) {
+        let preparedProgram: PreparedMaterialProgram | undefined;
+        try {
+          preparedProgram = prepareMaterialProgram(materialRegistry, material, {}, {
+            geometry: node.mesh,
+            residency,
+          });
+        } catch {
           pushIssue(
             'material-binding',
             `shader:${material.shaderId}`,
             `renderer "${renderer.label}" cannot resolve custom shader "${material.shaderId}" for material "${material.id}"`,
           );
-        } else {
-          for (const descriptor of getMaterialBindingDescriptors(program)) {
+        }
+
+        if (preparedProgram) {
+          for (const descriptor of getMaterialBindingDescriptors(preparedProgram.program)) {
             if (descriptor.kind === 'uniform' || descriptor.kind === 'alpha-policy') {
               continue;
             }
@@ -4075,7 +4108,7 @@ const resolveDeferredGbufferProgram = (
   residency: RuntimeResidency,
 ): PreparedMaterialProgram => {
   if (material.shaderId) {
-    return prepareMaterialProgram(materialRegistry, material);
+    return prepareMaterialProgram(materialRegistry, material, {}, { geometry, residency });
   }
 
   if (material.kind === 'lit') {

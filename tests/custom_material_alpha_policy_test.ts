@@ -6,6 +6,7 @@ import {
   createMaterialRegistry,
   type GpuRenderExecutionContext,
   registerWgslMaterial,
+  registerWgslMaterialTemplate,
   renderForwardFrame,
   resolveMaterialVariant,
 } from '@rieul3d/renderer';
@@ -245,4 +246,115 @@ Deno.test('resolveMaterialVariant marks custom shader materials separately', () 
   assertEquals(variant.usesCustomShader, true);
   assertEquals(variant.usesBaseColorTexture, false);
   assertEquals(variant.usesTexcoord0, false);
+});
+
+Deno.test('renderForwardFrame can prepare a custom WGSL template from material variant inputs', () => {
+  const mocks = createRenderMocks();
+  const residency = createRuntimeResidency();
+  residency.textures.set('base-color-texture', {
+    textureId: 'base-color-texture',
+    texture: {} as GPUTexture,
+    view: {} as GPUTextureView,
+    sampler: {} as GPUSampler,
+    width: 1,
+    height: 1,
+    format: 'rgba8unorm',
+  });
+
+  let capturedProgramId = '';
+  const registry = registerWgslMaterialTemplate(createMaterialRegistry(), {
+    id: 'custom:template',
+    label: 'custom template',
+    prepareProgram: (variant) => {
+      capturedProgramId = variant.usesBaseColorTexture && variant.usesTexcoord0
+        ? 'custom:template:textured'
+        : 'custom:template:plain';
+      return {
+        id: capturedProgramId,
+        label: 'templated custom program',
+        wgsl: `
+struct TransformUniforms {
+  world: mat4x4<f32>,
+  viewProjection: mat4x4<f32>,
+};
+
+@group(0) @binding(0) var<uniform> transform: TransformUniforms;
+
+@vertex
+fn vsMain(@location(0) position: vec3<f32>) -> @builtin(position) vec4<f32> {
+  return transform.viewProjection * transform.world * vec4<f32>(position, 1.0);
+}
+
+@fragment
+fn fsMain() -> @location(0) vec4<f32> {
+  return vec4<f32>(1.0, 1.0, 1.0, 1.0);
+}
+        `,
+        vertexEntryPoint: 'vsMain',
+        fragmentEntryPoint: 'fsMain',
+        vertexAttributes: [{
+          semantic: 'POSITION',
+          shaderLocation: 0,
+          format: 'float32x3',
+          offset: 0,
+          arrayStride: 12,
+        }],
+        usesTransformBindings: true,
+      };
+    },
+  });
+
+  let scene = createSceneIr('custom-template');
+  scene = appendMaterial(scene, {
+    id: 'custom-template-material',
+    kind: 'custom',
+    shaderId: 'custom:template',
+    textures: [{
+      id: 'base-color-texture',
+      semantic: 'baseColor',
+      colorSpace: 'srgb',
+      sampler: 'linear-repeat',
+    }],
+    parameters: {},
+  });
+  scene = appendMesh(scene, {
+    id: 'mesh-0',
+    materialId: 'custom-template-material',
+    attributes: [
+      {
+        semantic: 'POSITION',
+        itemSize: 3,
+        values: [0, 0.7, 0, -0.7, -0.7, 0, 0.7, -0.7, 0],
+      },
+      {
+        semantic: 'TEXCOORD_0',
+        itemSize: 2,
+        values: [0.5, 1, 0, 0, 1, 0],
+      },
+    ],
+  });
+  scene = appendNode(scene, createNode('mesh-node', { meshId: 'mesh-0' }));
+
+  residency.geometry.set('mesh-0', {
+    meshId: 'mesh-0',
+    attributeBuffers: {
+      POSITION: { id: 0 } as unknown as GPUBuffer,
+      TEXCOORD_0: { id: 1 } as unknown as GPUBuffer,
+    },
+    vertexCount: 3,
+    indexCount: 0,
+  });
+
+  renderForwardFrame(
+    mocks as unknown as GpuRenderExecutionContext,
+    createOffscreenBinding({
+      device: mocks.device as unknown as GPUDevice,
+      target: { kind: 'offscreen', width: 16, height: 16, format: 'rgba8unorm', sampleCount: 1 },
+    }),
+    residency,
+    evaluateScene(scene, { timeMs: 0 }),
+    registry,
+  );
+
+  assertEquals(capturedProgramId, 'custom:template:textured');
 });

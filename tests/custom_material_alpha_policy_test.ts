@@ -1,4 +1,4 @@
-import { assertEquals } from 'jsr:@std/assert@^1.0.14';
+import { assert, assertEquals } from 'jsr:@std/assert@^1.0.14';
 import { evaluateScene } from '@rieul3d/core';
 import { createOffscreenBinding, createRuntimeResidency } from '@rieul3d/gpu';
 import { appendMaterial, appendMesh, appendNode, createNode, createSceneIr } from '@rieul3d/ir';
@@ -246,6 +246,39 @@ Deno.test('resolveMaterialVariant marks custom shader materials separately', () 
   assertEquals(variant.usesCustomShader, true);
   assertEquals(variant.usesBaseColorTexture, false);
   assertEquals(variant.usesTexcoord0, false);
+});
+
+Deno.test('createMaterialRegistry exposes a built-in unlit template that selects textured variants', () => {
+  const template = createMaterialRegistry().templates.get('built-in:unlit-template');
+  assert(template);
+
+  const plainProgram = template.prepareProgram({
+    materialId: 'plain-material',
+    programId: 'built-in:unlit',
+    shaderFamily: 'unlit',
+    alphaMode: 'opaque',
+    renderQueue: 'opaque',
+    doubleSided: false,
+    depthWrite: true,
+    usesCustomShader: false,
+    usesBaseColorTexture: false,
+    usesTexcoord0: false,
+  });
+  const texturedProgram = template.prepareProgram({
+    materialId: 'textured-material',
+    programId: 'built-in:unlit',
+    shaderFamily: 'unlit',
+    alphaMode: 'opaque',
+    renderQueue: 'opaque',
+    doubleSided: false,
+    depthWrite: true,
+    usesCustomShader: false,
+    usesBaseColorTexture: true,
+    usesTexcoord0: true,
+  });
+
+  assertEquals(plainProgram.id, 'built-in:unlit');
+  assertEquals(texturedProgram.id, 'built-in:unlit-textured');
 });
 
 Deno.test('renderForwardFrame can prepare a custom WGSL template from material variant inputs', () => {

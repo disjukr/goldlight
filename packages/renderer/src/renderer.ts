@@ -437,6 +437,7 @@ const builtInUnlitProgramId = 'built-in:unlit';
 const builtInLitProgramId = 'built-in:lit';
 const builtInTexturedUnlitProgramId = 'built-in:unlit-textured';
 const builtInTexturedLitProgramId = 'built-in:lit-textured';
+const builtInUnlitTemplateId = 'built-in:unlit-template';
 const builtInDeferredDepthPrepassProgramId = 'built-in:deferred-depth-prepass';
 const builtInDeferredGbufferUnlitProgramId = 'built-in:deferred-gbuffer-unlit';
 const builtInDeferredGbufferTexturedUnlitProgramId = 'built-in:deferred-gbuffer-unlit-textured';
@@ -1261,6 +1262,15 @@ const builtInTexturedLitProgram: MaterialProgram = {
   ],
 };
 
+const builtInUnlitProgramTemplate: MaterialProgramTemplate = {
+  id: builtInUnlitTemplateId,
+  label: 'Built-in Unlit Template',
+  prepareProgram: (variant) =>
+    variant.usesBaseColorTexture && variant.usesTexcoord0
+      ? builtInTexturedUnlitProgram
+      : builtInUnlitProgram,
+};
+
 const builtInDeferredGbufferUnlitProgram: MaterialProgram = {
   id: builtInDeferredGbufferUnlitProgramId,
   label: 'Built-in Deferred G-buffer Unlit',
@@ -1405,7 +1415,9 @@ export const createMaterialRegistry = (): MaterialRegistry => ({
     [builtInLitProgramId, builtInLitProgram],
     [builtInTexturedUnlitProgramId, builtInTexturedUnlitProgram],
   ]),
-  templates: new Map(),
+  templates: new Map([
+    [builtInUnlitTemplateId, builtInUnlitProgramTemplate],
+  ]),
 });
 
 export type ResolveMaterialProgramOptions = Readonly<{
@@ -1534,11 +1546,15 @@ const prepareMaterialProgram = (
   resolutionOptions: MaterialVariantResolutionOptions = {},
 ): PreparedMaterialProgram => {
   const variant = resolveMaterialVariant(material, options, resolutionOptions);
+  const builtInTemplate = !material?.shaderId && material?.kind === 'unlit'
+    ? registry.templates.get(builtInUnlitTemplateId)
+    : undefined;
   const program = material?.shaderId
     ? registry.programs.get(material.shaderId) ??
       registry.templates.get(material.shaderId)?.prepareProgram(variant) ??
       resolveMaterialProgram(registry, material, options)
-    : resolveMaterialProgram(registry, material, options);
+    : builtInTemplate?.prepareProgram(variant) ??
+      resolveMaterialProgram(registry, material, options);
   return {
     key: createPreparedMaterialProgramKey(program, variant),
     variant,

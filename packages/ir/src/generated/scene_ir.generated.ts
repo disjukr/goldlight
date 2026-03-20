@@ -40,13 +40,39 @@ export type Transform = Readonly<{
 
 export type AssetRef = Readonly<{
   id: Id;
+  kind?: string;
   uri?: string;
   mimeType?: string;
 }>;
 
+export type InlineImageAsset = Readonly<{
+  mimeType: string;
+  bytes: readonly number[];
+  width?: number;
+  height?: number;
+  pixelFormat?: string;
+  bytesPerRow?: number;
+  rowsPerImage?: number;
+}>;
+
+export type TextureSourceInline = Readonly<{
+  'type': 'inline';
+  image: InlineImageAsset;
+}>;
+
+export type TextureSourceAsset = Readonly<{
+  'type': 'asset';
+  assetId: Id;
+}>;
+
+export type TextureSource =
+  | TextureSourceInline
+  | TextureSourceAsset;
+
 export type TextureRef = Readonly<{
   id: Id;
   assetId?: Id;
+  source?: TextureSource;
   semantic: string;
   colorSpace: string;
   sampler: string;
@@ -78,10 +104,27 @@ export type MeshAttribute = Readonly<{
   values: readonly Scalar[];
 }>;
 
+export type MeshSourceInline = Readonly<{
+  'type': 'inline';
+  attributes: readonly MeshAttribute[];
+  indices?: readonly number[];
+}>;
+
+export type MeshSourceAsset = Readonly<{
+  'type': 'asset';
+  assetId: Id;
+  format?: string;
+}>;
+
+export type MeshSource =
+  | MeshSourceInline
+  | MeshSourceAsset;
+
 export type MeshPrimitive = Readonly<{
   id: Id;
   attributes: readonly MeshAttribute[];
   indices?: readonly number[];
+  source?: MeshSource;
   materialId?: Id;
 }>;
 

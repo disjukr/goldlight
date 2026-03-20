@@ -1,5 +1,10 @@
-import type { GpuUploadContext, RenderContextBinding, RuntimeResidency } from '@rieul3d/gpu';
-import { ensureSceneMeshResidency } from '@rieul3d/gpu';
+import type {
+  GpuTextureUploadContext,
+  GpuUploadContext,
+  RenderContextBinding,
+  RuntimeResidency,
+} from '@rieul3d/gpu';
+import { ensureSceneMeshResidency, ensureSceneTextureResidency } from '@rieul3d/gpu';
 import type {
   GpuRenderExecutionContext,
   MaterialRegistry,
@@ -24,6 +29,13 @@ export type EnsureSceneMeshResidencyHook = (
   evaluatedScene: SceneRootFrameResult['evaluatedScene'],
 ) => RuntimeResidency;
 
+export type EnsureSceneTextureResidencyHook = (
+  context: GpuTextureUploadContext,
+  residency: RuntimeResidency,
+  scene: SceneRootFrameResult['scene'],
+  evaluatedScene: SceneRootFrameResult['evaluatedScene'],
+) => RuntimeResidency;
+
 export type SceneRootRenderFrameHook<TRenderResult> = (
   context: GpuRenderExecutionContext,
   binding: RenderContextBinding,
@@ -35,13 +47,14 @@ export type SceneRootRenderFrameHook<TRenderResult> = (
 
 export type SceneRootRendererHooks<TRenderResult> = Readonly<{
   ensureSceneMeshResidency?: EnsureSceneMeshResidencyHook;
+  ensureSceneTextureResidency?: EnsureSceneTextureResidencyHook;
   renderFrame?: SceneRootRenderFrameHook<TRenderResult>;
 }>;
 
 export type SceneRootRendererOptions<TRenderResult> = Readonly<
   & SceneRootFrameDriverOptions
   & {
-    context: GpuRenderExecutionContext & GpuUploadContext;
+    context: GpuRenderExecutionContext & GpuUploadContext & GpuTextureUploadContext;
     binding: RenderContextBinding;
     residency: RuntimeResidency;
     materialRegistry?: MaterialRegistry;
@@ -75,6 +88,9 @@ export const createSceneRootRenderer = <TRenderResult>(
     initialTimeMs: options.initialTimeMs,
   });
   const ensureMeshResidency = options.hooks?.ensureSceneMeshResidency ?? ensureSceneMeshResidency;
+  const ensureTextureResidency = options.hooks?.ensureSceneTextureResidency ??
+    ((context, residency, scene) =>
+      ensureSceneTextureResidency(context, residency, scene, { images: new Map() }));
   const renderFrame = options.hooks?.renderFrame;
   const materialRegistry = options.materialRegistry ?? createMaterialRegistry();
   const postProcessPasses = options.postProcessPasses ?? [];
@@ -88,6 +104,12 @@ export const createSceneRootRenderer = <TRenderResult>(
     renderFrame: (timeMs, frameOptions) => {
       const frame = frameDriver.advanceFrame(timeMs, frameOptions);
       ensureMeshResidency(
+        options.context,
+        options.residency,
+        frame.scene,
+        frame.evaluatedScene,
+      );
+      ensureTextureResidency?.(
         options.context,
         options.residency,
         frame.scene,

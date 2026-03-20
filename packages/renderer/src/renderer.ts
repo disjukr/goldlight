@@ -1383,6 +1383,26 @@ const builtInLitProgramTemplate: MaterialProgramTemplate<BuiltInLitTemplateVaria
         residency &&
         getBaseColorTextureResidency(residency, material),
     );
+    const usesMetallicRoughnessTexture = Boolean(
+      material &&
+        residency &&
+        getMaterialTextureResidency(residency, material, 'metallicRoughness'),
+    );
+    const usesNormalTexture = Boolean(
+      material &&
+        residency &&
+        getMaterialTextureResidency(residency, material, 'normal'),
+    );
+    const usesOcclusionTexture = Boolean(
+      material &&
+        residency &&
+        getMaterialTextureResidency(residency, material, 'occlusion'),
+    );
+    const usesEmissiveTexture = Boolean(
+      material &&
+        residency &&
+        getMaterialTextureResidency(residency, material, 'emissive'),
+    );
     const usesTexcoord0 = geometry
       ? 'attributeBuffers' in geometry
         ? Boolean(geometry.attributeBuffers.TEXCOORD_0)
@@ -1396,6 +1416,10 @@ const builtInLitProgramTemplate: MaterialProgramTemplate<BuiltInLitTemplateVaria
       doubleSided: policy.doubleSided,
       depthWrite: policy.depthWrite,
       usesBaseColorTexture,
+      usesMetallicRoughnessTexture,
+      usesNormalTexture,
+      usesOcclusionTexture,
+      usesEmissiveTexture,
       usesTexcoord0,
     };
   },
@@ -2302,17 +2326,6 @@ export const collectRendererCapabilityIssues = (
         );
       }
 
-      const unsupportedLitTexture = materialTextures.find((texture) =>
-        texture.semantic !== 'baseColor'
-      );
-      if (unsupportedLitTexture) {
-        pushIssue(
-          'material-binding',
-          `texture-semantic:${unsupportedLitTexture.semantic}`,
-          `renderer "${renderer.label}" does not support "${unsupportedLitTexture.semantic}" textures on built-in lit material "${material.id}"`,
-        );
-      }
-
       if (node.mesh && !node.mesh.attributes.some((attribute) => attribute.semantic === 'NORMAL')) {
         pushIssue(
           'material-binding',
@@ -2321,19 +2334,40 @@ export const collectRendererCapabilityIssues = (
         );
       }
 
-      const baseColorTexture = materialTextures.find((texture) => texture.semantic === 'baseColor');
-      if (baseColorTexture) {
+      const bindingDescriptors = getMaterialBindingDescriptors(
+        prepareMaterialProgram(materialRegistry, material, {}, {
+          geometry: node.mesh,
+          residency,
+        }).program,
+      );
+
+      for (const descriptor of bindingDescriptors) {
+        if (descriptor.kind === 'uniform' || descriptor.kind === 'alpha-policy') {
+          continue;
+        }
+
+        const semantic = descriptor.textureSemantic;
+        const textureRef = materialTextures.find((texture) => texture.semantic === semantic);
+        if (!textureRef) {
+          pushIssue(
+            'material-binding',
+            `texture-semantic:${semantic}`,
+            `renderer "${renderer.label}" cannot satisfy "${semantic}" ${descriptor.kind} binding for built-in lit material "${material.id}"`,
+          );
+          continue;
+        }
+
         if (node.mesh && !hasTexcoord0) {
           pushIssue(
             'material-binding',
             'vertex-attribute:TEXCOORD_0',
-            `renderer "${renderer.label}" cannot sample baseColor textures on lit node "${node.node.id}" because mesh "${node.mesh.id}" is missing TEXCOORD_0`,
+            `renderer "${renderer.label}" cannot sample "${semantic}" textures on lit node "${node.node.id}" because mesh "${node.mesh.id}" is missing TEXCOORD_0`,
           );
-        } else if (residency && !residency.textures.get(baseColorTexture.id)) {
+        } else if (residency && !residency.textures.get(textureRef.id)) {
           pushIssue(
             'material-binding',
-            'texture-residency:baseColor:texture',
-            `renderer "${renderer.label}" cannot sample baseColor textures for material "${material.id}" because texture "${baseColorTexture.id}" is not resident`,
+            `texture-residency:${semantic}:${descriptor.kind}`,
+            `renderer "${renderer.label}" cannot sample "${semantic}" textures for material "${material.id}" because texture "${textureRef.id}" is not resident`,
           );
         }
       }
@@ -2698,7 +2732,9 @@ const createDirectionalLightUniformData = (
 };
 
 const usesLitMaterialProgram = (program: MaterialProgram): boolean =>
-  program.id === builtInLitProgramId || program.id === builtInTexturedLitProgramId;
+  program.id === builtInLitProgramId ||
+  program.id === builtInTexturedLitProgramId ||
+  program.id.startsWith(`${builtInLitProgramId}+`);
 
 const prefersTexturedMaterialProgram = (
   program: MaterialProgram,

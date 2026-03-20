@@ -58,6 +58,7 @@ export type TemplateMaterialVariant =
   }>;
 
 export type SlotName =
+  | 'module_scope'
   | 'bindings'
   | 'vertex_inputs'
   | 'vs_out_fields'

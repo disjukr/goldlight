@@ -4,12 +4,16 @@ import type {
   Camera,
   CameraOrthographic,
   CameraPerspective,
+  InlineImageAsset,
   Light,
   Material,
+  MeshAttribute,
   MeshPrimitive,
+  MeshSource,
   Node,
   SceneIr,
   TextureRef,
+  TextureSource,
   Transform,
   Vec3,
 } from './generated/scene_ir.generated.ts';
@@ -121,6 +125,66 @@ export const appendLight = (scene: SceneIr, light: Light): SceneIr => ({
 export const appendAnimationClip = (scene: SceneIr, clip: AnimationClip): SceneIr => ({
   ...scene,
   animationClips: [...scene.animationClips, clip],
+});
+
+export const resolveTextureSourceAssetId = (texture: TextureRef): string | undefined => {
+  if (texture.source?.type === 'asset') {
+    return texture.source.assetId;
+  }
+
+  return texture.assetId;
+};
+
+export const resolveTextureSourceInlineImage = (
+  texture: TextureRef,
+): InlineImageAsset | undefined =>
+  texture.source?.type === 'inline' ? texture.source.image : undefined;
+
+export const createInlineTextureSource = (image: InlineImageAsset): TextureSource => ({
+  type: 'inline',
+  image,
+});
+
+export const createAssetTextureSource = (assetId: string): TextureSource => ({
+  type: 'asset',
+  assetId,
+});
+
+export const resolveMeshSourceInline = (
+  mesh: MeshPrimitive,
+): Readonly<{
+  attributes: readonly MeshAttribute[];
+  indices?: readonly number[];
+}> => {
+  if (mesh.source?.type === 'inline') {
+    return {
+      attributes: mesh.source.attributes,
+      indices: mesh.source.indices,
+    };
+  }
+
+  return {
+    attributes: mesh.attributes,
+    indices: mesh.indices,
+  };
+};
+
+export const resolveMeshSourceAssetId = (mesh: MeshPrimitive): string | undefined =>
+  mesh.source?.type === 'asset' ? mesh.source.assetId : undefined;
+
+export const createInlineMeshSource = (
+  attributes: readonly MeshAttribute[],
+  indices?: readonly number[],
+): MeshSource => ({
+  type: 'inline',
+  attributes,
+  indices,
+});
+
+export const createAssetMeshSource = (assetId: string, format?: string): MeshSource => ({
+  type: 'asset',
+  assetId,
+  format,
 });
 
 export const validateSceneIr = (

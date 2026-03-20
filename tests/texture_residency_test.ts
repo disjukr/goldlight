@@ -117,6 +117,8 @@ const assetSource: AssetSource = {
   ]),
 };
 
+const imageAsset = assetSource.images!.get('image-0')!;
+
 Deno.test('createTextureUploadPlan derives texture dimensions and upload layout', () => {
   const plan = createTextureUploadPlan(
     {
@@ -126,7 +128,7 @@ Deno.test('createTextureUploadPlan derives texture dimensions and upload layout'
       colorSpace: 'srgb',
       sampler: 'linear-repeat',
     },
-    assetSource.images.get('image-0')!,
+    imageAsset,
   );
 
   assertEquals(plan.width, 2);
@@ -146,7 +148,7 @@ Deno.test('uploadTextureResidency creates texture, view, sampler, and upload wri
       colorSpace: 'srgb',
       sampler: 'nearest-clamp',
     },
-    assetSource.images.get('image-0')!,
+    imageAsset,
   );
 
   assertEquals(residency.width, 2);

@@ -40,13 +40,34 @@ struct Transform {
 
 struct AssetRef {
   id: Id,
+  kind?: string,
   uri?: string,
   mimeType?: string,
+}
+
+struct InlineImageAsset {
+  mimeType: string,
+  bytes: int32[],
+  width?: int32,
+  height?: int32,
+  pixelFormat?: string,
+  bytesPerRow?: int32,
+  rowsPerImage?: int32,
+}
+
+union TextureSource {
+  inline(
+    image: InlineImageAsset,
+  ),
+  asset(
+    assetId: Id,
+  ),
 }
 
 struct TextureRef {
   id: Id,
   assetId?: Id,
+  source?: TextureSource,
   semantic: string,
   colorSpace: string,
   sampler: string,
@@ -78,10 +99,22 @@ struct MeshAttribute {
   values: Scalar[],
 }
 
+union MeshSource {
+  inline(
+    attributes: MeshAttribute[],
+    indices?: int32[],
+  ),
+  asset(
+    assetId: Id,
+    format?: string,
+  ),
+}
+
 struct MeshPrimitive {
   id: Id,
   attributes: MeshAttribute[],
   indices?: int32[],
+  source?: MeshSource,
   materialId?: Id,
 }
 

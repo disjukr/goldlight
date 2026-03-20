@@ -1,4 +1,9 @@
-import type { GpuUploadContext, RenderContextBinding, RuntimeResidency } from '@rieul3d/gpu';
+import type {
+  GpuTextureUploadContext,
+  GpuUploadContext,
+  RenderContextBinding,
+  RuntimeResidency,
+} from '@rieul3d/gpu';
 import type {
   DeferredRenderResult,
   GpuRenderExecutionContext,
@@ -11,6 +16,7 @@ import { type SceneRootFrameDriverOptions } from './runtime_driver.ts';
 import {
   createSceneRootRenderer,
   type EnsureSceneMeshResidencyHook,
+  type EnsureSceneTextureResidencyHook,
   type SceneRootRenderer,
   type SceneRootRenderFrameHook,
   type SceneRootRenderFrameResult,
@@ -20,13 +26,14 @@ type RenderDeferredFrameHook = SceneRootRenderFrameHook<DeferredRenderResult>;
 
 export type SceneRootDeferredRendererHooks = Readonly<{
   ensureSceneMeshResidency?: EnsureSceneMeshResidencyHook;
+  ensureSceneTextureResidency?: EnsureSceneTextureResidencyHook;
   renderDeferredFrame?: RenderDeferredFrameHook;
 }>;
 
 export type SceneRootDeferredRendererOptions = Readonly<
   & SceneRootFrameDriverOptions
   & {
-    context: GpuRenderExecutionContext & GpuUploadContext;
+    context: GpuRenderExecutionContext & GpuUploadContext & GpuTextureUploadContext;
     binding: RenderContextBinding;
     residency: RuntimeResidency;
     materialRegistry?: MaterialRegistry;
@@ -47,6 +54,7 @@ export const createSceneRootDeferredRenderer = (
     ...options,
     hooks: {
       ensureSceneMeshResidency: options.hooks?.ensureSceneMeshResidency,
+      ensureSceneTextureResidency: options.hooks?.ensureSceneTextureResidency,
       renderFrame: options.hooks?.renderDeferredFrame ?? renderDeferredFrame,
     },
   });

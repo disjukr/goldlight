@@ -13,6 +13,7 @@ import { emitMaterialProgram } from './emitter.ts';
 
 const slotMarkerPrefix = '// @slot ';
 const orderedSlots: readonly SlotName[] = [
+  'module_scope',
   'bindings',
   'vertex_inputs',
   'vs_out_fields',

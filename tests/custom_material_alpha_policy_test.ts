@@ -341,6 +341,10 @@ Deno.test('createMaterialRegistry exposes a built-in lit template that selects t
     renderQueue: 'opaque',
     doubleSided: false,
     depthWrite: true,
+    usesEmissiveTexture: false,
+    usesMetallicRoughnessTexture: false,
+    usesNormalTexture: false,
+    usesOcclusionTexture: false,
     usesCustomShader: false,
     usesBaseColorTexture: false,
     usesTexcoord0: false,
@@ -353,20 +357,76 @@ Deno.test('createMaterialRegistry exposes a built-in lit template that selects t
     renderQueue: 'opaque',
     doubleSided: false,
     depthWrite: true,
+    usesEmissiveTexture: true,
+    usesMetallicRoughnessTexture: true,
+    usesNormalTexture: true,
+    usesOcclusionTexture: true,
     usesCustomShader: false,
     usesBaseColorTexture: true,
     usesTexcoord0: true,
   });
 
-  assertEquals(plainProgram.id, 'built-in:lit');
-  assertEquals(texturedProgram.id, 'built-in:lit-textured');
+  assertEquals(plainProgram.id, 'built-in:lit+alpha_mask');
+  assertEquals(
+    texturedProgram.id,
+    'built-in:lit+base_color_texture+metallic_roughness_texture+normal_texture+occlusion_texture+emissive_texture+alpha_mask',
+  );
+  assertEquals(
+    texturedProgram.materialBindings,
+    [
+      { kind: 'uniform', binding: 0 },
+      { kind: 'texture', binding: 1, textureSemantic: 'baseColor' },
+      { kind: 'sampler', binding: 2, textureSemantic: 'baseColor' },
+      { kind: 'texture', binding: 3, textureSemantic: 'metallicRoughness' },
+      { kind: 'sampler', binding: 4, textureSemantic: 'metallicRoughness' },
+      { kind: 'texture', binding: 5, textureSemantic: 'normal' },
+      { kind: 'sampler', binding: 6, textureSemantic: 'normal' },
+      { kind: 'texture', binding: 7, textureSemantic: 'occlusion' },
+      { kind: 'sampler', binding: 8, textureSemantic: 'occlusion' },
+      { kind: 'texture', binding: 9, textureSemantic: 'emissive' },
+      { kind: 'sampler', binding: 10, textureSemantic: 'emissive' },
+    ],
+  );
   assert(
     texturedProgram.wgsl.includes('@group(2) @binding(0) var<uniform> lighting: LightingUniforms;'),
   );
   assert(
     texturedProgram.wgsl.includes('textureSample(baseColorTexture, baseColorSampler, in.texCoord)'),
   );
+  assert(texturedProgram.wgsl.includes('let metallicRoughnessSample = textureSample('));
+  assert(texturedProgram.wgsl.includes('surfaceNormal = sampleNormalTexture(in);'));
+  assert(texturedProgram.wgsl.includes('textureSample(occlusionTexture, occlusionSampler'));
+  assert(texturedProgram.wgsl.includes('textureSample(emissiveTexture, emissiveSampler'));
   assert(texturedProgram.wgsl.includes('let alphaPolicy = material.values[1];'));
+});
+
+Deno.test('inspectMaterialTemplateBake reports all lit helmet-style features', () => {
+  const report = inspectMaterialTemplateBake(createMaterialRegistry(), 'built-in:lit-template', {
+    materialId: 'helmet-material',
+    alphaMode: 'opaque',
+    renderQueue: 'opaque',
+    doubleSided: false,
+    depthWrite: true,
+    usesEmissiveTexture: true,
+    usesMetallicRoughnessTexture: true,
+    usesNormalTexture: true,
+    usesOcclusionTexture: true,
+    usesBaseColorTexture: true,
+    usesTexcoord0: true,
+  } as never);
+
+  assertEquals(report.activeFeatureIds, [
+    'base_color_texture',
+    'metallic_roughness_texture',
+    'normal_texture',
+    'occlusion_texture',
+    'emissive_texture',
+    'alpha_mask',
+  ]);
+  assert(report.wgsl.includes('fn sampleNormalTexture(in: VsOut) -> vec3<f32>'));
+  assert(report.wgsl.includes('var emissive = material.values[2].xyz;'));
+  assert(report.wgsl.includes('var metallic = clamp(material.values[3].x, 0.0, 1.0);'));
+  assert(report.wgsl.includes('occlusion = mix(1.0, occlusionSample'));
 });
 
 Deno.test('renderForwardFrame can prepare a custom WGSL template from material variant inputs', () => {

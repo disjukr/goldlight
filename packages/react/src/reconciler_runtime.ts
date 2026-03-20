@@ -52,6 +52,8 @@ export type ReconcilerDirectionalLightProps = Readonly<
   }
 >;
 
+type WithJsxKey<TProps> = TProps & { key?: React.Key };
+
 const hasChildIntent = (children: ReactNode): boolean => {
   if (Array.isArray(children)) {
     return children.some((child) => hasChildIntent(child));
@@ -156,17 +158,21 @@ export const DirectionalLight = (
 
 declare global {
   namespace JSX {
+    interface IntrinsicAttributes {
+      key?: React.Key;
+    }
+
     interface IntrinsicElements {
-      scene: ReconcilerSceneProps;
-      node: ReconcilerNodeProps;
-      group: ReconcilerGroupProps;
-      asset: AssetJsxProps;
-      texture: TextureJsxProps;
-      material: MaterialJsxProps;
-      light: LightJsxProps;
-      mesh: MeshJsxProps;
-      animationClip: AnimationClipJsxProps;
-      camera: CameraJsxProps;
+      scene: WithJsxKey<ReconcilerSceneProps>;
+      node: WithJsxKey<ReconcilerNodeProps>;
+      group: WithJsxKey<ReconcilerGroupProps>;
+      asset: WithJsxKey<AssetJsxProps>;
+      texture: WithJsxKey<TextureJsxProps>;
+      material: WithJsxKey<MaterialJsxProps>;
+      light: WithJsxKey<LightJsxProps>;
+      mesh: WithJsxKey<MeshJsxProps>;
+      animationClip: WithJsxKey<AnimationClipJsxProps>;
+      camera: WithJsxKey<CameraJsxProps>;
     }
   }
 }

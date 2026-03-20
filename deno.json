@@ -63,6 +63,8 @@
     "example:byow:cornell:run": "deno run -A --unstable-ffi --unstable-webgpu --unstable-raw-imports ./scripts/run_byow_example.ts ./examples/byow_cornell_pathtraced_demo/main.ts",
     "example:byow:cornell-helmet:check": "deno check --unstable-ffi --unstable-webgpu --unstable-raw-imports ./examples/byow_cornell_helmet_pathtraced_demo/main.ts",
     "example:byow:cornell-helmet:run": "deno run -A --unstable-ffi --unstable-webgpu --unstable-raw-imports ./scripts/run_byow_example.ts ./examples/byow_cornell_helmet_pathtraced_demo/main.ts",
+    "example:byow:helmet-forward:check": "deno check --unstable-ffi --unstable-webgpu --unstable-raw-imports ./examples/byow_helmet_forward_demo/main.ts ./examples/byow_helmet_forward_demo/app.tsx",
+    "example:byow:helmet-forward:run": "deno run -A --unstable-ffi --unstable-webgpu --unstable-raw-imports ./scripts/run_byow_example.ts ./examples/byow_helmet_forward_demo/main.ts",
     "example:byow:helmet-pathtraced:check": "deno check --unstable-ffi --unstable-webgpu --unstable-raw-imports ./examples/byow_helmet_pathtraced_demo/main.ts",
     "example:byow:helmet-pathtraced:run": "deno run -A --unstable-ffi --unstable-webgpu --unstable-raw-imports ./scripts/run_byow_example.ts ./examples/byow_helmet_pathtraced_demo/main.ts",
     "example:byow:react-bunny:check": "deno check --unstable-ffi --unstable-webgpu --unstable-raw-imports ./examples/byow_react_bunny_demo/main.tsx",

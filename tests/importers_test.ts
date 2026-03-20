@@ -354,11 +354,22 @@ Deno.test('importGltfFromJson ingests buffer views, accessors, images, and mater
   assertEquals(scene.textures, [{
     id: 'gltf-texture-0',
     assetId: 'gltf-image-0',
+    source: {
+      type: 'inline',
+      image: {
+        mimeType: 'image/png',
+        bytes: [...imageBytes],
+      },
+    },
     semantic: 'baseColor',
     colorSpace: 'srgb',
     sampler: 'linear-repeat',
   }]);
   assertEquals(scene.materials[0].textures, [scene.textures[0]]);
+  assertEquals(scene.textures[0].source?.type, 'inline');
+  if (scene.textures[0].source?.type === 'inline') {
+    assertEquals(scene.textures[0].source.image.mimeType, 'image/png');
+  }
   assertEquals(scene.materials[0].alphaMode, 'mask');
   assertEquals(scene.materials[0].alphaCutoff, 0.3);
   assertEquals(scene.materials[0].doubleSided, true);
@@ -383,6 +394,11 @@ Deno.test('importGltfFromJson ingests buffer views, accessors, images, and mater
   });
   assertEquals(scene.meshes[0].attributes[0].values, [0, 0, 0, 1, 0, 0, 0, 1, 0]);
   assertEquals(scene.meshes[0].indices, [0, 1, 2]);
+  assertEquals(scene.meshes[0].source?.type, 'inline');
+  if (scene.meshes[0].source?.type === 'inline') {
+    assertEquals(scene.meshes[0].source.attributes, scene.meshes[0].attributes);
+    assertEquals(scene.meshes[0].source.indices, [0, 1, 2]);
+  }
   assertEquals(scene.nodes[0].transform.translation, { x: 1, y: 2, z: 3 });
   assertEquals(scene.animationClips[0].channels[0].keyframes[1].value, {
     x: 1,
@@ -449,6 +465,72 @@ Deno.test('importGltfFromJson resolves external buffer and image URIs from provi
     uri: 'https://example.test/models/textures/albedo.png',
     mimeType: 'image/png',
   }]);
+  assertEquals(scene.textures[0].source, { type: 'asset', assetId: 'external-image-0' });
+});
+
+Deno.test('importGltfFromJson can inline external image assets when requested', () => {
+  const positions = new Float32Array([
+    0,
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    1,
+    0,
+  ]);
+  const externalBuffer = new Uint8Array(positions.buffer);
+  const externalImage = new Uint8Array([137, 80, 78, 71]);
+
+  const scene = importGltfFromJson(
+    {
+      buffers: [{
+        uri: 'geometry.bin',
+        byteLength: externalBuffer.byteLength,
+      }],
+      bufferViews: [{ buffer: 0, byteOffset: 0, byteLength: externalBuffer.byteLength }],
+      accessors: [{ bufferView: 0, componentType: 5126, count: 3, type: 'VEC3' }],
+      images: [{
+        uri: 'textures/albedo.png',
+        mimeType: 'image/png',
+      }],
+      textures: [{ source: 0 }],
+      materials: [{
+        pbrMetallicRoughness: {
+          baseColorTexture: { index: 0 },
+        },
+      }],
+      meshes: [{
+        primitives: [{
+          attributes: {
+            POSITION: 0,
+          },
+          material: 0,
+        }],
+      }],
+      nodes: [{ mesh: 0 }],
+      scenes: [{ nodes: [0] }],
+      scene: 0,
+    },
+    'external-inline',
+    {
+      baseUri: 'https://example.test/models/scene.gltf',
+      inlineExternalAssets: true,
+      resources: {
+        'https://example.test/models/geometry.bin': externalBuffer,
+        'https://example.test/models/textures/albedo.png': externalImage,
+      },
+    },
+  );
+
+  assertEquals(scene.assets, []);
+  assertEquals(scene.textures[0].assetId, undefined);
+  assertEquals(scene.textures[0].source?.type, 'inline');
+  if (scene.textures[0].source?.type === 'inline') {
+    assertEquals(scene.textures[0].source.image.mimeType, 'image/png');
+    assertEquals(scene.textures[0].source.image.bytes, [...externalImage]);
+  }
 });
 
 Deno.test('listExternalGltfResourceUris normalizes relative URIs against URL and file bases', () => {
@@ -627,4 +709,8 @@ Deno.test('importGltfFromGlb ingests binary buffers and bufferView-backed images
     mimeType: 'image/png',
   }]);
   assertEquals(scene.materials[0].textures, [scene.textures[0]]);
+  assertEquals(scene.textures[0].source?.type, 'inline');
+  if (scene.textures[0].source?.type === 'inline') {
+    assertEquals(scene.textures[0].source.image.mimeType, 'image/png');
+  }
 });

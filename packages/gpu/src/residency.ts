@@ -1,4 +1,10 @@
 import type { EvaluatedScene } from '@rieul3d/core';
+import {
+  resolveMeshSourceAssetId,
+  resolveMeshSourceInline,
+  resolveTextureSourceAssetId,
+  resolveTextureSourceInlineImage,
+} from '@rieul3d/ir';
 import type { Material, MeshAttribute, MeshPrimitive, SceneIr } from '@rieul3d/ir';
 import jpeg from 'npm:jpeg-js@0.4.4';
 import { PNG } from 'npm:pngjs@7.0.0';
@@ -14,9 +20,18 @@ export type ImageAsset = Readonly<{
   rowsPerImage?: number;
 }>;
 
-export type AssetSource = Readonly<{
-  images: ReadonlyMap<string, ImageAsset>;
+export type MeshAsset = Readonly<{
+  id: string;
+  attributes: readonly MeshAttribute[];
+  indices?: readonly number[];
 }>;
+
+export type AssetSource = Readonly<{
+  images?: ReadonlyMap<string, ImageAsset>;
+  meshes?: ReadonlyMap<string, MeshAsset>;
+}>;
+
+export type AssetSourceCollection = readonly AssetSource[];
 
 export type TextureResidency = Readonly<{
   textureId: string;
@@ -258,25 +273,68 @@ const toBufferSource = (view: ArrayBufferView): Uint8Array<ArrayBuffer> => {
 const getVertexCount = (attribute: MeshAttribute): number =>
   attribute.itemSize > 0 ? Math.floor(attribute.values.length / attribute.itemSize) : 0;
 
+const resolveMeshAsset = (
+  assetSource: AssetSource,
+  mesh: MeshPrimitive,
+): MeshAsset | undefined => {
+  const assetId = resolveMeshSourceAssetId(mesh);
+  return assetId ? assetSource.meshes?.get(assetId) : undefined;
+};
+
+const resolveMeshAssetFromSources = (
+  assetSources: AssetSourceCollection,
+  mesh: MeshPrimitive,
+): MeshAsset | undefined => {
+  for (const assetSource of assetSources) {
+    const meshAsset = resolveMeshAsset(assetSource, mesh);
+    if (meshAsset) {
+      return meshAsset;
+    }
+  }
+
+  return undefined;
+};
+
+const resolveMeshGeometry = (
+  mesh: MeshPrimitive,
+  meshAsset?: MeshAsset,
+): Readonly<{
+  attributes: readonly MeshAttribute[];
+  indices?: readonly number[];
+}> => {
+  if (meshAsset) {
+    return {
+      attributes: meshAsset.attributes,
+      indices: meshAsset.indices,
+    };
+  }
+
+  return resolveMeshSourceInline(mesh);
+};
+
 export const createMeshUploadPlan = (mesh: MeshPrimitive): MeshUploadPlan => ({
   meshId: mesh.id,
-  attributes: mesh.attributes.map((attribute) => ({
+  attributes: resolveMeshSourceInline(mesh).attributes.map((attribute) => ({
     semantic: attribute.semantic,
     itemSize: attribute.itemSize,
     vertexCount: getVertexCount(attribute),
     byteLength: createAttributeArray(attribute).byteLength,
   })),
-  hasIndices: Boolean(mesh.indices && mesh.indices.length > 0),
-  indexCount: mesh.indices?.length ?? 0,
+  hasIndices: Boolean(
+    resolveMeshSourceInline(mesh).indices && resolveMeshSourceInline(mesh).indices!.length > 0,
+  ),
+  indexCount: resolveMeshSourceInline(mesh).indices?.length ?? 0,
 });
 
 export const uploadMeshResidency = (
   context: GpuUploadContext,
   mesh: MeshPrimitive,
+  meshAsset?: MeshAsset,
 ): GeometryResidency => {
+  const geometry = resolveMeshGeometry(mesh, meshAsset);
   const attributeBuffers: Record<string, GPUBuffer> = {};
 
-  for (const attribute of mesh.attributes) {
+  for (const attribute of geometry.attributes) {
     const data = createAttributeArray(attribute);
     const buffer = context.device.createBuffer({
       label: `${mesh.id}:${attribute.semantic}`,
@@ -288,8 +346,8 @@ export const uploadMeshResidency = (
   }
 
   let indexBuffer: GPUBuffer | undefined;
-  if (mesh.indices && mesh.indices.length > 0) {
-    const indexData = createIndexArray(mesh.indices);
+  if (geometry.indices && geometry.indices.length > 0) {
+    const indexData = createIndexArray(geometry.indices);
     indexBuffer = context.device.createBuffer({
       label: `${mesh.id}:indices`,
       size: indexData.byteLength,
@@ -302,8 +360,8 @@ export const uploadMeshResidency = (
     meshId: mesh.id,
     attributeBuffers,
     indexBuffer,
-    vertexCount: mesh.attributes[0] ? getVertexCount(mesh.attributes[0]) : 0,
-    indexCount: mesh.indices?.length ?? 0,
+    vertexCount: geometry.attributes[0] ? getVertexCount(geometry.attributes[0]) : 0,
+    indexCount: geometry.indices?.length ?? 0,
   };
 };
 
@@ -318,6 +376,26 @@ export const ensureMeshResidency = (
   }
 
   const uploaded = uploadMeshResidency(context, mesh);
+  residency.geometry.set(mesh.id, uploaded);
+  return uploaded;
+};
+
+export const ensureMeshResidencyFromSources = (
+  context: GpuUploadContext,
+  residency: RuntimeResidency,
+  assetSources: AssetSourceCollection,
+  mesh: MeshPrimitive,
+): GeometryResidency => {
+  const cached = residency.geometry.get(mesh.id);
+  if (cached) {
+    return cached;
+  }
+
+  const uploaded = uploadMeshResidency(
+    context,
+    mesh,
+    resolveMeshAssetFromSources(assetSources, mesh),
+  );
   residency.geometry.set(mesh.id, uploaded);
   return uploaded;
 };
@@ -340,6 +418,30 @@ export const ensureSceneMeshResidency = (
     }
 
     ensureMeshResidency(context, residency, mesh);
+  }
+
+  return residency;
+};
+
+export const ensureSceneMeshResidencyFromSources = (
+  context: GpuUploadContext,
+  residency: RuntimeResidency,
+  scene: SceneIr,
+  evaluatedScene: EvaluatedScene,
+  assetSources: AssetSourceCollection,
+): RuntimeResidency => {
+  const meshIds = new Set(
+    evaluatedScene.nodes
+      .map((node) => node.mesh?.id)
+      .filter((meshId): meshId is string => Boolean(meshId)),
+  );
+
+  for (const mesh of scene.meshes) {
+    if (!meshIds.has(mesh.id)) {
+      continue;
+    }
+
+    ensureMeshResidencyFromSources(context, residency, assetSources, mesh);
   }
 
   return residency;
@@ -461,11 +563,26 @@ export const resolveTextureImageAsset = (
   assetSource: AssetSource,
   textureRef: SceneIr['textures'][number],
 ): ImageAsset | undefined => {
-  if (!textureRef.assetId) {
+  const assetId = resolveTextureSourceAssetId(textureRef);
+  if (!assetId) {
     return undefined;
   }
 
-  return assetSource.images.get(textureRef.assetId);
+  return assetSource.images?.get(assetId);
+};
+
+export const resolveTextureImageAssetFromSources = (
+  assetSources: AssetSourceCollection,
+  textureRef: SceneIr['textures'][number],
+): ImageAsset | undefined => {
+  for (const assetSource of assetSources) {
+    const imageAsset = resolveTextureImageAsset(assetSource, textureRef);
+    if (imageAsset) {
+      return imageAsset;
+    }
+  }
+
+  return undefined;
 };
 
 const decodeImageAssetBytes = (imageAsset: ImageAsset): ImageAsset => {
@@ -506,6 +623,26 @@ const decodeImageAssetBytes = (imageAsset: ImageAsset): ImageAsset => {
         `texture asset "${imageAsset.id}" with mimeType "${imageAsset.mimeType}" is missing decoded pixels`,
       );
   }
+};
+
+const inlineImageAssetToRuntime = (
+  textureRef: SceneIr['textures'][number],
+): ImageAsset | undefined => {
+  const inlineImage = resolveTextureSourceInlineImage(textureRef);
+  if (!inlineImage) {
+    return undefined;
+  }
+
+  return {
+    id: `${textureRef.id}:inline-image`,
+    mimeType: inlineImage.mimeType,
+    bytes: Uint8Array.from(inlineImage.bytes),
+    width: inlineImage.width,
+    height: inlineImage.height,
+    pixelFormat: inlineImage.pixelFormat as GPUTextureFormat | undefined,
+    bytesPerRow: inlineImage.bytesPerRow,
+    rowsPerImage: inlineImage.rowsPerImage,
+  };
 };
 
 export const createTextureUploadPlan = (
@@ -615,7 +752,30 @@ export const ensureTextureResidency = (
     return cached;
   }
 
-  const imageAsset = resolveTextureImageAsset(assetSource, textureRef);
+  const imageAsset = inlineImageAssetToRuntime(textureRef) ??
+    resolveTextureImageAsset(assetSource, textureRef);
+  if (!imageAsset) {
+    throw new Error(`texture "${textureRef.id}" references missing asset "${textureRef.assetId}"`);
+  }
+
+  const uploaded = uploadTextureResidency(context, textureRef, imageAsset);
+  residency.textures.set(textureRef.id, uploaded);
+  return uploaded;
+};
+
+export const ensureTextureResidencyFromSources = (
+  context: GpuTextureUploadContext,
+  residency: RuntimeResidency,
+  assetSources: AssetSourceCollection,
+  textureRef: SceneIr['textures'][number],
+): TextureResidency => {
+  const cached = residency.textures.get(textureRef.id);
+  if (cached) {
+    return cached;
+  }
+
+  const imageAsset = inlineImageAssetToRuntime(textureRef) ??
+    resolveTextureImageAssetFromSources(assetSources, textureRef);
   if (!imageAsset) {
     throw new Error(`texture "${textureRef.id}" references missing asset "${textureRef.assetId}"`);
   }
@@ -642,6 +802,23 @@ export const ensureSceneTextureResidency = (
   return residency;
 };
 
+export const ensureSceneTextureResidencyFromSources = (
+  context: GpuTextureUploadContext,
+  residency: RuntimeResidency,
+  scene: SceneIr,
+  assetSources: AssetSourceCollection,
+): RuntimeResidency => {
+  for (const textureRef of scene.textures) {
+    if (!textureRef.assetId) {
+      continue;
+    }
+
+    ensureTextureResidencyFromSources(context, residency, assetSources, textureRef);
+  }
+
+  return residency;
+};
+
 export const rebuildRuntimeResidency = (
   context: RuntimeResidencyRebuildContext,
   residency: RuntimeResidency,
@@ -650,8 +827,8 @@ export const rebuildRuntimeResidency = (
   assetSource: AssetSource,
 ): RuntimeResidency => {
   invalidateResidency(residency);
-  ensureSceneMeshResidency(context, residency, scene, evaluatedScene);
+  ensureSceneMeshResidencyFromSources(context, residency, scene, evaluatedScene, [assetSource]);
   ensureSceneMaterialResidency(context, residency, evaluatedScene);
-  ensureSceneTextureResidency(context, residency, scene, assetSource);
+  ensureSceneTextureResidencyFromSources(context, residency, scene, [assetSource]);
   return residency;
 };

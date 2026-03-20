@@ -2,6 +2,18 @@ import alphaMaskFeatureSource from '../../features/alpha_mask.wgsl' with { type:
 import baseColorTextureFeatureSource from './features/base_color_texture.wgsl' with {
   type: 'text',
 };
+import emissiveTextureFeatureSource from './features/emissive_texture.wgsl' with {
+  type: 'text',
+};
+import metallicRoughnessTextureFeatureSource from './features/metallic_roughness_texture.wgsl' with {
+  type: 'text',
+};
+import normalTextureFeatureSource from './features/normal_texture.wgsl' with {
+  type: 'text',
+};
+import occlusionTextureFeatureSource from './features/occlusion_texture.wgsl' with {
+  type: 'text',
+};
 import templateSource from './template.wgsl' with { type: 'text' };
 import { createShaderTemplateFeature, inspectShaderTemplate } from '../../assembler.ts';
 import type {
@@ -16,6 +28,10 @@ export type BuiltInLitTemplateVariant =
   & Readonly<{
     templateId: 'built-in:lit-template';
     usesBaseColorTexture: boolean;
+    usesEmissiveTexture: boolean;
+    usesMetallicRoughnessTexture: boolean;
+    usesNormalTexture: boolean;
+    usesOcclusionTexture: boolean;
     usesTexcoord0: boolean;
   }>;
 
@@ -65,6 +81,90 @@ const baseColorTextureFeature = createShaderTemplateFeature<BuiltInLitTemplateVa
   source: baseColorTextureFeatureSource,
 });
 
+const metallicRoughnessTextureFeature = createShaderTemplateFeature<BuiltInLitTemplateVariant>({
+  id: 'metallic_roughness_texture',
+  when: (variant) => variant.usesMetallicRoughnessTexture && variant.usesTexcoord0,
+  resources: [
+    {
+      id: 'metallicRoughnessTexture',
+      kind: 'texture',
+      textureSemantic: 'metallicRoughness',
+      varName: 'metallicRoughnessTexture',
+      textureType: 'texture_2d<f32>',
+    },
+    {
+      id: 'metallicRoughnessSampler',
+      kind: 'sampler',
+      textureSemantic: 'metallicRoughness',
+      varName: 'metallicRoughnessSampler',
+    },
+  ],
+  source: metallicRoughnessTextureFeatureSource,
+});
+
+const normalTextureFeature = createShaderTemplateFeature<BuiltInLitTemplateVariant>({
+  id: 'normal_texture',
+  when: (variant) => variant.usesNormalTexture && variant.usesTexcoord0,
+  resources: [
+    {
+      id: 'normalTexture',
+      kind: 'texture',
+      textureSemantic: 'normal',
+      varName: 'normalTexture',
+      textureType: 'texture_2d<f32>',
+    },
+    {
+      id: 'normalSampler',
+      kind: 'sampler',
+      textureSemantic: 'normal',
+      varName: 'normalSampler',
+    },
+  ],
+  source: normalTextureFeatureSource,
+});
+
+const occlusionTextureFeature = createShaderTemplateFeature<BuiltInLitTemplateVariant>({
+  id: 'occlusion_texture',
+  when: (variant) => variant.usesOcclusionTexture && variant.usesTexcoord0,
+  resources: [
+    {
+      id: 'occlusionTexture',
+      kind: 'texture',
+      textureSemantic: 'occlusion',
+      varName: 'occlusionTexture',
+      textureType: 'texture_2d<f32>',
+    },
+    {
+      id: 'occlusionSampler',
+      kind: 'sampler',
+      textureSemantic: 'occlusion',
+      varName: 'occlusionSampler',
+    },
+  ],
+  source: occlusionTextureFeatureSource,
+});
+
+const emissiveTextureFeature = createShaderTemplateFeature<BuiltInLitTemplateVariant>({
+  id: 'emissive_texture',
+  when: (variant) => variant.usesEmissiveTexture && variant.usesTexcoord0,
+  resources: [
+    {
+      id: 'emissiveTexture',
+      kind: 'texture',
+      textureSemantic: 'emissive',
+      varName: 'emissiveTexture',
+      textureType: 'texture_2d<f32>',
+    },
+    {
+      id: 'emissiveSampler',
+      kind: 'sampler',
+      textureSemantic: 'emissive',
+      varName: 'emissiveSampler',
+    },
+  ],
+  source: emissiveTextureFeatureSource,
+});
+
 const alphaMaskFeature = createShaderTemplateFeature<BuiltInLitTemplateVariant>({
   id: 'alpha_mask',
   when: (variant) => variant.alphaMode === 'mask' || variant.alphaMode === 'opaque',
@@ -83,14 +183,22 @@ const builtInLitShaderTemplate: ShaderTemplate<BuiltInLitTemplateVariant> = {
     typeName: 'MaterialUniforms',
   }],
   baseVertexAttributes: [positionVertexAttribute, normalVertexAttribute],
-  features: [baseColorTextureFeature, alphaMaskFeature],
+  features: [
+    baseColorTextureFeature,
+    metallicRoughnessTextureFeature,
+    normalTextureFeature,
+    occlusionTextureFeature,
+    emissiveTextureFeature,
+    alphaMaskFeature,
+  ],
   resolveProgramId: (_variant, activeFeatures) =>
-    activeFeatures.some((feature) => feature.id === 'base_color_texture')
-      ? 'built-in:lit-textured'
-      : 'built-in:lit',
+    [
+      'built-in:lit',
+      ...activeFeatures.map((feature) => feature.id),
+    ].join('+'),
   resolveProgramLabel: (_variant, activeFeatures) =>
-    activeFeatures.some((feature) => feature.id === 'base_color_texture')
-      ? 'Built-in Lit (Textured)'
+    activeFeatures.length > 0
+      ? `Built-in Lit (${activeFeatures.map((feature) => feature.id).join(', ')})`
       : 'Built-in Lit',
 };
 

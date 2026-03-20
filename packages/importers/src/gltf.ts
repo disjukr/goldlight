@@ -5,6 +5,9 @@ import {
   appendMesh,
   appendNode,
   appendTexture,
+  createAssetTextureSource,
+  createInlineMeshSource,
+  createInlineTextureSource,
   createNode,
   createSceneIr,
   createVec3,
@@ -143,6 +146,7 @@ export type GltfExternalResourceMap = Readonly<Record<string, Uint8Array>>;
 export type GltfImportOptions = Readonly<{
   baseUri?: string;
   resources?: GltfExternalResourceMap;
+  inlineExternalAssets?: boolean;
 }>;
 
 export type GltfExternalResourceOptions = Readonly<{
@@ -625,18 +629,36 @@ const createTextureRefs = (
     const image = imageIndex === undefined ? undefined : json.images?.[imageIndex];
     const textureId = `${sceneId}-texture-${textureIndex}`;
     let assetId: string | undefined;
+    let inlineImageSource: TextureRef['source'] | undefined;
 
     if (imageIndex !== undefined && image) {
-      assetId = `${sceneId}-image-${imageIndex}`;
-      if (!assets.some((asset) => asset.id === assetId)) {
-        const resource = getImageResource(
-          image,
-          buffers,
-          json.bufferViews ?? [],
-          options,
-          sceneId,
-          imageIndex,
-        );
+      const resource = getImageResource(
+        image,
+        buffers,
+        json.bufferViews ?? [],
+        options,
+        sceneId,
+        imageIndex,
+      );
+      const isExternalImage = Boolean(image.uri && !image.uri.startsWith('data:'));
+      const shouldInlineImage = Boolean(
+        resource.bytes &&
+          (!image.uri || image.uri.startsWith('data:') || options.inlineExternalAssets),
+      );
+
+      if (shouldInlineImage && resource.bytes) {
+        inlineImageSource = createInlineTextureSource({
+          mimeType: image.mimeType ?? inferMimeTypeFromUri(resource.uri) ??
+            'application/octet-stream',
+          bytes: [...resource.bytes],
+        });
+      }
+
+      if (!shouldInlineImage || !isExternalImage) {
+        assetId = `${sceneId}-image-${imageIndex}`;
+      }
+
+      if (assetId && !assets.some((asset) => asset.id === assetId)) {
         assets.push({
           id: assetId,
           uri: image.uri ? resource.uri : undefined,
@@ -659,6 +681,7 @@ const createTextureRefs = (
     textures.push({
       id: textureId,
       assetId,
+      source: inlineImageSource ?? (assetId ? createAssetTextureSource(assetId) : undefined),
       semantic: 'baseColor',
       colorSpace: 'srgb',
       sampler: 'linear-repeat',
@@ -861,10 +884,13 @@ const importGltfSceneWithAssets = (
   json.meshes?.forEach((mesh, meshIndex) => {
     mesh.primitives.forEach((primitive, primitiveIndex) => {
       const meshId = `${sceneId}-mesh-${meshIndex}-${primitiveIndex}`;
+      const attributes = createMeshAttributes(primitive, json, buffers);
+      const indices = readNumericArray(primitive.indices, json, buffers);
       scene = appendMesh(scene, {
         id: meshId,
-        attributes: createMeshAttributes(primitive, json, buffers),
-        indices: readNumericArray(primitive.indices, json, buffers),
+        attributes,
+        indices,
+        source: createInlineMeshSource(attributes, indices),
         materialId: primitive.material === undefined
           ? undefined
           : `${sceneId}-material-${primitive.material}`,

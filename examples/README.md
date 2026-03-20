@@ -12,6 +12,9 @@ Runnable examples live here. Each example should document how to build, serve, o
 - [`byow_helmet_pathtraced_demo/README.md`](./byow_helmet_pathtraced_demo/README.md): Windows-native
   BYOW demo exercising the default triangle-BVH mesh path tracing path with the vendored Damaged
   Helmet GLB
+- [`byow_helmet_forward_demo/README.md`](./byow_helmet_forward_demo/README.md): Windows-native BYOW
+  demo exercising the forward `lit` template system against the full vendored Damaged Helmet
+  material texture set
 - [`byow_cornell_pathtraced_demo/README.md`](./byow_cornell_pathtraced_demo/README.md):
   Windows-native BYOW Cornell-box demo that supplies SDF room data through the pathtraced renderer's
   scene extension
@@ -45,6 +48,8 @@ Runnable examples live here. Each example should document how to build, serve, o
 - Type-check the default BYOW mesh pathtraced demo: `deno task example:byow:pathtraced:check`
 - Run the BYOW Helmet pathtraced demo: `deno task example:byow:helmet-pathtraced:run`
 - Type-check the BYOW Helmet pathtraced demo: `deno task example:byow:helmet-pathtraced:check`
+- Run the BYOW Helmet forward demo: `deno task example:byow:helmet-forward:run`
+- Type-check the BYOW Helmet forward demo: `deno task example:byow:helmet-forward:check`
 - Run the BYOW Cornell pathtraced demo: `deno task example:byow:cornell:run`
 - Type-check the BYOW Cornell pathtraced demo: `deno task example:byow:cornell:check`
 - Run the BYOW Cornell Helmet pathtraced demo: `deno task example:byow:cornell-helmet:run`

@@ -127,7 +127,7 @@ const main = async () => {
     residency,
     scene,
     evaluatedScene,
-    { images: new Map(), volumes: new Map() },
+    { images: new Map() },
   );
 
   const binding = createOffscreenBinding(context);

@@ -106,19 +106,6 @@ export type Camera =
   | CameraPerspective
   | CameraOrthographic;
 
-export type SdfPrimitive = Readonly<{
-  id: Id;
-  op: string;
-  parameters: Readonly<Record<string, Vec4>>;
-}>;
-
-export type VolumePrimitive = Readonly<{
-  id: Id;
-  assetId?: Id;
-  dimensions: Vec3;
-  format: string;
-}>;
-
 export type Node = Readonly<{
   id: Id;
   name?: string;
@@ -126,8 +113,6 @@ export type Node = Readonly<{
   transform: Transform;
   meshId?: Id;
   cameraId?: Id;
-  sdfId?: Id;
-  volumeId?: Id;
   lightId?: Id;
 }>;
 
@@ -158,8 +143,6 @@ export type SceneIr = Readonly<{
   meshes: readonly MeshPrimitive[];
   cameras: readonly Camera[];
   activeCameraId?: Id;
-  sdfPrimitives: readonly SdfPrimitive[];
-  volumePrimitives: readonly VolumePrimitive[];
   nodes: readonly Node[];
   rootNodeIds: readonly Id[];
   animationClips: readonly AnimationClip[];

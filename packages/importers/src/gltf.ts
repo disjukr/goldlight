@@ -910,7 +910,6 @@ const importGltfSceneWithAssets = (
     scene,
     assetSource: {
       images: imageAssets,
-      volumes: new Map(),
     },
   };
 };

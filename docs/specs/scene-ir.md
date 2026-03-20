@@ -24,8 +24,6 @@ standard and declares that explicitly with `# standard - conventional`.
 ## Spatial Primitives
 
 - `mesh`: indexed or non-indexed polygonal geometry
-- `sdf`: signed distance field graphs or primitives for raymarching
-- `volume`: voxel or density grid primitives
 - `light`: first-class scene lights attached to nodes; the initial renderer consumes directional
   lights through node transforms
 

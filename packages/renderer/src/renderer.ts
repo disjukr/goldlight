@@ -64,7 +64,6 @@ export type PassKind =
   | 'mesh'
   | 'pathtrace'
   | 'post-process'
-  | 'raymarch'
   | 'present';
 
 export type RenderPassPlan = Readonly<{
@@ -78,8 +77,6 @@ export type CapabilityState = 'supported' | 'planned' | 'unsupported';
 
 export type RendererCapabilities = Readonly<{
   mesh: CapabilityState;
-  sdf: CapabilityState;
-  volume: CapabilityState;
   light: CapabilityState;
   builtInMaterialKinds: readonly string[];
   customShaders: CapabilityState;
@@ -96,8 +93,6 @@ export type FramePlan = Readonly<{
   renderer: RendererKind;
   nodeCount: number;
   meshNodeCount: number;
-  sdfNodeCount: number;
-  volumeNodeCount: number;
   passes: readonly RenderPassPlan[];
 }>;
 
@@ -334,11 +329,41 @@ export type PostProcessPass = Readonly<{
   uniformData?: ArrayBuffer | ArrayBufferView;
 }>;
 
+export type PathtracedSdfPrimitive = Readonly<{
+  id: string;
+  op: 'sphere' | 'box';
+  center: readonly [number, number, number];
+  radius?: number;
+  halfExtents?: readonly [number, number, number];
+  color?: readonly [number, number, number, number];
+  worldToLocalRotation?: readonly [
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+  ];
+}>;
+
+export type PathtracedSceneExtension = Readonly<{
+  sdfPrimitives?: readonly PathtracedSdfPrimitive[];
+}>;
+
+export type PathtracedRenderOptions = Readonly<{
+  materialRegistry?: MaterialRegistry;
+  postProcessPasses?: readonly PostProcessPass[];
+  extension?: PathtracedSceneExtension;
+}>;
+
 export type VolumePassItem = Readonly<{
   nodeId: string;
   volumeId: string;
   worldMatrix: readonly number[];
-  residency: NonNullable<RuntimeResidency['volumes'] extends Map<string, infer T> ? T : never>;
+  residency: never;
 }>;
 
 export type SdfPassItem = Readonly<{
@@ -366,8 +391,6 @@ export type RendererCapabilityIssue = Readonly<{
   nodeId: string;
   feature:
     | 'mesh'
-    | 'sdf'
-    | 'volume'
     | 'light'
     | 'material-kind'
     | 'custom-shader'
@@ -460,8 +483,6 @@ const toBufferSource = (view: ArrayBuffer | ArrayBufferView): Uint8Array<ArrayBu
 
 const countPrimitiveNodes = (evaluatedScene: EvaluatedScene) => ({
   meshNodeCount: evaluatedScene.nodes.filter((node) => Boolean(node.mesh)).length,
-  sdfNodeCount: evaluatedScene.nodes.filter((node) => Boolean(node.sdf)).length,
-  volumeNodeCount: evaluatedScene.nodes.filter((node) => Boolean(node.volume)).length,
 });
 
 const identityMat4 = (): readonly number[] => [
@@ -1563,8 +1584,6 @@ export const createForwardRenderer = (
   label,
   capabilities: {
     mesh: 'supported',
-    sdf: 'supported',
-    volume: 'supported',
     light: 'supported',
     builtInMaterialKinds: ['unlit', 'lit'],
     customShaders: 'supported',
@@ -1575,12 +1594,6 @@ export const createForwardRenderer = (
       kind: 'mesh',
       reads: ['scene'],
       writes: [postProcessPasses.length > 0 ? 'scene-color' : 'color', 'depth'],
-    },
-    {
-      id: 'raymarch',
-      kind: 'raymarch',
-      reads: ['scene', 'depth'],
-      writes: [postProcessPasses.length > 0 ? 'scene-color' : 'color'],
     },
     ...createPostProcessPassPlans('scene-color', postProcessPasses),
     {
@@ -1600,8 +1613,6 @@ export const createDeferredRenderer = (
   label,
   capabilities: {
     mesh: 'supported',
-    sdf: 'supported',
-    volume: 'supported',
     light: 'supported',
     builtInMaterialKinds: ['unlit', 'lit'],
     customShaders: 'supported',
@@ -1613,12 +1624,6 @@ export const createDeferredRenderer = (
       id: 'lighting',
       kind: 'lighting',
       reads: ['gbuffer', 'depth'],
-      writes: [postProcessPasses.length > 0 ? 'scene-color' : 'color'],
-    },
-    {
-      id: 'raymarch',
-      kind: 'raymarch',
-      reads: ['scene', postProcessPasses.length > 0 ? 'scene-color' : 'color'],
       writes: [postProcessPasses.length > 0 ? 'scene-color' : 'color'],
     },
     ...createPostProcessPassPlans('scene-color', postProcessPasses),
@@ -1639,8 +1644,6 @@ export const createPathtracedRenderer = (
   label,
   capabilities: {
     mesh: 'supported',
-    sdf: 'supported',
-    volume: 'unsupported',
     light: 'supported',
     builtInMaterialKinds: ['unlit'],
     customShaders: 'unsupported',
@@ -1670,8 +1673,6 @@ export const createUberRenderer = (
   label,
   capabilities: {
     mesh: 'supported',
-    sdf: 'supported',
-    volume: 'supported',
     light: 'supported',
     builtInMaterialKinds: ['unlit', 'lit'],
     customShaders: 'supported',
@@ -1697,12 +1698,6 @@ export const createUberRenderer = (
       reads: ['scene', 'depth', postProcessPasses.length > 0 ? 'scene-color' : 'color'],
       writes: [postProcessPasses.length > 0 ? 'scene-color' : 'color'],
     },
-    {
-      id: 'raymarch',
-      kind: 'raymarch',
-      reads: ['scene', 'depth', postProcessPasses.length > 0 ? 'scene-color' : 'color'],
-      writes: [postProcessPasses.length > 0 ? 'scene-color' : 'color'],
-    },
     ...createPostProcessPassPlans('scene-color', postProcessPasses),
     {
       id: 'present',
@@ -1724,15 +1719,9 @@ export const planFrame = (
     renderer: renderer.kind,
     nodeCount: evaluatedScene.nodes.length,
     meshNodeCount: counts.meshNodeCount,
-    sdfNodeCount: counts.sdfNodeCount,
-    volumeNodeCount: counts.volumeNodeCount,
     passes: renderer.passes.filter((pass) => {
-      if (pass.kind === 'raymarch') {
-        return counts.sdfNodeCount > 0 || counts.volumeNodeCount > 0;
-      }
-
       if (pass.kind === 'pathtrace') {
-        return counts.sdfNodeCount > 0;
+        return counts.meshNodeCount > 0;
       }
 
       return true;
@@ -1797,30 +1786,6 @@ export const collectRendererCapabilityIssues = (
           `renderer "${renderer.label}" requires NORMAL vertex data on node "${node.node.id}" for deferred lighting`,
         );
       }
-    }
-
-    if (node.sdf) {
-      if (renderer.capabilities.sdf !== 'supported') {
-        pushIssue(
-          'sdf',
-          'sdf-execution',
-          `renderer "${renderer.label}" does not support sdf execution`,
-        );
-      } else if (!['sphere', 'box'].includes(node.sdf.op)) {
-        pushIssue(
-          'sdf',
-          `sdf-op:${node.sdf.op}`,
-          `renderer "${renderer.label}" only supports sphere and box sdf primitives right now; node "${node.node.id}" requested "${node.sdf.op}"`,
-        );
-      }
-    }
-
-    if (node.volume && renderer.capabilities.volume !== 'supported') {
-      pushIssue(
-        'volume',
-        'volume-execution',
-        `renderer "${renderer.label}" does not support volume execution`,
-      );
     }
 
     if (
@@ -1996,26 +1961,9 @@ export const assertRendererSceneCapabilities = (
 };
 
 export const extractVolumePassItems = (
-  evaluatedScene: EvaluatedScene,
-  residency: RuntimeResidency,
-): readonly VolumePassItem[] =>
-  evaluatedScene.nodes.flatMap((node) => {
-    if (!node.volume) {
-      return [];
-    }
-
-    const volumeResidency = residency.volumes.get(node.volume.id);
-    if (!volumeResidency) {
-      return [];
-    }
-
-    return [{
-      nodeId: node.node.id,
-      volumeId: node.volume.id,
-      worldMatrix: node.worldMatrix,
-      residency: volumeResidency,
-    }];
-  });
+  _evaluatedScene: EvaluatedScene,
+  _residency: RuntimeResidency,
+): readonly VolumePassItem[] => [];
 
 const getMatrixTranslation = (
   worldMatrix: readonly number[],
@@ -2024,13 +1972,6 @@ const getMatrixTranslation = (
   worldMatrix[13] ?? 0,
   worldMatrix[14] ?? 0,
 ];
-
-const getMatrixScale = (worldMatrix: readonly number[]): readonly [number, number, number] => {
-  const scaleX = Math.hypot(worldMatrix[0] ?? 0, worldMatrix[1] ?? 0, worldMatrix[2] ?? 0);
-  const scaleY = Math.hypot(worldMatrix[4] ?? 0, worldMatrix[5] ?? 0, worldMatrix[6] ?? 0);
-  const scaleZ = Math.hypot(worldMatrix[8] ?? 0, worldMatrix[9] ?? 0, worldMatrix[10] ?? 0);
-  return [scaleX, scaleY, scaleZ];
-};
 
 const normalizeVector3 = (
   x: number,
@@ -2053,36 +1994,70 @@ const assertPositiveInteger = (name: string, value: number): number => {
   return value;
 };
 
-const getWorldToLocalRotation = (
-  worldMatrix: readonly number[],
-): readonly [number, number, number, number, number, number, number, number, number] => {
-  const [axisXx, axisXy, axisXz] = normalizeVector3(
-    worldMatrix[0] ?? 0,
-    worldMatrix[1] ?? 0,
-    worldMatrix[2] ?? 0,
-  );
-  const [axisYx, axisYy, axisYz] = normalizeVector3(
-    worldMatrix[4] ?? 0,
-    worldMatrix[5] ?? 0,
-    worldMatrix[6] ?? 0,
-  );
-  const [axisZx, axisZy, axisZz] = normalizeVector3(
-    worldMatrix[8] ?? 0,
-    worldMatrix[9] ?? 0,
-    worldMatrix[10] ?? 0,
-  );
+const defaultSdfWorldToLocalRotation = (): readonly [
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+] => [
+  1,
+  0,
+  0,
+  0,
+  1,
+  0,
+  0,
+  0,
+  1,
+];
 
-  return [
-    axisXx,
-    axisXy,
-    axisXz,
-    axisYx,
-    axisYy,
-    axisYz,
-    axisZx,
-    axisZy,
-    axisZz,
-  ];
+const createPathtracedExtensionSdfPassItems = (
+  extension?: PathtracedSceneExtension,
+): readonly SdfPassItem[] =>
+  extension?.sdfPrimitives?.map((primitive) => ({
+    nodeId: primitive.id,
+    sdfId: primitive.id,
+    op: primitive.op,
+    center: primitive.center,
+    radius: primitive.op === 'sphere' ? primitive.radius ?? 0 : primitive.radius ?? 0,
+    halfExtents: primitive.op === 'box'
+      ? primitive.halfExtents ?? [0, 0, 0]
+      : primitive.halfExtents ?? [0, 0, 0],
+    color: primitive.color ?? [0.82, 0.82, 0.82, 0],
+    worldToLocalRotation: primitive.worldToLocalRotation ?? defaultSdfWorldToLocalRotation(),
+  })) ?? [];
+
+const isMaterialRegistry = (value: unknown): value is MaterialRegistry =>
+  typeof value === 'object' &&
+  value !== null &&
+  'programs' in value &&
+  (value as { programs?: unknown }).programs instanceof Map;
+
+const resolvePathtracedRenderOptions = (
+  materialRegistryOrOptions?: MaterialRegistry | PathtracedRenderOptions,
+  postProcessPasses: readonly PostProcessPass[] = [],
+): Required<PathtracedRenderOptions> => {
+  if (
+    materialRegistryOrOptions === undefined ||
+    isMaterialRegistry(materialRegistryOrOptions)
+  ) {
+    return {
+      materialRegistry: materialRegistryOrOptions ?? createMaterialRegistry(),
+      postProcessPasses,
+      extension: {},
+    };
+  }
+
+  return {
+    materialRegistry: materialRegistryOrOptions.materialRegistry ?? createMaterialRegistry(),
+    postProcessPasses: materialRegistryOrOptions.postProcessPasses ?? [],
+    extension: materialRegistryOrOptions.extension ?? {},
+  };
 };
 
 const getMeshPositionValues = (
@@ -2267,34 +2242,8 @@ const invertAffineMatrix = (worldMatrix: readonly number[]): readonly number[] =
 };
 
 export const extractSdfPassItems = (
-  evaluatedScene: EvaluatedScene,
-): readonly SdfPassItem[] =>
-  evaluatedScene.nodes.flatMap((node) => {
-    if (!node.sdf || !['sphere', 'box'].includes(node.sdf.op)) {
-      return [];
-    }
-
-    const [scaleX, scaleY, scaleZ] = getMatrixScale(node.worldMatrix);
-    const averageScale = (scaleX + scaleY + scaleZ) / 3 || 1;
-    const radius = (node.sdf.parameters.radius?.x ?? 0.5) * averageScale;
-    const halfExtents: readonly [number, number, number] = [
-      (node.sdf.parameters.size?.x ?? 0.5) * (scaleX || 1),
-      (node.sdf.parameters.size?.y ?? 0.5) * (scaleY || 1),
-      (node.sdf.parameters.size?.z ?? 0.5) * (scaleZ || 1),
-    ];
-    const color = node.sdf.parameters.color ?? { x: 1, y: 0.55, z: 0.2, w: 1 };
-
-    return [{
-      nodeId: node.node.id,
-      sdfId: node.sdf.id,
-      op: node.sdf.op,
-      center: getMatrixTranslation(node.worldMatrix),
-      radius,
-      halfExtents,
-      color: [color.x, color.y, color.z, color.w],
-      worldToLocalRotation: getWorldToLocalRotation(node.worldMatrix),
-    }];
-  });
+  _evaluatedScene: EvaluatedScene,
+): readonly SdfPassItem[] => [];
 
 export const extractDirectionalLightItems = (
   evaluatedScene: EvaluatedScene,
@@ -3147,22 +3096,6 @@ const createSdfUniformData = (
   return uniformData;
 };
 
-const createVolumeUniformData = (
-  item: VolumePassItem,
-  camera: RaymarchCamera = defaultRaymarchCamera,
-): Float32Array =>
-  Float32Array.from([
-    ...invertAffineMatrix(item.worldMatrix),
-    ...camera.origin,
-    0,
-    ...camera.right,
-    0,
-    ...camera.up,
-    0,
-    ...camera.forward,
-    camera.projection === 'orthographic' ? 1 : 0,
-  ]);
-
 const createForwardMeshTransformUniformData = (
   worldMatrix: readonly number[],
   viewProjectionMatrix: readonly number[],
@@ -3291,76 +3224,34 @@ const createDeferredMeshTransformUniformData = (worldMatrix: readonly number[]):
   ]);
 
 export const renderSdfRaymarchPass = (
-  context: GpuRenderExecutionContext,
-  encoder: GPUCommandEncoder,
-  binding: RenderContextBinding,
-  residency: RuntimeResidency,
-  evaluatedScene: EvaluatedScene,
-  targetView = acquireColorAttachmentView(context, binding),
-  targetFormat = binding.target.format,
-  camera: RaymarchCamera = defaultRaymarchCamera,
-): number => {
-  const items = extractSdfPassItems(evaluatedScene);
-  if (items.length === 0) {
-    return 0;
-  }
-
-  const pipeline = ensureSdfRaymarchPipeline(context, residency, targetFormat);
-  const uniformData = createSdfUniformData(items, camera);
-  const uniformBuffer = context.device.createBuffer({
-    label: 'sdf-raymarch-uniforms',
-    size: uniformData.byteLength,
-    usage: uniformUsage | bufferCopyDstUsage,
-  });
-  context.queue.writeBuffer(uniformBuffer, 0, toBufferSource(uniformData));
-
-  const bindGroup = context.device.createBindGroup({
-    layout: pipeline.getBindGroupLayout(0),
-    entries: [{
-      binding: 0,
-      resource: {
-        buffer: uniformBuffer,
-      },
-    }],
-  });
-
-  const pass = encoder.beginRenderPass({
-    colorAttachments: [{
-      view: targetView,
-      loadOp: 'load',
-      storeOp: 'store',
-    }],
-  });
-
-  pass.setPipeline(pipeline);
-  pass.setBindGroup(0, bindGroup);
-  pass.draw(6, 1, 0, 0);
-  pass.end();
-
-  return 1;
-};
+  _context: GpuRenderExecutionContext,
+  _encoder: GPUCommandEncoder,
+  _binding: RenderContextBinding,
+  _residency: RuntimeResidency,
+  _evaluatedScene: EvaluatedScene,
+  _targetView = acquireColorAttachmentView(_context, _binding),
+  _targetFormat = _binding.target.format,
+  _camera: RaymarchCamera = defaultRaymarchCamera,
+): number => 0;
 
 export const renderPathtracedSdfPass = (
   context: GpuRenderExecutionContext,
   encoder: GPUCommandEncoder,
   binding: RenderContextBinding,
   residency: RuntimeResidency,
-  evaluatedScene: EvaluatedScene,
+  items: readonly SdfPassItem[],
   targetView = acquireColorAttachmentView(context, binding),
   targetFormat = binding.target.format,
   camera: RaymarchCamera = defaultRaymarchCamera,
   frameIndex = 0,
 ): number => {
-  const items = extractSdfPassItems(evaluatedScene);
   if (items.length === 0) {
     return 0;
   }
 
   const pipeline = ensurePathtracedSdfPipeline(context, residency, targetFormat);
   const uniformData = createSdfUniformData(items, camera, frameIndex);
-  const lightingData = createDirectionalLightUniformData(
-    extractDirectionalLightItems(evaluatedScene),
-  );
+  const lightingData = createDirectionalLightUniformData([]);
   const uniformBuffer = context.device.createBuffer({
     label: 'pathtraced-sdf-uniforms',
     size: uniformData.byteLength,
@@ -3373,7 +3264,6 @@ export const renderPathtracedSdfPass = (
     usage: uniformUsage | bufferCopyDstUsage,
   });
   context.queue.writeBuffer(lightingBuffer, 0, toBufferSource(lightingData));
-
   const bindGroup = context.device.createBindGroup({
     layout: pipeline.getBindGroupLayout(0),
     entries: [
@@ -3391,7 +3281,6 @@ export const renderPathtracedSdfPass = (
       },
     ],
   });
-
   const pass = encoder.beginRenderPass({
     colorAttachments: [{
       view: targetView,
@@ -3400,7 +3289,6 @@ export const renderPathtracedSdfPass = (
       storeOp: 'store',
     }],
   });
-
   pass.setPipeline(pipeline);
   pass.setBindGroup(0, bindGroup);
   pass.draw(6, 1, 0, 0);
@@ -3726,6 +3614,7 @@ export const renderPathtracedMeshPass = (
   residency: RuntimeResidency,
   evaluatedScene: EvaluatedScene,
   meshCacheKey: string,
+  sdfItems: readonly SdfPassItem[] = [],
   targetView = acquireColorAttachmentView(context, binding),
   targetFormat = binding.target.format,
   camera: RaymarchCamera = defaultRaymarchCamera,
@@ -3752,7 +3641,6 @@ export const renderPathtracedMeshPass = (
 
   const pipeline = ensurePathtracedMeshPipeline(context, residency, targetFormat);
   const uniformData = createPathtracedMeshUniformData(instances.length, camera, frameIndex);
-  const sdfItems = extractSdfPassItems(evaluatedScene);
   const sdfUniformData = createSdfUniformData(sdfItems, camera, frameIndex);
   const lightingData = createDirectionalLightUniformData(
     extractDirectionalLightItems(evaluatedScene),
@@ -4039,66 +3927,15 @@ const renderPathtracedPresentPass = (
 };
 
 export const renderVolumeRaymarchPass = (
-  context: GpuRenderExecutionContext,
-  encoder: GPUCommandEncoder,
-  binding: RenderContextBinding,
-  residency: RuntimeResidency,
-  evaluatedScene: EvaluatedScene,
-  targetView = acquireColorAttachmentView(context, binding),
-  targetFormat = binding.target.format,
-  camera: RaymarchCamera = defaultRaymarchCamera,
-): number => {
-  const items = extractVolumePassItems(evaluatedScene, residency);
-  if (items.length === 0) {
-    return 0;
-  }
-
-  const pipeline = ensureVolumeRaymarchPipeline(context, residency, targetFormat);
-  const pass = encoder.beginRenderPass({
-    colorAttachments: [{
-      view: targetView,
-      loadOp: 'load',
-      storeOp: 'store',
-    }],
-  });
-
-  pass.setPipeline(pipeline);
-  for (const item of items) {
-    const uniformData = createVolumeUniformData(item, camera);
-    const uniformBuffer = context.device.createBuffer({
-      label: `${item.nodeId}:volume-raymarch-uniforms`,
-      size: uniformData.byteLength,
-      usage: uniformUsage | bufferCopyDstUsage,
-    });
-    context.queue.writeBuffer(uniformBuffer, 0, toBufferSource(uniformData));
-
-    const bindGroup = context.device.createBindGroup({
-      layout: pipeline.getBindGroupLayout(0),
-      entries: [
-        {
-          binding: 0,
-          resource: {
-            buffer: uniformBuffer,
-          },
-        },
-        {
-          binding: 1,
-          resource: item.residency.view,
-        },
-        {
-          binding: 2,
-          resource: item.residency.sampler,
-        },
-      ],
-    });
-
-    pass.setBindGroup(0, bindGroup);
-    pass.draw(6, 1, 0, 0);
-  }
-  pass.end();
-
-  return items.length;
-};
+  _context: GpuRenderExecutionContext,
+  _encoder: GPUCommandEncoder,
+  _binding: RenderContextBinding,
+  _residency: RuntimeResidency,
+  _evaluatedScene: EvaluatedScene,
+  _targetView = acquireColorAttachmentView(_context, _binding),
+  _targetFormat = _binding.target.format,
+  _camera: RaymarchCamera = defaultRaymarchCamera,
+): number => 0;
 
 const createDefaultMaterial = (): Material => ({
   id: 'built-in:default-unlit-material',
@@ -4245,28 +4082,6 @@ const renderForwardFrameInternal = (
     transparentPass.end();
   }
 
-  if (options.includeRaymarchPasses !== false) {
-    drawCount += renderSdfRaymarchPass(
-      context,
-      encoder,
-      binding,
-      residency,
-      evaluatedScene,
-      colorView,
-      binding.target.format,
-      options.raymarchCamera,
-    );
-    drawCount += renderVolumeRaymarchPass(
-      context,
-      encoder,
-      binding,
-      residency,
-      evaluatedScene,
-      colorView,
-      binding.target.format,
-      options.raymarchCamera,
-    );
-  }
   if (sceneColorView) {
     drawCount += renderPostProcessPasses(
       context,
@@ -4329,6 +4144,7 @@ const getRenderTargetSampleCount = (binding: RenderContextBinding): number =>
 
 const createPathtracedSceneKey = (
   evaluatedScene: EvaluatedScene,
+  extension?: PathtracedSceneExtension,
 ): string => {
   const activeCamera = evaluatedScene.activeCamera;
   const cameraKey = activeCamera
@@ -4344,26 +4160,23 @@ const createPathtracedSceneKey = (
       activeCamera.viewMatrix.join(','),
     ].join('|')
     : 'default-camera';
-  const sdfKey = extractSdfPassItems(evaluatedScene)
-    .map((item) =>
-      [
-        item.nodeId,
-        item.sdfId,
-        item.op,
-        item.center.join(','),
-        item.radius,
-        item.halfExtents.join(','),
-        item.color.join(','),
-        item.worldToLocalRotation.join(','),
-      ].join('|')
-    )
-    .join('::');
   const meshKey = evaluatedScene.nodes
     .filter((node) => node.mesh)
     .map((node) => [node.node.id, node.worldMatrix.join(',')].join('|'))
     .join('::');
+  const sdfKey = extension?.sdfPrimitives?.map((primitive) =>
+    [
+      primitive.id,
+      primitive.op,
+      primitive.center.join(','),
+      primitive.radius ?? '',
+      primitive.halfExtents?.join(',') ?? '',
+      primitive.color?.join(',') ?? '',
+      primitive.worldToLocalRotation?.join(',') ?? '',
+    ].join('|')
+  ).join('::') ?? '';
 
-  return hashString(`${cameraKey}::${sdfKey}::${meshKey}`);
+  return hashString(`${cameraKey}::${meshKey}::${sdfKey}`);
 };
 
 const createPathtracedMeshCacheKey = (evaluatedScene: EvaluatedScene): string =>
@@ -4860,24 +4673,6 @@ export const renderDeferredFrame = (
     forwardLitPass.end();
   }
 
-  drawCount += renderSdfRaymarchPass(
-    context,
-    encoder,
-    binding,
-    residency,
-    evaluatedScene,
-    lightingOutputView,
-    binding.target.format,
-  );
-  drawCount += renderVolumeRaymarchPass(
-    context,
-    encoder,
-    binding,
-    residency,
-    evaluatedScene,
-    lightingOutputView,
-    binding.target.format,
-  );
   if (sceneColorView) {
     drawCount += renderPostProcessPasses(
       context,
@@ -4903,18 +4698,21 @@ export const renderPathtracedFrame = (
   binding: RenderContextBinding,
   residency: RuntimeResidency,
   evaluatedScene: EvaluatedScene,
-  materialRegistry = createMaterialRegistry(),
+  materialRegistryOrOptions: MaterialRegistry | PathtracedRenderOptions = createMaterialRegistry(),
   postProcessPasses: readonly PostProcessPass[] = [],
 ): PathtracedRenderResult => {
+  const options = resolvePathtracedRenderOptions(materialRegistryOrOptions, postProcessPasses);
   assertRendererSceneCapabilities(
-    createPathtracedRenderer('pathtraced', postProcessPasses),
+    createPathtracedRenderer('pathtraced', options.postProcessPasses),
     evaluatedScene,
-    materialRegistry,
+    options.materialRegistry,
     residency,
   );
 
   const hasMeshScene = evaluatedScene.nodes.some((node) => node.mesh);
-  const sceneKey = createPathtracedSceneKey(evaluatedScene);
+  const sdfItems = createPathtracedExtensionSdfPassItems(options.extension);
+  const hasSdfScene = sdfItems.length > 0;
+  const sceneKey = createPathtracedSceneKey(evaluatedScene, options.extension);
   const meshCacheKey = hasMeshScene ? createPathtracedMeshCacheKey(evaluatedScene) : '';
   const accumulationState = ensurePathtracedAccumulationState(context, binding, sceneKey);
   const currentSampleView = accumulationState.currentSampleTexture.createView();
@@ -4926,7 +4724,7 @@ export const renderPathtracedFrame = (
     : accumulationState.accumulationB;
   const previousAccumulationView = previousAccumulationTexture.createView();
   const nextAccumulationView = nextAccumulationTexture.createView();
-  const resolvedSceneTexture = postProcessPasses.length > 0
+  const resolvedSceneTexture = options.postProcessPasses.length > 0
     ? createTransientRenderTexture(
       context,
       binding,
@@ -4935,7 +4733,7 @@ export const renderPathtracedFrame = (
     )
     : undefined;
   const resolvedSceneView = resolvedSceneTexture?.createView();
-  const presentPasses = postProcessPasses.length > 0 ? postProcessPasses : [];
+  const presentPasses = options.postProcessPasses.length > 0 ? options.postProcessPasses : [];
   const encoder = context.device.createCommandEncoder({
     label: 'pathtraced-frame',
   });
@@ -4953,22 +4751,25 @@ export const renderPathtracedFrame = (
       residency,
       evaluatedScene,
       meshCacheKey,
+      sdfItems,
       currentSampleView,
       pathtracedAccumulationFormat,
       raymarchCamera,
       accumulationState.frameIndex,
     )
-    : renderPathtracedSdfPass(
+    : hasSdfScene
+    ? renderPathtracedSdfPass(
       context,
       encoder,
       binding,
       residency,
-      evaluatedScene,
+      sdfItems,
       currentSampleView,
       pathtracedAccumulationFormat,
       raymarchCamera,
       accumulationState.frameIndex,
-    );
+    )
+    : 0;
   drawCount += renderPathtracedAccumulationPass(
     context,
     encoder,
@@ -5377,24 +5178,6 @@ export const renderUberFrame = (
     forwardTransparentPass.end();
   }
 
-  drawCount += renderSdfRaymarchPass(
-    context,
-    encoder,
-    binding,
-    residency,
-    evaluatedScene,
-    lightingOutputView,
-    binding.target.format,
-  );
-  drawCount += renderVolumeRaymarchPass(
-    context,
-    encoder,
-    binding,
-    residency,
-    evaluatedScene,
-    lightingOutputView,
-    binding.target.format,
-  );
   if (sceneColorView) {
     drawCount += renderPostProcessPasses(
       context,
@@ -5622,7 +5405,7 @@ export const renderPathtracedSnapshot = async (
   binding: RenderContextBinding,
   residency: RuntimeResidency,
   evaluatedScene: EvaluatedScene,
-  materialRegistry = createMaterialRegistry(),
+  materialRegistryOrOptions: MaterialRegistry | PathtracedRenderOptions = createMaterialRegistry(),
   postProcessPasses: readonly PostProcessPass[] = [],
 ): Promise<PathtracedSnapshotResult> => {
   const frame = renderPathtracedFrame(
@@ -5630,7 +5413,7 @@ export const renderPathtracedSnapshot = async (
     binding,
     residency,
     evaluatedScene,
-    materialRegistry,
+    materialRegistryOrOptions,
     postProcessPasses,
   );
   const snapshot = await readOffscreenSnapshot(context, binding);

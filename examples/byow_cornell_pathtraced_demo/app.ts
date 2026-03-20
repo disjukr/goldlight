@@ -11,12 +11,12 @@ import {
 import {
   appendCamera,
   appendNode,
-  appendSdfPrimitive,
   createNode,
   createPerspectiveCamera,
   createSceneIr,
   setActiveCamera,
 } from '@rieul3d/ir';
+import type { PathtracedSceneExtension } from '@rieul3d/renderer';
 import { renderPathtracedFrame } from '@rieul3d/renderer';
 
 const cameraId = 'cornell-camera';
@@ -34,6 +34,7 @@ const createCornellScene = () => {
     ),
     cameraId,
   );
+
   scene = appendNode(
     scene,
     createNode('cornell-camera-node', {
@@ -46,134 +47,69 @@ const createCornellScene = () => {
     }),
   );
 
-  const primitives = [
+  return scene;
+};
+
+const createCornellExtension = (): PathtracedSceneExtension => ({
+  sdfPrimitives: [
     {
       id: 'floor',
-      primitive: {
-        id: 'floor',
-        op: 'box' as const,
-        parameters: {
-          size: { x: 1.6, y: 0.05, z: 1.6, w: 0 },
-          color: { x: 0.74, y: 0.74, z: 0.72, w: 0 },
-        },
-      },
-      nodeId: 'floor-node',
-      translation: [0, -1.55, -1.6] as const,
+      op: 'box',
+      center: [0, -1.55, -1.6],
+      halfExtents: [1.6, 0.05, 1.6],
+      color: [0.74, 0.74, 0.72, 0],
     },
     {
       id: 'ceiling',
-      primitive: {
-        id: 'ceiling',
-        op: 'box' as const,
-        parameters: {
-          size: { x: 1.6, y: 0.05, z: 1.6, w: 0 },
-          color: { x: 0.74, y: 0.74, z: 0.72, w: 0 },
-        },
-      },
-      nodeId: 'ceiling-node',
-      translation: [0, 1.55, -1.6] as const,
+      op: 'box',
+      center: [0, 1.55, -1.6],
+      halfExtents: [1.6, 0.05, 1.6],
+      color: [0.74, 0.74, 0.72, 0],
     },
     {
       id: 'light-panel',
-      primitive: {
-        id: 'light-panel',
-        op: 'box' as const,
-        parameters: {
-          size: { x: 0.45, y: 0.02, z: 0.45, w: 0 },
-          color: { x: 1, y: 0.97, z: 0.92, w: 5 },
-        },
-      },
-      nodeId: 'light-panel-node',
-      translation: [0, 1.46, -1.6] as const,
+      op: 'box',
+      center: [0, 1.46, -1.6],
+      halfExtents: [0.45, 0.02, 0.45],
+      color: [1, 0.97, 0.92, 5],
     },
     {
       id: 'back-wall',
-      primitive: {
-        id: 'back-wall',
-        op: 'box' as const,
-        parameters: {
-          size: { x: 1.6, y: 1.6, z: 0.05, w: 0 },
-          color: { x: 0.74, y: 0.74, z: 0.72, w: 0 },
-        },
-      },
-      nodeId: 'back-wall-node',
-      translation: [0, 0, -3.15] as const,
+      op: 'box',
+      center: [0, 0, -3.15],
+      halfExtents: [1.6, 1.6, 0.05],
+      color: [0.74, 0.74, 0.72, 0],
     },
     {
       id: 'left-wall',
-      primitive: {
-        id: 'left-wall',
-        op: 'box' as const,
-        parameters: {
-          size: { x: 0.05, y: 1.6, z: 1.6, w: 0 },
-          color: { x: 0.72, y: 0.12, z: 0.1, w: 0 },
-        },
-      },
-      nodeId: 'left-wall-node',
-      translation: [-1.55, 0, -1.6] as const,
+      op: 'box',
+      center: [-1.55, 0, -1.6],
+      halfExtents: [0.05, 1.6, 1.6],
+      color: [0.72, 0.12, 0.1, 0],
     },
     {
       id: 'right-wall',
-      primitive: {
-        id: 'right-wall',
-        op: 'box' as const,
-        parameters: {
-          size: { x: 0.05, y: 1.6, z: 1.6, w: 0 },
-          color: { x: 0.12, y: 0.54, z: 0.16, w: 0 },
-        },
-      },
-      nodeId: 'right-wall-node',
-      translation: [1.55, 0, -1.6] as const,
+      op: 'box',
+      center: [1.55, 0, -1.6],
+      halfExtents: [0.05, 1.6, 1.6],
+      color: [0.12, 0.54, 0.16, 0],
     },
     {
       id: 'short-box',
-      primitive: {
-        id: 'short-box',
-        op: 'box' as const,
-        parameters: {
-          size: { x: 0.42, y: 0.62, z: 0.42, w: 0 },
-          color: { x: 0.82, y: 0.82, z: 0.8, w: 0 },
-        },
-      },
-      nodeId: 'short-box-node',
-      translation: [-0.55, -0.92, -2.2] as const,
+      op: 'box',
+      center: [-0.55, -0.92, -2.2],
+      halfExtents: [0.42, 0.62, 0.42],
+      color: [0.82, 0.82, 0.8, 0],
     },
     {
       id: 'sphere',
-      primitive: {
-        id: 'sphere',
-        op: 'sphere' as const,
-        parameters: {
-          radius: { x: 0.46, y: 0, z: 0, w: 0 },
-          color: { x: 0.88, y: 0.88, z: 0.86, w: 0 },
-        },
-      },
-      nodeId: 'sphere-node',
-      translation: [0.62, -1.08, -1.38] as const,
+      op: 'sphere',
+      center: [0.62, -1.08, -1.38],
+      radius: 0.46,
+      color: [0.88, 0.88, 0.86, 0],
     },
-  ] as const;
-
-  for (const entry of primitives) {
-    scene = appendSdfPrimitive(scene, entry.primitive);
-    scene = appendNode(
-      scene,
-      createNode(entry.nodeId, {
-        sdfId: entry.id,
-        transform: {
-          translation: {
-            x: entry.translation[0],
-            y: entry.translation[1],
-            z: entry.translation[2],
-          },
-          rotation: { x: 0, y: 0, z: 0, w: 1 },
-          scale: { x: 1, y: 1, z: 1 },
-        },
-      }),
-    );
-  }
-
-  return scene;
-};
+  ],
+});
 
 export default async ({ window }: DesktopModuleContext): Promise<() => void> => {
   const target = {
@@ -187,6 +123,7 @@ export default async ({ window }: DesktopModuleContext): Promise<() => void> => 
   const binding = createSurfaceBinding(gpuContext, window.canvasContext);
   const residency = createRuntimeResidency();
   const scene = createCornellScene();
+  const extension = createCornellExtension();
   const evaluatedScene = evaluateScene(scene, { timeMs: 0 });
 
   window.runtime.addEventListener('resize', (event) => {
@@ -198,7 +135,7 @@ export default async ({ window }: DesktopModuleContext): Promise<() => void> => 
 
   let frameHandle = 0;
   const drawFrame = () => {
-    renderPathtracedFrame(gpuContext, binding, residency, evaluatedScene);
+    renderPathtracedFrame(gpuContext, binding, residency, evaluatedScene, { extension });
     window.present();
     frameHandle = requestAnimationFrame(drawFrame);
   };

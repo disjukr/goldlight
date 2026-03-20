@@ -6,8 +6,8 @@ transform shorthands such as `position`, commits that tree through `createSceneR
 the published `SceneIr` snapshot through the browser forward pipeline. Because the bridge publishes
 whole-scene snapshots, the example also uses `planSceneRootResidencyInvalidation()` together with
 `@rieul3d/gpu`'s `applyRuntimeResidencyPlan()` helper so cached GPU residency can drop changed
-mesh/material/texture/volume entries by ID, keep transform-only node updates on the lighter path,
-and still fall back to a full reset for node topology or binding changes.
+mesh/material/texture entries by ID, keep transform-only node updates on the lighter path, and still
+fall back to a full reset for node topology or binding changes.
 
 The example follows ADR 0005's preferred direction: camera/light convenience lives in reusable React
 components while primitive JSX authoring stays closer to explicit Scene IR concepts such as

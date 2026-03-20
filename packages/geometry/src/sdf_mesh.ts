@@ -1,9 +1,15 @@
-import type { MeshPrimitive, SdfPrimitive } from '@rieul3d/ir';
+import type { MeshPrimitive } from '@rieul3d/ir';
 import { marchingCubesEdgeTable, marchingCubesTriTable } from './marching_cubes_tables.ts';
 
 type Vec3 = readonly [number, number, number];
 type Vec2 = readonly [number, number];
 type Triangle = readonly [Vec3, Vec3, Vec3];
+
+export type SdfPrimitive = Readonly<{
+  id: string;
+  op: string;
+  parameters: Readonly<Record<string, Readonly<{ x: number; y: number; z: number; w: number }>>>;
+}>;
 
 export type SdfExtractionAlgorithm = 'marching-cubes' | 'surface-nets';
 

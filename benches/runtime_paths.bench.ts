@@ -4,12 +4,10 @@ import {
   createOffscreenBinding,
   createRuntimeResidency,
   createTextureUploadPlan,
-  createVolumeUploadPlan,
   ensureMaterialResidency,
   ensureSceneMeshResidency,
   type GpuTextureUploadContext,
   uploadTextureResidency,
-  uploadVolumeResidency,
 } from '@rieul3d/gpu';
 import {
   appendMaterial,
@@ -62,17 +60,7 @@ const createBenchScene = () => {
       ],
     }],
   });
-  scene = {
-    ...scene,
-    volumePrimitives: [{
-      id: 'volume-0',
-      assetId: 'volume-asset-0',
-      dimensions: { x: 8, y: 8, z: 8 },
-      format: 'density:r8unorm',
-    }],
-  };
   scene = appendNode(scene, createNode('mesh-node', { meshId: 'mesh-0' }));
-  scene = appendNode(scene, createNode('volume-node', { volumeId: 'volume-0' }));
   return scene;
 };
 
@@ -96,12 +84,7 @@ const createCapabilityBenchScene = () => {
       values: [0, 0.5, 0, -0.5, -0.5, 0, 0.5, -0.5, 0],
     }],
   });
-  scene = {
-    ...scene,
-    sdfPrimitives: [{ id: 'sdf-box', op: 'box', parameters: {} }],
-  };
   scene = appendNode(scene, createNode('custom-mesh-node', { meshId: 'mesh-custom' }));
-  scene = appendNode(scene, createNode('sdf-box-node', { sdfId: 'sdf-box' }));
   return scene;
 };
 
@@ -128,15 +111,6 @@ const imageAsset = {
   ]),
   width: 2,
   height: 2,
-} as const;
-
-const volumeAsset = {
-  id: 'volume-asset-0',
-  mimeType: 'application/octet-stream',
-  bytes: new Uint8Array(8 * 8 * 8),
-  width: 8,
-  height: 8,
-  depth: 8,
 } as const;
 
 const createTextureBenchContext = (): GpuTextureUploadContext => ({
@@ -252,28 +226,6 @@ Deno.bench('texture residency upload', () => {
   );
 });
 
-Deno.bench('volume upload planning', () => {
-  createVolumeUploadPlan({
-    id: 'volume-0',
-    assetId: 'volume-asset-0',
-    dimensions: { x: 8, y: 8, z: 8 },
-    format: 'density:r8unorm',
-  }, volumeAsset);
-});
-
-Deno.bench('volume residency upload', () => {
-  uploadVolumeResidency(
-    createTextureBenchContext(),
-    {
-      id: 'volume-0',
-      assetId: 'volume-asset-0',
-      dimensions: { x: 8, y: 8, z: 8 },
-      format: 'density:r8unorm',
-    },
-    volumeAsset,
-  );
-});
-
 Deno.bench('scene evaluation', () => {
   evaluateScene(createBenchScene(), { timeMs: 16 });
 });
@@ -317,13 +269,7 @@ Deno.bench('renderer capability assertion', () => {
 });
 
 Deno.bench('forward frame encoding', () => {
-  const baseScene = createBenchScene();
-  const scene = {
-    ...baseScene,
-    nodes: baseScene.nodes.filter((node) => node.id !== 'volume-node'),
-    rootNodeIds: baseScene.rootNodeIds.filter((nodeId) => nodeId !== 'volume-node'),
-    volumePrimitives: [],
-  };
+  const scene = createBenchScene();
   const evaluatedScene = evaluateScene(scene, { timeMs: 0 });
   const runtimeResidency = createRuntimeResidency();
   runtimeResidency.geometry.set('mesh-0', {

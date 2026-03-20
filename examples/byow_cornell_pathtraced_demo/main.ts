@@ -3,8 +3,8 @@
 import { runDesktopModule } from '@rieul3d/desktop';
 
 await runDesktopModule({
-  title: 'rieul3d byow pathtraced cornell box demo',
-  width: 1100,
-  height: 760,
+  title: 'rieul3d byow cornell pathtraced demo',
+  width: 1280,
+  height: 720,
   module: new URL('./app.ts', import.meta.url),
 });

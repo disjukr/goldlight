@@ -115,7 +115,6 @@ const assetSource: AssetSource = {
       height: 2,
     }],
   ]),
-  volumes: new Map(),
 };
 
 Deno.test('createTextureUploadPlan derives texture dimensions and upload layout', () => {
@@ -219,7 +218,6 @@ Deno.test('ensureTextureResidency fails when referenced asset metadata is incomp
           mimeType: 'image/raw',
           bytes: new Uint8Array([0, 0, 0, 0]),
         }]]),
-        volumes: new Map(),
       },
       {
         id: 'texture-0',

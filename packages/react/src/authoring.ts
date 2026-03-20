@@ -11,11 +11,9 @@ import type {
   Node,
   Quat,
   SceneIr,
-  SdfPrimitive,
   TextureRef,
   Transform,
   Vec3,
-  VolumePrimitive,
 } from '@rieul3d/ir';
 import {
   applySceneDocumentScene,
@@ -40,8 +38,6 @@ export type NodeAuthoringProps = Readonly<{
   name?: Node['name'];
   meshId?: Node['meshId'];
   cameraId?: Node['cameraId'];
-  sdfId?: Node['sdfId'];
-  volumeId?: Node['volumeId'];
   lightId?: Node['lightId'];
   transform?: Transform;
   position?: Vec3Like;
@@ -54,8 +50,6 @@ export type TextureJsxProps = TextureRef;
 export type MaterialJsxProps = Material;
 export type LightJsxProps = Light;
 export type MeshJsxProps = MeshPrimitive;
-export type SdfJsxProps = SdfPrimitive;
-export type VolumeJsxProps = VolumePrimitive;
 export type AnimationClipJsxProps = AnimationClip;
 export type CameraJsxProps =
   | Readonly<
@@ -75,8 +69,6 @@ type TextureAuthoringProps = Readonly<Omit<TextureRef, 'id'>>;
 type MaterialAuthoringProps = Readonly<Omit<Material, 'id'>>;
 type LightAuthoringProps = Readonly<Omit<Light, 'id'>>;
 type MeshAuthoringProps = Readonly<Omit<MeshPrimitive, 'id'>>;
-type SdfAuthoringProps = Readonly<Omit<SdfPrimitive, 'id'>>;
-type VolumeAuthoringProps = Readonly<Omit<VolumePrimitive, 'id'>>;
 type AnimationClipAuthoringProps = Readonly<Omit<AnimationClip, 'id'>>;
 type CameraAuthoringProps =
   | Readonly<
@@ -99,8 +91,6 @@ type AuthoringPropsByType = {
   material: MaterialJsxProps;
   light: LightJsxProps;
   mesh: MeshJsxProps;
-  sdf: SdfJsxProps;
-  volume: VolumeJsxProps;
   animationClip: AnimationClipJsxProps;
   camera: CameraJsxProps;
 };
@@ -243,18 +233,6 @@ export function createAuthoringElement(
   children?: readonly AuthoringElement[],
 ): AuthoringElement<'mesh'>;
 export function createAuthoringElement(
-  type: 'sdf',
-  id: string,
-  props?: SdfAuthoringProps,
-  children?: readonly AuthoringElement[],
-): AuthoringElement<'sdf'>;
-export function createAuthoringElement(
-  type: 'volume',
-  id: string,
-  props?: VolumeAuthoringProps,
-  children?: readonly AuthoringElement[],
-): AuthoringElement<'volume'>;
-export function createAuthoringElement(
   type: 'animationClip',
   id: string,
   props?: AnimationClipAuthoringProps,
@@ -278,16 +256,13 @@ export function createAuthoringElement(
     | MaterialAuthoringProps
     | LightAuthoringProps
     | MeshAuthoringProps
-    | SdfAuthoringProps
-    | VolumeAuthoringProps
     | AnimationClipAuthoringProps
     | CameraAuthoringProps = {},
   children: readonly AuthoringElement[] = [],
 ): AuthoringElement {
   const normalizedProps = type === 'node' ? normalizeNodeProps(props as NodeAuthoringProps) : (
       type === 'asset' || type === 'texture' || type === 'material' || type === 'light' ||
-      type === 'mesh' || type === 'sdf' || type === 'volume' || type === 'animationClip' ||
-      type === 'camera'
+      type === 'mesh' || type === 'animationClip' || type === 'camera'
     )
     ? { id, ...props }
     : props;
@@ -538,8 +513,6 @@ export const jsx = (
       | MaterialJsxProps
       | LightJsxProps
       | MeshJsxProps
-      | SdfJsxProps
-      | VolumeJsxProps
       | AnimationClipJsxProps
       | CameraJsxProps
       | PerspectiveCameraJsxProps
@@ -581,8 +554,7 @@ export const jsx = (
 
   if (
     type === 'asset' || type === 'texture' || type === 'material' || type === 'light' ||
-    type === 'mesh' || type === 'sdf' || type === 'volume' || type === 'animationClip' ||
-    type === 'camera'
+    type === 'mesh' || type === 'animationClip' || type === 'camera'
   ) {
     const { id, children: _children, ...resourceProps } = authoringProps as {
       id: string;
@@ -616,8 +588,6 @@ const sweepUnvisitedResourceIds = (
     | 'material'
     | 'light'
     | 'mesh'
-    | 'sdf'
-    | 'volume'
     | 'animationClip'
     | 'camera',
   visitedIds: ReadonlySet<string>,
@@ -632,10 +602,6 @@ const sweepUnvisitedResourceIds = (
     ? document.lights.order
     : kind === 'mesh'
     ? document.meshes.order
-    : kind === 'sdf'
-    ? document.sdfs.order
-    : kind === 'volume'
-    ? document.volumes.order
     : kind === 'animationClip'
     ? document.animationClips.order
     : document.cameras.order;
@@ -667,8 +633,6 @@ export const authoringTreeToSceneDocument = (
     material: new Set<string>(),
     light: new Set<string>(),
     mesh: new Set<string>(),
-    sdf: new Set<string>(),
-    volume: new Set<string>(),
     animationClip: new Set<string>(),
     camera: new Set<string>(),
   };
@@ -738,20 +702,6 @@ export const authoringTreeToSceneDocument = (
           value: node.props as MeshPrimitive,
         });
         return nodeIndex;
-      case 'sdf':
-        visitedResourceIds.sdf.add(node.id);
-        upsertSceneDocumentResource(document, {
-          kind: 'sdf',
-          value: node.props as SdfPrimitive,
-        });
-        return nodeIndex;
-      case 'volume':
-        visitedResourceIds.volume.add(node.id);
-        upsertSceneDocumentResource(document, {
-          kind: 'volume',
-          value: node.props as VolumePrimitive,
-        });
-        return nodeIndex;
       case 'animationClip':
         visitedResourceIds.animationClip.add(node.id);
         upsertSceneDocumentResource(document, {
@@ -783,8 +733,6 @@ export const authoringTreeToSceneDocument = (
   sweepUnvisitedResourceIds(document, 'material', visitedResourceIds.material);
   sweepUnvisitedResourceIds(document, 'light', visitedResourceIds.light);
   sweepUnvisitedResourceIds(document, 'mesh', visitedResourceIds.mesh);
-  sweepUnvisitedResourceIds(document, 'sdf', visitedResourceIds.sdf);
-  sweepUnvisitedResourceIds(document, 'volume', visitedResourceIds.volume);
   sweepUnvisitedResourceIds(document, 'animationClip', visitedResourceIds.animationClip);
   sweepUnvisitedResourceIds(document, 'camera', visitedResourceIds.camera);
 

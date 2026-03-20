@@ -8,7 +8,7 @@ React integration is a separate package. It must not become the source of truth 
 
 - JSX authoring trees are built through `@rieul3d/react` primitives such as `<scene>` and `<node>`.
 - Authored trees may also declare scene resources such as `<camera>`, `<mesh>`, `<material>`,
-  `<light>`, `<texture>`, `<asset>`, `<sdf>`, `<volume>`, and `<animationClip>`.
+  `<light>`, `<texture>`, `<asset>`, and `<animationClip>`.
 - Node-like authoring elements may expose React-style shorthands such as `<group>` plus transform
   props such as `position`, `rotation`, and `scale` when they still lower cleanly into the same
   node-oriented Scene IR structure.
@@ -121,7 +121,7 @@ Issue `#117` provided the first scene-document implementation slice that this ho
   ancestor changed are included in the transform buckets even when their local node data is
   otherwise unchanged.
 - `@rieul3d/gpu` now exposes ID-keyed targeted invalidation helpers, so snapshot consumers can drop
-  changed mesh/material/texture/volume residency entries before falling back to a full reset for
+  changed mesh/material/texture residency entries before falling back to a full reset for
   scene-topology changes.
 - `commitSummaryNeedsResidencyReset()` captures the current safe residency-reset boundary for
   snapshot consumers: resource changes plus node/topology changes still require a full reset until

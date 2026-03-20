@@ -4,9 +4,10 @@ import {
   extractSdfMesh,
   extractSurfaceNetMesh,
   inferSdfExtractionBounds,
+  type SdfPrimitive,
   triangulateMarchingCubesCell,
 } from '@rieul3d/geometry';
-import type { MeshPrimitive, SdfPrimitive } from '@rieul3d/ir';
+import type { MeshPrimitive } from '@rieul3d/ir';
 
 const getAttribute = (mesh: MeshPrimitive, semantic: string): readonly number[] => {
   const attribute = mesh.attributes.find((candidate) => candidate.semantic === semantic);

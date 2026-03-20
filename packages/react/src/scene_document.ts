@@ -6,9 +6,7 @@ import {
   appendMaterial,
   appendMesh,
   appendNode,
-  appendSdfPrimitive,
   appendTexture,
-  appendVolumePrimitive,
   createNode,
   createSceneIr,
 } from '@rieul3d/ir';
@@ -21,9 +19,7 @@ import type {
   MeshPrimitive,
   Node,
   SceneIr,
-  SdfPrimitive,
   TextureRef,
-  VolumePrimitive,
 } from '@rieul3d/ir';
 
 type SceneDocumentScene = {
@@ -53,8 +49,6 @@ type SceneDocumentResourceByKind = {
   light: Light;
   mesh: MeshPrimitive;
   camera: Camera;
-  sdf: SdfPrimitive;
-  volume: VolumePrimitive;
   animationClip: AnimationClip;
 };
 
@@ -90,8 +84,6 @@ export type SceneDocument = {
   lights: SceneDocumentResourceCollection<'light'>;
   meshes: SceneDocumentResourceCollection<'mesh'>;
   cameras: SceneDocumentResourceCollection<'camera'>;
-  sdfs: SceneDocumentResourceCollection<'sdf'>;
-  volumes: SceneDocumentResourceCollection<'volume'>;
   animationClips: SceneDocumentResourceCollection<'animationClip'>;
   nodes: SceneDocumentNodeCollection;
 };
@@ -136,10 +128,6 @@ const getResourceCollection = <TKind extends SceneDocumentResourceKind>(
       return document.meshes as SceneDocumentResourceCollection<TKind>;
     case 'camera':
       return document.cameras as SceneDocumentResourceCollection<TKind>;
-    case 'sdf':
-      return document.sdfs as SceneDocumentResourceCollection<TKind>;
-    case 'volume':
-      return document.volumes as SceneDocumentResourceCollection<TKind>;
     case 'animationClip':
       return document.animationClips as SceneDocumentResourceCollection<TKind>;
   }
@@ -183,8 +171,6 @@ export const createSceneDocument = (id = 'scene'): SceneDocument => ({
   lights: createResourceCollection(),
   meshes: createResourceCollection(),
   cameras: createResourceCollection(),
-  sdfs: createResourceCollection(),
-  volumes: createResourceCollection(),
   animationClips: createResourceCollection(),
   nodes: {
     order: [],
@@ -330,18 +316,6 @@ export const sceneDocumentToSceneIr = (document: SceneDocument): SceneIr => {
     const camera = document.cameras.byId.get(id);
     if (camera) {
       scene = appendCamera(scene, camera.value);
-    }
-  }
-  for (const id of document.sdfs.order) {
-    const sdf = document.sdfs.byId.get(id);
-    if (sdf) {
-      scene = appendSdfPrimitive(scene, sdf.value);
-    }
-  }
-  for (const id of document.volumes.order) {
-    const volume = document.volumes.byId.get(id);
-    if (volume) {
-      scene = appendVolumePrimitive(scene, volume.value);
     }
   }
   for (const id of document.animationClips.order) {

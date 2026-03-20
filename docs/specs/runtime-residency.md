@@ -30,15 +30,14 @@ from Scene IR so the same IR can run in browsers, Deno, and headless targets.
 
 - Mesh residency is uploaded into per-attribute vertex buffers plus an optional index buffer.
 - Texture residency is uploaded into `GPUTexture`/view/sampler triples from image assets.
-- Volume residency is uploaded into 3D textures from volume assets.
 - Residency caches are keyed by IR object IDs.
 
 ## Recovery
 
 - Device-local residency is invalidatable and rebuildable from
   `AssetSource + SceneIr + EvaluatedScene`.
-- Callers may now drop targeted mesh/material/texture/volume residency entries by stable IDs when a
-  full rebuild is not required.
+- Callers may now drop targeted mesh/material/texture residency entries by stable IDs when a full
+  rebuild is not required.
 - Pipeline caches are considered disposable and are cleared during rebuild.
 - Device loss is observed explicitly rather than hidden behind global runtime state.
 - Browser examples exercise both `ensureSceneMeshResidency(...)` and

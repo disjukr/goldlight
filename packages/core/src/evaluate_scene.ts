@@ -6,8 +6,6 @@ import type {
   MeshPrimitive,
   Node,
   SceneIr,
-  SdfPrimitive,
-  VolumePrimitive,
 } from '@rieul3d/ir';
 
 export type Mat4 = readonly number[];
@@ -17,8 +15,6 @@ export type EvaluatedNode = Readonly<{
   worldMatrix: Mat4;
   mesh?: MeshPrimitive;
   material?: Material;
-  sdf?: SdfPrimitive;
-  volume?: VolumePrimitive;
   light?: Light;
 }>;
 
@@ -246,8 +242,6 @@ export const evaluateScene = (scene: SceneIr, options: EvaluateSceneOptions): Ev
   const nodes = applyAnimation(scene, options);
   const meshById = new Map(scene.meshes.map((mesh) => [mesh.id, mesh]));
   const materialById = new Map(scene.materials.map((material) => [material.id, material]));
-  const sdfById = new Map(scene.sdfPrimitives.map((primitive) => [primitive.id, primitive]));
-  const volumeById = new Map(scene.volumePrimitives.map((primitive) => [primitive.id, primitive]));
   const lightById = new Map(scene.lights.map((light) => [light.id, light]));
   return evaluateResolvedScene(
     scene,
@@ -255,8 +249,6 @@ export const evaluateScene = (scene: SceneIr, options: EvaluateSceneOptions): Ev
     options,
     meshById,
     materialById,
-    sdfById,
-    volumeById,
     lightById,
   );
 };
@@ -267,8 +259,6 @@ const evaluateResolvedScene = (
   options: EvaluateSceneOptions,
   meshById: ReadonlyMap<string, MeshPrimitive>,
   materialById: ReadonlyMap<string, Material>,
-  sdfById: ReadonlyMap<string, SdfPrimitive>,
-  volumeById: ReadonlyMap<string, VolumePrimitive>,
   lightById: ReadonlyMap<string, Light>,
 ): EvaluatedScene => {
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
@@ -315,8 +305,6 @@ const evaluateResolvedScene = (
         worldMatrix: getWorldMatrix(node),
         mesh,
         material: mesh?.materialId ? materialById.get(mesh.materialId) : undefined,
-        sdf: node.sdfId ? sdfById.get(node.sdfId) : undefined,
-        volume: node.volumeId ? volumeById.get(node.volumeId) : undefined,
         light: node.lightId ? lightById.get(node.lightId) : undefined,
       };
     }),
@@ -334,8 +322,6 @@ export const reevaluateSceneTransforms = (
   );
   const meshById = new Map(scene.meshes.map((mesh) => [mesh.id, mesh]));
   const materialById = new Map(scene.materials.map((material) => [material.id, material]));
-  const sdfById = new Map(scene.sdfPrimitives.map((primitive) => [primitive.id, primitive]));
-  const volumeById = new Map(scene.volumePrimitives.map((primitive) => [primitive.id, primitive]));
   const lightById = new Map(scene.lights.map((light) => [light.id, light]));
 
   for (const node of nodes) {
@@ -347,8 +333,6 @@ export const reevaluateSceneTransforms = (
       previous.node.parentId !== node.parentId ||
       previous.node.meshId !== node.meshId ||
       previous.node.cameraId !== node.cameraId ||
-      previous.node.sdfId !== node.sdfId ||
-      previous.node.volumeId !== node.volumeId ||
       previous.node.lightId !== node.lightId
     ) {
       return evaluateScene(scene, options);
@@ -361,8 +345,6 @@ export const reevaluateSceneTransforms = (
     options,
     meshById,
     materialById,
-    sdfById,
-    volumeById,
     lightById,
   );
 };

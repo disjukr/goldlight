@@ -14,21 +14,8 @@ export type ImageAsset = Readonly<{
   rowsPerImage?: number;
 }>;
 
-export type VolumeAsset = Readonly<{
-  id: string;
-  mimeType: string;
-  bytes: Uint8Array;
-  width: number;
-  height: number;
-  depth: number;
-  pixelFormat?: GPUTextureFormat;
-  bytesPerRow?: number;
-  rowsPerImage?: number;
-}>;
-
 export type AssetSource = Readonly<{
   images: ReadonlyMap<string, ImageAsset>;
-  volumes: ReadonlyMap<string, VolumeAsset>;
 }>;
 
 export type TextureResidency = Readonly<{
@@ -58,22 +45,10 @@ export type MaterialResidency = Readonly<{
   alphaPolicyBuffer: GPUBuffer;
 }>;
 
-export type VolumeResidency = Readonly<{
-  volumeId: string;
-  texture: GPUTexture;
-  view: GPUTextureView;
-  sampler: GPUSampler;
-  width: number;
-  height: number;
-  depth: number;
-  format: GPUTextureFormat;
-}>;
-
 export type RuntimeResidency = {
   readonly textures: Map<string, TextureResidency>;
   readonly geometry: Map<string, GeometryResidency>;
   readonly materials: Map<string, MaterialResidency>;
-  readonly volumes: Map<string, VolumeResidency>;
   readonly pipelines: Map<string, GPURenderPipeline | GPUComputePipeline>;
 };
 
@@ -81,7 +56,6 @@ export type ResidencyInvalidationPlan = Readonly<{
   meshIds?: readonly string[];
   materialIds?: readonly string[];
   textureIds?: readonly string[];
-  volumeIds?: readonly string[];
   pipelineKeys?: readonly string[];
 }>;
 
@@ -90,7 +64,6 @@ export type RuntimeResidencyAdapterPlan = Readonly<{
   meshIds?: readonly string[];
   materialIds?: readonly string[];
   textureIds?: readonly string[];
-  volumeIds?: readonly string[];
   pipelineKeys?: readonly string[];
 }>;
 
@@ -98,7 +71,6 @@ export const createRuntimeResidency = (): RuntimeResidency => ({
   textures: new Map(),
   geometry: new Map(),
   materials: new Map(),
-  volumes: new Map(),
   pipelines: new Map(),
 });
 
@@ -132,10 +104,6 @@ const destroyTextureResidency = (texture: TextureResidency): void => {
   texture.texture.destroy?.();
 };
 
-const destroyVolumeResidency = (volume: VolumeResidency): void => {
-  volume.texture.destroy?.();
-};
-
 const deleteResidencyEntries = <TEntry>(
   cache: Map<string, TEntry>,
   ids: readonly string[] | undefined,
@@ -159,7 +127,6 @@ export const invalidateResidencyResources = (
   deleteResidencyEntries(residency.geometry, plan.meshIds, destroyGeometryResidency);
   deleteResidencyEntries(residency.materials, plan.materialIds, destroyMaterialResidency);
   deleteResidencyEntries(residency.textures, plan.textureIds, destroyTextureResidency);
-  deleteResidencyEntries(residency.volumes, plan.volumeIds, destroyVolumeResidency);
 
   for (const pipelineKey of plan.pipelineKeys ?? []) {
     residency.pipelines.delete(pipelineKey);
@@ -173,7 +140,6 @@ export const invalidateResidency = (residency: RuntimeResidency): RuntimeResiden
     meshIds: [...residency.geometry.keys()],
     materialIds: [...residency.materials.keys()],
     textureIds: [...residency.textures.keys()],
-    volumeIds: [...residency.volumes.keys()],
     pipelineKeys: [...residency.pipelines.keys()],
   });
   return residency;
@@ -191,7 +157,6 @@ export const applyRuntimeResidencyPlan = (
     meshIds: plan.meshIds,
     materialIds: plan.materialIds,
     textureIds: plan.textureIds,
-    volumeIds: plan.volumeIds,
     pipelineKeys: plan.pipelineKeys,
   });
 };
@@ -489,16 +454,6 @@ export type TextureUploadPlan = Readonly<{
   rowsPerImage: number;
 }>;
 
-export type VolumeUploadPlan = Readonly<{
-  volumeId: string;
-  width: number;
-  height: number;
-  depth: number;
-  format: GPUTextureFormat;
-  bytesPerRow: number;
-  rowsPerImage: number;
-}>;
-
 export const resolveTextureImageAsset = (
   assetSource: AssetSource,
   textureRef: SceneIr['textures'][number],
@@ -684,121 +639,6 @@ export const ensureSceneTextureResidency = (
   return residency;
 };
 
-export const resolveVolumeAsset = (
-  assetSource: AssetSource,
-  volumePrimitive: SceneIr['volumePrimitives'][number],
-): VolumeAsset | undefined => {
-  if (!volumePrimitive.assetId) {
-    return undefined;
-  }
-
-  return assetSource.volumes.get(volumePrimitive.assetId);
-};
-
-export const createVolumeUploadPlan = (
-  volumePrimitive: SceneIr['volumePrimitives'][number],
-  volumeAsset: VolumeAsset,
-): VolumeUploadPlan => ({
-  volumeId: volumePrimitive.id,
-  width: volumeAsset.width,
-  height: volumeAsset.height,
-  depth: volumeAsset.depth,
-  format: volumeAsset.pixelFormat ?? 'r8unorm',
-  bytesPerRow: volumeAsset.bytesPerRow ?? volumeAsset.width,
-  rowsPerImage: volumeAsset.rowsPerImage ?? volumeAsset.height,
-});
-
-export const uploadVolumeResidency = (
-  context: GpuTextureUploadContext,
-  volumePrimitive: SceneIr['volumePrimitives'][number],
-  volumeAsset: VolumeAsset,
-): VolumeResidency => {
-  const plan = createVolumeUploadPlan(volumePrimitive, volumeAsset);
-  const texture = context.device.createTexture({
-    label: volumePrimitive.id,
-    size: {
-      width: plan.width,
-      height: plan.height,
-      depthOrArrayLayers: plan.depth,
-    },
-    dimension: '3d',
-    format: plan.format,
-    usage: textureBindingUsage | textureCopyDstUsage,
-  });
-
-  context.queue.writeTexture(
-    { texture },
-    toBufferSource(volumeAsset.bytes),
-    {
-      offset: 0,
-      bytesPerRow: plan.bytesPerRow,
-      rowsPerImage: plan.rowsPerImage,
-    },
-    {
-      width: plan.width,
-      height: plan.height,
-      depthOrArrayLayers: plan.depth,
-    },
-  );
-
-  return {
-    volumeId: volumePrimitive.id,
-    texture,
-    view: texture.createView({ dimension: '3d' }),
-    sampler: context.device.createSampler({
-      magFilter: 'linear',
-      minFilter: 'linear',
-      addressModeU: 'clamp-to-edge',
-      addressModeV: 'clamp-to-edge',
-      addressModeW: 'clamp-to-edge',
-    }),
-    width: plan.width,
-    height: plan.height,
-    depth: plan.depth,
-    format: plan.format,
-  };
-};
-
-export const ensureVolumeResidency = (
-  context: GpuTextureUploadContext,
-  residency: RuntimeResidency,
-  assetSource: AssetSource,
-  volumePrimitive: SceneIr['volumePrimitives'][number],
-): VolumeResidency => {
-  const cached = residency.volumes.get(volumePrimitive.id);
-  if (cached) {
-    return cached;
-  }
-
-  const volumeAsset = resolveVolumeAsset(assetSource, volumePrimitive);
-  if (!volumeAsset) {
-    throw new Error(
-      `volume "${volumePrimitive.id}" references missing asset "${volumePrimitive.assetId}"`,
-    );
-  }
-
-  const uploaded = uploadVolumeResidency(context, volumePrimitive, volumeAsset);
-  residency.volumes.set(volumePrimitive.id, uploaded);
-  return uploaded;
-};
-
-export const ensureSceneVolumeResidency = (
-  context: GpuTextureUploadContext,
-  residency: RuntimeResidency,
-  scene: SceneIr,
-  assetSource: AssetSource,
-): RuntimeResidency => {
-  for (const volumePrimitive of scene.volumePrimitives) {
-    if (!volumePrimitive.assetId) {
-      continue;
-    }
-
-    ensureVolumeResidency(context, residency, assetSource, volumePrimitive);
-  }
-
-  return residency;
-};
-
 export const rebuildRuntimeResidency = (
   context: RuntimeResidencyRebuildContext,
   residency: RuntimeResidency,
@@ -810,6 +650,5 @@ export const rebuildRuntimeResidency = (
   ensureSceneMeshResidency(context, residency, scene, evaluatedScene);
   ensureSceneMaterialResidency(context, residency, evaluatedScene);
   ensureSceneTextureResidency(context, residency, scene, assetSource);
-  ensureSceneVolumeResidency(context, residency, scene, assetSource);
   return residency;
 };

@@ -9,11 +9,9 @@ import type {
   MeshPrimitive,
   Node,
   SceneIr,
-  SdfPrimitive,
   TextureRef,
   Transform,
   Vec3,
-  VolumePrimitive,
 } from './generated/scene_ir.generated.ts';
 
 export const createVec3 = (x = 0, y = 0, z = 0): Vec3 => ({ x, y, z });
@@ -32,8 +30,6 @@ export const createSceneIr = (id = 'scene'): SceneIr => ({
   lights: [],
   meshes: [],
   cameras: [],
-  sdfPrimitives: [],
-  volumePrimitives: [],
   nodes: [],
   rootNodeIds: [],
   animationClips: [],
@@ -120,16 +116,6 @@ export const appendMaterial = (scene: SceneIr, material: Material): SceneIr => (
 export const appendLight = (scene: SceneIr, light: Light): SceneIr => ({
   ...scene,
   lights: [...scene.lights, light],
-});
-
-export const appendSdfPrimitive = (scene: SceneIr, primitive: SdfPrimitive): SceneIr => ({
-  ...scene,
-  sdfPrimitives: [...scene.sdfPrimitives, primitive],
-});
-
-export const appendVolumePrimitive = (scene: SceneIr, primitive: VolumePrimitive): SceneIr => ({
-  ...scene,
-  volumePrimitives: [...scene.volumePrimitives, primitive],
 });
 
 export const appendAnimationClip = (scene: SceneIr, clip: AnimationClip): SceneIr => ({

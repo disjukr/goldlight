@@ -21,8 +21,6 @@ type SceneRootCollectionName =
   | 'lights'
   | 'meshes'
   | 'cameras'
-  | 'sdfPrimitives'
-  | 'volumePrimitives'
   | 'animationClips';
 
 type SceneRootCollectionValueByName = {
@@ -32,8 +30,6 @@ type SceneRootCollectionValueByName = {
   lights: SceneIr['lights'][number];
   meshes: SceneIr['meshes'][number];
   cameras: SceneIr['cameras'][number];
-  sdfPrimitives: SceneIr['sdfPrimitives'][number];
-  volumePrimitives: SceneIr['volumePrimitives'][number];
   animationClips: SceneIr['animationClips'][number];
 };
 
@@ -71,10 +67,6 @@ export type SceneRootCommitUpdatePayload = Readonly<{
   lights: SceneRootCollectionUpdatePayload<SceneRootCollectionValueByName['lights']>;
   meshes: SceneRootCollectionUpdatePayload<SceneRootCollectionValueByName['meshes']>;
   cameras: SceneRootCollectionUpdatePayload<SceneRootCollectionValueByName['cameras']>;
-  sdfPrimitives: SceneRootCollectionUpdatePayload<SceneRootCollectionValueByName['sdfPrimitives']>;
-  volumePrimitives: SceneRootCollectionUpdatePayload<
-    SceneRootCollectionValueByName['volumePrimitives']
-  >;
   nodes: SceneRootNodeUpdatePayload;
   animationClips: SceneRootCollectionUpdatePayload<
     SceneRootCollectionValueByName['animationClips']
@@ -86,7 +78,6 @@ export type SceneRootResidencyInvalidationPlan = Readonly<{
   meshIds: readonly string[];
   materialIds: readonly string[];
   textureIds: readonly string[];
-  volumeIds: readonly string[];
   reasons: readonly string[];
 }>;
 
@@ -118,8 +109,6 @@ export type SceneRootCommitSummary = Readonly<{
   lights: SceneRootCollectionSummary;
   meshes: SceneRootCollectionSummary;
   cameras: SceneRootCollectionSummary;
-  sdfPrimitives: SceneRootCollectionSummary;
-  volumePrimitives: SceneRootCollectionSummary;
   nodes: SceneRootCollectionSummary;
   animationClips: SceneRootCollectionSummary;
 }>;
@@ -146,8 +135,6 @@ export type SceneRootCommitUpdatePlan = Readonly<{
   lights: SceneRootCollectionSummary;
   meshes: SceneRootCollectionSummary;
   cameras: SceneRootCollectionSummary;
-  sdfPrimitives: SceneRootCollectionSummary;
-  volumePrimitives: SceneRootCollectionSummary;
   nodes: SceneRootNodeUpdatePlan;
   animationClips: SceneRootCollectionSummary;
 }>;
@@ -340,8 +327,6 @@ const toSceneRootNodeUpdatePayload = (
 const nodeResourceBindingsChanged = (currentNode: Node, previousNode: Node): boolean => {
   return currentNode.meshId !== previousNode.meshId ||
     currentNode.cameraId !== previousNode.cameraId ||
-    currentNode.sdfId !== previousNode.sdfId ||
-    currentNode.volumeId !== previousNode.volumeId ||
     currentNode.lightId !== previousNode.lightId;
 };
 
@@ -473,14 +458,6 @@ export const summarizeSceneRootCommit = (commit: SceneRootCommitBase): SceneRoot
   lights: compareSceneRootCollection(commit.scene.lights, commit.previousScene?.lights),
   meshes: compareSceneRootCollection(commit.scene.meshes, commit.previousScene?.meshes),
   cameras: compareSceneRootCollection(commit.scene.cameras, commit.previousScene?.cameras),
-  sdfPrimitives: compareSceneRootCollection(
-    commit.scene.sdfPrimitives,
-    commit.previousScene?.sdfPrimitives,
-  ),
-  volumePrimitives: compareSceneRootCollection(
-    commit.scene.volumePrimitives,
-    commit.previousScene?.volumePrimitives,
-  ),
   nodes: compareSceneRootCollection(commit.scene.nodes, commit.previousScene?.nodes),
   animationClips: compareSceneRootCollection(
     commit.scene.animationClips,
@@ -501,14 +478,6 @@ export const planSceneRootCommitUpdates = (
   lights: compareSceneRootCollection(commit.scene.lights, commit.previousScene?.lights),
   meshes: compareSceneRootCollection(commit.scene.meshes, commit.previousScene?.meshes),
   cameras: compareSceneRootCollection(commit.scene.cameras, commit.previousScene?.cameras),
-  sdfPrimitives: compareSceneRootCollection(
-    commit.scene.sdfPrimitives,
-    commit.previousScene?.sdfPrimitives,
-  ),
-  volumePrimitives: compareSceneRootCollection(
-    commit.scene.volumePrimitives,
-    commit.previousScene?.volumePrimitives,
-  ),
   nodes: compareSceneRootNodes(commit.scene.nodes, commit.previousScene?.nodes),
   animationClips: compareSceneRootCollection(
     commit.scene.animationClips,
@@ -523,8 +492,6 @@ export const commitSummaryNeedsResidencyReset = (summary: SceneRootCommitSummary
     collectionHasChanges(summary.textures) ||
     collectionHasChanges(summary.materials) ||
     collectionHasChanges(summary.meshes) ||
-    collectionHasChanges(summary.sdfPrimitives) ||
-    collectionHasChanges(summary.volumePrimitives) ||
     collectionHasChanges(summary.nodes);
 };
 
@@ -539,8 +506,6 @@ export const canApplySceneRootTransformUpdates = (commit: SceneRootCommit): bool
     !collectionHasChanges(updatePlan.lights) &&
     !collectionHasChanges(updatePlan.meshes) &&
     !collectionHasChanges(updatePlan.cameras) &&
-    !collectionHasChanges(updatePlan.sdfPrimitives) &&
-    !collectionHasChanges(updatePlan.volumePrimitives) &&
     !collectionHasChanges(updatePlan.animationClips) &&
     updatePlan.nodes.addedIds.length === 0 &&
     updatePlan.nodes.removedIds.length === 0 &&
@@ -601,14 +566,6 @@ export const createSceneRootCommit = (
         getSceneCollection(scene, 'cameras'),
         updatePlan.cameras,
       ),
-      sdfPrimitives: toSceneRootCollectionUpdatePayload(
-        getSceneCollection(scene, 'sdfPrimitives'),
-        updatePlan.sdfPrimitives,
-      ),
-      volumePrimitives: toSceneRootCollectionUpdatePayload(
-        getSceneCollection(scene, 'volumePrimitives'),
-        updatePlan.volumePrimitives,
-      ),
       nodes: toSceneRootNodeUpdatePayload(scene.nodes, updatePlan.nodes),
       animationClips: toSceneRootCollectionUpdatePayload(
         getSceneCollection(scene, 'animationClips'),
@@ -629,14 +586,12 @@ const collectAssetLinkedIds = (
   assetIds: readonly string[],
 ): Readonly<{
   textureIds: readonly string[];
-  volumeIds: readonly string[];
 }> => {
   const changedAssetIds = new Set(assetIds);
   const scenes = [commit.previousScene, commit.scene].filter((candidate): candidate is SceneIr =>
     candidate !== undefined
   );
   const textureIds = new Set<string>();
-  const volumeIds = new Set<string>();
 
   for (const candidateScene of scenes) {
     for (const texture of candidateScene.textures) {
@@ -644,17 +599,10 @@ const collectAssetLinkedIds = (
         textureIds.add(texture.id);
       }
     }
-
-    for (const volume of candidateScene.volumePrimitives) {
-      if (volume.assetId && changedAssetIds.has(volume.assetId)) {
-        volumeIds.add(volume.id);
-      }
-    }
   }
 
   return {
     textureIds: [...textureIds],
-    volumeIds: [...volumeIds],
   };
 };
 
@@ -672,9 +620,6 @@ export const planSceneRootResidencyInvalidation = (
   if (updatePlan.nodes.resourceBindingIds.length > 0) reasons.push('nodeResourceBindingChanged');
   if (updatePlan.nodes.metadataIds.length > 0) reasons.push('nodeMetadataChanged');
   if (updatePlan.nodes.otherUpdatedIds.length > 0) reasons.push('nodeOtherChanged');
-  if (updatePlan.sdfPrimitives.addedIds.length > 0) reasons.push('sdfAdded');
-  if (updatePlan.sdfPrimitives.removedIds.length > 0) reasons.push('sdfRemoved');
-  if (updatePlan.sdfPrimitives.updatedIds.length > 0) reasons.push('sdfUpdated');
 
   const reset = reasons.length > 0;
   if (reset) {
@@ -683,7 +628,6 @@ export const planSceneRootResidencyInvalidation = (
       meshIds: [],
       materialIds: [],
       textureIds: [],
-      volumeIds: [],
       reasons,
     };
   }
@@ -691,7 +635,6 @@ export const planSceneRootResidencyInvalidation = (
   const meshIds = new Set<string>();
   const materialIds = new Set<string>();
   const textureIds = new Set<string>();
-  const volumeIds = new Set<string>();
 
   appendUniqueIds(meshIds, updatePlan.meshes.addedIds);
   appendUniqueIds(meshIds, updatePlan.meshes.removedIds);
@@ -705,24 +648,18 @@ export const planSceneRootResidencyInvalidation = (
   appendUniqueIds(textureIds, updatePlan.textures.removedIds);
   appendUniqueIds(textureIds, updatePlan.textures.updatedIds);
 
-  appendUniqueIds(volumeIds, updatePlan.volumePrimitives.addedIds);
-  appendUniqueIds(volumeIds, updatePlan.volumePrimitives.removedIds);
-  appendUniqueIds(volumeIds, updatePlan.volumePrimitives.updatedIds);
-
   const assetLinkedIds = collectAssetLinkedIds(commit, [
     ...updatePlan.assets.addedIds,
     ...updatePlan.assets.removedIds,
     ...updatePlan.assets.updatedIds,
   ]);
   appendUniqueIds(textureIds, assetLinkedIds.textureIds);
-  appendUniqueIds(volumeIds, assetLinkedIds.volumeIds);
 
   return {
     reset: false,
     meshIds: [...meshIds],
     materialIds: [...materialIds],
     textureIds: [...textureIds],
-    volumeIds: [...volumeIds],
     reasons: [],
   };
 };

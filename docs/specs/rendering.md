@@ -24,8 +24,7 @@ The initial renderer uses a lightweight pass graph:
 ## Primitive Mapping
 
 - mesh primitives are expected to use raster-oriented passes
-- sdf and volume primitives are expected to use raymarch or compute-oriented passes
-- uber frames may mix raster and raymarch passes
+- procedural SDF/volume data is a caller concern rather than an engine-owned primitive family
 
 ## Shader Model
 
@@ -41,16 +40,13 @@ The initial renderer uses a lightweight pass graph:
 - Forward rendering now also consumes first-class directional light nodes for built-in Lambert mesh
   shading.
 - Deferred rendering now executes a minimal mesh-only path with a depth prepass, built-in unlit/lit
-  albedo-normal G-buffer passes, registered custom WGSL G-buffer programs, a fullscreen
-  directional-light lighting resolve, and post-lighting SDF/volume raymarch composition.
+  albedo-normal G-buffer passes, registered custom WGSL G-buffer programs, and a fullscreen
+  directional-light lighting resolve.
 - Uber rendering now executes deferred opaque mesh passes, forward opaque fallback passes, and a
   second forward transparent pass before post-process/present.
-- Forward rendering also encodes a dedicated SDF raymarch pass for supported sphere and box
-  primitives.
-- Forward rendering also encodes a first volume raymarch pass for volume primitives with residency.
-- Pathtraced rendering now ships with two fullscreen slices: the original SDF path and a
-  triangle-BVH mesh path for static mesh scenes, including mixed mesh+SDF pathtraced composition. It
-  does not yet support custom materials, resident volumes, or scene light nodes.
+- Pathtraced rendering targets static mesh scenes through the triangle-BVH path, and it may accept
+  renderer-specific scene extensions such as caller-owned SDF descriptors at render time. Those
+  extensions are not part of engine-owned `SceneIr`.
 - Built-in unlit WGSL is stored as a standalone shader file and imported as text.
 - Built-in forward lit WGSL is stored as a standalone shader file and consumes directional-light
   uniform data extracted from evaluated light nodes.
@@ -74,9 +70,6 @@ The initial renderer uses a lightweight pass graph:
   without writing incorrect prepass depth through zero-alpha cutouts.
 - Deferred custom WGSL programs may also target the G-buffer path when they write the same two
   render targets and match the deferred transform/material binding contract.
-- Deferred frames now reuse the existing SDF sphere/box and volume raymarch passes after lighting,
-  so mixed scenes can keep mesh shading in deferred while compositing raymarched primitives into the
-  same output target.
 - Forward and deferred rendering can now route scene output through an explicit intermediate
   scene-color texture when ordered post-process passes are requested.
 - The first post-process milestone ships a built-in fullscreen blit pass plus a minimal post-process
@@ -91,8 +84,7 @@ The initial renderer uses a lightweight pass graph:
 - Custom WGSL programs can be registered and cached through the material registry.
 - Headless/offscreen rendering supports compact byte readback for snapshot testing.
 - Headless/offscreen rendering also supports forward-renderer cubemap capture as six ordered
-  offscreen face snapshots for mesh, SDF, and volume scenes, decoupled from later
-  reprojection/export layouts.
+  offscreen face snapshots for mesh scenes, decoupled from later reprojection/export layouts.
 - Headless/offscreen rendering also supports a dedicated mesh-node id-buffer pick pass with stable
   node-to-mesh metadata and screen-pixel decode helpers.
 - Node-pick snapshots use an internal linear `rgba8unorm` attachment for readback and currently
@@ -104,10 +96,7 @@ The initial renderer uses a lightweight pass graph:
   custom WGSL path that samples texture residency through declared material bindings.
 - The native BYOW demos use the same forward renderer/runtime residency path on a `winit`-hosted
   `Deno.UnsafeWindowSurface` target instead of a browser canvas.
-- Fixture-backed golden snapshot tests cover clear-only, mesh, sphere/box SDF, volume, and
-  recovery-rebuild headless frames.
-- Raymarch golden tests also assert that SDF/volume snapshots differ from the clear-only frame so
-  unresolved shader or uniform regressions do not silently lock in blank fixtures.
+- Fixture-backed golden snapshot tests cover clear-only and mesh headless frames.
 - Golden fixtures can be refreshed intentionally with
   `deno run -A --unstable-raw-imports scripts/refresh_golden_snapshots.ts`.
 
@@ -176,12 +165,9 @@ The initial renderer uses a lightweight pass graph:
 
 - Post-processing currently exposes a renderer-owned fullscreen pass contract only; scene IR does
   not declare effect graphs yet.
-- The current pathtraced renderer slices support sphere/box SDF scenes and static triangle-mesh
-  scenes with BVHs derived from mesh geometry, but should still be treated as a renderer-boundary
-  milestone rather than the final path-tracing feature set.
+- The current pathtraced renderer slice supports static triangle-mesh scenes with BVHs derived from
+  mesh geometry, but should still be treated as a renderer-boundary milestone rather than the final
+  path-tracing feature set.
 - Custom WGSL materials do not yet receive a first-class shared alpha-policy binding, so uber
   partitioning currently treats non-opaque custom materials as forward-only.
-- Renderer-side picking currently targets mesh nodes only; SDF, volume, and per-triangle picking are
-  still pending.
-- SDF execution currently supports sphere and box primitives only; broader graph/operator coverage
-  is still pending.
+- Renderer-side picking currently targets mesh nodes only; per-triangle picking is still pending.

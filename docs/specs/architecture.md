@@ -16,7 +16,7 @@ The runtime is split into explicit data and execution stages:
 4. `Renderer Capability Preflight`: renderer support checks against evaluated scene features and
    material requirements.
 5. `Runtime Residency`: device-specific GPU resources and caches.
-6. `Render Execution`: forward/deferred/raymarch pass orchestration.
+6. `Render Execution`: forward/deferred/pathtraced pass orchestration.
 
 ## Packages
 
@@ -70,8 +70,7 @@ The current scaffold already includes:
 
 - mesh GPU residency upload and caching
 - texture GPU residency upload and caching
-- first volume GPU residency upload and extraction
-- forward frame encoding for mesh draws plus first SDF raymarch execution
+- forward frame encoding for mesh draws
 - local-space SDF sphere/box extraction into `MeshPrimitive` geometry through marching-cubes and
   naive surface-nets helpers
 - intermediate scene-color routing plus first renderer-owned fullscreen post-process blit pass

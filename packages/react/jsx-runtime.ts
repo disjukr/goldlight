@@ -10,9 +10,7 @@ export type {
   MeshJsxProps,
   NodeJsxProps,
   SceneJsxProps,
-  SdfJsxProps,
   TextureJsxProps,
-  VolumeJsxProps,
 } from './src/authoring.ts';
 
 // deno-lint-ignore no-namespace
@@ -30,8 +28,6 @@ export namespace JSX {
     material: import('./src/authoring.ts').MaterialJsxProps;
     light: import('./src/authoring.ts').LightJsxProps;
     mesh: import('./src/authoring.ts').MeshJsxProps;
-    sdf: import('./src/authoring.ts').SdfJsxProps;
-    volume: import('./src/authoring.ts').VolumeJsxProps;
     animationClip: import('./src/authoring.ts').AnimationClipJsxProps;
     camera: import('./src/authoring.ts').CameraJsxProps;
   }

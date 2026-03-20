@@ -101,19 +101,6 @@ union Camera {
   ),
 }
 
-struct SdfPrimitive {
-  id: Id,
-  op: string,
-  parameters: Vec4[string],
-}
-
-struct VolumePrimitive {
-  id: Id,
-  assetId?: Id,
-  dimensions: Vec3,
-  format: string,
-}
-
 struct Node {
   id: Id,
   name?: string,
@@ -121,8 +108,6 @@ struct Node {
   transform: Transform,
   meshId?: Id,
   cameraId?: Id,
-  sdfId?: Id,
-  volumeId?: Id,
   lightId?: Id,
 }
 
@@ -153,8 +138,6 @@ struct SceneIr {
   meshes: MeshPrimitive[],
   cameras: Camera[],
   activeCameraId?: Id,
-  sdfPrimitives: SdfPrimitive[],
-  volumePrimitives: VolumePrimitive[],
   nodes: Node[],
   rootNodeIds: Id[],
   animationClips: AnimationClip[],

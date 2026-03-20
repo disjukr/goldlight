@@ -9,15 +9,15 @@ Runnable examples live here. Each example should document how to build, serve, o
 - [`byow_primitives_demo/README.md`](./byow_primitives_demo/README.md): Windows-native BYOW demo
   rendering the built-in procedural mesh primitive set through a camera-backed, depth-tested forward
   path
-- [`byow_cornell_pathtraced_demo/README.md`](./byow_cornell_pathtraced_demo/README.md):
-  Windows-native BYOW demo exercising the current SDF-only pathtraced renderer slice with a
-  Cornell-box-like scene
-- [`byow_cornell_helmet_pathtraced_demo/README.md`](./byow_cornell_helmet_pathtraced_demo/README.md):
-  Windows-native BYOW demo exercising the mixed mesh+SDF pathtraced path with the Damaged Helmet
-  inside a Cornell-box-like scene
 - [`byow_helmet_pathtraced_demo/README.md`](./byow_helmet_pathtraced_demo/README.md): Windows-native
   BYOW demo exercising the default triangle-BVH mesh path tracing path with the vendored Damaged
   Helmet GLB
+- [`byow_cornell_pathtraced_demo/README.md`](./byow_cornell_pathtraced_demo/README.md):
+  Windows-native BYOW Cornell-box demo that supplies SDF room data through the pathtraced renderer's
+  scene extension
+- [`byow_cornell_helmet_pathtraced_demo/README.md`](./byow_cornell_helmet_pathtraced_demo/README.md):
+  Windows-native BYOW demo mixing the Damaged Helmet mesh path with a Cornell-box SDF renderer
+  extension
 - [`byow_react_bunny_demo/README.md`](./byow_react_bunny_demo/README.md): Windows-native BYOW demo
   mounted through `@rieul3d/react/reconciler` and rendering the vendored Stanford Bunny PLY mesh
 - [`assets/README.md`](./assets/README.md): in-repo small example assets plus refresh commands
@@ -41,14 +41,14 @@ Runnable examples live here. Each example should document how to build, serve, o
 - Type-check the BYOW triangle smoke test: `deno task example:byow:triangle:check`
 - Run the BYOW primitives demo: `deno task example:byow:primitives:run`
 - Type-check the BYOW primitives demo: `deno task example:byow:primitives:check`
-- Run the BYOW Cornell pathtraced demo: `deno task example:byow:cornell:run`
-- Type-check the BYOW Cornell pathtraced demo: `deno task example:byow:cornell:check`
-- Run the BYOW Cornell Helmet pathtraced demo: `deno task example:byow:cornell-helmet:run`
-- Type-check the BYOW Cornell Helmet pathtraced demo: `deno task example:byow:cornell-helmet:check`
 - Run the default BYOW mesh pathtraced demo: `deno task example:byow:pathtraced:run`
 - Type-check the default BYOW mesh pathtraced demo: `deno task example:byow:pathtraced:check`
 - Run the BYOW Helmet pathtraced demo: `deno task example:byow:helmet-pathtraced:run`
 - Type-check the BYOW Helmet pathtraced demo: `deno task example:byow:helmet-pathtraced:check`
+- Run the BYOW Cornell pathtraced demo: `deno task example:byow:cornell:run`
+- Type-check the BYOW Cornell pathtraced demo: `deno task example:byow:cornell:check`
+- Run the BYOW Cornell Helmet pathtraced demo: `deno task example:byow:cornell-helmet:run`
+- Type-check the BYOW Cornell Helmet pathtraced demo: `deno task example:byow:cornell-helmet:check`
 - Run the BYOW React Bunny demo: `deno task example:byow:react-bunny:run`
 - Type-check the BYOW React Bunny demo: `deno task example:byow:react-bunny:check`
 - Build the desktop host library: `deno task desktop:host:build`

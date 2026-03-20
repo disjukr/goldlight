@@ -2,12 +2,12 @@
 
 ## Status
 
-Proposed
+Accepted
 
 ## Decision
 
-The unstable utility and generation surface should move toward role-oriented boundaries instead of
-broad or ambiguous buckets such as `primitives`.
+The utility and generation surface uses role-oriented package boundaries instead of broad or
+ambiguous buckets such as `primitives`.
 
 The target roles are:
 
@@ -22,12 +22,12 @@ The target roles are:
 - `raytrace`: ray or path tracing acceleration structures and traversal helpers such as BVH, BLAS,
   TLAS, triangle intersection helpers, and flattened traversal layouts
 
-The utility surface should be exposed through explicit role-oriented public packages.
+These roles are exposed through explicit public packages in the workspace.
 
 ## Rationale
 
-The current boundaries around `primitives`, procedural generation, and future tracing helpers are
-starting to blur.
+The previous boundaries around `primitives`, procedural generation, and tracing helpers were too
+blurred to scale cleanly.
 
 - mesh primitives belong to geometry, not to a top-level catch-all package name
 - SDF primitives and field composition belong to procedural work, even when they later feed mesh
@@ -37,25 +37,26 @@ starting to blur.
   to the tracing execution stack
 
 Using role-based boundaries makes it easier to grow these areas without forcing unrelated concerns
-into the same package or namespace.
+into the same package or namespace, and the current workspace already reflects that split.
 
 ## Consequences
 
-- stable runtime packages remain unchanged: `ir`, `core`, `gpu`, `renderer`, and `react`
-- role-oriented utilities should publish through dedicated packages such as `@rieul3d/math`,
-  `@rieul3d/geometry`, `@rieul3d/spatial`, `@rieul3d/procedural`, and `@rieul3d/raytrace`
-- legacy catch-all package names such as `primitives` should be removed once callers migrate
-- mesh primitives should live under geometry-oriented modules
-- SDF primitives should live under procedural SDF modules
-- scene primitive declarations remain owned by `ir`
+- stable runtime packages remain separate from generation/tooling packages: `ir`, `core`, `gpu`,
+  `renderer`, `react`, and `desktop` stay distinct from utility roles
+- role-oriented utilities publish through dedicated packages: `@rieul3d/math`, `@rieul3d/geometry`,
+  `@rieul3d/spatial`, `@rieul3d/procedural`, and `@rieul3d/raytrace`
+- legacy catch-all package names such as `primitives` are no longer the primary public boundary
+- mesh primitives live under geometry-oriented modules
+- SDF and field-generation helpers live under procedural-oriented modules
+- scene declarations remain owned by `ir`, not by utility packages
 
 ## Alternatives Considered
 
-- keep the existing package names and internal buckets indefinitely: lowest churn, but it preserves
-  ambiguous ownership as the feature set grows
-- split into many new packages immediately: cleaner names, but too much public churn before the
-  internal seams are proven useful
+- keep ambiguous package names and internal buckets indefinitely: lowest churn, but it preserves
+  unclear ownership as the feature set grows
 - move everything under `core`: simpler workspace count, but it blurs runtime evaluation concerns
   with generation and tooling roles
+- split even more aggressively into finer packages now: possible later, but premature until usage
+  pressure justifies narrower boundaries
 
 Related issues: `#149`

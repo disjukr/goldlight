@@ -1,0 +1,178 @@
+import { assertEquals } from 'jsr:@std/assert@^1.0.14';
+import { evaluateScene } from '@rieul3d/core';
+import { createOffscreenBinding, createRuntimeResidency } from '@rieul3d/gpu';
+import { appendMaterial, appendMesh, appendNode, createNode, createSceneIr } from '@rieul3d/ir';
+import {
+  createMaterialRegistry,
+  type GpuRenderExecutionContext,
+  registerWgslMaterial,
+  renderForwardFrame,
+} from '@rieul3d/renderer';
+
+type MockBindGroup = Readonly<{
+  entries: readonly GPUBindGroupEntry[];
+}>;
+
+const createRenderMocks = () => {
+  const bindGroups: MockBindGroup[] = [];
+  const buffers: GPUBuffer[] = [];
+
+  const device = {
+    createShaderModule: ({ code }: GPUShaderModuleDescriptor) =>
+      ({ code }) as unknown as GPUShaderModule,
+    createRenderPipeline: (_descriptor: GPURenderPipelineDescriptor) =>
+      ({
+        getBindGroupLayout: () => ({}) as GPUBindGroupLayout,
+      }) as unknown as GPURenderPipeline,
+    createBindGroup: ({ entries }: GPUBindGroupDescriptor) => {
+      const bindGroup = { entries } as const;
+      bindGroups.push(bindGroup);
+      return bindGroup as unknown as GPUBindGroup;
+    },
+    createBuffer: (descriptor: GPUBufferDescriptor) => {
+      const buffer = {
+        label: descriptor.label,
+        size: descriptor.size,
+        destroy: () => undefined,
+      } as unknown as GPUBuffer;
+      buffers.push(buffer);
+      return buffer;
+    },
+    createCommandEncoder: () =>
+      ({
+        beginRenderPass: () =>
+          ({
+            setPipeline: () => undefined,
+            setBindGroup: () => undefined,
+            setVertexBuffer: () => undefined,
+            setIndexBuffer: () => undefined,
+            draw: () => undefined,
+            drawIndexed: () => undefined,
+            end: () => undefined,
+          }) as unknown as GPURenderPassEncoder,
+        finish: () => ({}) as GPUCommandBuffer,
+      }) as unknown as GPUCommandEncoder,
+    createTexture: () =>
+      ({
+        createView: () => ({}) as GPUTextureView,
+      }) as unknown as GPUTexture,
+    createSampler: () => ({}) as GPUSampler,
+  };
+
+  const queue = {
+    writeBuffer: () => undefined,
+    submit: () => undefined,
+  };
+
+  return {
+    device,
+    queue,
+    bindGroups,
+    buffers,
+  };
+};
+
+Deno.test('renderForwardFrame binds renderer-owned alpha policy for custom WGSL materials', () => {
+  const mocks = createRenderMocks();
+  const residency = createRuntimeResidency();
+  const registry = registerWgslMaterial(createMaterialRegistry(), {
+    id: 'custom:alpha-policy',
+    label: 'custom alpha policy',
+    wgsl: `
+struct TransformUniforms {
+  world: mat4x4<f32>,
+  viewProjection: mat4x4<f32>,
+};
+
+struct AlphaPolicyUniforms {
+  alphaCutoff: f32,
+  alphaMode: f32,
+  depthWrite: f32,
+  doubleSided: f32,
+};
+
+@group(0) @binding(0) var<uniform> transform: TransformUniforms;
+@group(1) @binding(0) var<uniform> alphaPolicy: AlphaPolicyUniforms;
+
+@vertex
+fn vsMain(@location(0) position: vec3<f32>) -> @builtin(position) vec4<f32> {
+  return transform.viewProjection * transform.world * vec4<f32>(position, 1.0);
+}
+
+@fragment
+fn fsMain() -> @location(0) vec4<f32> {
+  return vec4<f32>(alphaPolicy.alphaCutoff, alphaPolicy.alphaMode, alphaPolicy.depthWrite, 1.0);
+}
+    `,
+    vertexEntryPoint: 'vsMain',
+    fragmentEntryPoint: 'fsMain',
+    vertexAttributes: [{
+      semantic: 'POSITION',
+      shaderLocation: 0,
+      format: 'float32x3',
+      offset: 0,
+      arrayStride: 12,
+    }],
+    usesTransformBindings: true,
+    materialBindings: [{
+      kind: 'alpha-policy',
+      binding: 0,
+    }],
+  });
+
+  let scene = createSceneIr('custom-alpha-policy');
+  scene = appendMaterial(scene, {
+    id: 'custom-material',
+    kind: 'custom',
+    shaderId: 'custom:alpha-policy',
+    alphaMode: 'mask',
+    alphaCutoff: 0.35,
+    doubleSided: true,
+    textures: [],
+    parameters: {},
+  });
+  scene = appendMesh(scene, {
+    id: 'mesh-0',
+    materialId: 'custom-material',
+    attributes: [{
+      semantic: 'POSITION',
+      itemSize: 3,
+      values: [0, 0.7, 0, -0.7, -0.7, 0, 0.7, -0.7, 0],
+    }],
+  });
+  scene = appendNode(scene, createNode('mesh-node', { meshId: 'mesh-0' }));
+
+  residency.geometry.set('mesh-0', {
+    meshId: 'mesh-0',
+    attributeBuffers: { POSITION: { id: 0 } as unknown as GPUBuffer },
+    vertexCount: 3,
+    indexCount: 0,
+  });
+
+  renderForwardFrame(
+    mocks as unknown as GpuRenderExecutionContext,
+    createOffscreenBinding({
+      device: mocks.device as unknown as GPUDevice,
+      target: { kind: 'offscreen', width: 16, height: 16, format: 'rgba8unorm', sampleCount: 1 },
+    }),
+    residency,
+    evaluateScene(scene, { timeMs: 0 }),
+    registry,
+  );
+
+  const materialResidency = residency.materials.get('custom-material');
+  assertEquals(materialResidency?.alphaPolicyData, new Float32Array([0.35, 1, 1, 1]));
+
+  const alphaPolicyBuffer = materialResidency?.alphaPolicyBuffer;
+  const alphaPolicyBindGroup = mocks.bindGroups.find((bindGroup) =>
+    bindGroup.entries.some((entry) =>
+      'buffer' in entry.resource && entry.resource.buffer === alphaPolicyBuffer
+    )
+  );
+
+  assertEquals(alphaPolicyBindGroup?.entries.length, 1);
+  assertEquals(
+    alphaPolicyBindGroup?.entries.map((entry) => entry.binding),
+    [0],
+  );
+});

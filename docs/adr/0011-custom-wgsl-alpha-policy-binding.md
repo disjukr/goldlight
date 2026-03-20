@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted
 
 ## Decision
 
@@ -10,11 +10,16 @@ Proposed
 explicit optional material binding contract instead of packing that policy into the existing generic
 material uniform payload.
 
-The proposed boundary is:
+This decision applies to both hand-authored custom WGSL programs and future template-generated
+shader variants.
+
+The boundary is:
 
 - renderer-side opaque/mask/blend partitioning continues to derive from `SceneIr.Material`
-- custom WGSL programs may opt into a shared alpha-policy uniform binding through explicit material
-  binding descriptors
+- `Material` may eventually carry shader-selection inputs such as variant or feature flags, but
+  renderer-owned alpha policy remains a separate contract from program-owned material parameters
+- custom WGSL programs and template-generated shader variants may opt into a shared alpha-policy
+  uniform binding through explicit material binding descriptors
 - the alpha-policy binding stays in the material bind group, alongside existing material uniforms,
   textures, and samplers
 - the shared alpha-policy payload mirrors the renderer-owned material policy fields already used by
@@ -25,6 +30,20 @@ The proposed boundary is:
   - requested double-sided flag
 - custom material parameter uniforms remain owned by the custom program and should not need to
   reserve built-in slots or reinterpret built-in `values[]` packing
+- shader-generation inputs that change program structure should be treated as variant-selection
+  inputs and drive shader/pipeline residency keys instead of being inferred from arbitrary uniform
+  payload contents
+
+One acceptable architecture is:
+
+- `Material`: renderer-facing semantic inputs such as alpha mode, double-sided policy, and
+  program-selection inputs such as variant or feature flags
+- `MaterialBindingDescriptor`: explicit declaration of which bindings are program-owned parameters
+  versus renderer-owned policy bindings
+- `PreparedProgram`: generated WGSL, binding layout contract, and pipeline key derived from a
+  material variant
+- `ProgramResidency`: device-local shader module, bind group layout, and render pipeline caches for
+  a prepared program key
 
 One acceptable API shape would extend `MaterialBindingDescriptor` with an explicit semantic for
 renderer-owned alpha policy, for example an alpha-policy uniform descriptor distinct from the
@@ -35,7 +54,8 @@ current generic `uniform` entry.
 Issue `#145` is not just a missing shader field. The renderer already decides whether a material is
 opaque, masked, or blended before it chooses deferred, forward opaque fallback, or forward
 transparent execution. Custom WGSL programs need access to that same policy if they are going to
-clip masked texels or branch on the same material contract as built-in shaders.
+clip masked texels or branch on the same material contract as built-in shaders. The same applies to
+future template-generated shader variants.
 
 Reusing the current generic material uniform payload is a weak boundary because:
 
@@ -43,10 +63,22 @@ Reusing the current generic material uniform payload is a weak boundary because:
 - the renderer would still need out-of-band rules to know whether a custom material expects alpha
   policy
 - future built-in material parameter layout changes would leak into custom shader contracts
+- template-generated variants would end up duplicating renderer policy fields inside many different
+  per-variant uniform layouts
+- shader residency would become harder to cache correctly because program structure and per-material
+  data would be coupled to the same opaque payload
 
 An explicit alpha-policy binding keeps the renderer-owned classification contract separate from
 program-owned parameter payloads while still letting custom WGSL materials participate in the same
 hybrid execution model.
+
+This separation also supports a cleaner generated-shader architecture:
+
+- variant keys decide shader structure
+- renderer policy decides pass selection and fixed execution semantics
+- material uniforms and textures supply per-instance data
+
+Those three concerns should not collapse into a single implicit blob.
 
 ## Consequences
 
@@ -55,12 +87,23 @@ hybrid execution model.
 - hybrid renderer partitioning remains driven by `SceneIr.Material`, not by shader source analysis
 - material binding descriptors gain a clearer distinction between program-owned uniforms and
   renderer-owned policy data
-- implementation still needs follow-up work to define the exact descriptor shape and tests
+- a future material-variant system can generate shaders and program residency keys without taking
+  ownership of renderer alpha classification
+- shader residency invalidation can distinguish between:
+  - per-material parameter changes that only require buffer or texture updates
+  - variant changes that require prepared-program or pipeline re-selection
+  - renderer policy changes such as alpha mode that affect both execution partitioning and optional
+    alpha-policy binding contents
+- implementation still needs follow-up work to define the exact descriptor shape, prepared-program
+  model, and tests
 
 ## Alternatives Considered
 
 - pack alpha policy into the existing generic material uniform: less API surface, but it couples
   custom WGSL contracts to built-in layout details
+- pack alpha policy into every generated variant uniform layout: straightforward for a template
+  system, but it duplicates renderer-owned policy across many variant-specific contracts and weakens
+  program residency boundaries
 - infer alpha behavior from custom WGSL code or material registration flags alone: too implicit for
   stable renderer partitioning
 - keep custom transparent materials on forward-only fallback indefinitely: workable short term, but

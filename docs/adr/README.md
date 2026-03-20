@@ -25,6 +25,12 @@ supersedes them.
 - [`0010-uber-deferred-forward-alpha-materials.md`](./0010-uber-deferred-forward-alpha-materials.md):
   material alpha policy should explicitly separate deferred opaque or masked coverage from forward
   blended transparency
+- [`0011-custom-wgsl-alpha-policy-binding.md`](./0011-custom-wgsl-alpha-policy-binding.md): custom
+  and generated WGSL material programs receive renderer-owned alpha policy through an explicit
+  binding contract instead of built-in uniform packing
+- [`0012-role-oriented-utility-package-layout.md`](./0012-role-oriented-utility-package-layout.md):
+  utility and generation packages use role-oriented boundaries such as geometry, spatial,
+  procedural, and raytrace instead of catch-all primitive buckets
 
 ## Related References
 

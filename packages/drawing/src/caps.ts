@@ -53,6 +53,8 @@ const texturableFormats = new Set<GPUTextureFormat>([
 ]);
 
 const storageFormats = new Set<GPUTextureFormat>([
+  'bgra8unorm',
+  'bgra8unorm-srgb',
   'rgba8unorm',
   'rgba8unorm-srgb',
   'rgba16float',
@@ -85,14 +87,30 @@ const choosePreferredCanvasFormat = (
   backend: DawnBackendContext,
 ): GPUTextureFormat => backend.target.format;
 
+const hasFeature = (features: DrawingFeatureSet, feature: string): boolean => features.has(feature);
+
+const supportsStorageForFormat = (
+  format: GPUTextureFormat,
+  deviceFeatures: DrawingFeatureSet,
+): boolean => {
+  if (!storageFormats.has(format)) {
+    return false;
+  }
+  if (format === 'bgra8unorm' || format === 'bgra8unorm-srgb') {
+    return hasFeature(deviceFeatures, 'bgra8unorm-storage');
+  }
+  return true;
+};
+
 const createFormatCapabilities = (
   format: GPUTextureFormat,
-  supportsStorageBuffers: boolean,
+  deviceFeatures: DrawingFeatureSet,
+  maxSampleCount: 1 | 4,
 ): DrawingFormatCapabilities => ({
   texturable: texturableFormats.has(format),
   renderable: renderableFormats.has(format),
-  multisample: renderableFormats.has(format),
-  storage: supportsStorageBuffers && storageFormats.has(format),
+  multisample: renderableFormats.has(format) && maxSampleCount > 1,
+  storage: supportsStorageForFormat(format, deviceFeatures),
 });
 
 export const createDawnCaps = (
@@ -102,25 +120,35 @@ export const createDawnCaps = (
   const deviceFeatures = readFeatureSet(backend.device);
   const limits = readLimits(backend.device);
   const supportsTimestampQuery = deviceFeatures.has('timestamp-query');
-  const supportsStorageBuffers = true;
-  const maxSampleCount: 1 | 4 = limits.maxColorAttachments > 0 ? 4 : 1;
-  const defaultSampleCount: 1 | 4 = maxSampleCount;
+  const supportsStorageBuffers = limits.maxBufferSize > 0 &&
+    limits.minStorageBufferOffsetAlignment > 0;
+  const preferredCanvasFormat = choosePreferredCanvasFormat(backend);
+  const maxSampleCount: 1 | 4 = renderableFormats.has(preferredCanvasFormat) &&
+      limits.maxColorAttachments > 0
+    ? 4
+    : 1;
+  const defaultSampleCount: 1 | 4 = backend.target.kind === 'offscreen' &&
+      backend.target.sampleCount === 4 &&
+      maxSampleCount === 4
+    ? 4
+    : 1;
 
   return {
     backend: 'graphite-dawn',
     adapterFeatures,
     deviceFeatures,
     limits,
-    preferredCanvasFormat: choosePreferredCanvasFormat(backend),
+    preferredCanvasFormat,
     supportsTimestampQuery,
     supportsStorageBuffers,
     defaultSampleCount,
     maxSampleCount,
     isFormatTexturable: (format) =>
-      createFormatCapabilities(format, supportsStorageBuffers).texturable,
+      createFormatCapabilities(format, deviceFeatures, maxSampleCount).texturable,
     isFormatRenderable: (format) =>
-      createFormatCapabilities(format, supportsStorageBuffers).renderable,
-    getFormatCapabilities: (format) => createFormatCapabilities(format, supportsStorageBuffers),
+      createFormatCapabilities(format, deviceFeatures, maxSampleCount).renderable,
+    getFormatCapabilities: (format) =>
+      createFormatCapabilities(format, deviceFeatures, maxSampleCount),
     supportsSampleCount: (sampleCount) => sampleCount === 1 || sampleCount === maxSampleCount,
   };
 };

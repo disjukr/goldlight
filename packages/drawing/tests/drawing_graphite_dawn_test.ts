@@ -227,12 +227,33 @@ Deno.test('dawn caps expose feature, format, and sample count policy', () => {
 
   assertEquals(caps.preferredCanvasFormat, 'rgba8unorm');
   assertEquals(caps.supportsTimestampQuery, true);
+  assertEquals(caps.defaultSampleCount, 1);
   assertEquals(caps.limits.maxTextureDimension2D, 8192);
   assertEquals(caps.isFormatRenderable('rgba8unorm'), true);
   assertEquals(caps.getFormatCapabilities('depth24plus').texturable, true);
   assertEquals(caps.supportsSampleCount(1), true);
   assertEquals(caps.supportsSampleCount(4), true);
   assertEquals(caps.supportsSampleCount(8), false);
+});
+
+Deno.test('dawn caps gate bgra storage support on enabled device features', () => {
+  const mock = createMockGpuContext();
+  const bgraContext = {
+    ...mock.context,
+    target: {
+      ...mock.context.target,
+      format: 'bgra8unorm',
+    } as const,
+    device: {
+      ...mock.context.device,
+      features: new Set(['timestamp-query']),
+    } as unknown as GPUDevice,
+  };
+
+  const caps = createDawnCaps(createDawnBackendContext(bgraContext));
+
+  assertEquals(caps.getFormatCapabilities('bgra8unorm').storage, false);
+  assertEquals(caps.supportsStorageBuffers, true);
 });
 
 Deno.test('drawing recorder records transform and clip state into draw commands', () => {

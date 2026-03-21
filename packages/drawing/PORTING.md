@@ -585,12 +585,13 @@ These decisions directly affect the remaining work and are not settled yet.
   - Difference from Skia: format/sample/storage policy is still mostly static, while Skia DawnCaps
     derives backend workarounds and format behavior from actual adapter/device capabilities
   - To match Skia more closely: probe required features and encode fallback policies centrally
-  - Validation: basic caps unit tests only
+  - Validation: storage support and default sample-count policy are now feature gated in unit tests
 
 ## Latest Update
 
 - 2026-03-22
   - Files: `src/resource_provider.ts`, `src/command_buffer.ts`, `src/caps.ts`,
+    `src/queue_manager.ts`, `tests/drawing_graphite_dawn_test.ts`
     `src/queue_manager.ts`, `tests/drawing_graphite_dawn_test.ts`
   - Status transition: resource binding `pending` -> `started`; `DawnResourceProvider` `started` ->
     `partial`; `DawnQueueManager` `started` -> `partial`

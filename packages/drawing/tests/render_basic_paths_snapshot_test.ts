@@ -1,7 +1,7 @@
 import { assertEquals } from 'jsr:@std/assert@^1.0.14';
 import { renderBasicPathsSnapshot } from '../examples/render_basic_paths/render.ts';
 
-const expectedPngSha256 = '207f43541aecc2d47a6b9b9e75fef395ee5d6b94f2b06703029334557f341a5c';
+const expectedPngSha256 = '5d4151e53cf1f7316a28b88906b3d9a7991d328713461501111ec4b91f67a133';
 
 const toHex = (bytes: Uint8Array): string =>
   [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');

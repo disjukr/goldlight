@@ -577,7 +577,10 @@ Deno.test('drawing prepared recording scales curve resolve level with curve size
   const mock = createMockGpuContext();
   const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
 
-  const resolveLevelFor = (control1: readonly [number, number], control2: readonly [number, number]) => {
+  const resolveLevelFor = (
+    control1: readonly [number, number],
+    control2: readonly [number, number],
+  ) => {
     const recorder = drawingContext.createRecorder();
     recordDrawPath(
       recorder,

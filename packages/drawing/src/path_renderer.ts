@@ -395,15 +395,10 @@ const quadraticResolveLevelRaw = (
   p2: Point2D,
 ): number => {
   const v = add(add(p0, p2), scale(p1, -2));
-  const p4 = dot(v, v) * (((2 * 2) * (1 * 1)) / 64) * (wangsFormulaPrecision * wangsFormulaPrecision);
+  const p4 = dot(v, v) * (((2 * 2) * (1 * 1)) / 64) *
+    (wangsFormulaPrecision * wangsFormulaPrecision);
   return nextLog16(p4);
 };
-
-const quadraticResolveLevel = (
-  p0: Point2D,
-  p1: Point2D,
-  p2: Point2D,
-): number => Math.min(maxResolveLevel, quadraticResolveLevelRaw(p0, p1, p2));
 
 const cubicResolveLevelRaw = (
   p0: Point2D,
@@ -417,13 +412,6 @@ const cubicResolveLevelRaw = (
     (((3 * 3) * (2 * 2)) / 64) * (wangsFormulaPrecision * wangsFormulaPrecision);
   return nextLog16(p4);
 };
-
-const cubicResolveLevel = (
-  p0: Point2D,
-  p1: Point2D,
-  p2: Point2D,
-  p3: Point2D,
-): number => Math.min(maxResolveLevel, cubicResolveLevelRaw(p0, p1, p2, p3));
 
 const conicResolveLevel = (
   p0: Point2D,
@@ -1370,7 +1358,9 @@ const preparePatches = (
     contourStart = null;
   };
 
-  const pushContourPatch = (patch: Exclude<DrawingPreparedPatch, Readonly<{ kind: 'wedge' }>>): void => {
+  const pushContourPatch = (
+    patch: Exclude<DrawingPreparedPatch, Readonly<{ kind: 'wedge' }>>,
+  ): void => {
     patches.push(patch);
     contourSegments.push(patch);
   };

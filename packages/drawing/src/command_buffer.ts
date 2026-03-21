@@ -1,4 +1,7 @@
-import { acquireColorAttachmentView, type RenderContextBinding } from '@rieul3d/gpu';
+import {
+  acquireColorAttachmentView,
+  type RenderContextBinding,
+} from '@rieul3d/gpu';
 import { prepareDrawingRecording, type DrawingPreparedRecording } from './draw_pass.ts';
 import type { DrawingRecording } from './recording.ts';
 import type { DawnSharedContext } from './shared_context.ts';
@@ -23,75 +26,6 @@ const toGpuColor = (color: readonly [number, number, number, number]): GPUColor 
 const vertexBufferUsage = 0x0020;
 const floatBytes = Float32Array.BYTES_PER_ELEMENT;
 const floatsPerVertex = 6;
-const fillPathShaderSource = `
-struct VertexOut {
-  @builtin(position) position: vec4<f32>,
-  @location(0) color: vec4<f32>,
-};
-
-@vertex
-fn vs_main(
-  @location(0) position: vec2<f32>,
-  @location(1) color: vec4<f32>,
-) -> VertexOut {
-  var out: VertexOut;
-  out.position = vec4<f32>(position, 0.0, 1.0);
-  out.color = color;
-  return out;
-}
-
-@fragment
-fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
-  return in.color;
-}
-`;
-
-const createSolidFillPipeline = (
-  sharedContext: DawnSharedContext,
-): GPURenderPipeline => {
-  const shaderModule = sharedContext.backend.device.createShaderModule({
-    label: 'drawing-solid-fill',
-    code: fillPathShaderSource,
-  });
-
-  return sharedContext.backend.device.createRenderPipeline({
-    label: 'drawing-solid-fill',
-    layout: 'auto',
-    vertex: {
-      module: shaderModule,
-      entryPoint: 'vs_main',
-      buffers: [
-        {
-          arrayStride: floatBytes * floatsPerVertex,
-          attributes: [
-            {
-              shaderLocation: 0,
-              offset: 0,
-              format: 'float32x2',
-            },
-            {
-              shaderLocation: 1,
-              offset: floatBytes * 2,
-              format: 'float32x4',
-            },
-          ],
-        },
-      ],
-    },
-    fragment: {
-      module: shaderModule,
-      entryPoint: 'fs_main',
-      targets: [
-        {
-          format: sharedContext.backend.target.format,
-        },
-      ],
-    },
-    primitive: {
-      topology: 'triangle-list',
-    },
-  });
-};
 
 const createClipSpaceVertexData = (
   points: readonly (readonly [number, number])[],
@@ -141,6 +75,17 @@ const createVertexBuffer = (
   return buffer;
 };
 
+const createCoverVertices = (
+  color: readonly [number, number, number, number],
+): Float32Array => new Float32Array([
+  -1, -1, color[0], color[1], color[2], color[3],
+  1, -1, color[0], color[1], color[2], color[3],
+  1, 1, color[0], color[1], color[2], color[3],
+  -1, -1, color[0], color[1], color[2], color[3],
+  1, 1, color[0], color[1], color[2], color[3],
+  -1, 1, color[0], color[1], color[2], color[3],
+]);
+
 export const encodeDawnCommandBuffer = (
   sharedContext: DawnSharedContext,
   recording: DrawingRecording,
@@ -158,35 +103,76 @@ export const encodeDawnCommandBuffer = (
   );
   const unsupportedCommands: DrawingCommand[] = [...prepared.unsupportedCommands];
   let passCount = 0;
-  const fillPipeline = createSolidFillPipeline(sharedContext);
+  const coverPipeline = sharedContext.resourceProvider.getPathCoverPipeline();
+  const stencilView = sharedContext.resourceProvider.getStencilAttachmentView();
 
   for (const passInfo of prepared.passes) {
-    const pass = encoder.beginRenderPass({
-      colorAttachments: [
-        {
-          view: colorView,
-          clearValue: toGpuColor(passInfo.clearColor),
-          loadOp: passInfo.loadOp,
-          storeOp: 'store',
-        },
-      ],
-    });
+    if (passInfo.draws.length === 0) {
+      const pass = encoder.beginRenderPass({
+        colorAttachments: [
+          {
+            view: colorView,
+            clearValue: toGpuColor(passInfo.clearColor),
+            loadOp: passInfo.loadOp,
+            storeOp: 'store',
+          },
+        ],
+      });
+      unsupportedCommands.push(...passInfo.unsupportedDraws);
+      pass.end();
+      passCount += 1;
+      continue;
+    }
 
+    let colorLoadOp = passInfo.loadOp;
     for (const draw of passInfo.draws) {
       if (draw.kind !== 'pathFill') {
         continue;
       }
 
-      const vertices = createClipSpaceVertexData(draw.points, draw.color, sharedContext.backend.target);
-      const vertexBuffer = createVertexBuffer(sharedContext, vertices);
-      pass.setPipeline(fillPipeline);
-      pass.setVertexBuffer(0, vertexBuffer);
-      pass.draw(vertices.length / floatsPerVertex);
+      const stencilPipeline = sharedContext.resourceProvider.getPathStencilPipeline(draw.fillRule);
+      const pass = encoder.beginRenderPass({
+        colorAttachments: [
+          {
+            view: colorView,
+            clearValue: toGpuColor(passInfo.clearColor),
+            loadOp: colorLoadOp,
+            storeOp: 'store',
+          },
+        ],
+        depthStencilAttachment: {
+          view: stencilView,
+          depthClearValue: 1,
+          depthLoadOp: 'clear',
+          depthStoreOp: 'discard',
+          stencilClearValue: 0,
+          stencilLoadOp: 'clear',
+          stencilStoreOp: 'discard',
+        },
+      });
+
+      for (const contour of draw.contours) {
+        const vertices = createClipSpaceVertexData(contour, draw.color, sharedContext.backend.target);
+        if (vertices.length === 0) {
+          continue;
+        }
+        const vertexBuffer = createVertexBuffer(sharedContext, vertices);
+        pass.setPipeline(stencilPipeline);
+        pass.setVertexBuffer(0, vertexBuffer);
+        pass.draw(vertices.length / floatsPerVertex);
+      }
+
+      const coverVertices = createCoverVertices(draw.color);
+      const coverVertexBuffer = createVertexBuffer(sharedContext, coverVertices);
+      pass.setPipeline(coverPipeline);
+      pass.setVertexBuffer(0, coverVertexBuffer);
+      pass.draw(coverVertices.length / floatsPerVertex);
+      pass.end();
+      passCount += 1;
+      colorLoadOp = 'load';
     }
 
     unsupportedCommands.push(...passInfo.unsupportedDraws);
-    pass.end();
-    passCount += 1;
   }
 
   return {

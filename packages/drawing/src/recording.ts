@@ -20,6 +20,7 @@ const cloneCommand = (command: DrawingCommand): DrawingCommand => {
         kind: 'drawPath',
         path: {
           verbs: command.path.verbs.map((verb) => ({ ...verb })),
+          fillRule: command.path.fillRule,
         },
         paint: { ...command.paint },
       };
@@ -29,6 +30,7 @@ const cloneCommand = (command: DrawingCommand): DrawingCommand => {
         shape: structuredClone(command.shape),
         path: {
           verbs: command.path.verbs.map((verb) => ({ ...verb })),
+          fillRule: command.path.fillRule,
         },
         paint: { ...command.paint },
       };

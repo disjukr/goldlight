@@ -8,6 +8,7 @@ import {
   createPath2D,
   createRect,
   createRectPath2D,
+  withPath2DFillRule,
 } from '@rieul3d/geometry';
 import {
   encodeDawnCommandBuffer,
@@ -63,6 +64,28 @@ recordDrawPath(
   {
     style: 'fill',
     color: [0.98, 0.81, 0.33, 1],
+  },
+);
+recordDrawPath(
+  recorder,
+  withPath2DFillRule(
+    createPath2D(
+      { kind: 'moveTo', to: [72, 72] },
+      { kind: 'lineTo', to: [200, 72] },
+      { kind: 'lineTo', to: [200, 200] },
+      { kind: 'lineTo', to: [72, 200] },
+      { kind: 'close' },
+      { kind: 'moveTo', to: [104, 104] },
+      { kind: 'lineTo', to: [168, 104] },
+      { kind: 'lineTo', to: [168, 168] },
+      { kind: 'lineTo', to: [104, 168] },
+      { kind: 'close' },
+    ),
+    'evenodd',
+  ),
+  {
+    style: 'fill',
+    color: [0.18, 0.55, 0.46, 1],
   },
 );
 

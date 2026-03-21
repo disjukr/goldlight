@@ -39,8 +39,11 @@ export type PathVerb2D =
   | Readonly<{ kind: 'quadTo'; control: Point2D; to: Point2D }>
   | Readonly<{ kind: 'close' }>;
 
+export type PathFillRule2D = 'nonzero' | 'evenodd';
+
 export type Path2D = Readonly<{
   verbs: readonly PathVerb2D[];
+  fillRule: PathFillRule2D;
 }>;
 
 export type Shape2D =
@@ -88,7 +91,18 @@ export const createCircle = (
   radius,
 });
 
-export const createPath2D = (...verbs: PathVerb2D[]): Path2D => ({ verbs });
+export const createPath2D = (...verbs: PathVerb2D[]): Path2D => ({
+  verbs,
+  fillRule: 'nonzero',
+});
+
+export const withPath2DFillRule = (
+  path: Path2D,
+  fillRule: PathFillRule2D,
+): Path2D => ({
+  verbs: path.verbs,
+  fillRule,
+});
 
 export const createRectPath2D = (rect: Rect): Path2D => {
   const [x, y] = rect.origin;

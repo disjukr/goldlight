@@ -50,13 +50,13 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Initial caps and limits layer exists.
 - GPU encoding
   - Status: `started`
-  - Clear-only command buffer translation exists.
+  - Clear and first stencil-backed fill-path command buffer translation exist.
 - Queue submission
   - Status: `started`
   - Queue manager can submit encoded command buffers and track in-flight work counts.
 - Path rendering
   - Status: `started`
-  - Simple CPU triangle-fan fill path preparation exists for single closed polygons.
+  - Flattened contours can be pushed through a first stencil-and-cover fill path.
 - Paint system
   - Status: `started`
   - Minimal paint shape exists, not executable.
@@ -76,8 +76,8 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Missing: bind group layouts and pipeline helpers
 - `DawnResourceProvider` -> `src/resource_provider.ts`
   - Status: `started`
-  - What exists: simple resource allocation methods
-  - Missing: caching, bind groups, wrapped resources
+  - What exists: simple resource allocation plus first path pipeline and stencil attachment reuse
+  - Missing: bind groups, wrapped resources, broader cache policy
 - `Context` -> `src/context.ts`
   - Status: `started`
   - What exists: context factory and recorder creation
@@ -92,8 +92,8 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Missing: richer probing and backend-specific fallbacks
 - `DawnCommandBuffer` -> `src/command_buffer.ts`
   - Status: `started`
-  - What exists: clear and first fill-path draw encoding over prepared draw passes
-  - Missing: broader draw path and draw shape encoding
+  - What exists: clear plus first stencil-backed fill-path draw encoding over prepared draw passes
+  - Missing: broader draw path and draw shape encoding, pipeline reuse
 - `DrawPass` -> `src/draw_pass.ts`
   - Status: `started`
   - What exists: prepared pass partitioning for clear and pending draws
@@ -154,7 +154,7 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Role: immutable recorded command package
 - `src/path_renderer.ts`
   - Status: `started`
-  - Role: first path rendering preparation strategy
+  - Role: first path rendering preparation strategy with quadratic flattening
 - `tests/`
   - Status: `started`
   - Role: package-local tests for drawing
@@ -191,7 +191,7 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
   - General polygon input
 - `Path2D` in `@rieul3d/geometry/src/path2d.ts`
   - Status: `started`
-  - Supports `moveTo`, `lineTo`, `quadTo`, `close`
+  - Supports `moveTo`, `lineTo`, `quadTo`, `close`, and fill rule state
 - Cubic curves in `@rieul3d/geometry/src/path2d.ts`
   - Status: `pending`
   - No `cubicTo` yet
@@ -199,8 +199,8 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
   - Status: `pending`
   - No arc representation yet
 - Path fill rules in `@rieul3d/geometry/src/path2d.ts`
-  - Status: `pending`
-  - No winding/even-odd state yet
+  - Status: `started`
+  - Fill rule metadata exists, and first stencil-based evenodd/nonzero execution path now exists
 - Path transforms/utilities in `@rieul3d/geometry/src/path2d.ts`
   - Status: `pending`
   - No utility layer yet
@@ -213,8 +213,8 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
   - Missing: executable GPU path
 - `drawPath`
   - Status: `started`
-  - Current state: recordable, and simple fill polygons can be executed
-  - Missing: general rasterization or tessellation
+  - Current state: recordable, and flattened multi-contour fill paths can be executed through stencil-and-cover
+  - Missing: general rasterization, tessellation, and concave contour correctness
 - `drawShape`
   - Status: `started`
   - Current state: shape is converted to `Path2D`
@@ -313,11 +313,13 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
   - Status: `pending`
   - Missing: shader lifecycle
 - Pipelines
-  - Status: `pending`
-  - Missing: render pipeline creation
+  - Status: `started`
+  - Current state: first path stencil/cover pipelines are cached in the resource provider
+  - Missing: generalized render pipeline creation and keying
 - Global cache
-  - Status: `pending`
-  - Missing: shared backend caches
+  - Status: `started`
+  - Current state: path pipelines and stencil attachments are reused through the resource provider
+  - Missing: broader shared backend caches
 - Resource budget
   - Status: `started`
   - Current state: number is stored
@@ -337,25 +339,25 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
   - Shape to path conversion exists
 - Fill/stroke expansion
   - Status: `started`
-  - Triangle-fan fill generation exists for simple polygonal paths
+  - Flattened contours can be emitted for stencil fill passes
 - Path tessellation
   - Status: `started`
-  - Minimal CPU tessellation exists for simple polygonal fills
+  - Minimal CPU contour flattening exists for line and quadratic fills
 - Vertex/index generation
   - Status: `started`
-  - Vertex generation exists for simple polygonal fills
+  - Vertex generation exists for contour stencil fills and cover draws
 - GPU upload
   - Status: `started`
-  - Simple per-draw vertex buffer upload exists for polygonal fill paths
+  - Simple per-draw vertex buffer upload exists for stencil and cover passes
 - Render pass setup
   - Status: `started`
-  - Recording can be partitioned into prepared draw passes, and clear-only pass encoding exists
+  - Recording can be partitioned into prepared draw passes, and fill draws now allocate stencil-backed render passes
 - Pipeline binding
   - Status: `started`
-  - A basic solid-fill render pipeline exists for first path draws
+  - Basic stencil and cover pipelines exist for first path draws and are reused across command buffers
 - Draw submission
   - Status: `started`
-  - Command buffer submission helper exists for encoded clears
+  - Command buffer submission helper exists for encoded clears and first fill draws
 - Async work completion
   - Status: `started`
   - Tick and in-flight submission tracking exist, but completion is still coarse
@@ -365,8 +367,8 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
 These decisions directly affect the remaining work and are not settled yet.
 
 - First fill strategy
-  - Status: `blocked`
-  - Choose CPU tessellation vs stencil-and-cover vs analytic
+  - Status: `started`
+  - First implementation is moving toward stencil-and-cover for flattened contours
 - First stroke strategy
   - Status: `blocked`
   - Depends on paint and path expansion model
@@ -408,11 +410,12 @@ These decisions directly affect the remaining work and are not settled yet.
 - recording snapshots can be partitioned into coarse draw passes, but they do not yet carry
   Skia-like pipeline/state/resource data
 - no Skia-like draw-list or draw-pass preparation layer yet
-- only simple polygonal fill paths render; strokes and curved fills do not
+- only flattened contour fills render; strokes and cubic/arcs do not
+- evenodd/nonzero now go through stencil, but contour preparation is still not robust for concave/self-intersecting input
 - no SVG parser or SVG-to-`Path2D` ingestion path yet
 - no clipping, transforms, or retained state model
 - no pipeline or bind group cache
-- `command_buffer` currently skips draw commands and only encodes `clear`
+- `command_buffer` still does per-draw render pass replay for stencil clears instead of a richer DrawPass command stream
 - `queue_manager` currently treats `tick()` as coarse completion rather than using explicit GPU fences
 
 ## Recommended Next Steps
@@ -420,17 +423,16 @@ These decisions directly affect the remaining work and are not settled yet.
 1. Deepen `src/caps.ts`
    - Replace static format assumptions with richer backend policy
    - Add feature-gated fallbacks
-2. Add `src/command_buffer.ts`
-   - Define the backend execution layer that consumes recording output
-   - Start with `clear` and one simple filled path
-3. Decide and implement the first fill path
-   - Prefer a simple CPU tessellation route first for momentum
+2. Harden the first fill path
+   - Keep the stencil-and-cover route, but make contour preparation robust for concave shapes
+   - Add targeted tests for nested contours and winding behavior
+3. Add pipeline/resource caching
+   - Extend reuse beyond the first path stencil/cover pipelines and stencil attachment
 4. Add `src/queue_manager.ts`
    - Own submit and unfinished-work tracking
    - Integrate backend tick handling
 5. Expand `Path2D`
    - Add `cubicTo`
-   - Add fill rule
    - Add basic transform helpers
 
 ## Update Rules

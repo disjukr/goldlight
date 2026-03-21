@@ -1,6 +1,6 @@
 import { assertEquals, assertExists } from 'jsr:@std/assert@^1.0.14';
 import { createOffscreenBinding } from '@rieul3d/gpu';
-import { createPath2D, createRect } from '@rieul3d/geometry';
+import { createPath2D, createRect, createRRectPath2D, withPath2DFillRule } from '@rieul3d/geometry';
 import {
   createDawnBackendContext,
   createDawnCaps,
@@ -136,6 +136,7 @@ Deno.test('drawing shape path delegates path generation to geometry package', ()
 
   assertEquals(path.verbs[0]?.kind, 'moveTo');
   assertEquals(path.verbs.length, 5);
+  assertEquals(path.fillRule, 'nonzero');
 });
 
 Deno.test('dawn shared context exposes resource provider over gpu device', () => {
@@ -280,6 +281,70 @@ Deno.test('drawing prepared recording groups clear and draw commands into passes
   assertEquals(prepared.unsupportedCommands.length, 0);
 });
 
+Deno.test('drawing prepared recording flattens quadratic paths for fill draws', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  recordDrawPath(
+    recorder,
+    createRRectPath2D({
+      rect: createRect(24, 24, 80, 60),
+      topLeft: { x: 12, y: 12 },
+      topRight: { x: 12, y: 12 },
+      bottomRight: { x: 12, y: 12 },
+      bottomLeft: { x: 12, y: 12 },
+    }),
+    { style: 'fill' },
+  );
+
+  const recording = finishDrawingRecorder(recorder);
+  const prepared = prepareDrawingRecording(recording);
+
+  assertEquals(prepared.passCount, 1);
+  assertEquals(prepared.passes[0]?.draws.length, 1);
+  assertEquals(prepared.passes[0]?.unsupportedDraws.length, 0);
+  const preparedDraw = prepared.passes[0]?.draws[0];
+  assertEquals(preparedDraw?.kind, 'pathFill');
+  assertEquals((preparedDraw?.contours[0]?.length ?? 0) > 8, true);
+  assertEquals(preparedDraw?.fillRule, 'nonzero');
+});
+
+Deno.test('drawing prepared recording preserves multiple contours and fill rule', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  recordDrawPath(
+    recorder,
+    withPath2DFillRule(
+      createPath2D(
+        { kind: 'moveTo', to: [16, 16] },
+        { kind: 'lineTo', to: [64, 16] },
+        { kind: 'lineTo', to: [64, 64] },
+        { kind: 'lineTo', to: [16, 64] },
+        { kind: 'close' },
+        { kind: 'moveTo', to: [96, 96] },
+        { kind: 'lineTo', to: [144, 96] },
+        { kind: 'lineTo', to: [144, 144] },
+        { kind: 'lineTo', to: [96, 144] },
+        { kind: 'close' },
+      ),
+      'evenodd',
+    ),
+    { style: 'fill' },
+  );
+
+  const recording = finishDrawingRecorder(recorder);
+  const prepared = prepareDrawingRecording(recording);
+  const preparedDraw = prepared.passes[0]?.draws[0];
+
+  assertEquals(prepared.passes[0]?.draws.length, 1);
+  assertEquals(preparedDraw?.kind, 'pathFill');
+  assertEquals(preparedDraw?.contours.length, 2);
+  assertEquals(preparedDraw?.fillRule, 'evenodd');
+});
+
 Deno.test('dawn command buffer encodes clear passes and tracks unsupported commands', () => {
   const mock = createMockGpuContext();
   const backend = createDawnBackendContext(mock.context);
@@ -308,19 +373,112 @@ Deno.test('dawn command buffer encodes clear passes and tracks unsupported comma
   assertEquals(commandBuffer.passCount, 1);
   assertEquals(commandBuffer.unsupportedCommands.length, 0);
   assertEquals(mock.created.renderPasses.length, 1);
-  assertEquals(mock.created.shaderModules.length, 1);
-  assertEquals(mock.created.renderPipelines.length, 1);
-  assertEquals(mock.created.drawCalls.length, 1);
+  assertEquals(mock.created.shaderModules.length, 2);
+  assertEquals(mock.created.renderPipelines.length, 2);
+  assertEquals(mock.created.drawCalls.length, 2);
   assertEquals(mock.created.drawCalls[0], 3);
+  assertEquals(mock.created.drawCalls[1], 6);
   assertEquals(
     mock.created.renderPasses[0]?.colorAttachments[0]?.clearValue,
     { r: 0.25, g: 0.5, b: 0.75, a: 1 },
   );
+  assertExists(mock.created.renderPasses[0]?.depthStencilAttachment);
   assertEquals(mock.created.submitted.length, 1);
   assertEquals(mock.created.submitted[0]?.length, 1);
   assertEquals(sharedContext.queueManager.submittedCount, 1);
   assertEquals(sharedContext.queueManager.inFlightCount, 1);
   assertEquals(sharedContext.queueManager.lastSubmittedRecorderId, recording.recorderId);
+});
+
+Deno.test('dawn command buffer draws flattened quadratic fill paths', () => {
+  const mock = createMockGpuContext();
+  const backend = createDawnBackendContext(mock.context);
+  const sharedContext = createDawnSharedContext(backend);
+  const binding = createOffscreenBinding(mock.context);
+  const recorder = createDrawingRecorder(sharedContext);
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [32, 96] },
+      { kind: 'quadTo', control: [96, 16], to: [160, 96] },
+      { kind: 'lineTo', to: [160, 160] },
+      { kind: 'lineTo', to: [32, 160] },
+      { kind: 'close' },
+    ),
+    { style: 'fill', color: [0.2, 0.4, 0.8, 1] },
+  );
+
+  const recording = finishDrawingRecorder(recorder);
+  const commandBuffer = encodeDawnCommandBuffer(sharedContext, recording, binding);
+
+  assertEquals(commandBuffer.unsupportedCommands.length, 0);
+  assertEquals(mock.created.drawCalls.length, 2);
+  assertEquals((mock.created.drawCalls[0] ?? 0) > 3, true);
+  assertEquals(mock.created.drawCalls[1], 6);
+});
+
+Deno.test('dawn command buffer draws each contour in a multi-contour fill path', () => {
+  const mock = createMockGpuContext();
+  const backend = createDawnBackendContext(mock.context);
+  const sharedContext = createDawnSharedContext(backend);
+  const binding = createOffscreenBinding(mock.context);
+  const recorder = createDrawingRecorder(sharedContext);
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [16, 16] },
+      { kind: 'lineTo', to: [80, 16] },
+      { kind: 'lineTo', to: [80, 80] },
+      { kind: 'lineTo', to: [16, 80] },
+      { kind: 'close' },
+      { kind: 'moveTo', to: [96, 96] },
+      { kind: 'lineTo', to: [160, 96] },
+      { kind: 'lineTo', to: [160, 160] },
+      { kind: 'lineTo', to: [96, 160] },
+      { kind: 'close' },
+    ),
+    { style: 'fill', color: [0.7, 0.2, 0.2, 1] },
+  );
+
+  const recording = finishDrawingRecorder(recorder);
+  const commandBuffer = encodeDawnCommandBuffer(sharedContext, recording, binding);
+
+  assertEquals(commandBuffer.unsupportedCommands.length, 0);
+  assertEquals(mock.created.drawCalls.length, 3);
+  assertEquals(mock.created.drawCalls[0], 6);
+  assertEquals(mock.created.drawCalls[1], 6);
+  assertEquals(mock.created.drawCalls[2], 6);
+});
+
+Deno.test('dawn resource provider reuses path pipelines across command buffers', () => {
+  const mock = createMockGpuContext();
+  const backend = createDawnBackendContext(mock.context);
+  const sharedContext = createDawnSharedContext(backend);
+  const binding = createOffscreenBinding(mock.context);
+
+  const createFilledRecording = () => {
+    const recorder = createDrawingRecorder(sharedContext);
+    recordDrawPath(
+      recorder,
+      createPath2D(
+        { kind: 'moveTo', to: [16, 16] },
+        { kind: 'lineTo', to: [96, 16] },
+        { kind: 'lineTo', to: [96, 96] },
+        { kind: 'lineTo', to: [16, 96] },
+        { kind: 'close' },
+      ),
+      { style: 'fill', color: [0.2, 0.5, 0.7, 1] },
+    );
+    return finishDrawingRecorder(recorder);
+  };
+
+  encodeDawnCommandBuffer(sharedContext, createFilledRecording(), binding);
+  encodeDawnCommandBuffer(sharedContext, createFilledRecording(), binding);
+
+  assertEquals(mock.created.renderPipelines.length, 2);
+  assertEquals(mock.created.shaderModules.length, 2);
 });
 
 Deno.test('dawn queue manager tracks submit and tick completion', async () => {

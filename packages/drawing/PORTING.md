@@ -43,14 +43,14 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Status: `started`
   - Thin buffer/texture/sampler allocation layer exists.
 - Recording
-  - Status: `started`
-  - Abstract commands for `clear`, `drawPath`, `drawShape` exist.
+  - Status: `partial`
+  - Abstract commands exist and can be frozen into immutable recordings.
 - Capability probing
   - Status: `started`
   - Initial caps and limits layer exists.
 - GPU encoding
-  - Status: `pending`
-  - No command buffer translation yet.
+  - Status: `started`
+  - Clear-only command buffer translation exists.
 - Queue submission
   - Status: `pending`
   - No queue manager or GPU work tracking yet.
@@ -85,14 +85,15 @@ stack that fits this repository's TypeScript and WebGPU architecture.
 - `Recorder` -> `src/recorder.ts`
   - Status: `started`
   - What exists: abstract command collection
-  - Missing: immutable recording object, ordering rules, flush rules
+  - Missing: ordering rules and flush rules
 - `DawnCaps` -> `src/caps.ts`
   - Status: `started`
   - What exists: initial feature, format, and limit policy
   - Missing: richer probing and backend-specific fallbacks
 - `DawnCommandBuffer` -> `src/command_buffer.ts`
-  - Status: `pending`
-  - Missing: WebGPU encoder translation
+  - Status: `started`
+  - What exists: clear-only WebGPU render-pass encoding
+  - Missing: draw path and draw shape encoding
 - `DawnQueueManager` -> `src/queue_manager.ts`
   - Status: `pending`
   - Missing: queue submit, tick, unfinished work tracking
@@ -100,8 +101,9 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Status: `pending`
   - Missing: pipeline creation and reuse
 - `Recording` -> `src/recording.ts`
-  - Status: `pending`
-  - Missing: immutable recorded work unit
+  - Status: `started`
+  - What exists: immutable recorded work snapshot
+  - Missing: pass partitioning and backend execution metadata
 
 ## Local Files
 
@@ -130,13 +132,13 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Status: `started`
   - Role: backend capability model
 - `src/command_buffer.ts`
-  - Status: `pending`
+  - Status: `started`
   - Role: command encoder translation
 - `src/queue_manager.ts`
   - Status: `pending`
   - Role: queue submission and completion
 - `src/recording.ts`
-  - Status: `pending`
+  - Status: `started`
   - Role: immutable recorded command package
 - `src/path_renderer.ts`
   - Status: `pending`
@@ -334,14 +336,14 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
   - Status: `pending`
   - Not connected to drawing commands
 - Render pass setup
-  - Status: `pending`
-  - None
+  - Status: `started`
+  - Clear-only render pass encoding exists
 - Pipeline binding
   - Status: `pending`
   - None
 - Draw submission
-  - Status: `pending`
-  - None
+  - Status: `started`
+  - Command buffer submission helper exists for encoded clears
 - Async work completion
   - Status: `pending`
   - Tick exists, submission does not
@@ -391,30 +393,28 @@ These decisions directly affect the remaining work and are not settled yet.
 ## Known Gaps
 
 - `Path2D` is still very small compared to Skia `SkPath`
-- recording is mutable command accumulation, not a true immutable recording object
+- recording snapshots exist, but they still do not partition work into backend-executable passes
 - no separation yet between frontend drawing commands and backend executable passes
 - no renderer for fills or strokes
 - no SVG parser or SVG-to-`Path2D` ingestion path yet
 - no clipping, transforms, or retained state model
 - no pipeline or bind group cache
+- `command_buffer` currently skips draw commands and only encodes `clear`
 
 ## Recommended Next Steps
 
 1. Deepen `src/caps.ts`
    - Replace static format assumptions with richer backend policy
    - Add feature-gated fallbacks
-2. Add `src/recording.ts`
-   - Freeze recorder output into an immutable work package
-   - Separate API recording from backend execution
-3. Add `src/command_buffer.ts`
+2. Add `src/command_buffer.ts`
    - Define the backend execution layer that consumes recording output
    - Start with `clear` and one simple filled path
-4. Decide and implement the first fill path
+3. Decide and implement the first fill path
    - Prefer a simple CPU tessellation route first for momentum
-5. Add `src/queue_manager.ts`
+4. Add `src/queue_manager.ts`
    - Own submit and unfinished-work tracking
    - Integrate backend tick handling
-6. Expand `Path2D`
+5. Expand `Path2D`
    - Add `cubicTo`
    - Add fill rule
    - Add basic transform helpers

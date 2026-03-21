@@ -1,5 +1,6 @@
 import type { Path2D } from '@rieul3d/geometry';
 import { createDrawingPath2DFromShape } from './geometry.ts';
+import { createDrawingRecording, type DrawingRecording } from './recording.ts';
 import { type DawnSharedContext, registerDawnRecorder } from './shared_context.ts';
 import type {
   ClearCommand,
@@ -73,13 +74,24 @@ export const resetDrawingRecorder = (
   recorder.commands.length = 0;
 };
 
+export const finishDrawingRecorder = (
+  recorder: DrawingRecorder,
+): DrawingRecording => {
+  const recording = createDrawingRecording(
+    recorder.sharedContext,
+    recorder.recorderId,
+    recorder.commands,
+  );
+  resetDrawingRecorder(recorder);
+  return recording;
+};
+
 export const submitDrawingRecorder = (
   recorder: DrawingRecorder,
 ): DrawingSubmission => {
-  const submission: DrawingSubmission = {
-    backend: recorder.sharedContext.backend.kind,
-    commands: [...recorder.commands],
+  const recording = finishDrawingRecorder(recorder);
+  return {
+    backend: recording.backend,
+    commands: recording.commands,
   };
-  resetDrawingRecorder(recorder);
-  return submission;
 };

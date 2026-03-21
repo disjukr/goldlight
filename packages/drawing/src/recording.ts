@@ -43,7 +43,8 @@ const cloneCommand = (command: DrawingCommand): DrawingCommand => {
               kind: 'path',
               path: clonePath(clip.path)!,
               transform: [...clip.transform] as typeof clip.transform,
-            }),
+            }
+        ),
       };
     case 'drawShape':
       return {
@@ -66,7 +67,8 @@ const cloneCommand = (command: DrawingCommand): DrawingCommand => {
               kind: 'path',
               path: clonePath(clip.path)!,
               transform: [...clip.transform] as typeof clip.transform,
-            }),
+            }
+        ),
       };
   }
 };

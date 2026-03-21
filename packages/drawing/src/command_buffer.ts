@@ -1,9 +1,9 @@
 import {
-  acquireColorResolveView,
   acquireColorAttachmentView,
+  acquireColorResolveView,
   type RenderContextBinding,
 } from '@rieul3d/gpu';
-import { prepareDrawingRecording, type DrawingPreparedRecording } from './draw_pass.ts';
+import { type DrawingPreparedRecording, prepareDrawingRecording } from './draw_pass.ts';
 import type { DrawingRecording } from './recording.ts';
 import type { DrawingPreparedPatch, DrawingPreparedVertex } from './path_renderer.ts';
 import type { DawnSharedContext } from './shared_context.ts';
@@ -19,7 +19,6 @@ export type DawnCommandBuffer = Readonly<{
 }>;
 
 const vertexBufferUsage = 0x0020;
-const floatBytes = Float32Array.BYTES_PER_ELEMENT;
 const floatsPerVertex = 6;
 const wedgePatchFloats = 10;
 const curvePatchFloats = 14;
@@ -313,26 +312,35 @@ export const encodeDawnCommandBuffer = (
       switch (step.draw.kind) {
         case 'pathFill': {
           const usesPatchFill = step.draw.renderer !== 'middle-out-fan';
-          const fillVertices = usesPatchFill
-            ? null
-            : createClipSpaceVertexData(
-              step.draw.triangles,
-              step.draw.color,
-              sharedContext.backend.target,
-            );
+          const fillVertices = usesPatchFill ? null : createClipSpaceVertexData(
+            step.draw.triangles,
+            step.draw.color,
+            sharedContext.backend.target,
+          );
           const fillVertexBuffer = fillVertices
             ? createVertexBuffer(sharedContext, fillVertices)
             : null;
           const patchVertices = step.draw.renderer === 'stencil-tessellated-wedges'
-            ? createWedgePatchInstanceData(step.draw.patches, step.draw.color, sharedContext.backend.target)
+            ? createWedgePatchInstanceData(
+              step.draw.patches,
+              step.draw.color,
+              sharedContext.backend.target,
+            )
             : step.draw.renderer === 'stencil-tessellated-curves'
-            ? createCurvePatchInstanceData(step.draw.patches, step.draw.color, sharedContext.backend.target)
+            ? createCurvePatchInstanceData(
+              step.draw.patches,
+              step.draw.color,
+              sharedContext.backend.target,
+            )
             : null;
           const patchVertexBuffer = patchVertices && patchVertices.length > 0
             ? createVertexBuffer(sharedContext, patchVertices)
             : null;
           const fringeVertices = step.draw.fringeVertices
-            ? createColoredClipSpaceVertexData(step.draw.fringeVertices, sharedContext.backend.target)
+            ? createColoredClipSpaceVertexData(
+              step.draw.fringeVertices,
+              sharedContext.backend.target,
+            )
             : null;
           const fringeVertexBuffer = fringeVertices
             ? createVertexBuffer(sharedContext, fringeVertices)
@@ -390,7 +398,9 @@ export const encodeDawnCommandBuffer = (
             }
             if (fringeVertices && fringeVertexBuffer) {
               if (usesPatchFill) {
-                pass.setPipeline(sharedContext.resourceProvider.getPipeline('path-fill-clip-cover'));
+                pass.setPipeline(
+                  sharedContext.resourceProvider.getPipeline('path-fill-clip-cover'),
+                );
               }
               pass.setVertexBuffer(0, fringeVertexBuffer);
               pass.draw(fringeVertices.length / floatsPerVertex);
@@ -441,7 +451,10 @@ export const encodeDawnCommandBuffer = (
             ? createVertexBuffer(sharedContext, patchVertices)
             : null;
           const fringeVertices = step.draw.fringeVertices
-            ? createColoredClipSpaceVertexData(step.draw.fringeVertices, sharedContext.backend.target)
+            ? createColoredClipSpaceVertexData(
+              step.draw.fringeVertices,
+              sharedContext.backend.target,
+            )
             : null;
           const fringeVertexBuffer = fringeVertices
             ? createVertexBuffer(sharedContext, fringeVertices)

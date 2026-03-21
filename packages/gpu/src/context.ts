@@ -223,7 +223,8 @@ export const createOffscreenBinding = (
     },
     format: context.target.format,
     sampleCount: context.target.sampleCount,
-    usage: renderAttachmentUsage | textureBindingUsage | (context.target.sampleCount === 1 ? textureCopySrcUsage : 0),
+    usage: renderAttachmentUsage | textureBindingUsage |
+      (context.target.sampleCount === 1 ? textureCopySrcUsage : 0),
   });
   const resolveTexture = context.target.sampleCount > 1
     ? context.device.createTexture({

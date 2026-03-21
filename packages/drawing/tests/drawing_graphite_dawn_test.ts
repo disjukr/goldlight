@@ -1,4 +1,4 @@
-import { assertEquals, assertExists } from 'jsr:@std/assert@^1.0.14';
+import { assertEquals } from 'jsr:@std/assert@^1.0.14';
 import { createOffscreenBinding } from '@rieul3d/gpu';
 import {
   createPath2D,
@@ -259,7 +259,9 @@ Deno.test('drawing recorder records transform and clip state into draw commands'
 
 Deno.test('drawing recorder supports explicit transform concatenation', () => {
   const mock = createMockGpuContext();
-  const recorder = createDrawingRecorder(createDawnSharedContext(createDawnBackendContext(mock.context)));
+  const recorder = createDrawingRecorder(
+    createDawnSharedContext(createDawnBackendContext(mock.context)),
+  );
 
   concatDrawingRecorderTransform(recorder, createTranslationMatrix2D(5, 8));
   concatDrawingRecorderTransform(recorder, createScaleMatrix2D(2, 2));
@@ -671,7 +673,11 @@ Deno.test('dawn command buffer encodes fill draws with stencil and cover pipelin
     { style: 'fill' },
   );
 
-  const commandBuffer = encodeDawnCommandBuffer(sharedContext, finishDrawingRecorder(recorder), binding);
+  const commandBuffer = encodeDawnCommandBuffer(
+    sharedContext,
+    finishDrawingRecorder(recorder),
+    binding,
+  );
   submitToDawnQueueManager(sharedContext.queueManager, commandBuffer);
 
   assertEquals(commandBuffer.passCount, 1);
@@ -736,7 +742,11 @@ Deno.test('dawn command buffer encodes stroke draws without stencil', () => {
     { style: 'stroke', strokeWidth: 8, color: [0.2, 0.4, 0.8, 1] },
   );
 
-  const commandBuffer = encodeDawnCommandBuffer(sharedContext, finishDrawingRecorder(recorder), binding);
+  const commandBuffer = encodeDawnCommandBuffer(
+    sharedContext,
+    finishDrawingRecorder(recorder),
+    binding,
+  );
 
   assertEquals(commandBuffer.unsupportedCommands.length, 0);
   assertEquals(mock.created.renderPasses.length, 1);
@@ -818,7 +828,11 @@ Deno.test('dawn queue manager tracks submit and tick completion', async () => {
   const binding = createOffscreenBinding(mock.context);
 
   recordClear(recorder, [0, 0, 0, 1]);
-  const commandBuffer = encodeDawnCommandBuffer(sharedContext, finishDrawingRecorder(recorder), binding);
+  const commandBuffer = encodeDawnCommandBuffer(
+    sharedContext,
+    finishDrawingRecorder(recorder),
+    binding,
+  );
   submitToDawnQueueManager(queueManager, commandBuffer);
 
   assertEquals(queueManager.submittedCount, 1);
@@ -845,7 +859,9 @@ Deno.test('drawing context increments recorder ids through shared context', () =
 
 Deno.test('submitDrawingRecorder exposes draw commands without mutating backend metadata', () => {
   const mock = createMockGpuContext();
-  const recorder = createDrawingRecorder(createDawnSharedContext(createDawnBackendContext(mock.context)));
+  const recorder = createDrawingRecorder(
+    createDawnSharedContext(createDawnBackendContext(mock.context)),
+  );
 
   recordDrawPath(
     recorder,

@@ -7,8 +7,8 @@ import {
   recordClear,
   recordDrawPath,
   requestDrawingContext,
-  scaleDrawingRecorder,
   saveDrawingRecorder,
+  scaleDrawingRecorder,
   submitToDawnQueueManager,
 } from '@rieul3d/drawing';
 

@@ -1,5 +1,5 @@
 import type { DrawingRecording } from './recording.ts';
-import { prepareDrawingPathCommand, type DrawingPreparedDraw } from './path_renderer.ts';
+import { type DrawingPreparedDraw, prepareDrawingPathCommand } from './path_renderer.ts';
 import type {
   DrawingClipRect,
   DrawingCommand,

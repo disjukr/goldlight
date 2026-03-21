@@ -59,7 +59,8 @@ const cloneState = (state: DrawingRecorderState): DrawingRecorderState => ({
           fillRule: clip.path.fillRule,
         },
         transform: [...clip.transform] as typeof clip.transform,
-      }),
+      }
+  ),
 });
 
 export const createDrawingRecorder = (

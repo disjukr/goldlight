@@ -1,6 +1,5 @@
 import {
   type GpuContext,
-  type GpuContextOptions,
   type GpuLostInfo,
   type RenderTarget,
   requestGpuContext,

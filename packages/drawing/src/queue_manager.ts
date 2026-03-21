@@ -17,12 +17,13 @@ const asMutableQueueManager = (
   completedCount: number;
   inFlightCount: number;
   lastSubmittedRecorderId: number | null;
-} => queueManager as {
-  submittedCount: number;
-  completedCount: number;
-  inFlightCount: number;
-  lastSubmittedRecorderId: number | null;
-};
+} =>
+  queueManager as {
+    submittedCount: number;
+    completedCount: number;
+    inFlightCount: number;
+    lastSubmittedRecorderId: number | null;
+  };
 
 export const createDawnQueueManager = (
   backend: DawnBackendContext,

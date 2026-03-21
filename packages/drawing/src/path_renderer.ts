@@ -1,4 +1,4 @@
-import { transformPoint2D, type PathFillRule2D, type Path2D, type Point2D, type Rect } from '@rieul3d/geometry';
+import { type PathFillRule2D, type Point2D, type Rect, transformPoint2D } from '@rieul3d/geometry';
 import type {
   DrawingClip,
   DrawingClipRect,
@@ -8,9 +8,9 @@ import type {
   DrawShapeCommand,
 } from './types.ts';
 import {
+  type DrawingRendererKind,
   selectPathFillRenderer,
   selectPathStrokeRenderer,
-  type DrawingRendererKind,
 } from './renderer_provider.ts';
 
 type FlattenedSubpath = Readonly<{
@@ -118,7 +118,10 @@ const cross = (origin: Point2D, a: Point2D, b: Point2D): number =>
 
 const dot = (left: Point2D, right: Point2D): number => (left[0] * right[0]) + (left[1] * right[1]);
 
-const subtract = (left: Point2D, right: Point2D): Point2D => [left[0] - right[0], left[1] - right[1]];
+const subtract = (
+  left: Point2D,
+  right: Point2D,
+): Point2D => [left[0] - right[0], left[1] - right[1]];
 
 const add = (left: Point2D, right: Point2D): Point2D => [left[0] + right[0], left[1] + right[1]];
 
@@ -207,49 +210,6 @@ const evaluateConic = (
     (t * t * to[1])) / denominator;
   return [x, y];
 };
-
-const evaluateQuadratic = (
-  from: Point2D,
-  control: Point2D,
-  to: Point2D,
-  t: number,
-): Point2D => {
-  const oneMinusT = 1 - t;
-  return [
-    (oneMinusT * oneMinusT * from[0]) + (2 * oneMinusT * t * control[0]) + (t * t * to[0]),
-    (oneMinusT * oneMinusT * from[1]) + (2 * oneMinusT * t * control[1]) + (t * t * to[1]),
-  ];
-};
-
-const evaluateCubic = (
-  from: Point2D,
-  control1: Point2D,
-  control2: Point2D,
-  to: Point2D,
-  t: number,
-): Point2D => {
-  const oneMinusT = 1 - t;
-  return [
-    (oneMinusT * oneMinusT * oneMinusT * from[0]) +
-    (3 * oneMinusT * oneMinusT * t * control1[0]) +
-    (3 * oneMinusT * t * t * control2[0]) +
-    (t * t * t * to[0]),
-    (oneMinusT * oneMinusT * oneMinusT * from[1]) +
-    (3 * oneMinusT * oneMinusT * t * control1[1]) +
-    (3 * oneMinusT * t * t * control2[1]) +
-    (t * t * t * to[1]),
-  ];
-};
-
-const derivativeQuadratic = (
-  from: Point2D,
-  control: Point2D,
-  to: Point2D,
-  t: number,
-): Point2D => [
-  (2 * (1 - t) * (control[0] - from[0])) + (2 * t * (to[0] - control[0])),
-  (2 * (1 - t) * (control[1] - from[1])) + (2 * t * (to[1] - control[1])),
-];
 
 const derivativeConic = (
   from: Point2D,
@@ -351,7 +311,8 @@ const findCuspTBySampling = (
       bestT = t;
     }
   }
-  return bestLength <= cuspDerivativeEpsilon && bestT !== null && bestT > epsilon && bestT < 1 - epsilon
+  return bestLength <= cuspDerivativeEpsilon && bestT !== null && bestT > epsilon &&
+      bestT < 1 - epsilon
     ? bestT
     : null;
 };
@@ -563,7 +524,9 @@ const triangulatePolygon = (points: readonly Point2D[]): readonly Point2D[] | nu
       if ((winding > 0 && turn <= epsilon) || (winding < 0 && turn >= -epsilon)) continue;
       let containsPoint = false;
       for (const candidateIndex of indices) {
-        if (candidateIndex === prev || candidateIndex === current || candidateIndex === next) continue;
+        if (candidateIndex === prev || candidateIndex === current || candidateIndex === next) {
+          continue;
+        }
         if (isPointInTriangle(points[candidateIndex]!, a, b, c)) {
           containsPoint = true;
           break;
@@ -842,7 +805,9 @@ const flattenCubicRecursive = (
     distanceFromLine(control1, from, to),
     distanceFromLine(control2, from, to),
   );
-  if (depth >= targetDepth || depth >= maxCurveSubdivisionDepth || flatness <= curveFlatnessTolerance) {
+  if (
+    depth >= targetDepth || depth >= maxCurveSubdivisionDepth || flatness <= curveFlatnessTolerance
+  ) {
     out.push(to);
     return;
   }
@@ -899,16 +864,18 @@ const flattenSubpaths = (
         {
           const control = transformPoint2D(verb.control, transform);
           const to = transformPoint2D(verb.to, transform);
-          const targetDepth = Math.ceil(Math.log2(approximateQuadraticSegments(currentPoint, control, to)));
-        flattenQuadraticRecursive(
-          currentPoint,
-          control,
-          to,
-          0,
-          targetDepth,
-          points,
-        );
-        currentPoint = to;
+          const targetDepth = Math.ceil(
+            Math.log2(approximateQuadraticSegments(currentPoint, control, to)),
+          );
+          flattenQuadraticRecursive(
+            currentPoint,
+            control,
+            to,
+            0,
+            targetDepth,
+            points,
+          );
+          currentPoint = to;
         }
         break;
       case 'cubicTo':
@@ -923,16 +890,16 @@ const flattenSubpaths = (
             control2,
             to,
           )));
-        flattenCubicRecursive(
-          currentPoint,
-          control1,
-          control2,
-          to,
-          0,
-          targetDepth,
-          points,
-        );
-        currentPoint = to;
+          flattenCubicRecursive(
+            currentPoint,
+            control1,
+            control2,
+            to,
+            0,
+            targetDepth,
+            points,
+          );
+          currentPoint = to;
         }
         break;
       case 'conicTo':
@@ -1044,7 +1011,9 @@ const preparePatches = (
         if (!currentPoint) break;
         const control = transformPoint2D(verb.control, transform);
         const to = transformPoint2D(verb.to, transform);
-        const cuspT = findCuspTBySampling((t) => derivativeConic(currentPoint!, control, to, verb.weight, t));
+        const cuspT = findCuspTBySampling((t) =>
+          derivativeConic(currentPoint!, control, to, verb.weight, t)
+        );
         if (cuspT !== null) {
           const cusp = evaluateConic(currentPoint, control, to, verb.weight, cuspT);
           patches.push({ kind: 'line', points: [currentPoint, cusp] });
@@ -1061,7 +1030,9 @@ const preparePatches = (
         const control1 = transformPoint2D(verb.control1, transform);
         const control2 = transformPoint2D(verb.control2, transform);
         const to = transformPoint2D(verb.to, transform);
-        const cuspT = findCuspTBySampling((t) => derivativeCubic(currentPoint!, control1, control2, to, t));
+        const cuspT = findCuspTBySampling((t) =>
+          derivativeCubic(currentPoint!, control1, control2, to, t)
+        );
         if (cuspT !== null) {
           const [left, right] = splitCubicAt(currentPoint, control1, control2, to, cuspT);
           patches.push({ kind: 'cubic', points: left });
@@ -1192,15 +1163,6 @@ const appendTriangle = (triangles: Point2D[], a: Point2D, b: Point2D, c: Point2D
   triangles.push(a, b, c);
 };
 
-const appendColoredTriangle = (
-  triangles: DrawingPreparedVertex[],
-  a: DrawingPreparedVertex,
-  b: DrawingPreparedVertex,
-  c: DrawingPreparedVertex,
-): void => {
-  triangles.push(a, b, c);
-};
-
 const appendQuad = (triangles: Point2D[], a: Point2D, b: Point2D, c: Point2D, d: Point2D): void => {
   triangles.push(a, b, c, a, c, d);
 };
@@ -1327,7 +1289,8 @@ const appendStrokeJoin = (
       outDirection,
     );
     if (miterPoint) {
-      const miterLength = Math.hypot(miterPoint[0] - point[0], miterPoint[1] - point[1]) / halfWidth;
+      const miterLength = Math.hypot(miterPoint[0] - point[0], miterPoint[1] - point[1]) /
+        halfWidth;
       if (miterLength <= miterLimit) {
         appendTriangle(triangles, point, outerStart, miterPoint);
         appendTriangle(triangles, point, miterPoint, outerEnd);
@@ -1342,10 +1305,12 @@ const appendStrokeJoin = (
 const prepareStrokeTriangles = (
   subpaths: readonly FlattenedSubpath[],
   paint: DrawingPaint,
-): Readonly<{
-  triangles: readonly Point2D[];
-  fringeVertices?: readonly DrawingPreparedVertex[];
-}> | null => {
+):
+  | Readonly<{
+    triangles: readonly Point2D[];
+    fringeVertices?: readonly DrawingPreparedVertex[];
+  }>
+  | null => {
   const strokeWidth = Math.max(paint.strokeWidth ?? 1, epsilon);
   const halfWidth = Math.max(0.5, strokeWidth) / 2;
   const join = paint.strokeJoin ?? 'miter';
@@ -1401,7 +1366,16 @@ const prepareStrokeTriangles = (
         const leftEnd = add(end, scale(normal, halfWidth));
         const rightEnd = add(end, scale(normal, -halfWidth));
         appendQuad(triangles, leftStart, leftEnd, rightEnd, rightStart);
-        segmentData.push({ start, end, direction, normal, leftStart, rightStart, leftEnd, rightEnd });
+        segmentData.push({
+          start,
+          end,
+          direction,
+          normal,
+          leftStart,
+          rightStart,
+          leftEnd,
+          rightEnd,
+        });
       }
     }
     if (segmentData.length === 0) continue;
@@ -1469,17 +1443,6 @@ const normalizeDashArray = (paint: DrawingPaint): readonly number[] | null => {
     return Object.freeze([...dashArray, ...dashArray]);
   }
   return Object.freeze(dashArray);
-};
-
-const pathLength = (points: readonly Point2D[], closed: boolean): number => {
-  let length = 0;
-  for (let index = 1; index < points.length; index += 1) {
-    length += Math.hypot(points[index]![0] - points[index - 1]![0], points[index]![1] - points[index - 1]![1]);
-  }
-  if (closed && points.length > 1) {
-    length += Math.hypot(points[0]![0] - points[points.length - 1]![0], points[0]![1] - points[points.length - 1]![1]);
-  }
-  return length;
 };
 
 const buildDashedPolyline = (
@@ -1568,16 +1531,6 @@ const applyDashPattern = (
     dashed.push(...buildDashedPolyline(subpath.points, subpath.closed, dashArray, dashOffset));
   }
   return Object.freeze(dashed);
-};
-
-const prepareClip = (clipPath: Path2D | undefined): DrawingPreparedClip | undefined => {
-  if (!clipPath) return undefined;
-  const subpaths = flattenSubpaths(clipPath, [1, 0, 0, 1, 0, 0]);
-  if (!subpaths || subpaths.length === 0) return undefined;
-  return {
-    bounds: unionBounds(subpaths.map((subpath) => computeBounds(subpath.points))),
-    triangles: prepareFillTriangles(subpaths, clipPath.fillRule) ?? undefined,
-  };
 };
 
 type PreparedClipStack = Readonly<{

@@ -633,7 +633,9 @@ export const createDawnResourceProvider = (
           if (pathStrokeClipCoverPipeline) {
             return pathStrokeClipCoverPipeline;
           }
-          pathStrokeClipCoverPipeline = createClipAwareColorPipeline('drawing-path-stroke-clip-cover');
+          pathStrokeClipCoverPipeline = createClipAwareColorPipeline(
+            'drawing-path-stroke-clip-cover',
+          );
           return pathStrokeClipCoverPipeline;
         case 'path-stroke-patch-clip-cover':
           if (pathStrokePatchClipCoverPipeline) {

@@ -130,17 +130,21 @@ Deno.test('drawing recorder tracks graphite-dawn style command submission', () =
     ),
     { style: 'fill' },
   );
-  recordDrawShape(recorder, {
-    kind: 'circle',
-    circle: {
-      center: [32, 32],
-      radius: 12,
+  recordDrawShape(
+    recorder,
+    {
+      kind: 'circle',
+      circle: {
+        center: [32, 32],
+        radius: 12,
+      },
+      segments: 12,
     },
-    segments: 12,
-  }, {
-    style: 'stroke',
-    strokeWidth: 2,
-  });
+    {
+      style: 'stroke',
+      strokeWidth: 2,
+    },
+  );
 
   const submission = submitDrawingRecorder(recorder);
 

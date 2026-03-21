@@ -76,6 +76,8 @@
     "example:browser:react:build": "deno bundle --platform browser --unstable-raw-imports -o ./examples/browser_react_authoring/dist/main.js ./examples/browser_react_authoring/main.tsx",
     "example:browser:textured:build": "deno bundle --platform browser --unstable-raw-imports -o ./examples/browser_textured_forward/dist/main.js ./examples/browser_textured_forward/main.ts",
     "example:browser:custom-textured:build": "deno bundle --platform browser --unstable-raw-imports -o ./examples/browser_custom_textured_forward/dist/main.js ./examples/browser_custom_textured_forward/main.ts",
+    "example:drawing:tiger:check": "deno check --unstable-raw-imports ./packages/drawing/examples/render_tiger_png/main.ts",
+    "example:drawing:tiger:png": "deno run -A --unstable-raw-imports ./packages/drawing/examples/render_tiger_png/main.ts",
     "example:browser:serve": "deno run -A jsr:@std/http@1/file-server ."
   },
   "fmt": {

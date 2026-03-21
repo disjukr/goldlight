@@ -141,6 +141,17 @@ stack that fits this repository's TypeScript and WebGPU architecture.
 - `src/path_renderer.ts`
   - Status: `pending`
   - Role: path rendering strategy
+- `tests/`
+  - Status: `started`
+  - Role: package-local tests for drawing
+- `assets/`
+  - Status: `started`
+  - Role: package-local drawing reference assets and generated outputs
+- `examples/`
+  - Status: `started`
+  - Role: package-local drawing examples and progress viewers
+  - Note: prefer non-browser examples unless browser output is specifically needed
+  - Current state: `examples/render_tiger_png` writes a PNG via `@rieul3d/exporters`, but it is still a progress scaffold rather than a true tiger render
 
 ## Geometry Model Progress
 
@@ -359,7 +370,7 @@ These decisions directly affect the remaining work and are not settled yet.
 
 - Unit tests for package wiring
   - Status: `done`
-  - `tests/drawing_graphite_dawn_test.ts`
+  - `packages/drawing/tests/drawing_graphite_dawn_test.ts`
 - Type checking
   - Status: `done`
   - Package APIs type-check
@@ -372,6 +383,7 @@ These decisions directly affect the remaining work and are not settled yet.
 - Image snapshot regression
   - Status: `pending`
   - No rendered output yet
+  - Note: `examples/render_tiger_png` currently exports a placeholder PNG because SVG ingestion and path rendering are not ready
 - Backend capability tests
   - Status: `started`
   - Basic caps tests exist
@@ -382,6 +394,7 @@ These decisions directly affect the remaining work and are not settled yet.
 - recording is mutable command accumulation, not a true immutable recording object
 - no separation yet between frontend drawing commands and backend executable passes
 - no renderer for fills or strokes
+- no SVG parser or SVG-to-`Path2D` ingestion path yet
 - no clipping, transforms, or retained state model
 - no pipeline or bind group cache
 

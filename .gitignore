@@ -3,3 +3,4 @@ examples/browser_textured_forward/dist/main.js
 examples/assets/sponza
 vendor/sdl2
 packages/desktop/native/target
+packages/drawing/examples/render_tiger_png/tiger.png

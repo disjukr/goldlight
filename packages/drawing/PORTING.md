@@ -459,8 +459,8 @@ These decisions directly affect the remaining work and are not settled yet.
 - `queue_manager` currently treats `tick()` as coarse completion rather than using explicit GPU
 - `queue_manager` still lacks full Graphite-style per-submission objects and backend-specific wait
   modes, even though queue-work-done completion now exists
-- clip stack handling still diverges from Skia Graphite for inverse clips, atlas-backed masking,
-  and clip-shape simplification beyond plain intersect accumulation
+- clip stack handling still diverges from Skia Graphite for inverse clips, atlas-backed masking, and
+  clip-shape simplification beyond plain intersect accumulation
 - clip geometry clipping is still incomplete for AA fringe geometry, so coverage edges can diverge
   from Graphite under complex clips
 - stroke tessellation still uses simplified fixed-count subdivision instead of Wang's-formula-driven

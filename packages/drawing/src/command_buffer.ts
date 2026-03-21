@@ -274,7 +274,8 @@ const encodeStencilClipStack = (
     DrawingPreparedRecording['passes'][number]['steps'][number]['draw']['clips']
   >,
   sharedContext: DawnSharedContext,
-  firstPipelineKey: DrawingPreparedRecording['passes'][number]['steps'][number]['pipelineKeys'][number],
+  firstPipelineKey:
+    DrawingPreparedRecording['passes'][number]['steps'][number]['pipelineKeys'][number],
 ): number => {
   for (let clipIndex = 0; clipIndex < clips.length; clipIndex += 1) {
     const clip = clips[clipIndex]!;

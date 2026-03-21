@@ -612,7 +612,10 @@ Deno.test('drawing prepared recording preserves multiple complex clip paths in s
   }
   assertEquals(draw.usesStencil, true);
   assertEquals(draw.clips?.length, 2);
-  assertEquals(prepared.passes[0]?.steps[0]?.pipelineKeys, ['clip-stencil-write', 'path-fill-clip-cover']);
+  assertEquals(prepared.passes[0]?.steps[0]?.pipelineKeys, [
+    'clip-stencil-write',
+    'path-fill-clip-cover',
+  ]);
   assertEquals(prepared.passes[0]?.steps[0]?.clipRect, createRect(32, 24, 80, 88));
 });
 

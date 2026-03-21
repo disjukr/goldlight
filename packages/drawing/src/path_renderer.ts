@@ -2402,7 +2402,7 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
         patches,
         fillRule: command.path.fillRule,
         color: resolveFillColor(command.paint),
-        bounds: unionBounds(subpaths.map((subpath) => computeBounds(subpath.points))),
+        bounds: computeBounds(triangles),
         clipRect: preparedClipStack?.bounds,
         clips: preparedClipStack?.stencilClips,
         usesStencil: Boolean(preparedClipStack && preparedClipStack.stencilClips.length > 0),

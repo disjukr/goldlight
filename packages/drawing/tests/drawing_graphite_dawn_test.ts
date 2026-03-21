@@ -928,6 +928,29 @@ Deno.test('drawing prepared recording falls back to direct fill geometry under c
   assertEquals(step?.pipelineKeys, ['path-fill-cover']);
 });
 
+Deno.test('drawing prepared recording tightens fill bounds after convex clip application', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  clipDrawingRecorderRect(recorder, createRect(32, 32, 48, 48));
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [0, 0] },
+      { kind: 'lineTo', to: [128, 0] },
+      { kind: 'lineTo', to: [128, 128] },
+      { kind: 'lineTo', to: [0, 128] },
+      { kind: 'close' },
+    ),
+    { style: 'fill' },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const draw = prepared.passes[0]?.steps[0]?.draw;
+  assertEquals(draw?.bounds, createRect(32, 32, 48, 48));
+});
+
 Deno.test('drawing prepared recording falls back to direct stroke geometry under convex clip stacks', () => {
   const mock = createMockGpuContext();
   const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));

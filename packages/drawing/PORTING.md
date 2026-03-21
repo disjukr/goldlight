@@ -669,6 +669,17 @@ These decisions directly affect the remaining work and are not settled yet.
   - Remaining: backend-specific wait paths, stronger fallback fences, and richer error/completion
     propagation
   - Validation: `deno test packages/drawing/tests/drawing_graphite_dawn_test.ts`
+- 2026-03-22
+  - Files: `src/path_renderer.ts`, `src/command_buffer.ts`, `tests/drawing_graphite_dawn_test.ts`,
+    `tests/render_basic_paths_snapshot_test.ts`
+  - Status transition: clip replay remains `partial`, but convex/complex clip interaction is now
+    closer to Graphite
+  - Change: convex clip stacks now trim fill AA fringe and pre-clip prepared complex stencil masks;
+    command-buffer scissor setup now intersects clip state with prepared draw bounds; the basic path
+    snapshot hash was refreshed to the new replay output
+  - Remaining: inverse clips, non-convex difference clips, atlas-backed masking, and richer
+    clip-stack simplification are still missing
+  - Validation: `deno task check`
 
 ## Update Rules
 

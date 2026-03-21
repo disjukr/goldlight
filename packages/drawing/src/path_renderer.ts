@@ -2243,6 +2243,27 @@ const prepareClipStack = (clips: readonly DrawingClip[]): PreparedClipStack | un
     }
   }
 
+  const preparedStencilClips: DrawingPreparedClip[] = [];
+  for (const clip of stencilClips) {
+    let triangles = clip.triangles;
+    for (const convexClip of convexClips) {
+      triangles = convexClip.op === 'intersect'
+        ? clipTrianglesAgainstConvexPolygon(triangles, convexClip.polygon)
+        : subtractTrianglesByConvexPolygon(triangles, convexClip.polygon);
+      if (triangles.length === 0) {
+        triangles = [];
+        break;
+      }
+    }
+    if (triangles.length === 0) {
+      continue;
+    }
+    preparedStencilClips.push({
+      bounds: computeBounds(triangles),
+      triangles,
+    });
+  }
+
   return {
     bounds,
     convexClips: Object.freeze(convexClips.map((clip) => ({
@@ -2250,7 +2271,7 @@ const prepareClipStack = (clips: readonly DrawingClip[]): PreparedClipStack | un
       bounds: clip.bounds,
       op: clip.op,
     }))),
-    stencilClips: Object.freeze(stencilClips),
+    stencilClips: Object.freeze(preparedStencilClips),
     unsupportedReason,
   };
 };

@@ -225,28 +225,33 @@ const applyClipRect = (
   step: DrawingPreparedRecording['passes'][number]['steps'][number],
   target: Readonly<{ width: number; height: number }>,
 ): void => {
+  const drawBounds = step.drawBounds;
   const clipRect = step.clipRect;
   const clipBounds = step.clipBounds;
-  const clipX = clipRect?.origin[0] ?? clipBounds?.origin[0] ?? 0;
-  const clipY = clipRect?.origin[1] ?? clipBounds?.origin[1] ?? 0;
+  const clipX = clipRect?.origin[0] ?? clipBounds?.origin[0] ?? drawBounds.origin[0];
+  const clipY = clipRect?.origin[1] ?? clipBounds?.origin[1] ?? drawBounds.origin[1];
   const clipRight = clipRect
     ? clipRect.origin[0] + clipRect.size.width
     : clipBounds
     ? clipBounds.origin[0] + clipBounds.size.width
-    : target.width;
+    : drawBounds.origin[0] + drawBounds.size.width;
   const clipBottom = clipRect
     ? clipRect.origin[1] + clipRect.size.height
     : clipBounds
     ? clipBounds.origin[1] + clipBounds.size.height
-    : target.height;
+    : drawBounds.origin[1] + drawBounds.size.height;
+  const drawX = drawBounds.origin[0];
+  const drawY = drawBounds.origin[1];
+  const drawRight = drawBounds.origin[0] + drawBounds.size.width;
+  const drawBottom = drawBounds.origin[1] + drawBounds.size.height;
   const clip2X = clipBounds?.origin[0] ?? clipX;
   const clip2Y = clipBounds?.origin[1] ?? clipY;
   const clip2Right = clipBounds ? clipBounds.origin[0] + clipBounds.size.width : clipRight;
   const clip2Bottom = clipBounds ? clipBounds.origin[1] + clipBounds.size.height : clipBottom;
-  const x = Math.max(0, Math.floor(Math.max(clipX, clip2X)));
-  const y = Math.max(0, Math.floor(Math.max(clipY, clip2Y)));
-  const right = Math.min(target.width, Math.ceil(Math.min(clipRight, clip2Right)));
-  const bottom = Math.min(target.height, Math.ceil(Math.min(clipBottom, clip2Bottom)));
+  const x = Math.max(0, Math.floor(Math.max(clipX, clip2X, drawX)));
+  const y = Math.max(0, Math.floor(Math.max(clipY, clip2Y, drawY)));
+  const right = Math.min(target.width, Math.ceil(Math.min(clipRight, clip2Right, drawRight)));
+  const bottom = Math.min(target.height, Math.ceil(Math.min(clipBottom, clip2Bottom, drawBottom)));
   const width = Math.max(0, right - x);
   const height = Math.max(0, bottom - y);
   pass.setScissorRect(x, y, width, height);

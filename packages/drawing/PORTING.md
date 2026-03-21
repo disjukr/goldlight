@@ -150,7 +150,10 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Role: immutable recorded command package
 - `src/path_renderer.ts`
   - Status: `partial`
-  - Role: adaptive curve flattening, conic/arc flattening, patch preparation, triangulation, scanline fallback, convex clip-stack clipping, clip preparation, and stroke expansion strategy
+  - Role: adaptive curve flattening, conic/arc flattening, cusp splitting, patch preparation, triangulation, scanline fallback, convex clip-stack clipping, clip preparation, and stroke expansion strategy
+- `src/renderer_provider.ts`
+  - Status: `started`
+  - Role: first renderer selection layer for middle-out fan, tessellated wedges, tessellated curves, and tessellated strokes
 - `tests/`
   - Status: `started`
   - Role: package-local tests for drawing, including snapshot regression
@@ -206,7 +209,7 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
   - Missing: better integration with richer draw-pass replay
 - `drawPath`
   - Status: `started`
-  - Current state: recordable, fill uses direct tessellation plus scanline fallback, path verbs include conic/arc flattening, and stroke has expanded geometry path
+  - Current state: recordable, fill now selects between middle-out fan, tessellated wedge, and tessellated curve preparation paths, path verbs include conic/arc flattening and cusp-aware splitting, and stroke has tessellated geometry preparation
   - Missing: higher-quality rasterization and broader path feature coverage
 - `drawShape`
   - Status: `started`
@@ -406,7 +409,8 @@ These decisions directly affect the remaining work and are not settled yet.
 - recording snapshots can be partitioned into coarse draw passes, but they do not yet carry
   Skia-like pipeline/state/resource data
 - no Skia-like draw-list or draw-pass preparation layer yet
-- arcs and advanced curve/path features are still missing
+- broader advanced curve/path features are still missing
+- curve patch preparation is closer to Skia Graphite terminology now, but it is still CPU-generated geometry instead of true GPU patch tessellation
 - patch metadata now exists, but there is still no Skia-style GPU patch tessellation path
 - evenodd/nonzero fills now rely on prepared geometry plus scanline fallback rather than Skia-style path renderers, and coverage is still not Skia-grade
 - no SVG parser or SVG-to-`Path2D` ingestion path yet

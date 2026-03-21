@@ -8,6 +8,7 @@ export * from './src/path_renderer.ts';
 export * from './src/queue_manager.ts';
 export * from './src/recording.ts';
 export * from './src/recorder.ts';
+export * from './src/renderer_provider.ts';
 export * from './src/resource_provider.ts';
 export * from './src/shared_context.ts';
 export * from './src/types.ts';

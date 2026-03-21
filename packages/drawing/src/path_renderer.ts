@@ -7,6 +7,11 @@ import type {
   DrawPathCommand,
   DrawShapeCommand,
 } from './types.ts';
+import {
+  selectPathFillRenderer,
+  selectPathStrokeRenderer,
+  type DrawingRendererKind,
+} from './renderer_provider.ts';
 
 type FlattenedSubpath = Readonly<{
   points: readonly Point2D[];
@@ -50,6 +55,7 @@ export type DrawingPreparedPatch = Readonly<
 
 export type DrawingPreparedPathFill = Readonly<{
   kind: 'pathFill';
+  renderer: DrawingRendererKind;
   triangles: readonly Point2D[];
   fringeVertices?: readonly DrawingPreparedVertex[];
   patches: readonly DrawingPreparedPatch[];
@@ -63,6 +69,7 @@ export type DrawingPreparedPathFill = Readonly<{
 
 export type DrawingPreparedPathStroke = Readonly<{
   kind: 'pathStroke';
+  renderer: DrawingRendererKind;
   triangles: readonly Point2D[];
   fringeVertices?: readonly DrawingPreparedVertex[];
   patches: readonly DrawingPreparedPatch[];
@@ -87,6 +94,7 @@ const curveFlatnessTolerance = 0.75;
 const roundStrokeSegments = 12;
 const hairlineCoverageWidth = 1;
 const aaFringeWidth = 1;
+const cuspDerivativeEpsilon = 0.5;
 
 const resolveFillColor = (paint: DrawingPaint): readonly [number, number, number, number] =>
   paint.color ?? defaultFillColor;
@@ -199,6 +207,154 @@ const evaluateConic = (
   return [x, y];
 };
 
+const evaluateQuadratic = (
+  from: Point2D,
+  control: Point2D,
+  to: Point2D,
+  t: number,
+): Point2D => {
+  const oneMinusT = 1 - t;
+  return [
+    (oneMinusT * oneMinusT * from[0]) + (2 * oneMinusT * t * control[0]) + (t * t * to[0]),
+    (oneMinusT * oneMinusT * from[1]) + (2 * oneMinusT * t * control[1]) + (t * t * to[1]),
+  ];
+};
+
+const evaluateCubic = (
+  from: Point2D,
+  control1: Point2D,
+  control2: Point2D,
+  to: Point2D,
+  t: number,
+): Point2D => {
+  const oneMinusT = 1 - t;
+  return [
+    (oneMinusT * oneMinusT * oneMinusT * from[0]) +
+    (3 * oneMinusT * oneMinusT * t * control1[0]) +
+    (3 * oneMinusT * t * t * control2[0]) +
+    (t * t * t * to[0]),
+    (oneMinusT * oneMinusT * oneMinusT * from[1]) +
+    (3 * oneMinusT * oneMinusT * t * control1[1]) +
+    (3 * oneMinusT * t * t * control2[1]) +
+    (t * t * t * to[1]),
+  ];
+};
+
+const derivativeQuadratic = (
+  from: Point2D,
+  control: Point2D,
+  to: Point2D,
+  t: number,
+): Point2D => [
+  (2 * (1 - t) * (control[0] - from[0])) + (2 * t * (to[0] - control[0])),
+  (2 * (1 - t) * (control[1] - from[1])) + (2 * t * (to[1] - control[1])),
+];
+
+const derivativeConic = (
+  from: Point2D,
+  control: Point2D,
+  to: Point2D,
+  weight: number,
+  t: number,
+): Point2D => {
+  const dt = 1e-3;
+  const left = evaluateConic(from, control, to, weight, Math.max(0, t - dt));
+  const right = evaluateConic(from, control, to, weight, Math.min(1, t + dt));
+  return [(right[0] - left[0]) / (2 * dt), (right[1] - left[1]) / (2 * dt)];
+};
+
+const derivativeCubic = (
+  from: Point2D,
+  control1: Point2D,
+  control2: Point2D,
+  to: Point2D,
+  t: number,
+): Point2D => {
+  const oneMinusT = 1 - t;
+  return [
+    (3 * oneMinusT * oneMinusT * (control1[0] - from[0])) +
+    (6 * oneMinusT * t * (control2[0] - control1[0])) +
+    (3 * t * t * (to[0] - control2[0])),
+    (3 * oneMinusT * oneMinusT * (control1[1] - from[1])) +
+    (6 * oneMinusT * t * (control2[1] - control1[1])) +
+    (3 * t * t * (to[1] - control2[1])),
+  ];
+};
+
+const splitQuadraticAt = (
+  from: Point2D,
+  control: Point2D,
+  to: Point2D,
+  t: number,
+): readonly [
+  readonly [Point2D, Point2D, Point2D],
+  readonly [Point2D, Point2D, Point2D],
+] => {
+  const p01 = lerp(from, control, t);
+  const p12 = lerp(control, to, t);
+  const split = lerp(p01, p12, t);
+  return [
+    [from, p01, split],
+    [split, p12, to],
+  ];
+};
+
+const splitCubicAt = (
+  from: Point2D,
+  control1: Point2D,
+  control2: Point2D,
+  to: Point2D,
+  t: number,
+): readonly [
+  readonly [Point2D, Point2D, Point2D, Point2D],
+  readonly [Point2D, Point2D, Point2D, Point2D],
+] => {
+  const p01 = lerp(from, control1, t);
+  const p12 = lerp(control1, control2, t);
+  const p23 = lerp(control2, to, t);
+  const p012 = lerp(p01, p12, t);
+  const p123 = lerp(p12, p23, t);
+  const split = lerp(p012, p123, t);
+  return [
+    [from, p01, p012, split],
+    [split, p123, p23, to],
+  ];
+};
+
+const findQuadraticCuspT = (
+  from: Point2D,
+  control: Point2D,
+  to: Point2D,
+): number | null => {
+  const a = subtract(control, from);
+  const b = subtract(to, control);
+  const crossValue = Math.abs((a[0] * b[1]) - (a[1] * b[0]));
+  const dotValue = dot(a, b);
+  if (crossValue <= epsilon && dotValue < 0) {
+    return 0.5;
+  }
+  return null;
+};
+
+const findCuspTBySampling = (
+  sampleDerivative: (t: number) => Point2D,
+): number | null => {
+  let bestT: number | null = null;
+  let bestLength = Number.POSITIVE_INFINITY;
+  for (let index = 1; index < 32; index += 1) {
+    const t = index / 32;
+    const derivative = sampleDerivative(t);
+    const length = Math.hypot(derivative[0], derivative[1]);
+    if (length < bestLength) {
+      bestLength = length;
+      bestT = t;
+    }
+  }
+  return bestLength <= cuspDerivativeEpsilon && bestT !== null && bestT > epsilon && bestT < 1 - epsilon
+    ? bestT
+    : null;
+};
+
 const flattenConic = (
   from: Point2D,
   control: Point2D,
@@ -206,6 +362,13 @@ const flattenConic = (
   weight: number,
   out: Point2D[],
 ): void => {
+  const cuspT = findCuspTBySampling((t) => derivativeConic(from, control, to, weight, t));
+  if (cuspT !== null) {
+    const cuspPoint = evaluateConic(from, control, to, weight, cuspT);
+    flattenConic(from, lerp(from, control, cuspT), cuspPoint, weight, out);
+    flattenConic(cuspPoint, lerp(control, to, cuspT), to, weight, out);
+    return;
+  }
   const segments = Math.max(
     2,
     Math.min(
@@ -634,6 +797,13 @@ const flattenQuadraticRecursive = (
   targetDepth: number,
   out: Point2D[],
 ): void => {
+  const cuspT = depth === 0 ? findQuadraticCuspT(from, control, to) : null;
+  if (cuspT !== null) {
+    const [left, right] = splitQuadraticAt(from, control, to, cuspT);
+    flattenQuadraticRecursive(left[0], left[1], left[2], depth + 1, targetDepth, out);
+    flattenQuadraticRecursive(right[0], right[1], right[2], depth + 1, targetDepth, out);
+    return;
+  }
   if (
     depth >= targetDepth ||
     depth >= maxCurveSubdivisionDepth ||
@@ -658,6 +828,15 @@ const flattenCubicRecursive = (
   targetDepth: number,
   out: Point2D[],
 ): void => {
+  const cuspT = depth === 0
+    ? findCuspTBySampling((t) => derivativeCubic(from, control1, control2, to, t))
+    : null;
+  if (cuspT !== null) {
+    const [left, right] = splitCubicAt(from, control1, control2, to, cuspT);
+    flattenCubicRecursive(left[0], left[1], left[2], left[3], depth + 1, targetDepth, out);
+    flattenCubicRecursive(right[0], right[1], right[2], right[3], depth + 1, targetDepth, out);
+    return;
+  }
   const flatness = Math.max(
     distanceFromLine(control1, from, to),
     distanceFromLine(control2, from, to),
@@ -811,7 +990,7 @@ const preparePatches = (
       contourStart = null;
       return;
     }
-    const fanPoint = computeBounds(contourPoints).origin;
+    const fanPoint = computeContourMidpoint(contourPoints);
     for (let index = 0; index < contourPoints.length; index += 1) {
       patches.push({
         kind: 'wedge',
@@ -848,7 +1027,14 @@ const preparePatches = (
         if (!currentPoint) break;
         const control = transformPoint2D(verb.control, transform);
         const to = transformPoint2D(verb.to, transform);
-        patches.push({ kind: 'quadratic', points: [currentPoint, control, to] });
+        const cuspT = findQuadraticCuspT(currentPoint, control, to);
+        if (cuspT !== null) {
+          const [left, right] = splitQuadraticAt(currentPoint, control, to, cuspT);
+          patches.push({ kind: 'quadratic', points: left });
+          patches.push({ kind: 'quadratic', points: right });
+        } else {
+          patches.push({ kind: 'quadratic', points: [currentPoint, control, to] });
+        }
         contourPoints.push(to);
         currentPoint = to;
         break;
@@ -857,7 +1043,14 @@ const preparePatches = (
         if (!currentPoint) break;
         const control = transformPoint2D(verb.control, transform);
         const to = transformPoint2D(verb.to, transform);
-        patches.push({ kind: 'conic', points: [currentPoint, control, to], weight: verb.weight });
+        const cuspT = findCuspTBySampling((t) => derivativeConic(currentPoint!, control, to, verb.weight, t));
+        if (cuspT !== null) {
+          const cusp = evaluateConic(currentPoint, control, to, verb.weight, cuspT);
+          patches.push({ kind: 'line', points: [currentPoint, cusp] });
+          patches.push({ kind: 'line', points: [cusp, to] });
+        } else {
+          patches.push({ kind: 'conic', points: [currentPoint, control, to], weight: verb.weight });
+        }
         contourPoints.push(to);
         currentPoint = to;
         break;
@@ -867,7 +1060,14 @@ const preparePatches = (
         const control1 = transformPoint2D(verb.control1, transform);
         const control2 = transformPoint2D(verb.control2, transform);
         const to = transformPoint2D(verb.to, transform);
-        patches.push({ kind: 'cubic', points: [currentPoint, control1, control2, to] });
+        const cuspT = findCuspTBySampling((t) => derivativeCubic(currentPoint!, control1, control2, to, t));
+        if (cuspT !== null) {
+          const [left, right] = splitCubicAt(currentPoint, control1, control2, to, cuspT);
+          patches.push({ kind: 'cubic', points: left });
+          patches.push({ kind: 'cubic', points: right });
+        } else {
+          patches.push({ kind: 'cubic', points: [currentPoint, control1, control2, to] });
+        }
         contourPoints.push(to);
         currentPoint = to;
         break;
@@ -928,6 +1128,48 @@ const prepareFillTriangles = (
       return scanlineTessellate(subpaths, fillRule);
     }
     triangles.push(...contourTriangles);
+  }
+  return Object.freeze(triangles);
+};
+
+const tessellateFillFromPatches = (
+  patches: readonly DrawingPreparedPatch[],
+): readonly Point2D[] | null => {
+  const triangles: Point2D[] = [];
+  let sawWedge = false;
+  for (const patch of patches) {
+    if (patch.kind !== 'wedge') {
+      continue;
+    }
+    sawWedge = true;
+    triangles.push(patch.fanPoint, patch.points[0], patch.points[1]);
+  }
+  return sawWedge ? Object.freeze(triangles) : null;
+};
+
+const middleOutFanTriangulate = (
+  points: readonly Point2D[],
+): readonly Point2D[] | null => {
+  if (points.length < 3 || !isConvexPolygon(points)) {
+    return null;
+  }
+  const triangles: Point2D[] = [];
+  let left = 1;
+  let right = points.length - 1;
+  let anchor = 0;
+  while (left < right) {
+    appendTriangle(triangles, points[anchor]!, points[left]!, points[right]!);
+    anchor = left;
+    left += 1;
+    if (left >= right) {
+      break;
+    }
+    appendTriangle(triangles, points[anchor]!, points[right]!, points[left]!);
+    anchor = right;
+    right -= 1;
+  }
+  if (triangles.length === 0) {
+    return triangulatePolygon(points);
   }
   return Object.freeze(triangles);
 };
@@ -1406,6 +1648,43 @@ const prepareClipStack = (clips: readonly DrawingClip[]): PreparedClipStack | un
   };
 };
 
+const computeContourMidpoint = (points: readonly Point2D[]): Point2D => {
+  if (points.length === 0) {
+    return [0, 0];
+  }
+  if (points.length === 1) {
+    return points[0]!;
+  }
+
+  const closedPoints = pointsEqual(points[0]!, points[points.length - 1]!)
+    ? points
+    : [...points, points[0]!];
+  let totalLength = 0;
+  for (let index = 1; index < closedPoints.length; index += 1) {
+    totalLength += Math.hypot(
+      closedPoints[index]![0] - closedPoints[index - 1]![0],
+      closedPoints[index]![1] - closedPoints[index - 1]![1],
+    );
+  }
+  if (totalLength <= epsilon) {
+    return points[0]!;
+  }
+
+  const targetLength = totalLength / 2;
+  let traversed = 0;
+  for (let index = 1; index < closedPoints.length; index += 1) {
+    const start = closedPoints[index - 1]!;
+    const end = closedPoints[index]!;
+    const segmentLength = Math.hypot(end[0] - start[0], end[1] - start[1]);
+    if (traversed + segmentLength >= targetLength) {
+      const t = (targetLength - traversed) / Math.max(segmentLength, epsilon);
+      return lerp(start, end, t);
+    }
+    traversed += segmentLength;
+  }
+  return points[0]!;
+};
+
 const applyConvexClipStack = (
   triangles: readonly Point2D[],
   clipStack: PreparedClipStack | undefined,
@@ -1434,8 +1713,40 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
   const style = command.paint.style ?? 'fill';
   if (style === 'fill') {
     const patches = preparePatches(command.path, command.transform);
+    const hasCurves = patches.some((patch) =>
+      patch.kind === 'quadratic' || patch.kind === 'conic' || patch.kind === 'cubic'
+    );
+    const hasWedges = patches.some((patch) => patch.kind === 'wedge');
+    const isSingleConvexContour = subpaths.length === 1 &&
+      subpaths[0]!.closed &&
+      isConvexPolygon(subpaths[0]!.points);
+    const renderer = selectPathFillRenderer({
+      fillRule: command.path.fillRule,
+      patchCount: patches.length,
+      hasCurves,
+      hasWedges,
+      isSingleConvexContour,
+    });
+
+    let baseTriangles: readonly Point2D[] = [];
+    switch (renderer) {
+      case 'middle-out-fan':
+        baseTriangles = middleOutFanTriangulate(subpaths[0]!.points) ?? [];
+        break;
+      case 'stencil-tessellated-wedges':
+        baseTriangles = tessellateFillFromPatches(patches) ??
+          prepareFillTriangles(subpaths, command.path.fillRule) ?? [];
+        break;
+      case 'stencil-tessellated-curves':
+        baseTriangles = prepareFillTriangles(subpaths, command.path.fillRule) ??
+          tessellateFillFromPatches(patches) ?? [];
+        break;
+      default:
+        baseTriangles = prepareFillTriangles(subpaths, command.path.fillRule) ?? [];
+        break;
+    }
     const triangles = applyConvexClipStack(
-      prepareFillTriangles(subpaths, command.path.fillRule) ?? [],
+      baseTriangles,
       preparedClipStack,
     );
     if (!triangles) {
@@ -1445,6 +1756,7 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
       supported: true,
       draw: {
         kind: 'pathFill',
+        renderer,
         triangles,
         fringeVertices: buildFillFringe(subpaths, resolveFillColor(command.paint)),
         patches,
@@ -1471,6 +1783,7 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
     supported: true,
     draw: {
       kind: 'pathStroke',
+      renderer: selectPathStrokeRenderer(patches),
       triangles: strokeTriangles,
       fringeVertices: preparedStroke?.fringeVertices,
       patches,

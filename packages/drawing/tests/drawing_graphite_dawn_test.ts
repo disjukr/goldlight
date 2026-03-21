@@ -333,6 +333,32 @@ Deno.test('drawing prepared recording groups clear and prepared steps into passe
   assertEquals(prepared.unsupportedCommands.length, 0);
 });
 
+Deno.test('drawing prepared recording selects middle-out fan for simple convex fills', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [16, 16] },
+      { kind: 'lineTo', to: [96, 16] },
+      { kind: 'lineTo', to: [120, 64] },
+      { kind: 'lineTo', to: [96, 112] },
+      { kind: 'lineTo', to: [16, 112] },
+      { kind: 'close' },
+    ),
+    { style: 'fill' },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const draw = prepared.passes[0]?.steps[0]?.draw;
+
+  assertEquals(draw?.kind, 'pathFill');
+  assertEquals(draw?.renderer, 'middle-out-fan');
+  assertEquals((draw?.triangles.length ?? 0) > 0, true);
+});
+
 Deno.test('drawing prepared recording flattens quadratic and cubic paths for fill draws', () => {
   const mock = createMockGpuContext();
   const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
@@ -353,6 +379,7 @@ Deno.test('drawing prepared recording flattens quadratic and cubic paths for fil
   const draw = prepared.passes[0]?.steps[0]?.draw;
 
   assertEquals(draw?.kind, 'pathFill');
+  assertEquals(draw?.renderer, 'stencil-tessellated-wedges');
   assertEquals((draw?.triangles.length ?? 0) > 6, true);
   assertEquals(draw?.bounds.origin[0], 24);
   assertEquals((draw?.patches.length ?? 0) > 0, true);
@@ -386,6 +413,30 @@ Deno.test('drawing prepared recording flattens conic and arc verbs', () => {
   assertEquals((draw?.triangles.length ?? 0) > 6, true);
   assertEquals(
     draw?.patches.some((patch) => patch.kind === 'conic'),
+    true,
+  );
+});
+
+Deno.test('drawing prepared recording splits cusp-like cubic patches', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [32, 96] },
+      { kind: 'cubicTo', control1: [96, 32], control2: [96, 160], to: [160, 96] },
+      { kind: 'close' },
+    ),
+    { style: 'stroke', strokeWidth: 10 },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const draw = prepared.passes[0]?.steps[0]?.draw;
+  assertEquals(draw?.kind, 'pathStroke');
+  assertEquals(
+    (draw?.patches.filter((patch) => patch.kind === 'cubic').length ?? 0) >= 1,
     true,
   );
 });
@@ -533,6 +584,7 @@ Deno.test('drawing prepared recording expands stroke geometry', () => {
   const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
   const draw = prepared.passes[0]?.steps[0]?.draw;
   assertEquals(draw?.kind, 'pathStroke');
+  assertEquals(draw?.renderer, 'tessellated-strokes');
   assertEquals((draw?.triangles.length ?? 0) > 12, true);
 });
 
@@ -595,6 +647,7 @@ Deno.test('drawing prepared recording scales hairline alpha coverage', () => {
   const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
   const draw = prepared.passes[0]?.steps[0]?.draw;
   assertEquals(draw?.kind, 'pathStroke');
+  assertEquals(draw?.renderer, 'tessellated-strokes');
   assertEquals(draw?.color, [0.4, 0.6, 0.8, 0.5]);
 });
 

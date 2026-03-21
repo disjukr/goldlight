@@ -5,7 +5,11 @@ import {
 } from '@rieul3d/gpu';
 import { type DrawingPreparedRecording, prepareDrawingRecording } from './draw_pass.ts';
 import type { DrawingRecording } from './recording.ts';
-import type { DrawingPreparedPatch, DrawingPreparedVertex } from './path_renderer.ts';
+import type {
+  DrawingPreparedDraw,
+  DrawingPreparedPatch,
+  DrawingPreparedVertex,
+} from './path_renderer.ts';
 import type { DawnSharedContext } from './shared_context.ts';
 import type { DrawingCommand } from './types.ts';
 
@@ -275,6 +279,154 @@ const encodeStencilClipStack = (
   return emittedClipCount;
 };
 
+type DrawingPreparedStep = DrawingPreparedRecording['passes'][number]['steps'][number];
+type DrawingPreparedFillStep = DrawingPreparedStep & {
+  draw: Extract<DrawingPreparedStep['draw'], { kind: 'pathFill' }>;
+};
+type DrawingPreparedStrokeStep = DrawingPreparedStep & {
+  draw: Extract<DrawingPreparedStep['draw'], { kind: 'pathStroke' }>;
+};
+
+const encodePathFillStep = (
+  pass: GPURenderPassEncoder,
+  sharedContext: DawnSharedContext,
+  step: DrawingPreparedFillStep,
+): void => {
+  const usesPatchFill = step.draw.renderer === 'stencil-tessellated-wedges' ||
+    step.draw.renderer === 'stencil-tessellated-curves';
+  const fillVertices = usesPatchFill ? null : createVertexData(
+    step.draw.triangles,
+    step.draw.color,
+  );
+  const fillVertexBuffer = fillVertices ? createVertexBuffer(sharedContext, fillVertices) : null;
+  const patchVertices = step.draw.renderer === 'stencil-tessellated-wedges'
+    ? createWedgePatchInstanceData(step.draw.patches, step.draw.color)
+    : step.draw.renderer === 'stencil-tessellated-curves'
+    ? createCurvePatchInstanceData(step.draw.patches, step.draw.color)
+    : null;
+  const patchVertexBuffer = patchVertices && patchVertices.length > 0
+    ? createVertexBuffer(sharedContext, patchVertices)
+    : null;
+  const fringeVertices = step.draw.fringeVertices
+    ? createColoredVertexData(step.draw.fringeVertices)
+    : null;
+  const fringeVertexBuffer = fringeVertices
+    ? createVertexBuffer(sharedContext, fringeVertices)
+    : null;
+
+  applyStepClip(pass, step, sharedContext.backend.target);
+  if (step.draw.clips && step.draw.clips.length > 0) {
+    const colorPipeline = sharedContext.resourceProvider.getPipeline(step.pipelineKeys[1]!);
+    const stencilReference = encodeStencilClipStack(
+      pass,
+      step.draw.clips,
+      sharedContext,
+      step.pipelineKeys[0]!,
+    );
+    pass.setStencilReference?.(stencilReference);
+    pass.setPipeline(colorPipeline);
+    if (usesPatchFill && patchVertexBuffer && patchVertices) {
+      pass.setVertexBuffer(0, patchVertexBuffer);
+      pass.draw(
+        step.draw.renderer === 'stencil-tessellated-wedges' ? 3 : curvePatchVertexCount,
+        patchVertices.length /
+          (step.draw.renderer === 'stencil-tessellated-wedges'
+            ? wedgePatchFloats
+            : curvePatchFloats),
+      );
+    } else if (fillVertexBuffer && fillVertices) {
+      pass.setVertexBuffer(0, fillVertexBuffer);
+      pass.draw(fillVertices.length / floatsPerVertex);
+    }
+    if (fringeVertices && fringeVertexBuffer) {
+      if (usesPatchFill) {
+        pass.setPipeline(sharedContext.resourceProvider.getPipeline('path-fill-clip-cover'));
+      }
+      pass.setVertexBuffer(0, fringeVertexBuffer);
+      pass.draw(fringeVertices.length / floatsPerVertex);
+    }
+    return;
+  }
+
+  pass.setPipeline(sharedContext.resourceProvider.getPipeline(step.pipelineKeys[0]!));
+  if (usesPatchFill && patchVertexBuffer && patchVertices) {
+    pass.setVertexBuffer(0, patchVertexBuffer);
+    pass.draw(
+      step.draw.renderer === 'stencil-tessellated-wedges' ? 3 : curvePatchVertexCount,
+      patchVertices.length /
+        (step.draw.renderer === 'stencil-tessellated-wedges' ? wedgePatchFloats : curvePatchFloats),
+    );
+  } else if (fillVertexBuffer && fillVertices) {
+    pass.setVertexBuffer(0, fillVertexBuffer);
+    pass.draw(fillVertices.length / floatsPerVertex);
+  }
+  if (fringeVertices && fringeVertexBuffer) {
+    if (usesPatchFill) {
+      pass.setPipeline(sharedContext.resourceProvider.getPipeline('path-fill-cover'));
+    }
+    pass.setVertexBuffer(0, fringeVertexBuffer);
+    pass.draw(fringeVertices.length / floatsPerVertex);
+  }
+};
+
+const encodePathStrokeStep = (
+  pass: GPURenderPassEncoder,
+  sharedContext: DawnSharedContext,
+  step: DrawingPreparedStrokeStep,
+): void => {
+  const strokeVertices = createVertexData(step.draw.triangles, step.draw.color);
+  const strokeVertexBuffer = createVertexBuffer(sharedContext, strokeVertices);
+  const patchVertices = createStrokePatchInstanceData(
+    step.draw.patches,
+    step.draw.color,
+    step.draw.halfWidth,
+  );
+  const patchVertexBuffer = patchVertices.length > 0
+    ? createVertexBuffer(sharedContext, patchVertices)
+    : null;
+  const usesPatchStroke = Boolean(patchVertexBuffer);
+  const fringeVertices = step.draw.fringeVertices
+    ? createColoredVertexData(step.draw.fringeVertices)
+    : null;
+  const fringeVertexBuffer = fringeVertices
+    ? createVertexBuffer(sharedContext, fringeVertices)
+    : null;
+
+  applyStepClip(pass, step, sharedContext.backend.target);
+  if (step.draw.clips && step.draw.clips.length > 0) {
+    const stencilReference = encodeStencilClipStack(
+      pass,
+      step.draw.clips,
+      sharedContext,
+      step.pipelineKeys[0]!,
+    );
+    pass.setStencilReference?.(stencilReference);
+    pass.setPipeline(sharedContext.resourceProvider.getPipeline(
+      usesPatchStroke ? step.pipelineKeys[1]! : 'path-stroke-clip-cover',
+    ));
+  } else {
+    pass.setPipeline(sharedContext.resourceProvider.getPipeline(
+      usesPatchStroke ? step.pipelineKeys[0]! : 'path-stroke-cover',
+    ));
+  }
+  if (usesPatchStroke && patchVertexBuffer) {
+    pass.setVertexBuffer(0, patchVertexBuffer);
+    pass.draw(strokePatchVertexCount, patchVertices.length / strokePatchFloats);
+  } else {
+    pass.setVertexBuffer(0, strokeVertexBuffer);
+    pass.draw(strokeVertices.length / floatsPerVertex);
+  }
+  if (fringeVertices && fringeVertexBuffer) {
+    pass.setPipeline(sharedContext.resourceProvider.getPipeline(
+      step.draw.clips && step.draw.clips.length > 0
+        ? 'path-stroke-clip-cover'
+        : 'path-stroke-cover',
+    ));
+    pass.setVertexBuffer(0, fringeVertexBuffer);
+    pass.draw(fringeVertices.length / floatsPerVertex);
+  }
+};
+
 export const encodeDawnCommandBuffer = (
   sharedContext: DawnSharedContext,
   recording: DrawingRecording,
@@ -316,206 +468,53 @@ export const encodeDawnCommandBuffer = (
     }
 
     let colorLoadOp = passInfo.loadOp;
-    for (const step of passInfo.steps) {
-      switch (step.draw.kind) {
-        case 'pathFill': {
-          const usesPatchFill = step.draw.renderer === 'stencil-tessellated-wedges' ||
-            step.draw.renderer === 'stencil-tessellated-curves';
-          const fillVertices = usesPatchFill ? null : createVertexData(
-            step.draw.triangles,
-            step.draw.color,
-          );
-          const fillVertexBuffer = fillVertices
-            ? createVertexBuffer(sharedContext, fillVertices)
-            : null;
-          const patchVertices = step.draw.renderer === 'stencil-tessellated-wedges'
-            ? createWedgePatchInstanceData(
-              step.draw.patches,
-              step.draw.color,
-            )
-            : step.draw.renderer === 'stencil-tessellated-curves'
-            ? createCurvePatchInstanceData(
-              step.draw.patches,
-              step.draw.color,
-            )
-            : null;
-          const patchVertexBuffer = patchVertices && patchVertices.length > 0
-            ? createVertexBuffer(sharedContext, patchVertices)
-            : null;
-          const fringeVertices = step.draw.fringeVertices
-            ? createColoredVertexData(step.draw.fringeVertices)
-            : null;
-          const fringeVertexBuffer = fringeVertices
-            ? createVertexBuffer(sharedContext, fringeVertices)
-            : null;
-          const pass = encoder.beginRenderPass({
-            colorAttachments: [
-              {
-                view: colorView,
-                resolveTarget: resolveView,
-                clearValue: toGpuColor(passInfo.clearColor),
-                loadOp: colorLoadOp,
-                storeOp: 'store',
-              },
-            ],
-            depthStencilAttachment: step.draw.clips && step.draw.clips.length > 0
-              ? {
-                view: stencilView,
-                depthClearValue: 1,
-                depthLoadOp: 'clear',
-                depthStoreOp: 'discard',
-                stencilClearValue: 0,
-                stencilLoadOp: 'clear',
-                stencilStoreOp: 'discard',
-              }
-              : undefined,
-          });
-          applyStepClip(pass, step, sharedContext.backend.target);
-          pass.setBindGroup(0, intrinsicBindGroup);
-          if (step.draw.clips && step.draw.clips.length > 0) {
-            const colorPipeline = sharedContext.resourceProvider.getPipeline(step.pipelineKeys[1]!);
-            const stencilReference = encodeStencilClipStack(
-              pass,
-              step.draw.clips,
-              sharedContext,
-              step.pipelineKeys[0]!,
-            );
-            pass.setStencilReference?.(stencilReference);
-            pass.setPipeline(colorPipeline);
-            if (usesPatchFill && patchVertexBuffer && patchVertices) {
-              pass.setVertexBuffer(0, patchVertexBuffer);
-              pass.draw(
-                step.draw.renderer === 'stencil-tessellated-wedges' ? 3 : curvePatchVertexCount,
-                patchVertices.length /
-                  (step.draw.renderer === 'stencil-tessellated-wedges'
-                    ? wedgePatchFloats
-                    : curvePatchFloats),
-              );
-            } else if (fillVertexBuffer && fillVertices) {
-              pass.setVertexBuffer(0, fillVertexBuffer);
-              pass.draw(fillVertices.length / floatsPerVertex);
-            }
-            if (fringeVertices && fringeVertexBuffer) {
-              if (usesPatchFill) {
-                pass.setPipeline(
-                  sharedContext.resourceProvider.getPipeline('path-fill-clip-cover'),
-                );
-              }
-              pass.setVertexBuffer(0, fringeVertexBuffer);
-              pass.draw(fringeVertices.length / floatsPerVertex);
-            }
-          } else {
-            const fillPipeline = sharedContext.resourceProvider.getPipeline(step.pipelineKeys[0]!);
-            pass.setPipeline(fillPipeline);
-            if (usesPatchFill && patchVertexBuffer && patchVertices) {
-              pass.setVertexBuffer(0, patchVertexBuffer);
-              pass.draw(
-                step.draw.renderer === 'stencil-tessellated-wedges' ? 3 : curvePatchVertexCount,
-                patchVertices.length /
-                  (step.draw.renderer === 'stencil-tessellated-wedges'
-                    ? wedgePatchFloats
-                    : curvePatchFloats),
-              );
-            } else if (fillVertexBuffer && fillVertices) {
-              pass.setVertexBuffer(0, fillVertexBuffer);
-              pass.draw(fillVertices.length / floatsPerVertex);
-            }
-            if (fringeVertices && fringeVertexBuffer) {
-              if (usesPatchFill) {
-                pass.setPipeline(sharedContext.resourceProvider.getPipeline('path-fill-cover'));
-              }
-              pass.setVertexBuffer(0, fringeVertexBuffer);
-              pass.draw(fringeVertices.length / floatsPerVertex);
-            }
+    for (let stepIndex = 0; stepIndex < passInfo.steps.length;) {
+      const step = passInfo.steps[stepIndex]!;
+      const requiresStencilPass = Boolean(step.draw.clips && step.draw.clips.length > 0);
+      const pass = encoder.beginRenderPass({
+        colorAttachments: [
+          {
+            view: colorView,
+            resolveTarget: resolveView,
+            clearValue: toGpuColor(passInfo.clearColor),
+            loadOp: colorLoadOp,
+            storeOp: 'store',
+          },
+        ],
+        depthStencilAttachment: requiresStencilPass
+          ? {
+            view: stencilView,
+            depthClearValue: 1,
+            depthLoadOp: 'clear',
+            depthStoreOp: 'discard',
+            stencilClearValue: 0,
+            stencilLoadOp: 'clear',
+            stencilStoreOp: 'discard',
           }
-          pass.end();
-          passCount += 1;
-          colorLoadOp = 'load';
-          break;
+          : undefined,
+      });
+      pass.setBindGroup(0, intrinsicBindGroup);
+
+      do {
+        const currentStep = passInfo.steps[stepIndex]!;
+        switch (currentStep.draw.kind) {
+          case 'pathFill':
+            encodePathFillStep(pass, sharedContext, currentStep as DrawingPreparedFillStep);
+            break;
+          case 'pathStroke':
+            encodePathStrokeStep(pass, sharedContext, currentStep as DrawingPreparedStrokeStep);
+            break;
         }
-        case 'pathStroke': {
-          const strokeVertices = createVertexData(
-            step.draw.triangles,
-            step.draw.color,
-          );
-          const strokeVertexBuffer = createVertexBuffer(sharedContext, strokeVertices);
-          const patchVertices = createStrokePatchInstanceData(
-            step.draw.patches,
-            step.draw.color,
-            step.draw.halfWidth,
-          );
-          const patchVertexBuffer = patchVertices.length > 0
-            ? createVertexBuffer(sharedContext, patchVertices)
-            : null;
-          const usesPatchStroke = Boolean(patchVertexBuffer);
-          const fringeVertices = step.draw.fringeVertices
-            ? createColoredVertexData(step.draw.fringeVertices)
-            : null;
-          const fringeVertexBuffer = fringeVertices
-            ? createVertexBuffer(sharedContext, fringeVertices)
-            : null;
-          const pass = encoder.beginRenderPass({
-            colorAttachments: [
-              {
-                view: colorView,
-                resolveTarget: resolveView,
-                clearValue: toGpuColor(passInfo.clearColor),
-                loadOp: colorLoadOp,
-                storeOp: 'store',
-              },
-            ],
-            depthStencilAttachment: step.draw.clips && step.draw.clips.length > 0
-              ? {
-                view: stencilView,
-                depthClearValue: 1,
-                depthLoadOp: 'clear',
-                depthStoreOp: 'discard',
-                stencilClearValue: 0,
-                stencilLoadOp: 'clear',
-                stencilStoreOp: 'discard',
-              }
-              : undefined,
-          });
-          applyStepClip(pass, step, sharedContext.backend.target);
-          pass.setBindGroup(0, intrinsicBindGroup);
-          if (step.draw.clips && step.draw.clips.length > 0) {
-            const stencilReference = encodeStencilClipStack(
-              pass,
-              step.draw.clips,
-              sharedContext,
-              step.pipelineKeys[0]!,
-            );
-            pass.setStencilReference?.(stencilReference);
-            pass.setPipeline(sharedContext.resourceProvider.getPipeline(
-              usesPatchStroke ? step.pipelineKeys[1]! : 'path-stroke-clip-cover',
-            ));
-          } else {
-            pass.setPipeline(sharedContext.resourceProvider.getPipeline(
-              usesPatchStroke ? step.pipelineKeys[0]! : 'path-stroke-cover',
-            ));
-          }
-          if (usesPatchStroke && patchVertexBuffer) {
-            pass.setVertexBuffer(0, patchVertexBuffer);
-            pass.draw(strokePatchVertexCount, patchVertices.length / strokePatchFloats);
-          } else {
-            pass.setVertexBuffer(0, strokeVertexBuffer);
-            pass.draw(strokeVertices.length / floatsPerVertex);
-          }
-          if (fringeVertices && fringeVertexBuffer) {
-            pass.setPipeline(sharedContext.resourceProvider.getPipeline(
-              step.draw.clips && step.draw.clips.length > 0
-                ? 'path-stroke-clip-cover'
-                : 'path-stroke-cover',
-            ));
-            pass.setVertexBuffer(0, fringeVertexBuffer);
-            pass.draw(fringeVertices.length / floatsPerVertex);
-          }
-          pass.end();
-          passCount += 1;
-          colorLoadOp = 'load';
-          break;
-        }
-      }
+        stepIndex += 1;
+      } while (
+        !requiresStencilPass &&
+        stepIndex < passInfo.steps.length &&
+        !Boolean(passInfo.steps[stepIndex]?.draw.clips?.length)
+      );
+
+      pass.end();
+      passCount += 1;
+      colorLoadOp = 'load';
     }
 
     unsupportedCommands.push(...passInfo.unsupportedDraws);

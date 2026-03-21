@@ -578,7 +578,8 @@ These decisions directly affect the remaining work and are not settled yet.
     pipeline/state/resource payloads Skia bakes into `DrawPass`
   - To match Skia more closely: attach bind-group compatible draw state and batch-compatible replay
     metadata to prepared steps
-  - Validation: pending
+  - Validation: non-stencil prepared steps now batch into a single render pass during replay; richer
+    prepared state is still pending
 - `src/caps.ts`
   - Status: `started`
   - Difference from Skia: format/sample/storage policy is still mostly static, while Skia DawnCaps

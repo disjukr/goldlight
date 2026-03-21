@@ -43,20 +43,20 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Status: `started`
   - Thin buffer/texture/sampler allocation layer exists.
 - Recording
-  - Status: `started`
-  - Abstract commands, recorder state, and immutable recordings exist.
+  - Status: `partial`
+  - Abstract commands, clip-stack state, and immutable recordings exist.
 - Capability probing
   - Status: `started`
   - Initial caps and limits layer exists.
 - GPU encoding
-  - Status: `started`
-  - Clear, stencil-backed fill, clip-stencil replay, and first stroke command buffer translation exist.
+  - Status: `partial`
+  - Clear, direct fill/stroke replay, clip-stencil replay for complex clip paths, and first stroke command buffer translation exist.
 - Queue submission
   - Status: `started`
   - Queue manager can submit encoded command buffers and track in-flight work counts.
 - Path rendering
-  - Status: `started`
-  - Flattened contours can be pushed through stencil-and-cover fill, self-intersection fallback, and first stroke expansion exists.
+  - Status: `partial`
+  - Flattened contours can be pushed through direct tessellated fills, convex clip-stack clipping, self-intersection fallback, and first stroke expansion.
 - Paint system
   - Status: `started`
   - Minimal fill/stroke paint exists and first execution path is active.
@@ -84,19 +84,19 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Missing: submit pipeline and global backend orchestration
 - `Recorder` -> `src/recorder.ts`
   - Status: `started`
-  - What exists: abstract command collection plus save/restore, per-draw transform, clip-rect, and clip-path state
+  - What exists: abstract command collection plus save/restore, per-draw transform, and clip-stack state
   - Missing: ordering rules and flush rules
 - `DawnCaps` -> `src/caps.ts`
   - Status: `started`
   - What exists: initial feature, format, and limit policy
   - Missing: richer probing and backend-specific fallbacks
 - `DawnCommandBuffer` -> `src/command_buffer.ts`
-  - Status: `started`
-  - What exists: clear plus fill/stroke/clip replay over prepared draw steps
+  - Status: `partial`
+  - What exists: clear plus direct fill/stroke replay, convex-clip scissor replay, and stencil replay for complex clip paths
   - Missing: broader draw path and draw shape encoding, richer pass replay
 - `DrawPass` -> `src/draw_pass.ts`
-  - Status: `started`
-  - What exists: prepared pass partitioning plus pipeline-key, bounds, stencil, and clip metadata for draw steps
+  - Status: `partial`
+  - What exists: prepared pass partitioning plus pipeline-key, bounds, stencil, and clip-stack metadata for draw steps
   - Missing: pipeline/state/resource preparation comparable to Skia DrawPass
 - `DawnQueueManager` -> `src/queue_manager.ts`
   - Status: `started`
@@ -125,8 +125,8 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Status: `started`
   - Role: low-level resource creation
 - `src/recorder.ts`
-  - Status: `started`
-  - Role: command recording API and canvas-like state stack
+  - Status: `partial`
+  - Role: command recording API with transform and clip-stack state
 - `src/geometry.ts`
   - Status: `started`
   - Role: bridge from drawing to geometry
@@ -149,8 +149,8 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Status: `started`
   - Role: immutable recorded command package
 - `src/path_renderer.ts`
-  - Status: `started`
-  - Role: adaptive curve flattening, triangulation, scanline fallback, clip preparation, and stroke expansion strategy
+  - Status: `partial`
+  - Role: adaptive curve flattening, triangulation, scanline fallback, convex clip-stack clipping, clip preparation, and stroke expansion strategy
 - `tests/`
   - Status: `started`
   - Role: package-local tests for drawing, including snapshot regression
@@ -214,15 +214,15 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
   - Missing: broader primitive specialization
 - Clip path
   - Status: `started`
-  - Current state: clip rect maps to scissor, and clip path can allocate a stencil clip pass for supported shapes
-  - Missing: nested clip stack behavior and more complete clip-path coverage
+  - Current state: clip stack is recorded explicitly, rect clips and convex path clips are intersected through prepared geometry, and a complex single clip path can still allocate a stencil clip pass
+  - Missing: full nested arbitrary clip-path coverage and Skia-like clip stack semantics
 - Transform stack
   - Status: `started`
   - Current state: recorder save/restore and per-draw transform state exist without mutating stored source geometry
   - Missing: uniform-driven transform replay
 - Save/restore
   - Status: `started`
-  - Current state: recorder state stack exists for transform and clip rect
+  - Current state: recorder state stack exists for transform and clip stack
   - Missing: broader paint and clip state capture
 - Paint blending
   - Status: `pending`
@@ -311,7 +311,7 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
   - Missing: shader lifecycle
 - Pipelines
   - Status: `started`
-  - Current state: fill stencil, clip stencil, fill cover, clip-aware cover, and stroke cover pipelines are cached in the resource provider
+  - Current state: direct fill, clip stencil, clip-aware cover, and stroke cover pipelines are cached in the resource provider
   - Missing: generalized render pipeline creation and keying
 - Global cache
   - Status: `started`
@@ -336,22 +336,22 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
   - Shape to path conversion exists
 - Fill/stroke expansion
   - Status: `started`
-  - Flattened contours can be emitted for stencil fill passes, and first join/cap-aware stroke geometry is emitted
+  - Flattened contours can be emitted for direct fill meshes, convex clip-stack clipping, and first join/cap-aware stroke geometry
 - Path tessellation
   - Status: `started`
-  - Adaptive CPU contour flattening exists for line, quadratic, and cubic path segments
+  - Adaptive CPU contour flattening exists for line, quadratic, and cubic path segments, with scanline fallback for more complex fill input
 - Vertex/index generation
   - Status: `started`
-  - Vertex generation exists for contour stencil fills, direct clip-aware fills, cover draws, and expanded strokes
+  - Vertex generation exists for direct fills, clip-aware fills, complex clip replay, and expanded strokes
 - GPU upload
   - Status: `started`
   - Simple per-draw vertex buffer upload exists for stencil and cover passes
 - Render pass setup
   - Status: `started`
-  - Recording can be partitioned into prepared draw passes, and draw replay now covers clip stencil plus fill/stroke passes
+  - Recording can be partitioned into prepared draw passes, and draw replay now covers direct fill/stroke plus clip stencil when needed
 - Pipeline binding
   - Status: `started`
-  - Basic stencil, clip, and cover pipelines exist for first path draws and are reused across command buffers
+  - Basic fill, clip, and stroke pipelines exist for first path draws and are reused across command buffers
 - Draw submission
   - Status: `started`
   - Command buffer submission helper exists for encoded clears and first fill draws
@@ -365,13 +365,13 @@ These decisions directly affect the remaining work and are not settled yet.
 
 - First fill strategy
   - Status: `started`
-  - First implementation combines stencil-and-cover with scanline fallback for problematic contours
+  - First implementation triangulates simple contours directly and falls back to scanline tessellation for problematic contours
 - First stroke strategy
   - Status: `started`
   - First implementation now includes miter/bevel/round joins and butt/square/round caps
 - Clip implementation
   - Status: `started`
-  - First implementation uses scissor from clip rect and stencil masking for supported clip paths
+  - First implementation uses recorded clip stacks, convex geometry clipping, scissor reduction, and stencil masking for a remaining complex clip path
 - Atlas/text approach
   - Status: `pending`
   - Deferred until shapes are rendering
@@ -407,7 +407,7 @@ These decisions directly affect the remaining work and are not settled yet.
   Skia-like pipeline/state/resource data
 - no Skia-like draw-list or draw-pass preparation layer yet
 - arcs and advanced curve/path features are still missing
-- evenodd/nonzero now go through stencil, and self-intersecting input has a scanline fallback, but coverage is still not Skia-grade
+- evenodd/nonzero fills now rely on prepared geometry plus scanline fallback rather than Skia-style path renderers, and coverage is still not Skia-grade
 - no SVG parser or SVG-to-`Path2D` ingestion path yet
 - no retained scene model
 - no bind group cache

@@ -46,6 +46,7 @@ const createMockGpuContext = () => {
   const renderPipelines: GPURenderPipelineDescriptor[] = [];
   const drawCalls: number[] = [];
   const scissorCalls: Array<readonly [number, number, number, number]> = [];
+  const stencilReferences: number[] = [];
   const mappedBuffers: ArrayBuffer[] = [];
   const offscreenView = { label: 'offscreen-view' } as unknown as GPUTextureView;
   const ticks: number[] = [];
@@ -62,6 +63,7 @@ const createMockGpuContext = () => {
       renderPipelines,
       drawCalls,
       scissorCalls,
+      stencilReferences,
       mappedBuffers,
     },
     context: {
@@ -115,6 +117,9 @@ const createMockGpuContext = () => {
                 setVertexBuffer: () => undefined,
                 setScissorRect: (x: number, y: number, width: number, height: number) => {
                   scissorCalls.push([x, y, width, height]);
+                },
+                setStencilReference: (reference: number) => {
+                  stencilReferences.push(reference);
                 },
                 draw: (vertexCount: number) => {
                   drawCalls.push(vertexCount);
@@ -241,9 +246,14 @@ Deno.test('drawing recorder records transform and clip state into draw commands'
     throw new Error('expected draw path commands');
   }
   assertEquals(first.transform, [2, 0, 0, 3, 10, 12]);
-  assertEquals(first.clipRect, createRect(20, 30, 40, 50));
+  assertEquals(first.clips.length, 1);
+  assertEquals(first.clips[0]?.kind, 'rect');
+  if (first.clips[0]?.kind !== 'rect') {
+    throw new Error('expected rect clip');
+  }
+  assertEquals(first.clips[0].rect, createRect(20, 30, 40, 50));
   assertEquals(second.transform, identityMatrix2D);
-  assertEquals(second.clipRect, undefined);
+  assertEquals(second.clips.length, 0);
   assertEquals(first.path.verbs[0], { kind: 'moveTo', to: [1, 1] });
 });
 
@@ -316,11 +326,8 @@ Deno.test('drawing prepared recording groups clear and prepared steps into passe
   assertEquals(prepared.passCount, 2);
   assertEquals(prepared.passes[0]?.loadOp, 'clear');
   assertEquals(prepared.passes[0]?.steps.length, 1);
-  assertEquals(prepared.passes[0]?.steps[0]?.pipelineKeys, [
-    'path-fill-nonzero-stencil',
-    'path-fill-cover',
-  ]);
-  assertEquals(prepared.passes[0]?.steps[0]?.usesStencil, true);
+  assertEquals(prepared.passes[0]?.steps[0]?.pipelineKeys, ['path-fill-cover']);
+  assertEquals(prepared.passes[0]?.steps[0]?.usesStencil, false);
   assertEquals(prepared.passes[1]?.loadOp, 'clear');
   assertEquals(prepared.passes[1]?.steps.length, 0);
   assertEquals(prepared.unsupportedCommands.length, 0);
@@ -384,7 +391,7 @@ Deno.test('drawing prepared recording preserves evenodd fill rule through draw s
     throw new Error('expected pathFill draw');
   }
   assertEquals(draw.fillRule, 'evenodd');
-  assertEquals(step?.pipelineKeys, ['path-fill-evenodd-stencil', 'path-fill-cover']);
+  assertEquals(step?.pipelineKeys, ['path-fill-cover']);
 });
 
 Deno.test('drawing prepared recording derives clip bounds from clip path', () => {
@@ -415,8 +422,41 @@ Deno.test('drawing prepared recording derives clip bounds from clip path', () =>
   );
 
   const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
-  assertEquals(prepared.passes[0]?.steps[0]?.clipBounds, createRect(32, 40, 64, 48));
-  assertEquals(prepared.passes[0]?.steps[0]?.pipelineKeys, ['clip-stencil-write', 'path-fill-clip-cover']);
+  assertEquals(prepared.passes[0]?.steps[0]?.clipRect, createRect(32, 40, 64, 48));
+  assertEquals(prepared.passes[0]?.steps[0]?.pipelineKeys, ['path-fill-cover']);
+});
+
+Deno.test('drawing prepared recording accumulates clip stack intersections', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  clipDrawingRecorderRect(recorder, createRect(16, 16, 80, 80));
+  clipDrawingRecorderRect(recorder, createRect(32, 24, 48, 72));
+  clipDrawingRecorderPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [24, 32] },
+      { kind: 'lineTo', to: [88, 32] },
+      { kind: 'lineTo', to: [88, 72] },
+      { kind: 'lineTo', to: [24, 72] },
+      { kind: 'close' },
+    ),
+  );
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [0, 0] },
+      { kind: 'lineTo', to: [120, 0] },
+      { kind: 'lineTo', to: [120, 120] },
+      { kind: 'lineTo', to: [0, 120] },
+      { kind: 'close' },
+    ),
+    { style: 'fill' },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  assertEquals(prepared.passes[0]?.steps[0]?.clipRect, createRect(32, 32, 48, 40));
 });
 
 Deno.test('drawing prepared recording falls back for self-intersecting fill paths', () => {
@@ -510,9 +550,9 @@ Deno.test('dawn command buffer encodes fill draws with stencil and cover pipelin
   assertEquals(commandBuffer.passCount, 1);
   assertEquals(commandBuffer.unsupportedCommands.length, 0);
   assertEquals(mock.created.renderPasses.length, 1);
-  assertEquals(mock.created.renderPipelines.length, 2);
-  assertEquals(mock.created.drawCalls.length, 2);
-  assertExists(mock.created.renderPasses[0]?.depthStencilAttachment);
+  assertEquals(mock.created.renderPipelines.length, 1);
+  assertEquals(mock.created.drawCalls.length, 1);
+  assertEquals(mock.created.renderPasses[0]?.depthStencilAttachment, undefined);
   assertEquals(mock.created.scissorCalls[0], [4, 6, 40, 50]);
   assertEquals(
     mock.created.renderPasses[0]?.colorAttachments[0]?.clearValue,
@@ -550,7 +590,7 @@ Deno.test('dawn command buffer clips via clip path bounds fallback', () => {
 
   encodeDawnCommandBuffer(sharedContext, finishDrawingRecorder(recorder), binding);
   assertEquals(mock.created.scissorCalls[0], [24, 30, 48, 48]);
-  assertEquals(mock.created.drawCalls.length, 2);
+  assertEquals(mock.created.drawCalls.length, 1);
 });
 
 Deno.test('dawn command buffer encodes stroke draws without stencil', () => {
@@ -605,8 +645,8 @@ Deno.test('dawn resource provider reuses pipelines across command buffers', () =
   encodeDawnCommandBuffer(sharedContext, createRecording('stroke'), binding);
   encodeDawnCommandBuffer(sharedContext, createRecording('stroke'), binding);
 
-  assertEquals(mock.created.renderPipelines.length, 3);
-  assertEquals(mock.created.shaderModules.length, 3);
+  assertEquals(mock.created.renderPipelines.length, 2);
+  assertEquals(mock.created.shaderModules.length, 2);
 });
 
 Deno.test('dawn pipelines honor target sample count for MSAA', () => {

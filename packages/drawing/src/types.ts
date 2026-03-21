@@ -6,6 +6,18 @@ export type DrawingPath2D = Path2D;
 export type DrawingShapeDescriptor = Shape2D;
 export type DrawingMatrix2D = Matrix2D;
 export type DrawingClipRect = Rect;
+export type DrawingClip = Readonly<
+  | {
+    kind: 'rect';
+    rect: DrawingClipRect;
+    transform: DrawingMatrix2D;
+  }
+  | {
+    kind: 'path';
+    path: DrawingPath2D;
+    transform: DrawingMatrix2D;
+  }
+>;
 
 export type DrawingBackendKind = 'graphite-dawn';
 
@@ -28,8 +40,7 @@ export type DrawPathCommand = Readonly<{
   path: DrawingPath2D;
   paint: DrawingPaint;
   transform: DrawingMatrix2D;
-  clipRect?: DrawingClipRect;
-  clipPath?: DrawingPath2D;
+  clips: readonly DrawingClip[];
 }>;
 
 export type DrawShapeCommand = Readonly<{
@@ -38,8 +49,7 @@ export type DrawShapeCommand = Readonly<{
   path: DrawingPath2D;
   paint: DrawingPaint;
   transform: DrawingMatrix2D;
-  clipRect?: DrawingClipRect;
-  clipPath?: DrawingPath2D;
+  clips: readonly DrawingClip[];
 }>;
 
 export type DrawingCommand = ClearCommand | DrawPathCommand | DrawShapeCommand;

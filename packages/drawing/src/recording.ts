@@ -29,13 +29,21 @@ const cloneCommand = (command: DrawingCommand): DrawingCommand => {
         path: clonePath(command.path)!,
         paint: { ...command.paint },
         transform: [...command.transform] as typeof command.transform,
-        clipRect: command.clipRect
-          ? {
-            origin: [...command.clipRect.origin] as typeof command.clipRect.origin,
-            size: { ...command.clipRect.size },
-          }
-          : undefined,
-        clipPath: clonePath(command.clipPath),
+        clips: command.clips.map((clip) =>
+          clip.kind === 'rect'
+            ? {
+              kind: 'rect',
+              rect: {
+                origin: [...clip.rect.origin] as typeof clip.rect.origin,
+                size: { ...clip.rect.size },
+              },
+              transform: [...clip.transform] as typeof clip.transform,
+            }
+            : {
+              kind: 'path',
+              path: clonePath(clip.path)!,
+              transform: [...clip.transform] as typeof clip.transform,
+            }),
       };
     case 'drawShape':
       return {
@@ -44,13 +52,21 @@ const cloneCommand = (command: DrawingCommand): DrawingCommand => {
         path: clonePath(command.path)!,
         paint: { ...command.paint },
         transform: [...command.transform] as typeof command.transform,
-        clipRect: command.clipRect
-          ? {
-            origin: [...command.clipRect.origin] as typeof command.clipRect.origin,
-            size: { ...command.clipRect.size },
-          }
-          : undefined,
-        clipPath: clonePath(command.clipPath),
+        clips: command.clips.map((clip) =>
+          clip.kind === 'rect'
+            ? {
+              kind: 'rect',
+              rect: {
+                origin: [...clip.rect.origin] as typeof clip.rect.origin,
+                size: { ...clip.rect.size },
+              },
+              transform: [...clip.transform] as typeof clip.transform,
+            }
+            : {
+              kind: 'path',
+              path: clonePath(clip.path)!,
+              transform: [...clip.transform] as typeof clip.transform,
+            }),
       };
   }
 };

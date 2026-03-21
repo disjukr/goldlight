@@ -1,5 +1,6 @@
 import { transformPoint2D, type PathFillRule2D, type Path2D, type Point2D, type Rect } from '@rieul3d/geometry';
 import type {
+  DrawingClip,
   DrawingClipRect,
   DrawingPaint,
   DrawingPath2D,
@@ -13,7 +14,6 @@ type FlattenedSubpath = Readonly<{
 }>;
 
 export type DrawingPreparedClip = Readonly<{
-  path?: DrawingPath2D;
   bounds?: Rect;
   triangles?: readonly Point2D[];
 }>;
@@ -26,7 +26,7 @@ export type DrawingPreparedPathFill = Readonly<{
   bounds: Rect;
   clipRect?: DrawingClipRect;
   clip?: DrawingPreparedClip;
-  usesStencil: true;
+  usesStencil: boolean;
 }>;
 
 export type DrawingPreparedPathStroke = Readonly<{
@@ -36,7 +36,7 @@ export type DrawingPreparedPathStroke = Readonly<{
   bounds: Rect;
   clipRect?: DrawingClipRect;
   clip?: DrawingPreparedClip;
-  usesStencil: false;
+  usesStencil: boolean;
 }>;
 
 export type DrawingPreparedDraw = DrawingPreparedPathFill | DrawingPreparedPathStroke;
@@ -132,6 +132,21 @@ const unionBounds = (bounds: readonly Rect[]): Rect => {
   ]));
 };
 
+const intersectBounds = (left: Rect | undefined, right: Rect): Rect | undefined => {
+  if (!left) return right;
+  const x0 = Math.max(left.origin[0], right.origin[0]);
+  const y0 = Math.max(left.origin[1], right.origin[1]);
+  const x1 = Math.min(left.origin[0] + left.size.width, right.origin[0] + right.size.width);
+  const y1 = Math.min(left.origin[1] + left.size.height, right.origin[1] + right.size.height);
+  return {
+    origin: [x0, y0],
+    size: {
+      width: Math.max(0, x1 - x0),
+      height: Math.max(0, y1 - y0),
+    },
+  };
+};
+
 const orientation = (a: Point2D, b: Point2D, c: Point2D): number => {
   const value = ((b[1] - a[1]) * (c[0] - b[0])) - ((b[0] - a[0]) * (c[1] - b[1]));
   if (Math.abs(value) <= epsilon) return 0;
@@ -189,6 +204,22 @@ const isSelfIntersecting = (points: readonly Point2D[]): boolean => {
   return false;
 };
 
+const isConvexPolygon = (points: readonly Point2D[]): boolean => {
+  if (points.length < 3 || isSelfIntersecting(points)) return false;
+  let sign = 0;
+  for (let index = 0; index < points.length; index += 1) {
+    const a = points[index]!;
+    const b = points[(index + 1) % points.length]!;
+    const c = points[(index + 2) % points.length]!;
+    const turn = cross(a, b, c);
+    if (Math.abs(turn) <= epsilon) continue;
+    const nextSign = turn > 0 ? 1 : -1;
+    if (sign !== 0 && nextSign !== sign) return false;
+    sign = nextSign;
+  }
+  return sign !== 0;
+};
+
 const isPointInTriangle = (point: Point2D, a: Point2D, b: Point2D, c: Point2D): boolean => {
   const area0 = cross(point, a, b);
   const area1 = cross(point, b, c);
@@ -239,6 +270,85 @@ const triangulatePolygon = (points: readonly Point2D[]): readonly Point2D[] | nu
     triangles.push(...(winding > 0 ? [a, b, c] : [a, c, b]));
   }
   return Object.freeze(triangles);
+};
+
+const lineSegmentIntersection = (
+  start: Point2D,
+  end: Point2D,
+  clipStart: Point2D,
+  clipEnd: Point2D,
+): Point2D => {
+  const direction = subtract(end, start);
+  const clipDirection = subtract(clipEnd, clipStart);
+  const denominator = (direction[0] * clipDirection[1]) - (direction[1] * clipDirection[0]);
+  if (Math.abs(denominator) <= epsilon) {
+    return end;
+  }
+  const delta = subtract(clipStart, start);
+  const t = ((delta[0] * clipDirection[1]) - (delta[1] * clipDirection[0])) / denominator;
+  return add(start, scale(direction, t));
+};
+
+const ensureCounterClockwise = (points: readonly Point2D[]): readonly Point2D[] =>
+  polygonArea(points) >= 0 ? points : Object.freeze([...points].reverse());
+
+const clipPolygonAgainstEdge = (
+  polygon: readonly Point2D[],
+  clipStart: Point2D,
+  clipEnd: Point2D,
+): readonly Point2D[] => {
+  if (polygon.length === 0) return polygon;
+  const output: Point2D[] = [];
+  const isInside = (point: Point2D): boolean => cross(clipStart, clipEnd, point) >= -epsilon;
+
+  let previous = polygon[polygon.length - 1]!;
+  let previousInside = isInside(previous);
+  for (const current of polygon) {
+    const currentInside = isInside(current);
+    if (currentInside) {
+      if (!previousInside) {
+        output.push(lineSegmentIntersection(previous, current, clipStart, clipEnd));
+      }
+      output.push(current);
+    } else if (previousInside) {
+      output.push(lineSegmentIntersection(previous, current, clipStart, clipEnd));
+    }
+    previous = current;
+    previousInside = currentInside;
+  }
+
+  return Object.freeze(output);
+};
+
+const clipTrianglesAgainstConvexPolygon = (
+  triangles: readonly Point2D[],
+  clipPolygon: readonly Point2D[],
+): readonly Point2D[] => {
+  const clip = ensureCounterClockwise(clipPolygon);
+  const clipped: Point2D[] = [];
+
+  for (let index = 0; index + 2 < triangles.length; index += 3) {
+    let polygon: readonly Point2D[] = [
+      triangles[index]!,
+      triangles[index + 1]!,
+      triangles[index + 2]!,
+    ];
+    for (let clipIndex = 0; clipIndex < clip.length; clipIndex += 1) {
+      polygon = clipPolygonAgainstEdge(
+        polygon,
+        clip[clipIndex]!,
+        clip[(clipIndex + 1) % clip.length]!,
+      );
+      if (polygon.length === 0) break;
+    }
+    if (polygon.length >= 3) {
+      for (let polygonIndex = 1; polygonIndex + 1 < polygon.length; polygonIndex += 1) {
+        clipped.push(polygon[0]!, polygon[polygonIndex]!, polygon[polygonIndex + 1]!);
+      }
+    }
+  }
+
+  return Object.freeze(clipped);
 };
 
 type ScanEdge = Readonly<{
@@ -486,6 +596,17 @@ const prepareFillTriangles = (
   subpaths: readonly FlattenedSubpath[],
   fillRule: PathFillRule2D,
 ): readonly Point2D[] | null => {
+  const canTriangulateDirectly = subpaths.length === 1 &&
+    subpaths[0]!.closed &&
+    !isSelfIntersecting(subpaths[0]!.points);
+
+  if (!canTriangulateDirectly) {
+    const scanlineTriangles = scanlineTessellate(subpaths, fillRule);
+    if (scanlineTriangles && scanlineTriangles.length > 0) {
+      return scanlineTriangles;
+    }
+  }
+
   const triangles: Point2D[] = [];
   for (const subpath of subpaths) {
     if (!subpath.closed || subpath.points.length < 3) return null;
@@ -704,12 +825,98 @@ const prepareStrokeTriangles = (
 const prepareClip = (clipPath: Path2D | undefined): DrawingPreparedClip | undefined => {
   if (!clipPath) return undefined;
   const subpaths = flattenSubpaths(clipPath, [1, 0, 0, 1, 0, 0]);
-  if (!subpaths || subpaths.length === 0) return { path: clipPath };
+  if (!subpaths || subpaths.length === 0) return undefined;
   return {
-    path: clipPath,
     bounds: unionBounds(subpaths.map((subpath) => computeBounds(subpath.points))),
     triangles: prepareFillTriangles(subpaths, clipPath.fillRule) ?? undefined,
   };
+};
+
+type PreparedClipStack = Readonly<{
+  bounds?: Rect;
+  convexPolygons: readonly (readonly Point2D[])[];
+  stencilClip?: DrawingPreparedClip;
+}>;
+
+const createRectClipPolygon = (
+  clipRect: DrawingClipRect,
+  transform: readonly [number, number, number, number, number, number],
+): readonly Point2D[] => {
+  const x0 = clipRect.origin[0];
+  const y0 = clipRect.origin[1];
+  const x1 = x0 + clipRect.size.width;
+  const y1 = y0 + clipRect.size.height;
+  return Object.freeze([
+    transformPoint2D([x0, y0], transform),
+    transformPoint2D([x1, y0], transform),
+    transformPoint2D([x1, y1], transform),
+    transformPoint2D([x0, y1], transform),
+  ]);
+};
+
+const prepareClipStack = (clips: readonly DrawingClip[]): PreparedClipStack | undefined => {
+  if (clips.length === 0) return undefined;
+
+  const convexPolygons: Point2D[][] = [];
+  let bounds: Rect | undefined;
+  let stencilClip: DrawingPreparedClip | undefined;
+
+  for (const clip of clips) {
+    if (clip.kind === 'rect') {
+      const polygon = createRectClipPolygon(clip.rect, clip.transform);
+      convexPolygons.push([...polygon]);
+      bounds = intersectBounds(bounds, computeBounds(polygon));
+      continue;
+    }
+
+    const subpaths = flattenSubpaths(clip.path, clip.transform);
+    if (!subpaths || subpaths.length === 0) {
+      continue;
+    }
+
+    const clipBounds = unionBounds(subpaths.map((subpath) => computeBounds(subpath.points)));
+    bounds = intersectBounds(bounds, clipBounds);
+
+    if (
+      subpaths.length === 1 &&
+      subpaths[0]!.closed &&
+      isConvexPolygon(subpaths[0]!.points)
+    ) {
+      convexPolygons.push([...subpaths[0]!.points]);
+      continue;
+    }
+
+    if (!stencilClip) {
+      stencilClip = {
+        bounds: clipBounds,
+        triangles: prepareFillTriangles(subpaths, clip.path.fillRule) ?? undefined,
+      };
+    }
+  }
+
+  return {
+    bounds,
+    convexPolygons: Object.freeze(convexPolygons.map((polygon) => Object.freeze(polygon))),
+    stencilClip,
+  };
+};
+
+const applyConvexClipStack = (
+  triangles: readonly Point2D[],
+  clipStack: PreparedClipStack | undefined,
+): readonly Point2D[] => {
+  if (!clipStack || clipStack.convexPolygons.length === 0) {
+    return triangles;
+  }
+
+  let clipped = triangles;
+  for (const polygon of clipStack.convexPolygons) {
+    clipped = clipTrianglesAgainstConvexPolygon(clipped, polygon);
+    if (clipped.length === 0) {
+      break;
+    }
+  }
+  return clipped;
 };
 
 const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDrawPreparation => {
@@ -718,10 +925,13 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
     return { supported: false, reason: 'path does not resolve to subpaths' };
   }
 
-  const clip = prepareClip(command.clipPath);
+  const preparedClipStack = prepareClipStack(command.clips);
   const style = command.paint.style ?? 'fill';
   if (style === 'fill') {
-    const triangles = prepareFillTriangles(subpaths, command.path.fillRule);
+    const triangles = applyConvexClipStack(
+      prepareFillTriangles(subpaths, command.path.fillRule) ?? [],
+      preparedClipStack,
+    );
     if (!triangles) {
       return { supported: false, reason: 'path fill triangulation failed' };
     }
@@ -733,14 +943,17 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
         fillRule: command.path.fillRule,
         color: resolveFillColor(command.paint),
         bounds: unionBounds(subpaths.map((subpath) => computeBounds(subpath.points))),
-        clipRect: command.clipRect,
-        clip,
-        usesStencil: true,
+        clipRect: preparedClipStack?.bounds,
+        clip: preparedClipStack?.stencilClip,
+        usesStencil: Boolean(preparedClipStack?.stencilClip?.triangles),
       },
     };
   }
 
-  const strokeTriangles = prepareStrokeTriangles(subpaths, command.paint);
+  const strokeTriangles = applyConvexClipStack(
+    prepareStrokeTriangles(subpaths, command.paint) ?? [],
+    preparedClipStack,
+  );
   if (!strokeTriangles) {
     return { supported: false, reason: 'path stroke expansion failed' };
   }
@@ -751,9 +964,9 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
       triangles: strokeTriangles,
       color: resolveFillColor(command.paint),
       bounds: computeBounds(strokeTriangles),
-      clipRect: command.clipRect,
-      clip,
-      usesStencil: false,
+      clipRect: preparedClipStack?.bounds,
+      clip: preparedClipStack?.stencilClip,
+      usesStencil: Boolean(preparedClipStack?.stencilClip?.triangles),
     },
   };
 };

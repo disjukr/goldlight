@@ -1,4 +1,3 @@
-import type { PathFillRule2D } from '@rieul3d/geometry';
 import type { DawnBackendContext } from './dawn_backend_context.ts';
 import type { DrawingPipelineKey } from './draw_pass.ts';
 
@@ -90,7 +89,6 @@ export const createDawnResourceProvider = (
     resourceBudget?: number;
   }> = {},
 ): DawnResourceProvider => {
-  const pathStencilPipelines = new Map<PathFillRule2D, GPURenderPipeline>();
   let clipStencilWritePipeline: GPURenderPipeline | null = null;
   let pathFillCoverPipeline: GPURenderPipeline | null = null;
   let pathFillClipCoverPipeline: GPURenderPipeline | null = null;
@@ -124,47 +122,6 @@ export const createDawnResourceProvider = (
 
   const sampleCount = backend.target.kind === 'offscreen' ? backend.target.sampleCount : 1;
 
-  const createPathStencilPipeline = (fillRule: PathFillRule2D): GPURenderPipeline => {
-    const shaderModule = createPathShaderModule(backend);
-    const stencilFace = fillRule === 'evenodd' ? createStencilFaceState('invert') : undefined;
-
-    return backend.device.createRenderPipeline({
-      label: `drawing-path-stencil-${fillRule}`,
-      layout: 'auto',
-      vertex: {
-        module: shaderModule,
-        entryPoint: 'vs_main',
-        buffers: [createVertexLayout()],
-      },
-      fragment: {
-        module: shaderModule,
-        entryPoint: 'fs_main',
-        targets: [
-          {
-            format: backend.target.format,
-            writeMask: noColorWrites,
-          },
-        ],
-      },
-      primitive: {
-        topology: 'triangle-list',
-        cullMode: 'none',
-      },
-      multisample: {
-        count: sampleCount,
-      },
-      depthStencil: {
-        format: stencilFormat,
-        depthWriteEnabled: false,
-        depthCompare: 'always',
-        stencilReadMask: 0xff,
-        stencilWriteMask: 0xff,
-        stencilFront: stencilFace ?? createStencilFaceState('increment-wrap'),
-        stencilBack: stencilFace ?? createStencilFaceState('decrement-wrap'),
-      },
-    });
-  };
-
   const createPathFillCoverPipeline = (): GPURenderPipeline => {
     const shaderModule = createPathShaderModule(backend);
 
@@ -191,15 +148,6 @@ export const createDawnResourceProvider = (
       },
       multisample: {
         count: sampleCount,
-      },
-      depthStencil: {
-        format: stencilFormat,
-        depthWriteEnabled: false,
-        depthCompare: 'always',
-        stencilReadMask: 0xff,
-        stencilWriteMask: 0x00,
-        stencilFront: createStencilFaceState('keep', 'not-equal'),
-        stencilBack: createStencilFaceState('keep', 'not-equal'),
       },
     });
   };
@@ -325,24 +273,6 @@ export const createDawnResourceProvider = (
           }
           clipStencilWritePipeline = createClipStencilWritePipeline();
           return clipStencilWritePipeline;
-        case 'path-fill-nonzero-stencil': {
-          const cached = pathStencilPipelines.get('nonzero');
-          if (cached) {
-            return cached;
-          }
-          const pipeline = createPathStencilPipeline('nonzero');
-          pathStencilPipelines.set('nonzero', pipeline);
-          return pipeline;
-        }
-        case 'path-fill-evenodd-stencil': {
-          const cached = pathStencilPipelines.get('evenodd');
-          if (cached) {
-            return cached;
-          }
-          const pipeline = createPathStencilPipeline('evenodd');
-          pathStencilPipelines.set('evenodd', pipeline);
-          return pipeline;
-        }
         case 'path-fill-cover':
           if (pathFillCoverPipeline) {
             return pathFillCoverPipeline;

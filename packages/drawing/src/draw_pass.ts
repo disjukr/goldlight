@@ -12,8 +12,6 @@ export type DrawingDrawCommand = DrawPathCommand | DrawShapeCommand;
 
 export type DrawingPipelineKey =
   | 'clip-stencil-write'
-  | 'path-fill-nonzero-stencil'
-  | 'path-fill-evenodd-stencil'
   | 'path-fill-cover'
   | 'path-fill-clip-cover'
   | 'path-stroke-cover'
@@ -56,9 +54,7 @@ const getPipelineKeysForDraw = (draw: DrawingPreparedDraw): readonly DrawingPipe
       if (draw.clip?.triangles) {
         return ['clip-stencil-write', 'path-fill-clip-cover'];
       }
-      return draw.fillRule === 'evenodd'
-        ? ['path-fill-evenodd-stencil', 'path-fill-cover']
-        : ['path-fill-nonzero-stencil', 'path-fill-cover'];
+      return ['path-fill-cover'];
     case 'pathStroke':
       return draw.clip?.triangles
         ? ['clip-stencil-write', 'path-stroke-clip-cover']

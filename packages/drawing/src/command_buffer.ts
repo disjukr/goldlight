@@ -68,17 +68,6 @@ const createVertexBuffer = (
   return buffer;
 };
 
-const createCoverVertices = (
-  color: readonly [number, number, number, number],
-): Float32Array => new Float32Array([
-  -1, -1, color[0], color[1], color[2], color[3],
-  1, -1, color[0], color[1], color[2], color[3],
-  1, 1, color[0], color[1], color[2], color[3],
-  -1, -1, color[0], color[1], color[2], color[3],
-  1, 1, color[0], color[1], color[2], color[3],
-  -1, 1, color[0], color[1], color[2], color[3],
-]);
-
 const applyClipRect = (
   pass: GPURenderPassEncoder,
   step: DrawingPreparedRecording['passes'][number]['steps'][number],
@@ -190,15 +179,17 @@ export const encodeDawnCommandBuffer = (
                 storeOp: 'store',
               },
             ],
-            depthStencilAttachment: {
-              view: stencilView,
-              depthClearValue: 1,
-              depthLoadOp: 'clear',
-              depthStoreOp: 'discard',
-              stencilClearValue: 0,
-              stencilLoadOp: 'clear',
-              stencilStoreOp: 'discard',
-            },
+            depthStencilAttachment: step.draw.clip?.triangles
+              ? {
+                view: stencilView,
+                depthClearValue: 1,
+                depthLoadOp: 'clear',
+                depthStoreOp: 'discard',
+                stencilClearValue: 0,
+                stencilLoadOp: 'clear',
+                stencilStoreOp: 'discard',
+              }
+              : undefined,
           });
           applyStepClip(pass, step, sharedContext.backend.target);
           if (step.draw.clip?.triangles) {
@@ -210,23 +201,19 @@ export const encodeDawnCommandBuffer = (
             );
             const clipVertexBuffer = createVertexBuffer(sharedContext, clipVertices);
             const colorPipeline = sharedContext.resourceProvider.getPipeline(step.pipelineKeys[1]!);
+            pass.setStencilReference?.(1);
             pass.setPipeline(clipPipeline);
             pass.setVertexBuffer(0, clipVertexBuffer);
             pass.draw(clipVertices.length / floatsPerVertex);
+            pass.setStencilReference?.(1);
             pass.setPipeline(colorPipeline);
             pass.setVertexBuffer(0, fillVertexBuffer);
             pass.draw(fillVertices.length / floatsPerVertex);
           } else {
-            const stencilPipeline = sharedContext.resourceProvider.getPipeline(step.pipelineKeys[0]!);
-            const coverPipeline = sharedContext.resourceProvider.getPipeline(step.pipelineKeys[1]!);
-            const coverVertices = createCoverVertices(step.draw.color);
-            const coverVertexBuffer = createVertexBuffer(sharedContext, coverVertices);
-            pass.setPipeline(stencilPipeline);
+            const fillPipeline = sharedContext.resourceProvider.getPipeline(step.pipelineKeys[0]!);
+            pass.setPipeline(fillPipeline);
             pass.setVertexBuffer(0, fillVertexBuffer);
             pass.draw(fillVertices.length / floatsPerVertex);
-            pass.setPipeline(coverPipeline);
-            pass.setVertexBuffer(0, coverVertexBuffer);
-            pass.draw(coverVertices.length / floatsPerVertex);
           }
           pass.end();
           passCount += 1;
@@ -271,9 +258,11 @@ export const encodeDawnCommandBuffer = (
               sharedContext.backend.target,
             );
             const clipVertexBuffer = createVertexBuffer(sharedContext, clipVertices);
+            pass.setStencilReference?.(1);
             pass.setPipeline(clipPipeline);
             pass.setVertexBuffer(0, clipVertexBuffer);
             pass.draw(clipVertices.length / floatsPerVertex);
+            pass.setStencilReference?.(1);
             pass.setPipeline(sharedContext.resourceProvider.getPipeline(step.pipelineKeys[1]!));
           } else {
             pass.setPipeline(sharedContext.resourceProvider.getPipeline(step.pipelineKeys[0]!));

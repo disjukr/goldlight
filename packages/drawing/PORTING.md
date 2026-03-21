@@ -53,9 +53,8 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Status: `partial`
   - Clear, direct fill replay, patch-instance fill/stroke replay, clip-stencil replay for complex
     intersect clip paths, chained stencil replay for multiple complex intersect clips, convex
-    clip-geometry replay for intersect/difference stacks, first stroke command buffer
-    translation, and Wang-style per-patch resolve levels for curve, wedge, and stroke patch
-    instances exist.
+    clip-geometry replay for intersect/difference stacks, first stroke command buffer translation,
+    and Wang-style per-patch resolve levels for curve, wedge, and stroke patch instances exist.
 - Queue submission
   - Status: `started`
   - Queue manager can submit encoded command buffers, track in-flight work counts, and now keep

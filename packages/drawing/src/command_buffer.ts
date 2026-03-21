@@ -281,23 +281,28 @@ const encodeStencilClipStack = (
   firstPipelineKey:
     DrawingPreparedRecording['passes'][number]['steps'][number]['pipelineKeys'][number],
 ): number => {
+  let emittedClipCount = 0;
   for (let clipIndex = 0; clipIndex < clips.length; clipIndex += 1) {
     const clip = clips[clipIndex]!;
+    if (!clip.triangles.length) {
+      continue;
+    }
     const clipVertices = createClipSpaceVertexData(
       clip.triangles,
       [0, 0, 0, 0],
       sharedContext.backend.target,
     );
     const clipVertexBuffer = createVertexBuffer(sharedContext, clipVertices);
-    pass.setStencilReference?.(clipIndex + 1);
+    emittedClipCount += 1;
+    pass.setStencilReference?.(emittedClipCount);
     pass.setPipeline(sharedContext.resourceProvider.getPipeline(
-      clipIndex === 0 ? firstPipelineKey : 'clip-stencil-intersect',
+      emittedClipCount === 1 ? firstPipelineKey : 'clip-stencil-intersect',
     ));
     pass.setVertexBuffer(0, clipVertexBuffer);
     pass.draw(clipVertices.length / floatsPerVertex);
   }
 
-  return clips.length;
+  return emittedClipCount;
 };
 
 export const encodeDawnCommandBuffer = (

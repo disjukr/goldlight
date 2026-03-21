@@ -16,9 +16,49 @@ import {
   requestDrawingContext,
   restoreDrawingRecorder,
   saveDrawingRecorder,
+  scaleDrawingRecorder,
   submitToDawnQueueManager,
   translateDrawingRecorder,
 } from '@rieul3d/drawing';
+
+const outputSize = 512;
+const supersampleScale = 2;
+
+const downsampleRgba = (
+  bytes: Uint8Array,
+  width: number,
+  height: number,
+  scale: number,
+): Uint8Array => {
+  const nextWidth = Math.floor(width / scale);
+  const nextHeight = Math.floor(height / scale);
+  const downsampled = new Uint8Array(nextWidth * nextHeight * 4);
+
+  for (let y = 0; y < nextHeight; y += 1) {
+    for (let x = 0; x < nextWidth; x += 1) {
+      const sums = [0, 0, 0, 0];
+      for (let sampleY = 0; sampleY < scale; sampleY += 1) {
+        for (let sampleX = 0; sampleX < scale; sampleX += 1) {
+          const sourceX = (x * scale) + sampleX;
+          const sourceY = (y * scale) + sampleY;
+          const sourceOffset = ((sourceY * width) + sourceX) * 4;
+          sums[0] += bytes[sourceOffset];
+          sums[1] += bytes[sourceOffset + 1];
+          sums[2] += bytes[sourceOffset + 2];
+          sums[3] += bytes[sourceOffset + 3];
+        }
+      }
+      const targetOffset = ((y * nextWidth) + x) * 4;
+      const sampleCount = scale * scale;
+      downsampled[targetOffset] = Math.round(sums[0] / sampleCount);
+      downsampled[targetOffset + 1] = Math.round(sums[1] / sampleCount);
+      downsampled[targetOffset + 2] = Math.round(sums[2] / sampleCount);
+      downsampled[targetOffset + 3] = Math.round(sums[3] / sampleCount);
+    }
+  }
+
+  return downsampled;
+};
 
 export const renderBasicPathsSnapshot = async (): Promise<
   Readonly<{
@@ -30,16 +70,18 @@ export const renderBasicPathsSnapshot = async (): Promise<
   const drawingContext = await requestDrawingContext({
     target: {
       kind: 'offscreen',
-      width: 512,
-      height: 512,
+      width: outputSize * supersampleScale,
+      height: outputSize * supersampleScale,
       format: 'rgba8unorm',
-      sampleCount: 1,
+      sampleCount: 4,
     },
   });
 
   const binding = createOffscreenBinding(drawingContext.backend);
   const recorder = drawingContext.createRecorder();
 
+  saveDrawingRecorder(recorder);
+  scaleDrawingRecorder(recorder, supersampleScale, supersampleScale);
   recordClear(recorder, [0.96, 0.95, 0.91, 1]);
   recordDrawPath(recorder, createRectPath2D(createRect(48, 48, 416, 416)), {
     style: 'fill',
@@ -145,9 +187,19 @@ export const renderBasicPathsSnapshot = async (): Promise<
     },
     binding,
   );
+  const downsampled = downsampleRgba(
+    snapshot.bytes,
+    snapshot.width,
+    snapshot.height,
+    supersampleScale,
+  );
 
   return {
-    png: exportPngRgba(snapshot),
+    png: exportPngRgba({
+      width: outputSize,
+      height: outputSize,
+      bytes: downsampled,
+    }),
     passCount: commandBuffer.passCount,
     unsupportedCommandCount: commandBuffer.unsupportedCommands.length,
   };

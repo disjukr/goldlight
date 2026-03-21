@@ -39,6 +39,8 @@ export type OffscreenBinding = Readonly<{
   target: OffscreenTarget;
   texture: GPUTexture;
   view: GPUTextureView;
+  resolveTexture?: GPUTexture;
+  resolveView?: GPUTextureView;
   depthTexture: GPUTexture;
   depthView: GPUTextureView;
 }>;
@@ -221,8 +223,21 @@ export const createOffscreenBinding = (
     },
     format: context.target.format,
     sampleCount: context.target.sampleCount,
-    usage: renderAttachmentUsage | textureBindingUsage | textureCopySrcUsage,
+    usage: renderAttachmentUsage | textureBindingUsage | (context.target.sampleCount === 1 ? textureCopySrcUsage : 0),
   });
+  const resolveTexture = context.target.sampleCount > 1
+    ? context.device.createTexture({
+      label: 'offscreen-resolve',
+      size: {
+        width: context.target.width,
+        height: context.target.height,
+        depthOrArrayLayers: 1,
+      },
+      format: context.target.format,
+      sampleCount: 1,
+      usage: renderAttachmentUsage | textureBindingUsage | textureCopySrcUsage,
+    })
+    : undefined;
   const depthTexture = createDepthTexture(
     context.device,
     context.target.width,
@@ -235,6 +250,8 @@ export const createOffscreenBinding = (
     target: context.target,
     texture,
     view: texture.createView(),
+    resolveTexture,
+    resolveView: resolveTexture?.createView(),
     depthTexture,
     depthView: depthTexture.createView(),
   };
@@ -284,6 +301,10 @@ export const acquireColorAttachmentView = (
 
 export const acquireDepthAttachmentView = (binding: RenderContextBinding): GPUTextureView =>
   binding.depthView;
+
+export const acquireColorResolveView = (
+  binding: RenderContextBinding,
+): GPUTextureView | undefined => binding.kind === 'offscreen' ? binding.resolveView : undefined;
 
 export const resizeSurfaceBindingTarget = (
   binding: SurfaceBinding,
@@ -357,7 +378,7 @@ export const copyOffscreenToReadbackBuffer = (
   });
   encoder.copyTextureToBuffer(
     {
-      texture: binding.texture,
+      texture: binding.resolveTexture ?? binding.texture,
     },
     {
       buffer,

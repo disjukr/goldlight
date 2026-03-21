@@ -1,4 +1,5 @@
 import {
+  acquireColorResolveView,
   acquireColorAttachmentView,
   type RenderContextBinding,
 } from '@rieul3d/gpu';
@@ -145,6 +146,7 @@ export const encodeDawnCommandBuffer = (
     },
     binding,
   );
+  const resolveView = acquireColorResolveView(binding);
   const unsupportedCommands: DrawingCommand[] = [...prepared.unsupportedCommands];
   let passCount = 0;
   const stencilView = sharedContext.resourceProvider.getStencilAttachmentView();
@@ -155,6 +157,7 @@ export const encodeDawnCommandBuffer = (
         colorAttachments: [
           {
             view: colorView,
+            resolveTarget: resolveView,
             clearValue: toGpuColor(passInfo.clearColor),
             loadOp: passInfo.loadOp,
             storeOp: 'store',
@@ -171,20 +174,17 @@ export const encodeDawnCommandBuffer = (
     for (const step of passInfo.steps) {
       switch (step.draw.kind) {
         case 'pathFill': {
-          const stencilPipeline = sharedContext.resourceProvider.getPipeline(step.pipelineKeys[0]!);
-          const coverPipeline = sharedContext.resourceProvider.getPipeline(step.pipelineKeys[1]!);
           const fillVertices = createClipSpaceVertexData(
             step.draw.triangles,
             step.draw.color,
             sharedContext.backend.target,
           );
           const fillVertexBuffer = createVertexBuffer(sharedContext, fillVertices);
-          const coverVertices = createCoverVertices(step.draw.color);
-          const coverVertexBuffer = createVertexBuffer(sharedContext, coverVertices);
           const pass = encoder.beginRenderPass({
             colorAttachments: [
               {
                 view: colorView,
+                resolveTarget: resolveView,
                 clearValue: toGpuColor(passInfo.clearColor),
                 loadOp: colorLoadOp,
                 storeOp: 'store',
@@ -201,19 +201,39 @@ export const encodeDawnCommandBuffer = (
             },
           });
           applyStepClip(pass, step, sharedContext.backend.target);
-          pass.setPipeline(stencilPipeline);
-          pass.setVertexBuffer(0, fillVertexBuffer);
-          pass.draw(fillVertices.length / floatsPerVertex);
-          pass.setPipeline(coverPipeline);
-          pass.setVertexBuffer(0, coverVertexBuffer);
-          pass.draw(coverVertices.length / floatsPerVertex);
+          if (step.draw.clip?.triangles) {
+            const clipPipeline = sharedContext.resourceProvider.getPipeline(step.pipelineKeys[0]!);
+            const clipVertices = createClipSpaceVertexData(
+              step.draw.clip.triangles,
+              [0, 0, 0, 0],
+              sharedContext.backend.target,
+            );
+            const clipVertexBuffer = createVertexBuffer(sharedContext, clipVertices);
+            const colorPipeline = sharedContext.resourceProvider.getPipeline(step.pipelineKeys[1]!);
+            pass.setPipeline(clipPipeline);
+            pass.setVertexBuffer(0, clipVertexBuffer);
+            pass.draw(clipVertices.length / floatsPerVertex);
+            pass.setPipeline(colorPipeline);
+            pass.setVertexBuffer(0, fillVertexBuffer);
+            pass.draw(fillVertices.length / floatsPerVertex);
+          } else {
+            const stencilPipeline = sharedContext.resourceProvider.getPipeline(step.pipelineKeys[0]!);
+            const coverPipeline = sharedContext.resourceProvider.getPipeline(step.pipelineKeys[1]!);
+            const coverVertices = createCoverVertices(step.draw.color);
+            const coverVertexBuffer = createVertexBuffer(sharedContext, coverVertices);
+            pass.setPipeline(stencilPipeline);
+            pass.setVertexBuffer(0, fillVertexBuffer);
+            pass.draw(fillVertices.length / floatsPerVertex);
+            pass.setPipeline(coverPipeline);
+            pass.setVertexBuffer(0, coverVertexBuffer);
+            pass.draw(coverVertices.length / floatsPerVertex);
+          }
           pass.end();
           passCount += 1;
           colorLoadOp = 'load';
           break;
         }
         case 'pathStroke': {
-          const strokePipeline = sharedContext.resourceProvider.getPipeline(step.pipelineKeys[0]!);
           const strokeVertices = createClipSpaceVertexData(
             step.draw.triangles,
             step.draw.color,
@@ -224,14 +244,40 @@ export const encodeDawnCommandBuffer = (
             colorAttachments: [
               {
                 view: colorView,
+                resolveTarget: resolveView,
                 clearValue: toGpuColor(passInfo.clearColor),
                 loadOp: colorLoadOp,
                 storeOp: 'store',
               },
             ],
+            depthStencilAttachment: step.draw.clip?.triangles
+              ? {
+                view: stencilView,
+                depthClearValue: 1,
+                depthLoadOp: 'clear',
+                depthStoreOp: 'discard',
+                stencilClearValue: 0,
+                stencilLoadOp: 'clear',
+                stencilStoreOp: 'discard',
+              }
+              : undefined,
           });
           applyStepClip(pass, step, sharedContext.backend.target);
-          pass.setPipeline(strokePipeline);
+          if (step.draw.clip?.triangles) {
+            const clipPipeline = sharedContext.resourceProvider.getPipeline(step.pipelineKeys[0]!);
+            const clipVertices = createClipSpaceVertexData(
+              step.draw.clip.triangles,
+              [0, 0, 0, 0],
+              sharedContext.backend.target,
+            );
+            const clipVertexBuffer = createVertexBuffer(sharedContext, clipVertices);
+            pass.setPipeline(clipPipeline);
+            pass.setVertexBuffer(0, clipVertexBuffer);
+            pass.draw(clipVertices.length / floatsPerVertex);
+            pass.setPipeline(sharedContext.resourceProvider.getPipeline(step.pipelineKeys[1]!));
+          } else {
+            pass.setPipeline(sharedContext.resourceProvider.getPipeline(step.pipelineKeys[0]!));
+          }
           pass.setVertexBuffer(0, strokeVertexBuffer);
           pass.draw(strokeVertices.length / floatsPerVertex);
           pass.end();

@@ -4,7 +4,6 @@ import {
   identityMatrix2D,
   multiplyMatrix2D,
   type Path2D,
-  transformPath2D,
   type Rect,
 } from '@rieul3d/geometry';
 import { createDrawingPath2DFromShape } from './geometry.ts';
@@ -91,11 +90,6 @@ const intersectClipRect = (
   };
 };
 
-const applyRecorderStateToPath = (
-  recorder: DrawingRecorder,
-  path: Path2D,
-): Path2D => transformPath2D(path, recorder.state.transform);
-
 export const createDrawingRecorder = (
   sharedContext: DawnSharedContext,
 ): DrawingRecorder => ({
@@ -127,7 +121,7 @@ export const recordDrawPath = (
 ): DrawPathCommand => {
   const command: DrawPathCommand = {
     kind: 'drawPath',
-    path: applyRecorderStateToPath(recorder, path) as DrawingPath2D,
+    path: path as DrawingPath2D,
     paint,
     transform: recorder.state.transform,
     clipRect: recorder.state.clipRect,
@@ -145,7 +139,7 @@ export const recordDrawShape = (
   const command: DrawShapeCommand = {
     kind: 'drawShape',
     shape,
-    path: applyRecorderStateToPath(recorder, createDrawingPath2DFromShape(shape)),
+    path: createDrawingPath2DFromShape(shape),
     paint,
     transform: recorder.state.transform,
     clipRect: recorder.state.clipRect,
@@ -207,7 +201,7 @@ export const clipDrawingRecorderPath = (
 ): void => {
   (recorder as MutableDrawingRecorder).state = {
     ...recorder.state,
-    clipPath: applyRecorderStateToPath(recorder, clipPath) as DrawingPath2D,
+    clipPath: clipPath as DrawingPath2D,
   };
 };
 

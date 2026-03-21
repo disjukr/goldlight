@@ -91,8 +91,11 @@ export const createDawnResourceProvider = (
   }> = {},
 ): DawnResourceProvider => {
   const pathStencilPipelines = new Map<PathFillRule2D, GPURenderPipeline>();
+  let clipStencilWritePipeline: GPURenderPipeline | null = null;
   let pathFillCoverPipeline: GPURenderPipeline | null = null;
+  let pathFillClipCoverPipeline: GPURenderPipeline | null = null;
   let pathStrokeCoverPipeline: GPURenderPipeline | null = null;
+  let pathStrokeClipCoverPipeline: GPURenderPipeline | null = null;
   let stencilAttachment:
     | Readonly<{
       width: number;
@@ -119,6 +122,8 @@ export const createDawnResourceProvider = (
     ],
   });
 
+  const sampleCount = backend.target.kind === 'offscreen' ? backend.target.sampleCount : 1;
+
   const createPathStencilPipeline = (fillRule: PathFillRule2D): GPURenderPipeline => {
     const shaderModule = createPathShaderModule(backend);
     const stencilFace = fillRule === 'evenodd' ? createStencilFaceState('invert') : undefined;
@@ -144,6 +149,9 @@ export const createDawnResourceProvider = (
       primitive: {
         topology: 'triangle-list',
         cullMode: 'none',
+      },
+      multisample: {
+        count: sampleCount,
       },
       depthStencil: {
         format: stencilFormat,
@@ -181,6 +189,9 @@ export const createDawnResourceProvider = (
         topology: 'triangle-list',
         cullMode: 'none',
       },
+      multisample: {
+        count: sampleCount,
+      },
       depthStencil: {
         format: stencilFormat,
         depthWriteEnabled: false,
@@ -189,6 +200,83 @@ export const createDawnResourceProvider = (
         stencilWriteMask: 0x00,
         stencilFront: createStencilFaceState('keep', 'not-equal'),
         stencilBack: createStencilFaceState('keep', 'not-equal'),
+      },
+    });
+  };
+
+  const createClipStencilWritePipeline = (): GPURenderPipeline => {
+    const shaderModule = createPathShaderModule(backend);
+    return backend.device.createRenderPipeline({
+      label: 'drawing-clip-stencil-write',
+      layout: 'auto',
+      vertex: {
+        module: shaderModule,
+        entryPoint: 'vs_main',
+        buffers: [createVertexLayout()],
+      },
+      fragment: {
+        module: shaderModule,
+        entryPoint: 'fs_main',
+        targets: [
+          {
+            format: backend.target.format,
+            writeMask: noColorWrites,
+          },
+        ],
+      },
+      primitive: {
+        topology: 'triangle-list',
+        cullMode: 'none',
+      },
+      multisample: {
+        count: sampleCount,
+      },
+      depthStencil: {
+        format: stencilFormat,
+        depthWriteEnabled: false,
+        depthCompare: 'always',
+        stencilReadMask: 0xff,
+        stencilWriteMask: 0xff,
+        stencilFront: createStencilFaceState('replace'),
+        stencilBack: createStencilFaceState('replace'),
+      },
+    });
+  };
+
+  const createClipAwareColorPipeline = (label: string): GPURenderPipeline => {
+    const shaderModule = createPathShaderModule(backend);
+    return backend.device.createRenderPipeline({
+      label,
+      layout: 'auto',
+      vertex: {
+        module: shaderModule,
+        entryPoint: 'vs_main',
+        buffers: [createVertexLayout()],
+      },
+      fragment: {
+        module: shaderModule,
+        entryPoint: 'fs_main',
+        targets: [
+          {
+            format: backend.target.format,
+          },
+        ],
+      },
+      primitive: {
+        topology: 'triangle-list',
+        cullMode: 'none',
+      },
+      multisample: {
+        count: sampleCount,
+      },
+      depthStencil: {
+        format: stencilFormat,
+        depthWriteEnabled: false,
+        depthCompare: 'always',
+        stencilReadMask: 0xff,
+        stencilWriteMask: 0x00,
+        stencilFront: createStencilFaceState('keep', 'equal'),
+        stencilBack: createStencilFaceState('keep', 'equal'),
       },
     });
   };
@@ -217,6 +305,9 @@ export const createDawnResourceProvider = (
         topology: 'triangle-list',
         cullMode: 'none',
       },
+      multisample: {
+        count: sampleCount,
+      },
     });
   };
 
@@ -228,6 +319,12 @@ export const createDawnResourceProvider = (
     createSampler: (descriptor = {}) => backend.device.createSampler(descriptor),
     getPipeline: (key) => {
       switch (key) {
+        case 'clip-stencil-write':
+          if (clipStencilWritePipeline) {
+            return clipStencilWritePipeline;
+          }
+          clipStencilWritePipeline = createClipStencilWritePipeline();
+          return clipStencilWritePipeline;
         case 'path-fill-nonzero-stencil': {
           const cached = pathStencilPipelines.get('nonzero');
           if (cached) {
@@ -252,12 +349,24 @@ export const createDawnResourceProvider = (
           }
           pathFillCoverPipeline = createPathFillCoverPipeline();
           return pathFillCoverPipeline;
+        case 'path-fill-clip-cover':
+          if (pathFillClipCoverPipeline) {
+            return pathFillClipCoverPipeline;
+          }
+          pathFillClipCoverPipeline = createClipAwareColorPipeline('drawing-path-fill-clip-cover');
+          return pathFillClipCoverPipeline;
         case 'path-stroke-cover':
           if (pathStrokeCoverPipeline) {
             return pathStrokeCoverPipeline;
           }
           pathStrokeCoverPipeline = createPathStrokeCoverPipeline();
           return pathStrokeCoverPipeline;
+        case 'path-stroke-clip-cover':
+          if (pathStrokeClipCoverPipeline) {
+            return pathStrokeClipCoverPipeline;
+          }
+          pathStrokeClipCoverPipeline = createClipAwareColorPipeline('drawing-path-stroke-clip-cover');
+          return pathStrokeClipCoverPipeline;
       }
     },
     getStencilAttachmentView: () => {

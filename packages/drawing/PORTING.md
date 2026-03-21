@@ -50,13 +50,13 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Initial caps and limits layer exists.
 - GPU encoding
   - Status: `started`
-  - Clear, stencil-backed fill, and first stroke command buffer translation exist.
+  - Clear, stencil-backed fill, clip-stencil replay, and first stroke command buffer translation exist.
 - Queue submission
   - Status: `started`
   - Queue manager can submit encoded command buffers and track in-flight work counts.
 - Path rendering
   - Status: `started`
-  - Flattened contours can be pushed through stencil-and-cover fill, and first stroke expansion exists.
+  - Flattened contours can be pushed through stencil-and-cover fill, self-intersection fallback, and first stroke expansion exists.
 - Paint system
   - Status: `started`
   - Minimal fill/stroke paint exists and first execution path is active.
@@ -76,7 +76,7 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Missing: bind group layouts and pipeline helpers
 - `DawnResourceProvider` -> `src/resource_provider.ts`
   - Status: `started`
-  - What exists: simple resource allocation plus cached fill/stroke pipelines and stencil attachment reuse
+  - What exists: simple resource allocation plus cached fill/stroke/clip pipelines, stencil attachment reuse, and multisample-aware pipelines
   - Missing: bind groups, wrapped resources, broader cache policy
 - `Context` -> `src/context.ts`
   - Status: `started`
@@ -84,7 +84,7 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Missing: submit pipeline and global backend orchestration
 - `Recorder` -> `src/recorder.ts`
   - Status: `started`
-  - What exists: abstract command collection plus save/restore, transform, clip-rect, and clip-path state
+  - What exists: abstract command collection plus save/restore, per-draw transform, clip-rect, and clip-path state
   - Missing: ordering rules and flush rules
 - `DawnCaps` -> `src/caps.ts`
   - Status: `started`
@@ -92,11 +92,11 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Missing: richer probing and backend-specific fallbacks
 - `DawnCommandBuffer` -> `src/command_buffer.ts`
   - Status: `started`
-  - What exists: clear plus first fill/stroke draw replay over prepared draw steps
+  - What exists: clear plus fill/stroke/clip replay over prepared draw steps
   - Missing: broader draw path and draw shape encoding, richer pass replay
 - `DrawPass` -> `src/draw_pass.ts`
   - Status: `started`
-  - What exists: prepared pass partitioning plus pipeline-key, bounds, stencil, and scissor metadata for draw steps
+  - What exists: prepared pass partitioning plus pipeline-key, bounds, stencil, and clip metadata for draw steps
   - Missing: pipeline/state/resource preparation comparable to Skia DrawPass
 - `DawnQueueManager` -> `src/queue_manager.ts`
   - Status: `started`
@@ -150,7 +150,7 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Role: immutable recorded command package
 - `src/path_renderer.ts`
   - Status: `started`
-  - Role: adaptive curve flattening, triangulation, clip preparation, and first stroke expansion strategy
+  - Role: adaptive curve flattening, triangulation, scanline fallback, clip preparation, and stroke expansion strategy
 - `tests/`
   - Status: `started`
   - Role: package-local tests for drawing, including snapshot regression
@@ -206,20 +206,20 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
   - Missing: better integration with richer draw-pass replay
 - `drawPath`
   - Status: `started`
-  - Current state: recordable, fill uses stencil-and-cover, and stroke has first expanded geometry path
-  - Missing: general rasterization, high-quality stroke joins/caps, and robust complex contour correctness
+  - Current state: recordable, fill uses stencil-and-cover or scanline fallback, and stroke has expanded geometry path
+  - Missing: higher-quality rasterization and broader path feature coverage
 - `drawShape`
   - Status: `started`
   - Current state: shape is converted to `Path2D` and uses the same fill/stroke execution path
   - Missing: broader primitive specialization
 - Clip path
   - Status: `started`
-  - Current state: clip rect maps to scissor, and clip path currently falls back to clip bounds on prepared draw steps
-  - Missing: true arbitrary clip-path masking and nested clip stack behavior
+  - Current state: clip rect maps to scissor, and clip path can allocate a stencil clip pass for supported shapes
+  - Missing: nested clip stack behavior and more complete clip-path coverage
 - Transform stack
   - Status: `started`
-  - Current state: recorder save/restore and transform state exist
-  - Missing: dedicated per-draw matrix replay instead of pre-transformed geometry
+  - Current state: recorder save/restore and per-draw transform state exist without mutating stored source geometry
+  - Missing: uniform-driven transform replay
 - Save/restore
   - Status: `started`
   - Current state: recorder state stack exists for transform and clip rect
@@ -228,8 +228,9 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
   - Status: `pending`
   - Missing: blend mode model
 - Anti-aliasing
-  - Status: `pending`
-  - Missing: AA strategy
+  - Status: `started`
+  - Current state: pipeline multisample count follows target sample count, and the basic snapshot example now renders through a supersampled offscreen path before PNG export
+  - Missing: coverage/analytic AA beyond MSAA and example-specific supersampling
 - Text/glyph drawing
   - Status: `pending`
   - Out of scope for now
@@ -310,7 +311,7 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
   - Missing: shader lifecycle
 - Pipelines
   - Status: `started`
-  - Current state: fill stencil, fill cover, and stroke cover pipelines are cached in the resource provider
+  - Current state: fill stencil, clip stencil, fill cover, clip-aware cover, and stroke cover pipelines are cached in the resource provider
   - Missing: generalized render pipeline creation and keying
 - Global cache
   - Status: `started`
@@ -335,22 +336,22 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
   - Shape to path conversion exists
 - Fill/stroke expansion
   - Status: `started`
-  - Flattened contours can be emitted for stencil fill passes, and first stroke quads are emitted
+  - Flattened contours can be emitted for stencil fill passes, and first join/cap-aware stroke geometry is emitted
 - Path tessellation
   - Status: `started`
   - Adaptive CPU contour flattening exists for line, quadratic, and cubic path segments
 - Vertex/index generation
   - Status: `started`
-  - Vertex generation exists for contour stencil fills, cover draws, and expanded strokes
+  - Vertex generation exists for contour stencil fills, direct clip-aware fills, cover draws, and expanded strokes
 - GPU upload
   - Status: `started`
   - Simple per-draw vertex buffer upload exists for stencil and cover passes
 - Render pass setup
   - Status: `started`
-  - Recording can be partitioned into prepared draw passes, and fill draws now allocate stencil-backed render passes
+  - Recording can be partitioned into prepared draw passes, and draw replay now covers clip stencil plus fill/stroke passes
 - Pipeline binding
   - Status: `started`
-  - Basic stencil and cover pipelines exist for first path draws and are reused across command buffers
+  - Basic stencil, clip, and cover pipelines exist for first path draws and are reused across command buffers
 - Draw submission
   - Status: `started`
   - Command buffer submission helper exists for encoded clears and first fill draws
@@ -364,13 +365,13 @@ These decisions directly affect the remaining work and are not settled yet.
 
 - First fill strategy
   - Status: `started`
-  - First implementation is moving toward stencil-and-cover for flattened contours
+  - First implementation combines stencil-and-cover with scanline fallback for problematic contours
 - First stroke strategy
   - Status: `started`
   - First implementation now includes miter/bevel/round joins and butt/square/round caps
 - Clip implementation
   - Status: `started`
-  - First implementation uses scissor from clip rect, with clip-path bounds fallback
+  - First implementation uses scissor from clip rect and stencil masking for supported clip paths
 - Atlas/text approach
   - Status: `pending`
   - Deferred until shapes are rendering
@@ -391,7 +392,7 @@ These decisions directly affect the remaining work and are not settled yet.
   - Covered indirectly through cubic/fill/stroke preparation tests
 - Real WebGPU integration test
   - Status: `started`
-  - `render_basic_paths_snapshot_test.ts` exercises live WebGPU rendering when available
+  - `render_basic_paths_snapshot_test.ts` exercises live WebGPU rendering when available, including the supersampled PNG output path
 - Image snapshot regression
   - Status: `started`
   - PNG hash regression exists for `examples/render_basic_paths`
@@ -406,9 +407,9 @@ These decisions directly affect the remaining work and are not settled yet.
   Skia-like pipeline/state/resource data
 - no Skia-like draw-list or draw-pass preparation layer yet
 - arcs and advanced curve/path features are still missing
-- evenodd/nonzero now go through stencil, and simple concave polygons triangulate, but self-intersecting input is still rejected
+- evenodd/nonzero now go through stencil, and self-intersecting input has a scanline fallback, but coverage is still not Skia-grade
 - no SVG parser or SVG-to-`Path2D` ingestion path yet
-- no true arbitrary clip path masking or retained scene model
+- no retained scene model
 - no bind group cache
 - `command_buffer` still does per-draw render pass replay for stencil clears instead of a richer DrawPass command stream
 - `queue_manager` currently treats `tick()` as coarse completion rather than using explicit GPU fences
@@ -419,10 +420,11 @@ These decisions directly affect the remaining work and are not settled yet.
    - Replace static format assumptions with richer backend policy
    - Add feature-gated fallbacks
 2. Harden the first fill path
-   - Keep the stencil-and-cover route, but improve complex contour handling and self-intersection fallback
-   - Add targeted tests for winding behavior and clipping
-3. Improve stroke quality
-   - Replace segment quads with proper joins/caps and closed-contour behavior
+   - Improve scanline fallback quality and unify it more cleanly with stencil rendering
+   - Add more winding and clip-path tests
+3. Improve transform and paint replay
+   - Move per-draw transform from CPU-prepared geometry toward uniform-driven replay
+   - Start separating paint data from vertex payloads
 4. Add pipeline/resource caching
    - Extend reuse toward bind groups, transient buffers, and richer pipeline keys
 5. Add `src/queue_manager.ts`

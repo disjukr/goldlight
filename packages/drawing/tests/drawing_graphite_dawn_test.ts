@@ -244,7 +244,7 @@ Deno.test('drawing recorder records transform and clip state into draw commands'
   assertEquals(first.clipRect, createRect(20, 30, 40, 50));
   assertEquals(second.transform, identityMatrix2D);
   assertEquals(second.clipRect, undefined);
-  assertEquals(first.path.verbs[0], { kind: 'moveTo', to: [12, 15] });
+  assertEquals(first.path.verbs[0], { kind: 'moveTo', to: [1, 1] });
 });
 
 Deno.test('drawing recorder supports explicit transform concatenation', () => {
@@ -347,6 +347,7 @@ Deno.test('drawing prepared recording flattens quadratic and cubic paths for fil
 
   assertEquals(draw?.kind, 'pathFill');
   assertEquals((draw?.triangles.length ?? 0) > 6, true);
+  assertEquals(draw?.bounds.origin[0], 24);
 });
 
 Deno.test('drawing prepared recording preserves evenodd fill rule through draw step metadata', () => {
@@ -415,6 +416,30 @@ Deno.test('drawing prepared recording derives clip bounds from clip path', () =>
 
   const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
   assertEquals(prepared.passes[0]?.steps[0]?.clipBounds, createRect(32, 40, 64, 48));
+  assertEquals(prepared.passes[0]?.steps[0]?.pipelineKeys, ['clip-stencil-write', 'path-fill-clip-cover']);
+});
+
+Deno.test('drawing prepared recording falls back for self-intersecting fill paths', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [32, 32] },
+      { kind: 'lineTo', to: [96, 96] },
+      { kind: 'lineTo', to: [32, 96] },
+      { kind: 'lineTo', to: [96, 32] },
+      { kind: 'close' },
+    ),
+    { style: 'fill' },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const draw = prepared.passes[0]?.steps[0]?.draw;
+  assertEquals(draw?.kind, 'pathFill');
+  assertEquals((draw?.triangles.length ?? 0) > 0, true);
 });
 
 Deno.test('drawing prepared recording expands stroke geometry', () => {
@@ -525,6 +550,7 @@ Deno.test('dawn command buffer clips via clip path bounds fallback', () => {
 
   encodeDawnCommandBuffer(sharedContext, finishDrawingRecorder(recorder), binding);
   assertEquals(mock.created.scissorCalls[0], [24, 30, 48, 48]);
+  assertEquals(mock.created.drawCalls.length, 2);
 });
 
 Deno.test('dawn command buffer encodes stroke draws without stencil', () => {
@@ -581,6 +607,35 @@ Deno.test('dawn resource provider reuses pipelines across command buffers', () =
 
   assertEquals(mock.created.renderPipelines.length, 3);
   assertEquals(mock.created.shaderModules.length, 3);
+});
+
+Deno.test('dawn pipelines honor target sample count for MSAA', () => {
+  const mock = createMockGpuContext();
+  const context = {
+    ...mock.context,
+    target: {
+      ...mock.context.target,
+      sampleCount: 4,
+    } as const,
+  };
+  const sharedContext = createDawnSharedContext(createDawnBackendContext(context));
+  const recorder = createDrawingRecorder(sharedContext);
+  const binding = createOffscreenBinding(context);
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [16, 16] },
+      { kind: 'lineTo', to: [64, 16] },
+      { kind: 'lineTo', to: [64, 64] },
+      { kind: 'lineTo', to: [16, 64] },
+      { kind: 'close' },
+    ),
+    { style: 'fill' },
+  );
+
+  encodeDawnCommandBuffer(sharedContext, finishDrawingRecorder(recorder), binding);
+  assertEquals(mock.created.renderPipelines[0]?.multisample?.count, 4);
 });
 
 Deno.test('dawn queue manager tracks submit and tick completion', async () => {

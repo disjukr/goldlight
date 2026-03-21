@@ -1,4 +1,4 @@
-import type { PathFillRule2D, Path2D, Point2D, Rect } from '@rieul3d/geometry';
+import { transformPoint2D, type PathFillRule2D, type Path2D, type Point2D, type Rect } from '@rieul3d/geometry';
 import type {
   DrawingClipRect,
   DrawingPaint,
@@ -15,6 +15,7 @@ type FlattenedSubpath = Readonly<{
 export type DrawingPreparedClip = Readonly<{
   path?: DrawingPath2D;
   bounds?: Rect;
+  triangles?: readonly Point2D[];
 }>;
 
 export type DrawingPreparedPathFill = Readonly<{
@@ -156,6 +157,23 @@ const segmentsIntersect = (a0: Point2D, a1: Point2D, b0: Point2D, b1: Point2D): 
   return false;
 };
 
+const segmentIntersectionPoint = (
+  a0: Point2D,
+  a1: Point2D,
+  b0: Point2D,
+  b1: Point2D,
+): Point2D | null => {
+  const a = subtract(a1, a0);
+  const b = subtract(b1, b0);
+  const det = (a[0] * b[1]) - (a[1] * b[0]);
+  if (Math.abs(det) <= epsilon) return null;
+  const delta = subtract(b0, a0);
+  const t = ((delta[0] * b[1]) - (delta[1] * b[0])) / det;
+  const u = ((delta[0] * a[1]) - (delta[1] * a[0])) / det;
+  if (t < -epsilon || t > 1 + epsilon || u < -epsilon || u > 1 + epsilon) return null;
+  return add(a0, scale(a, t));
+};
+
 const isSelfIntersecting = (points: readonly Point2D[]): boolean => {
   for (let first = 0; first < points.length; first += 1) {
     const firstNext = (first + 1) % points.length;
@@ -223,6 +241,130 @@ const triangulatePolygon = (points: readonly Point2D[]): readonly Point2D[] | nu
   return Object.freeze(triangles);
 };
 
+type ScanEdge = Readonly<{
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+  winding: number;
+}>;
+
+type ScanEvent = Readonly<{
+  x: number;
+  winding: number;
+}>;
+
+const buildScanEdges = (subpaths: readonly FlattenedSubpath[]): readonly ScanEdge[] => {
+  const edges: ScanEdge[] = [];
+  for (const subpath of subpaths) {
+    if (!subpath.closed || subpath.points.length < 3) continue;
+    for (let index = 0; index < subpath.points.length; index += 1) {
+      const start = subpath.points[index]!;
+      const end = subpath.points[(index + 1) % subpath.points.length]!;
+      if (Math.abs(start[1] - end[1]) <= epsilon) continue;
+      if (start[1] < end[1]) {
+        edges.push({ x0: start[0], y0: start[1], x1: end[0], y1: end[1], winding: 1 });
+      } else {
+        edges.push({ x0: end[0], y0: end[1], x1: start[0], y1: start[1], winding: -1 });
+      }
+    }
+  }
+  return Object.freeze(edges);
+};
+
+const collectScanBands = (subpaths: readonly FlattenedSubpath[]): readonly number[] => {
+  const ys = new Set<number>();
+  for (const subpath of subpaths) {
+    for (const point of subpath.points) {
+      ys.add(point[1]);
+    }
+  }
+  const edges = buildScanEdges(subpaths);
+  for (let first = 0; first < edges.length; first += 1) {
+    for (let second = first + 1; second < edges.length; second += 1) {
+      const edgeA = edges[first]!;
+      const edgeB = edges[second]!;
+      const intersection = segmentIntersectionPoint(
+        [edgeA.x0, edgeA.y0],
+        [edgeA.x1, edgeA.y1],
+        [edgeB.x0, edgeB.y0],
+        [edgeB.x1, edgeB.y1],
+      );
+      if (intersection) {
+        ys.add(intersection[1]);
+      }
+    }
+  }
+  return Object.freeze([...ys].sort((left, right) => left - right));
+};
+
+const scanlineIntersectionX = (edge: ScanEdge, y: number): number =>
+  edge.x0 + (((y - edge.y0) / (edge.y1 - edge.y0)) * (edge.x1 - edge.x0));
+
+const buildFillIntervals = (
+  events: readonly ScanEvent[],
+  fillRule: PathFillRule2D,
+): readonly (readonly [number, number])[] => {
+  const intervals: Array<readonly [number, number]> = [];
+  if (fillRule === 'evenodd') {
+    for (let index = 0; index + 1 < events.length; index += 2) {
+      intervals.push([events[index]!.x, events[index + 1]!.x]);
+    }
+    return Object.freeze(intervals);
+  }
+
+  let winding = 0;
+  let intervalStart: number | null = null;
+  for (const event of events) {
+    const previous = winding;
+    winding += event.winding;
+    if (previous === 0 && winding !== 0) {
+      intervalStart = event.x;
+    } else if (previous !== 0 && winding === 0 && intervalStart !== null) {
+      intervals.push([intervalStart, event.x]);
+      intervalStart = null;
+    }
+  }
+  return Object.freeze(intervals);
+};
+
+const scanlineTessellate = (
+  subpaths: readonly FlattenedSubpath[],
+  fillRule: PathFillRule2D,
+): readonly Point2D[] | null => {
+  const ys = collectScanBands(subpaths);
+  if (ys.length < 2) return null;
+  const edges = buildScanEdges(subpaths);
+  const triangles: Point2D[] = [];
+
+  for (let band = 0; band < ys.length - 1; band += 1) {
+    const y0 = ys[band]!;
+    const y1 = ys[band + 1]!;
+    if (y1 - y0 <= epsilon) continue;
+    const sampleY = (y0 + y1) / 2;
+    const events: ScanEvent[] = [];
+    for (const edge of edges) {
+      if (sampleY < edge.y0 || sampleY >= edge.y1) continue;
+      events.push({
+        x: scanlineIntersectionX(edge, sampleY),
+        winding: edge.winding,
+      });
+    }
+    events.sort((left, right) => left.x - right.x);
+    const intervals = buildFillIntervals(events, fillRule);
+    for (const [x0, x1] of intervals) {
+      if (x1 - x0 <= epsilon) continue;
+      const topLeft: Point2D = [x0, y0];
+      const topRight: Point2D = [x1, y0];
+      const bottomRight: Point2D = [x1, y1];
+      const bottomLeft: Point2D = [x0, y1];
+      appendQuad(triangles, topLeft, topRight, bottomRight, bottomLeft);
+    }
+  }
+
+  return triangles.length > 0 ? Object.freeze(triangles) : null;
+};
+
 const flattenQuadraticRecursive = (
   from: Point2D,
   control: Point2D,
@@ -267,7 +409,10 @@ const flattenCubicRecursive = (
   flattenCubicRecursive(split, p123, p23, to, depth + 1, out);
 };
 
-const flattenSubpaths = (path: DrawingPath2D): readonly FlattenedSubpath[] | null => {
+const flattenSubpaths = (
+  path: DrawingPath2D,
+  transform: readonly [number, number, number, number, number, number],
+): readonly FlattenedSubpath[] | null => {
   const subpaths: FlattenedSubpath[] = [];
   let points: Point2D[] = [];
   let currentPoint: Point2D | null = null;
@@ -294,23 +439,36 @@ const flattenSubpaths = (path: DrawingPath2D): readonly FlattenedSubpath[] | nul
     switch (verb.kind) {
       case 'moveTo':
         flush();
-        points.push(verb.to);
-        currentPoint = verb.to;
+        points.push(transformPoint2D(verb.to, transform));
+        currentPoint = transformPoint2D(verb.to, transform);
         break;
       case 'lineTo':
         if (!currentPoint) return null;
-        points.push(verb.to);
-        currentPoint = verb.to;
+        points.push(transformPoint2D(verb.to, transform));
+        currentPoint = transformPoint2D(verb.to, transform);
         break;
       case 'quadTo':
         if (!currentPoint) return null;
-        flattenQuadraticRecursive(currentPoint, verb.control, verb.to, 0, points);
-        currentPoint = verb.to;
+        flattenQuadraticRecursive(
+          currentPoint,
+          transformPoint2D(verb.control, transform),
+          transformPoint2D(verb.to, transform),
+          0,
+          points,
+        );
+        currentPoint = transformPoint2D(verb.to, transform);
         break;
       case 'cubicTo':
         if (!currentPoint) return null;
-        flattenCubicRecursive(currentPoint, verb.control1, verb.control2, verb.to, 0, points);
-        currentPoint = verb.to;
+        flattenCubicRecursive(
+          currentPoint,
+          transformPoint2D(verb.control1, transform),
+          transformPoint2D(verb.control2, transform),
+          transformPoint2D(verb.to, transform),
+          0,
+          points,
+        );
+        currentPoint = transformPoint2D(verb.to, transform);
         break;
       case 'close':
         if (!currentPoint) return null;
@@ -324,12 +482,17 @@ const flattenSubpaths = (path: DrawingPath2D): readonly FlattenedSubpath[] | nul
   return Object.freeze(subpaths);
 };
 
-const prepareFillTriangles = (subpaths: readonly FlattenedSubpath[]): readonly Point2D[] | null => {
+const prepareFillTriangles = (
+  subpaths: readonly FlattenedSubpath[],
+  fillRule: PathFillRule2D,
+): readonly Point2D[] | null => {
   const triangles: Point2D[] = [];
   for (const subpath of subpaths) {
     if (!subpath.closed || subpath.points.length < 3) return null;
     const contourTriangles = triangulatePolygon(subpath.points);
-    if (!contourTriangles) return null;
+    if (!contourTriangles) {
+      return scanlineTessellate(subpaths, fillRule);
+    }
     triangles.push(...contourTriangles);
   }
   return Object.freeze(triangles);
@@ -540,16 +703,17 @@ const prepareStrokeTriangles = (
 
 const prepareClip = (clipPath: Path2D | undefined): DrawingPreparedClip | undefined => {
   if (!clipPath) return undefined;
-  const subpaths = flattenSubpaths(clipPath);
+  const subpaths = flattenSubpaths(clipPath, [1, 0, 0, 1, 0, 0]);
   if (!subpaths || subpaths.length === 0) return { path: clipPath };
   return {
     path: clipPath,
     bounds: unionBounds(subpaths.map((subpath) => computeBounds(subpath.points))),
+    triangles: prepareFillTriangles(subpaths, clipPath.fillRule) ?? undefined,
   };
 };
 
 const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDrawPreparation => {
-  const subpaths = flattenSubpaths(command.path);
+  const subpaths = flattenSubpaths(command.path, command.transform);
   if (!subpaths) {
     return { supported: false, reason: 'path does not resolve to subpaths' };
   }
@@ -557,7 +721,7 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
   const clip = prepareClip(command.clipPath);
   const style = command.paint.style ?? 'fill';
   if (style === 'fill') {
-    const triangles = prepareFillTriangles(subpaths);
+    const triangles = prepareFillTriangles(subpaths, command.path.fillRule);
     if (!triangles) {
       return { supported: false, reason: 'path fill triangulation failed' };
     }

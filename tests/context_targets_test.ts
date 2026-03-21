@@ -1,6 +1,7 @@
 import { assertEquals, assertStrictEquals, assertThrows } from 'jsr:@std/assert@^1.0.14';
 import {
   acquireColorAttachmentView,
+  acquireColorResolveView,
   acquireDepthAttachmentView,
   bindRenderTarget,
   createOffscreenBinding,
@@ -122,6 +123,19 @@ Deno.test('createOffscreenBinding allocates color and depth textures and views',
   assertEquals(Boolean(offscreen.depthView), true);
 });
 
+Deno.test('createOffscreenBinding allocates resolve texture for multisampled targets', () => {
+  const { device, textures } = createMockDevice();
+  const offscreen = createOffscreenBinding({
+    device: device as GPUDevice,
+    target: { kind: 'offscreen', width: 320, height: 240, format: 'rgba8unorm', sampleCount: 4 },
+  });
+
+  assertEquals(textures.length, 3);
+  assertEquals(textures[0].descriptor.sampleCount, 4);
+  assertEquals(textures[1].descriptor.sampleCount, 1);
+  assertEquals(Boolean(offscreen.resolveView), true);
+});
+
 Deno.test('bindRenderTarget chooses surface or offscreen binding based on input', () => {
   const { device } = createMockDevice();
   const surfaceBinding = bindRenderTarget(
@@ -194,6 +208,16 @@ Deno.test('acquireColorAttachmentView returns a view for surface and offscreen b
   assertEquals(Boolean(surfaceView), true);
   assertEquals(Boolean(offscreenView), true);
   assertEquals(Boolean(acquireDepthAttachmentView(surfaceBinding)), true);
+});
+
+Deno.test('acquireColorResolveView returns a resolve view for multisampled offscreen bindings', () => {
+  const { device } = createMockDevice();
+  const binding = createOffscreenBinding({
+    device: device as GPUDevice,
+    target: { kind: 'offscreen', width: 10, height: 10, format: 'rgba8unorm', sampleCount: 4 },
+  });
+
+  assertEquals(Boolean(acquireColorResolveView(binding)), true);
 });
 
 Deno.test('acquireColorAttachmentView recreates the surface depth attachment when the drawable size changes', () => {

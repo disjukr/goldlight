@@ -71,6 +71,9 @@ The current scaffold already includes:
 - mesh GPU residency upload and caching
 - texture GPU residency upload and caching
 - forward frame encoding for mesh draws
+- template-assembled built-in unlit/lit shaders with template-specific variants and binding-spec
+  driven forward material pipeline layouts
+- forward lit metallic-roughness shading with EXR-backed environment-map diffuse/specular IBL
 - local-space SDF sphere/box extraction into `MeshPrimitive` geometry through marching-cubes and
   naive surface-nets helpers
 - intermediate scene-color routing plus first renderer-owned fullscreen post-process blit pass
@@ -79,6 +82,7 @@ The current scaffold already includes:
 - headless snapshot readback and PNG encoding
 - browser surface binding and a bundled browser example
 - a Windows BYOW triangle example for native Deno surface presentation
+- Windows-native forward/pathtraced Damaged Helmet demos for real imported material validation
 - device-loss observation and residency rebuild helpers
 - explicit device-loss recovery sequencing for device replacement and target rebinding
 - benchmark coverage for key runtime paths, including material binding and renderer capability

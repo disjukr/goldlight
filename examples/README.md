@@ -13,8 +13,8 @@ Runnable examples live here. Each example should document how to build, serve, o
   BYOW demo exercising the default triangle-BVH mesh path tracing path with the vendored Damaged
   Helmet GLB
 - [`byow_helmet_forward_demo/README.md`](./byow_helmet_forward_demo/README.md): Windows-native BYOW
-  demo exercising the forward `lit` template system against the full vendored Damaged Helmet
-  material texture set
+  demo exercising the React-reconciler-driven forward `lit` template system against the full
+  vendored Damaged Helmet material texture set, environment-map IBL, and renderer debug views
 - [`byow_cornell_pathtraced_demo/README.md`](./byow_cornell_pathtraced_demo/README.md):
   Windows-native BYOW Cornell-box demo that supplies SDF room data through the pathtraced renderer's
   scene extension

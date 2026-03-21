@@ -48,13 +48,14 @@ Implemented today:
 - screen-to-world mouse ray generation from evaluated camera state for interaction foundations
 - reusable core helpers for quaternion-from-Euler rotation authoring, mesh bounds, and generated
   mesh normals
-- mesh, texture, first volume residency upload paths, and first volume raymarch execution
+- mesh and texture residency upload paths
 - forward rendering, minimal deferred mesh execution with built-in unlit/lit plus custom WGSL
-  G-buffer paths, deferred directional-light resolve support, optional baseColor texture sampling,
-  deferred-plus-forward textured lit composition through the `uber` renderer entrypoint,
-  post-lighting deferred SDF/volume composition, optional scene-color post-process blit passes,
-  first-class directional light nodes with built-in forward Lambert shading, first SDF raymarch
-  execution, an initial SDF-only `pathtraced` fullscreen slice, and headless snapshot readback
+  G-buffer paths, deferred directional-light resolve support, optional scene-color post-process blit
+  passes, first-class directional light nodes with built-in forward metallic-roughness shading,
+  EXR-backed environment-map diffuse/specular IBL in the forward lit path, template-assembled built-
+  in unlit/lit shader variants with binding-spec-driven forward material pipeline layouts, triangle-
+  BVH mesh path tracing plus caller-owned pathtraced scene extensions, and headless snapshot
+  readback
 - forward-renderer cubemap capture for mesh, SDF, and volume scenes as six ordered offscreen face
   snapshots, plus CPU-side export helpers for equirectangular, angular-map, cross, and strip layouts
   with optional filtered reprojection and caller-controlled output dimensions
@@ -62,7 +63,6 @@ Implemented today:
   `@rieul3d/procedural` that share the existing deterministic seed model
 - triangle BVH construction in `@rieul3d/raytrace` plus a mesh pathtraced renderer slice for static
   mesh scenes
-- forward SDF sphere and box raymarch execution with capability preflight alignment
 - local-space SDF-to-mesh extraction for supported sphere and box primitives, including
   canonical-table marching-cubes and naive surface-nets contouring helpers for baking or inspection
   workflows
@@ -93,7 +93,7 @@ Implemented today:
   updates through the experimental React reconciler host
 - a browser React authoring example plus the current `createSceneRoot()` snapshot path that commits
   JSX-authored trees into `SceneIr` snapshots before rendering, including JSX-authored scene
-  resources such as meshes, materials, cameras, SDFs, volumes, and animation clips, exported
+  resources such as meshes, materials, cameras, textures, assets, and animation clips, exported
   convenience components for common camera/light composition, an internal React-owned scene document
   that preserves stable resource and node host instances across commits before publishing data-only
   snapshots, and commit-summary, update-plan, plus `updatePayload` helpers for targeted residency

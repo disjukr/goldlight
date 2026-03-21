@@ -13,11 +13,11 @@ from Scene IR so the same IR can run in browsers, Deno, and headless targets.
   records.
 - Residency is rebuildable from assets + IR + evaluated scene after device loss.
 
-## Texture Example
+## Resource Example
 
-1. Image asset: PNG/JPEG/EXR/KTX2 bytes and metadata
-2. Texture IR: intended semantic, color space, sampler intent
-3. Residency: actual `GPUTexture` and related views/samplers
+1. Resource source: inline payload or asset-backed bytes plus metadata
+2. Resource IR: intended semantic, color space, sampler intent, or mesh-buffer layout
+3. Residency: actual `GPUBuffer`/`GPUTexture` and related views/samplers
 
 ## Lifecycle
 
@@ -29,13 +29,14 @@ from Scene IR so the same IR can run in browsers, Deno, and headless targets.
 ## Current Residency Coverage
 
 - Mesh residency is uploaded into per-attribute vertex buffers plus an optional index buffer.
-- Texture residency is uploaded into `GPUTexture`/view/sampler triples from image assets.
+- Texture residency is uploaded into `GPUTexture`/view/sampler triples from inline or asset-backed
+  image sources.
 - Residency caches are keyed by IR object IDs.
 
 ## Recovery
 
-- Device-local residency is invalidatable and rebuildable from
-  `AssetSource + SceneIr + EvaluatedScene`.
+- Device-local residency is invalidatable and rebuildable from `SceneIr + EvaluatedScene`, provided
+  the scene resource sources still describe either inline payloads or reachable asset-backed bytes.
 - Callers may now drop targeted mesh/material/texture residency entries by stable IDs when a full
   rebuild is not required.
 - Pipeline caches are considered disposable and are cleared during rebuild.

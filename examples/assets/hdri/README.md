@@ -1,6 +1,7 @@
 # HDRI Samples
 
-Repository copy of a small 1K EXR HDRI set for lookdev and future image-based lighting work.
+Repository copy of a small 1K EXR HDRI set for current lookdev and image-based lighting work in the
+forward helmet demo.
 
 ## Contents
 

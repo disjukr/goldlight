@@ -7,7 +7,7 @@ This directory stores small, versioned assets that are practical to keep in the 
 - `stanford-bunny/`: Stanford Bunny source refresh target plus the extracted `bun_zipper.ply`
   reconstruction mesh, now directly loadable through `@rieul3d/importers`
 - `damaged-helmet/`: Khronos `DamagedHelmet.glb` sample asset
-- `hdri/`: 1K EXR environment-map samples for future lookdev and IBL work
+- `hdri/`: 1K EXR environment-map samples used by the forward helmet PBR/IBL demos
 
 ## Refresh Commands
 

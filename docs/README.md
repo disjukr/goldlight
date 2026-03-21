@@ -46,7 +46,7 @@ Use this page as the main navigation hub.
   [`adr/0009-cubemap-capture-boundary.md`](./adr/0009-cubemap-capture-boundary.md)
 - Review the accepted material alpha policy for deferred, uber, and dithered coverage:
   [`adr/0010-uber-deferred-forward-alpha-materials.md`](./adr/0010-uber-deferred-forward-alpha-materials.md)
-- Review the proposed custom WGSL alpha-policy binding contract:
+- Review the accepted custom WGSL alpha-policy binding contract:
   [`adr/0011-custom-wgsl-alpha-policy-binding.md`](./adr/0011-custom-wgsl-alpha-policy-binding.md)
 - Review the JSX authoring boundary decision:
   [`adr/0004-react-jsx-authoring.md`](./adr/0004-react-jsx-authoring.md)

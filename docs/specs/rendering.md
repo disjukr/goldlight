@@ -37,8 +37,8 @@ The initial renderer uses a lightweight pass graph:
 ## Current Execution Surface
 
 - Forward rendering is the first concrete execution path and currently draws mesh residency items.
-- Forward rendering now also consumes first-class directional light nodes for built-in Lambert mesh
-  shading.
+- Forward rendering now also consumes first-class directional light nodes for built-in metallic-
+  roughness `lit` shading.
 - Deferred rendering now executes a minimal mesh-only path with a depth prepass, built-in unlit/lit
   albedo-normal G-buffer passes, registered custom WGSL G-buffer programs, and a fullscreen
   directional-light lighting resolve.
@@ -48,8 +48,9 @@ The initial renderer uses a lightweight pass graph:
   renderer-specific scene extensions such as caller-owned SDF descriptors at render time. Those
   extensions are not part of engine-owned `SceneIr`.
 - Built-in unlit WGSL is stored as a standalone shader file and imported as text.
-- Built-in forward lit WGSL is stored as a standalone shader file and consumes directional-light
-  uniform data extracted from evaluated light nodes.
+- Built-in forward lit shading is assembled through the renderer template system and consumes
+  directional-light plus environment-lighting uniform data extracted from evaluated light nodes and
+  render options.
 - Built-in unlit shading supports color-only meshes plus optional base-color texture sampling when
   UVs and texture residency are available.
 - Built-in forward mesh draws upload each evaluated node `worldMatrix` plus the active camera
@@ -57,9 +58,9 @@ The initial renderer uses a lightweight pass graph:
 - Forward mesh draws now allocate a depth attachment per render target, render opaque meshes before
   transparent meshes, and use depth-tested triangle-list rasterization with per-material blend and
   double-sided policy where requested.
-- Built-in lit shading supports color-only Lambert materials plus optional base-color texture
-  sampling when UVs and texture residency are available, and still requires mesh normals plus at
-  least one directional light.
+- Built-in lit shading now targets the core glTF metallic-roughness material model, including base
+  color, metallic-roughness, normal, occlusion, and emissive texture channels when UVs and texture
+  residency are available.
 - Built-in deferred unlit shading supports the same optional base-color texture sampling when
   `NORMAL` and `TEXCOORD_0` data plus texture residency are available, and bypasses the lighting
   resolve so color-only materials stay unlit.
@@ -74,9 +75,14 @@ The initial renderer uses a lightweight pass graph:
   scene-color texture when ordered post-process passes are requested.
 - The first post-process milestone ships a built-in fullscreen blit pass plus a minimal post-process
   program contract for renderer-owned fullscreen passes.
-- Built-in forward lit mesh draws also upload an inverse-transpose normal matrix plus a compact
-  directional-light uniform block.
-- Material parameter uploads and bind group creation are implemented for built-in unlit shading.
+- Built-in forward lit mesh draws also upload view/inverse-view transforms, an inverse-transpose
+  normal matrix, a compact directional-light uniform block, and environment-lighting inputs.
+- Material parameter uploads and bind group creation are implemented for built-in unlit/lit shading.
+- The current forward lit path includes direct-light GGX BRDF evaluation plus environment-map
+  diffuse/specular image-based lighting using a prefiltered EXR environment texture and BRDF LUT.
+- The current forward lit path also exposes debug views for geometric normals, sampled tangent-space
+  normals, mapped normals, tangent/bitangent, handedness, and UV inspection in the Damaged Helmet
+  demo.
 - The minimal deferred path currently requires `NORMAL` vertex data and supports built-in `unlit`
   plus built-in `lit` materials; built-in `unlit` textures stay in the G-buffer path, while textured
   built-in `lit` meshes fall back to a depth-tested forward pass after deferred lighting when
@@ -108,11 +114,11 @@ The initial renderer uses a lightweight pass graph:
   - `viewProjection`: the active camera projection multiplied by the evaluated camera view matrix
 - Built-in deferred G-buffer mesh shaders reserve `@group(0) @binding(0)` for a transform uniform
   containing the evaluated node world matrix plus an inverse-transpose normal matrix.
-- Built-in forward lit mesh shaders extend the same transform bind group with an inverse-transpose
-  normal matrix for Lambert shading.
-- Material programs can declare `materialBindings` entries for uniform buffers, renderer-owned
-  alpha-policy uniforms, texture views, and samplers that are assembled into a single material bind
-  group.
+- Built-in forward lit mesh shaders extend the same transform bind group with view/inverse-view
+  matrices plus an inverse-transpose normal matrix for PBR shading.
+- Material programs may still expose `materialBindings` as the group-1 material subset, but the
+  renderer now also tracks full-program binding specs so WGSL declarations, bind-group layout
+  creation, and bind-group entry assembly can stay aligned.
 - Built-in unlit material uniforms live at `@group(1) @binding(0)`.
 - Built-in material slot `values[1]` now reserves alpha-policy data:
   - `x`: `alphaCutoff`
@@ -121,8 +127,10 @@ The initial renderer uses a lightweight pass graph:
   - `w`: requested double-sided flag
 - Built-in textured unlit shading also binds base-color texture/view pairs at
   `@group(1) @binding(1)` and `@group(1) @binding(2)`.
-- Built-in textured lit shading uses the same `@group(1)` base-color texture/sampler contract and a
-  `@group(2) @binding(0)` directional-light uniform block.
+- Built-in lit shading reserves:
+  - `@group(2) @binding(0)` for renderer-owned lighting/environment settings
+  - `@group(3) @binding(0..3)` for environment texture, environment sampler, BRDF LUT texture, and
+    BRDF LUT sampler
 - Built-in deferred textured unlit shading uses the same `@group(1)` base-color texture/sampler
   contract during G-buffer writes.
 - Built-in node picking reserves `@group(0) @binding(0)` for a uniform containing the evaluated node
@@ -146,10 +154,11 @@ The initial renderer uses a lightweight pass graph:
   - `w`: resolved double-sided flag
 - Custom WGSL programs that need sampled textures should declare matching texture/sampler bindings
   plus the texture semantic they expect from `Material.textures`.
-- The current renderer shape follows the proposed custom WGSL alpha-policy contract in
-  [`../adr/0011-custom-wgsl-alpha-policy-binding.md`](../adr/0011-custom-wgsl-alpha-policy-binding.md),
-  which remains in proposal status until reviewed; hybrid rendering still routes non-opaque custom
-  WGSL materials through the forward fallback instead of deferred G-buffer execution.
+- The current renderer shape follows the accepted custom WGSL alpha-policy contract in
+  [`../adr/0011-custom-wgsl-alpha-policy-binding.md`](../adr/0011-custom-wgsl-alpha-policy-binding.md).
+- The current template system also assembles WGSL binding declarations from the same binding-spec
+  data used to derive explicit forward material pipeline layouts, reducing drift between shader
+  source and bind-group creation.
 - Capability preflight validates declared texture semantics, mesh UV requirements, and texture
   residency before the renderer starts encoding bind groups.
 
@@ -168,6 +177,6 @@ The initial renderer uses a lightweight pass graph:
 - The current pathtraced renderer slice supports static triangle-mesh scenes with BVHs derived from
   mesh geometry, but should still be treated as a renderer-boundary milestone rather than the final
   path-tracing feature set.
-- Custom WGSL materials do not yet receive a first-class shared alpha-policy binding, so uber
-  partitioning currently treats non-opaque custom materials as forward-only.
+- Custom WGSL materials now receive a first-class shared alpha-policy binding when they declare the
+  `alpha-policy` material binding semantic.
 - Renderer-side picking currently targets mesh nodes only; per-triangle picking is still pending.

@@ -14,7 +14,7 @@ The capability model exists to answer two questions early:
 
 Each renderer advertises a `capabilities` object with:
 
-- primitive support states for `mesh`, `sdf`, and `volume`
+- primitive support states for `mesh`
 - scene-light support state for evaluated light nodes
 - the list of built-in material kinds it accepts
 - a support state for custom WGSL shader programs
@@ -23,8 +23,6 @@ The current TypeScript surface is:
 
 - `CapabilityState`: `supported | planned | unsupported`
 - `RendererCapabilities.mesh`
-- `RendererCapabilities.sdf`
-- `RendererCapabilities.volume`
 - `RendererCapabilities.light`
 - `RendererCapabilities.builtInMaterialKinds`
 - `RendererCapabilities.customShaders`
@@ -47,8 +45,6 @@ aligned with the same node/material resolution that render extraction consumes.
 The current preflight rules are:
 
 - mesh nodes require `capabilities.mesh === 'supported'`
-- SDF nodes require `capabilities.sdf === 'supported'`
-- volume nodes require `capabilities.volume === 'supported'`
 - light nodes require `capabilities.light === 'supported'`
 - built-in materials without `shaderId` must have `material.kind` listed in
   `capabilities.builtInMaterialKinds`
@@ -56,8 +52,8 @@ The current preflight rules are:
 - built-in `lit` materials also require at least one directional light plus `NORMAL` mesh data
 
 Renderers may apply narrower execution limits after the top-level capability gate. For example, the
-forward renderer currently advertises SDF support but only encodes sphere and box SDF primitives;
-that shape-specific restriction is reported as a validation issue during the same preflight step.
+pathtraced renderer accepts mesh scenes plus caller-owned renderer extensions, but those extensions
+remain outside the engine-owned Scene IR capability model.
 
 ## Failure Reporting
 
@@ -86,22 +82,18 @@ present. Non-fatal tooling may inspect the issue list directly for UI, tests, or
 The current forward renderer declares:
 
 - `mesh: supported`
-- `sdf: supported`
-- `volume: supported`
 - `light: supported`
 - `builtInMaterialKinds: ['unlit', 'lit']`
 - `customShaders: supported`
 
-This matches the implemented path: mesh draws, directional-light Lambert shading with optional
-base-color textures, plus first SDF and volume raymarch passes are encoded in the forward renderer.
+This matches the implemented path: mesh draws, metallic-roughness forward lit shading with optional
+texture sets, EXR-backed environment lighting, and custom WGSL support.
 
 ### Deferred
 
 The deferred renderer declares:
 
 - `mesh: supported`
-- `sdf: supported`
-- `volume: supported`
 - `light: supported`
 - `builtInMaterialKinds: ['unlit', 'lit']`
 - `customShaders: supported`
@@ -124,16 +116,12 @@ This now matches the implemented minimal deferred path:
   consistently across depth, shadow, and G-buffer passes
 - registered custom WGSL materials may also execute in the G-buffer pass when they provide
   compatible transform bindings, fragment outputs, and declared material bindings
-- SDF sphere/box primitives and resident volumes are composited afterward through the existing
-  raymarch passes, so deferred frames can execute mixed mesh-plus-raymarch scenes
 
 ### Uber
 
 The uber renderer currently declares:
 
 - `mesh: supported`
-- `sdf: supported`
-- `volume: supported`
 - `light: supported`
 - `builtInMaterialKinds: ['unlit', 'lit']`
 - `customShaders: supported`
@@ -145,18 +133,16 @@ combinations are still being designed.
 
 The current pathtraced renderer declares:
 
-- `mesh: unsupported`
-- `sdf: supported`
-- `volume: unsupported`
+- `mesh: supported`
 - `light: supported`
 - `builtInMaterialKinds: []`
 - `customShaders: unsupported`
 
 This matches the current first slice:
 
-- sphere and box SDF nodes can render through a fullscreen pathtraced pass
-- mesh geometry is not yet accelerated for path tracing
-- resident volumes are not yet integrated into this renderer
+- static mesh geometry can render through the triangle-BVH path
+- caller-owned renderer extensions such as pathtraced SDF descriptors can be supplied at render time
+  without becoming part of engine-owned Scene IR
 - custom material shaders are not yet part of the pathtraced binding contract
 
 ## Relationship To Other Specs

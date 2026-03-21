@@ -146,9 +146,9 @@ Issue `#117` provided the first scene-document implementation slice that this ho
   scene updates outward.
 - Issue `#89` now tracks follow-up implementation work around the next runtime-facing update
   contract.
-- The next follow-up after the first reconciler landing is improving the React-runtime JSX surface
-  so the live path can expand beyond the current primitive and convenience-component set without
-  falling back to lower-level `React.createElement()` calls.
+- The React-runtime JSX surface now accepts intrinsic `key` props directly on scene/resource
+  intrinsics, so normal mapped JSX lists no longer need to fall back to lower-level
+  `React.createElement()` calls.
 - [`../../examples/browser_react_authoring/README.md`](../../examples/browser_react_authoring/README.md)
   shows the reference browser flow: author a tree with `@rieul3d/react` TSX, commit it through
   `createSceneRoot()`, derive an update plan plus summary from that commit, drop targeted residency

@@ -20,7 +20,7 @@ Blender interoperability is `glTF-first`. The primary interchange path is:
 - The current glTF path ingests JSON scenes, GLB containers, data-URI buffers, bufferViews,
   accessors, images, textures, materials, meshes, nodes, and animations into Scene IR.
 - Runtime support behind the importer includes mesh, texture, material, forward rendering, headless
-  snapshotting, and first volume residency paths.
+  snapshotting, and real imported-asset demo coverage such as Damaged Helmet.
 - External buffer and image URIs are supported when callers provide the referenced bytes through
   `importGltfFromJson(..., { baseUri, resources })`.
 - `fetchGltfExternalResources` and `readDenoGltfExternalResources` provide supported helper paths
@@ -34,8 +34,11 @@ Blender interoperability is `glTF-first`. The primary interchange path is:
   inspect or cache resource fetch plans themselves.
 - `importGltfFromGlb` parses glTF 2.0 GLB containers and uses the embedded BIN chunk for buffer
   data.
-- External image URIs are normalized against `baseUri` and preserved on emitted `SceneIr.assets`
-  entries so runtime-side asset loading can still occur later.
+- The importer now preserves texture semantic and color-space intent per material usage instead of
+  treating every imported image as a base-color sRGB texture.
+- `inlineExternalAssets: true` can bake caller-provided external image resources directly into scene
+  resource sources, which is useful for self-contained scene snapshots in renderer and React
+  workflows.
 
 ## Helper Usage
 

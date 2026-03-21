@@ -491,8 +491,8 @@ These decisions directly affect the remaining work and are not settled yet.
        to escape polygon clips
   - Validation: `packages/drawing/tests/drawing_graphite_dawn_test.ts`
 - `render/TessellateStrokesRenderStep.cpp`
-  - Current local change: zero-length stroke contours with `round` or `square` caps now emit
-    visible cap geometry instead of being discarded
+  - Current local change: zero-length stroke contours with `round` or `square` caps now emit visible
+    cap geometry instead of being discarded
   - Remaining gap:
     1. align full deferred contour/cap handling with Graphite stroke patch writer
     2. align cusp/circle emission and transform-aware stroke tessellation counts

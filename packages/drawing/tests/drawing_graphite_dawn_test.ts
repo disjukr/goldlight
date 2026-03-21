@@ -258,9 +258,39 @@ Deno.test('drawing recorder records transform and clip state into draw commands'
     throw new Error('expected rect clip');
   }
   assertEquals(first.clips[0].rect, createRect(20, 30, 40, 50));
+  assertEquals(first.clips[0].op, 'intersect');
   assertEquals(second.transform, identityMatrix2D);
   assertEquals(second.clips.length, 0);
   assertEquals(first.path.verbs[0], { kind: 'moveTo', to: [1, 1] });
+});
+
+Deno.test('drawing recorder stores difference clip operations in recorded commands', () => {
+  const mock = createMockGpuContext();
+  const recorder = createDrawingRecorder(
+    createDawnSharedContext(createDawnBackendContext(mock.context)),
+  );
+
+  clipDrawingRecorderRect(recorder, createRect(0, 0, 120, 120), 'intersect');
+  clipDrawingRecorderRect(recorder, createRect(0, 0, 24, 120), 'difference');
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [0, 0] },
+      { kind: 'lineTo', to: [120, 0] },
+      { kind: 'lineTo', to: [120, 120] },
+      { kind: 'lineTo', to: [0, 120] },
+      { kind: 'close' },
+    ),
+    { style: 'fill' },
+  );
+
+  const recording = finishDrawingRecorder(recorder);
+  const command = recording.commands[0];
+  assertEquals(command?.kind, 'drawPath');
+  if (command?.kind !== 'drawPath') {
+    throw new Error('expected drawPath');
+  }
+  assertEquals(command.clips.map((clip) => clip.op), ['intersect', 'difference']);
 });
 
 Deno.test('drawing recorder supports explicit transform concatenation', () => {
@@ -549,6 +579,70 @@ Deno.test('drawing prepared recording accumulates clip stack intersections', () 
 
   const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
   assertEquals(prepared.passes[0]?.steps[0]?.clipRect, createRect(32, 32, 48, 40));
+});
+
+Deno.test('drawing prepared recording subtracts convex difference clips from geometry and scissor', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  clipDrawingRecorderRect(recorder, createRect(0, 0, 120, 120));
+  clipDrawingRecorderRect(recorder, createRect(0, 0, 24, 120), 'difference');
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [0, 0] },
+      { kind: 'lineTo', to: [120, 0] },
+      { kind: 'lineTo', to: [120, 120] },
+      { kind: 'lineTo', to: [0, 120] },
+      { kind: 'close' },
+    ),
+    { style: 'fill' },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const draw = prepared.passes[0]?.steps[0]?.draw;
+
+  assertEquals(prepared.passes[0]?.steps[0]?.clipRect, createRect(24, 0, 96, 120));
+  assertEquals(draw?.kind, 'pathFill');
+  if (draw?.kind !== 'pathFill') {
+    throw new Error('expected pathFill');
+  }
+  assertEquals(draw.triangles.every((point) => point[0] >= 24 - 1e-5), true);
+  assertEquals(draw.fringeVertices?.every((vertex) => vertex.point[0] >= 24 - 1e-5), true);
+});
+
+Deno.test('drawing prepared recording rejects non-convex difference clip paths for now', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  clipDrawingRecorderPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [16, 16] },
+      { kind: 'lineTo', to: [64, 64] },
+      { kind: 'lineTo', to: [16, 64] },
+      { kind: 'lineTo', to: [64, 16] },
+      { kind: 'close' },
+    ),
+    'difference',
+  );
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [0, 0] },
+      { kind: 'lineTo', to: [96, 0] },
+      { kind: 'lineTo', to: [96, 96] },
+      { kind: 'lineTo', to: [0, 96] },
+      { kind: 'close' },
+    ),
+    { style: 'fill' },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  assertEquals(prepared.passes[0]?.steps.length, 0);
+  assertEquals(prepared.unsupportedCommands.length, 1);
 });
 
 Deno.test('drawing prepared recording preserves multiple complex clip paths in stencil order', () => {
@@ -902,7 +996,7 @@ Deno.test('dawn command buffer encodes fill draws with stencil and cover pipelin
   );
 });
 
-Deno.test('dawn command buffer clips via clip path bounds fallback', () => {
+Deno.test('dawn command buffer clips convex clip paths directly before replay', () => {
   const mock = createMockGpuContext();
   const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
   const recorder = createDrawingRecorder(sharedContext);
@@ -932,7 +1026,31 @@ Deno.test('dawn command buffer clips via clip path bounds fallback', () => {
 
   encodeDawnCommandBuffer(sharedContext, finishDrawingRecorder(recorder), binding);
   assertEquals(mock.created.scissorCalls[0], [24, 30, 48, 48]);
-  assertEquals(mock.created.drawCalls.length, 2);
+  assertEquals(mock.created.drawCalls.length, 1);
+});
+
+Deno.test('dawn command buffer tightens scissor after exact difference subtraction', () => {
+  const mock = createMockGpuContext();
+  const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
+  const recorder = createDrawingRecorder(sharedContext);
+  const binding = createOffscreenBinding(mock.context);
+
+  clipDrawingRecorderRect(recorder, createRect(0, 0, 120, 120));
+  clipDrawingRecorderRect(recorder, createRect(0, 0, 24, 120), 'difference');
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [0, 0] },
+      { kind: 'lineTo', to: [120, 0] },
+      { kind: 'lineTo', to: [120, 120] },
+      { kind: 'lineTo', to: [0, 120] },
+      { kind: 'close' },
+    ),
+    { style: 'fill' },
+  );
+
+  encodeDawnCommandBuffer(sharedContext, finishDrawingRecorder(recorder), binding);
+  assertEquals(mock.created.scissorCalls[0], [24, 0, 96, 120]);
 });
 
 Deno.test('dawn command buffer intersects multiple clip paths through stencil references', () => {

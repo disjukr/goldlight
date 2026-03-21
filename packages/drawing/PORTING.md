@@ -44,14 +44,16 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Thin buffer/texture/sampler allocation layer exists.
 - Recording
   - Status: `partial`
-  - Abstract commands, clip-stack state, and immutable recordings exist.
+  - Abstract commands, clip-stack state with first intersect/difference op tracking, and immutable
+    recordings exist.
 - Capability probing
   - Status: `started`
   - Initial caps and limits layer exists.
 - GPU encoding
   - Status: `partial`
   - Clear, direct fill replay, patch-instance fill/stroke replay, clip-stencil replay for complex
-    clip paths, and first stroke command buffer translation exist.
+    intersect clip paths, convex clip-geometry replay for intersect/difference stacks, and first
+    stroke command buffer translation exist.
 - Queue submission
   - Status: `started`
   - Queue manager can submit encoded command buffers, track in-flight work counts, and now keep
@@ -59,7 +61,8 @@ stack that fits this repository's TypeScript and WebGPU architecture.
 - Path rendering
   - Status: `partial`
   - Flattened contours can be pushed through direct tessellated fills, convex clip-stack clipping,
-    self-intersection fallback, adaptive curve flattening, patch preparation, and stroke expansion.
+    convex difference subtraction, clipped AA fringe replay, self-intersection fallback, adaptive
+    curve flattening, patch preparation, and stroke expansion.
 - Paint system
   - Status: `started`
   - Minimal fill/stroke paint exists and first execution path is active.
@@ -89,7 +92,7 @@ stack that fits this repository's TypeScript and WebGPU architecture.
 - `Recorder` -> `src/recorder.ts`
   - Status: `started`
   - What exists: abstract command collection plus save/restore, per-draw transform, and clip-stack
-    state
+    state with first clip-op recording
   - Missing: ordering rules and flush rules
 - `DawnCaps` -> `src/caps.ts`
   - Status: `started`
@@ -98,7 +101,8 @@ stack that fits this repository's TypeScript and WebGPU architecture.
 - `DawnCommandBuffer` -> `src/command_buffer.ts`
   - Status: `partial`
   - What exists: clear plus direct fill replay, first patch-instance fill/stroke replay, convex-clip
-    scissor replay, and stencil replay for complex clip paths
+    geometry/scissor replay for intersect and exact difference cases, and stencil replay for a
+    complex intersect clip path
   - Missing: broader draw path and draw shape encoding, richer pass replay
 - `DrawPass` -> `src/draw_pass.ts`
   - Status: `partial`
@@ -158,8 +162,8 @@ stack that fits this repository's TypeScript and WebGPU architecture.
 - `src/path_renderer.ts`
   - Status: `partial`
   - Role: adaptive curve flattening, conic/arc flattening, cusp splitting, patch preparation,
-    triangulation, scanline fallback, convex clip-stack clipping, clip preparation, and stroke
-    expansion strategy
+    triangulation, scanline fallback, convex clip-stack intersect/difference clipping, clipped AA
+    fringe preparation, clip preparation, and stroke expansion strategy
 - `src/renderer_provider.ts`
   - Status: `started`
   - Role: first renderer selection layer for middle-out fan, tessellated wedges, tessellated curves,
@@ -231,12 +235,12 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
   - Missing: broader primitive specialization
 - Clip path
   - Status: `started`
-  - Current state: clip stack is recorded explicitly, rect clips and convex path clips are
-    intersected through prepared geometry including AA fringe coverage vertices, and nested complex
-    path clips now accumulate through ordered stencil references instead of collapsing to one
-    payload
-  - Missing: inverse clip ops, clip-atlas-style masking, and more of Skia's clip-shape collapsing
-    rules
+  - Current state: clip stack is recorded explicitly, rect and convex path clips carry
+    intersect/difference ops through recording, convex clips are applied directly to fill/stroke
+    geometry and AA fringe data, and nested complex intersect clip paths now accumulate through
+    ordered stencil references instead of collapsing to one payload
+  - Missing: arbitrary non-convex difference clips, inverse clip semantics, clip-atlas-style
+    masking, and more of Skia's clip-shape collapsing rules
 - Transform stack
   - Status: `started`
   - Current state: recorder save/restore and per-draw transform state exist without mutating stored
@@ -380,7 +384,7 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
 - Render pass setup
   - Status: `started`
   - Recording can be partitioned into prepared draw passes, and draw replay now covers direct
-    fill/stroke plus accumulated clip stencil replay when needed
+    fill/stroke plus convex clip replay and accumulated clip stencil replay when needed
 - Pipeline binding
   - Status: `started`
   - Basic fill, clip, and stroke pipelines exist for first path draws and are reused across command
@@ -407,8 +411,9 @@ These decisions directly affect the remaining work and are not settled yet.
     and hairline alpha scaling
 - Clip implementation
   - Status: `started`
-  - First implementation uses recorded clip stacks, convex geometry clipping, scissor reduction, and
-    stencil masking for a remaining complex clip path
+  - First implementation uses recorded clip stacks, convex intersect/difference geometry clipping,
+    clipped AA fringe replay, exact scissor reduction when representable, and stencil masking for a
+    remaining complex intersect clip path
 - Atlas/text approach
   - Status: `pending`
   - Deferred until shapes are rendering
@@ -451,6 +456,8 @@ These decisions directly affect the remaining work and are not settled yet.
   fixed-count WGSL subdivision instead of Skia-style Wang's-formula tessellation
 - evenodd/nonzero fills now rely on prepared geometry plus scanline fallback rather than Skia-style
   path renderers, and coverage is still not Skia-grade
+- clip ops now carry intersect/difference for convex clips, but non-convex difference and inverse
+  semantics still diverge from Skia ClipStack
 - no SVG parser or SVG-to-`Path2D` ingestion path yet
 - no retained scene model
 - no bind group cache
@@ -516,21 +523,25 @@ These decisions directly affect the remaining work and are not settled yet.
 
 ## Recommended Next Steps
 
-1. Improve transform and paint replay
-   - Move per-draw transform from CPU-prepared geometry toward uniform-driven replay
-   - Start separating paint data from vertex payloads and bind groups
-2. Harden the first fill path
-   - Improve scanline fallback quality and unify it more cleanly with stencil rendering
-   - Add more winding and nested clip-path tests
-3. Deepen `src/caps.ts`
+1. Deepen `src/caps.ts`
    - Replace static format assumptions with richer backend policy
    - Add feature-gated fallbacks
-4. Add pipeline/resource caching
+2. Deepen clip-stack parity
+   - Add inverse and non-convex difference semantics comparable to Skia ClipStack
+   - Extend the current stacked complex-intersect stencil path toward Graphite-style clip
+     simplification and atlas-backed masking
+3. Harden the first fill path
+   - Improve scanline fallback quality and unify it more cleanly with stencil rendering
+   - Add more winding and nested clip-path tests
+4. Improve transform and paint replay
+   - Move per-draw transform from CPU-prepared geometry toward uniform-driven replay
+   - Start separating paint data from vertex payloads and bind groups
+5. Add pipeline/resource caching
    - Extend reuse toward bind groups, transient buffers, and richer pipeline keys
-5. Add `src/queue_manager.ts`
+6. Add `src/queue_manager.ts`
    - Own submit and unfinished-work tracking
    - Integrate backend tick handling
-6. Expand `Path2D`
+7. Expand `Path2D`
    - Add arcs/conics
    - Add more utility helpers
 

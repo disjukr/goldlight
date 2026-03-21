@@ -1,6 +1,7 @@
 import { type PathFillRule2D, type Point2D, type Rect, transformPoint2D } from '@rieul3d/geometry';
 import type {
   DrawingClip,
+  DrawingClipOp,
   DrawingClipRect,
   DrawingPaint,
   DrawingPath2D,
@@ -672,14 +673,57 @@ const interpolatePreparedVertex = (
   };
 };
 
-const clipColoredTriangleAgainstEdge = (
+const splitPolygonAgainstEdge = (
+  polygon: readonly Point2D[],
+  clipStart: Point2D,
+  clipEnd: Point2D,
+): Readonly<{
+  inside: readonly Point2D[];
+  outside: readonly Point2D[];
+}> => {
+  if (polygon.length === 0) {
+    return { inside: [], outside: [] };
+  }
+
+  const inside: Point2D[] = [];
+  const outside: Point2D[] = [];
+  const isInside = (point: Point2D): boolean => cross(clipStart, clipEnd, point) >= -epsilon;
+
+  let previous = polygon[polygon.length - 1]!;
+  let previousInside = isInside(previous);
+  for (const current of polygon) {
+    const currentInside = isInside(current);
+    if (currentInside) {
+      if (!previousInside) {
+        const intersection = lineSegmentIntersection(previous, current, clipStart, clipEnd);
+        inside.push(intersection);
+        outside.push(intersection);
+      }
+      inside.push(current);
+    } else {
+      if (previousInside) {
+        const intersection = lineSegmentIntersection(previous, current, clipStart, clipEnd);
+        inside.push(intersection);
+        outside.push(intersection);
+      }
+      outside.push(current);
+    }
+    previous = current;
+    previousInside = currentInside;
+  }
+
+  return {
+    inside: Object.freeze(inside),
+    outside: Object.freeze(outside),
+  };
+};
+
+const clipColoredPolygonAgainstEdge = (
   polygon: readonly DrawingPreparedVertex[],
   clipStart: Point2D,
   clipEnd: Point2D,
 ): readonly DrawingPreparedVertex[] => {
-  if (polygon.length === 0) {
-    return polygon;
-  }
+  if (polygon.length === 0) return polygon;
   const output: DrawingPreparedVertex[] = [];
   const isInside = (vertex: DrawingPreparedVertex): boolean =>
     cross(clipStart, clipEnd, vertex.point) >= -epsilon;
@@ -703,6 +747,96 @@ const clipColoredTriangleAgainstEdge = (
   return Object.freeze(output);
 };
 
+const splitColoredPolygonAgainstEdge = (
+  polygon: readonly DrawingPreparedVertex[],
+  clipStart: Point2D,
+  clipEnd: Point2D,
+): Readonly<{
+  inside: readonly DrawingPreparedVertex[];
+  outside: readonly DrawingPreparedVertex[];
+}> => {
+  if (polygon.length === 0) {
+    return { inside: [], outside: [] };
+  }
+
+  const inside: DrawingPreparedVertex[] = [];
+  const outside: DrawingPreparedVertex[] = [];
+  const isInside = (vertex: DrawingPreparedVertex): boolean =>
+    cross(clipStart, clipEnd, vertex.point) >= -epsilon;
+
+  let previous = polygon[polygon.length - 1]!;
+  let previousInside = isInside(previous);
+  for (const current of polygon) {
+    const currentInside = isInside(current);
+    if (currentInside !== previousInside) {
+      const intersection = interpolatePreparedVertex(previous, current, clipStart, clipEnd);
+      inside.push(intersection);
+      outside.push(intersection);
+    }
+    if (currentInside) {
+      inside.push(current);
+    } else {
+      outside.push(current);
+    }
+    previous = current;
+    previousInside = currentInside;
+  }
+
+  return {
+    inside: Object.freeze(inside),
+    outside: Object.freeze(outside),
+  };
+};
+
+const triangulatePointPolygon = (polygon: readonly Point2D[]): readonly Point2D[] => {
+  const triangles: Point2D[] = [];
+  for (let index = 1; index + 1 < polygon.length; index += 1) {
+    triangles.push(polygon[0]!, polygon[index]!, polygon[index + 1]!);
+  }
+  return Object.freeze(triangles);
+};
+
+const triangulateColoredPolygon = (
+  polygon: readonly DrawingPreparedVertex[],
+): readonly DrawingPreparedVertex[] => {
+  const triangles: DrawingPreparedVertex[] = [];
+  for (let index = 1; index + 1 < polygon.length; index += 1) {
+    triangles.push(polygon[0]!, polygon[index]!, polygon[index + 1]!);
+  }
+  return Object.freeze(triangles);
+};
+
+const subtractTrianglesByConvexPolygon = (
+  triangles: readonly Point2D[],
+  clipPolygon: readonly Point2D[],
+): readonly Point2D[] => {
+  const clip = ensureCounterClockwise(clipPolygon);
+  const difference: Point2D[] = [];
+
+  for (let index = 0; index + 2 < triangles.length; index += 3) {
+    let pending: Point2D[][] = [[triangles[index]!, triangles[index + 1]!, triangles[index + 2]!]];
+    for (let clipIndex = 0; clipIndex < clip.length && pending.length > 0; clipIndex += 1) {
+      const nextPending: Point2D[][] = [];
+      for (const polygon of pending) {
+        const split = splitPolygonAgainstEdge(
+          polygon,
+          clip[clipIndex]!,
+          clip[(clipIndex + 1) % clip.length]!,
+        );
+        if (split.outside.length >= 3) {
+          difference.push(...triangulatePointPolygon(split.outside));
+        }
+        if (split.inside.length >= 3) {
+          nextPending.push([...split.inside]);
+        }
+      }
+      pending = nextPending;
+    }
+  }
+
+  return Object.freeze(difference);
+};
+
 const clipColoredTrianglesAgainstConvexPolygon = (
   triangles: readonly DrawingPreparedVertex[],
   clipPolygon: readonly Point2D[],
@@ -717,7 +851,7 @@ const clipColoredTrianglesAgainstConvexPolygon = (
       triangles[index + 2]!,
     ];
     for (let clipIndex = 0; clipIndex < clip.length; clipIndex += 1) {
-      polygon = clipColoredTriangleAgainstEdge(
+      polygon = clipColoredPolygonAgainstEdge(
         polygon,
         clip[clipIndex]!,
         clip[(clipIndex + 1) % clip.length]!,
@@ -727,15 +861,47 @@ const clipColoredTrianglesAgainstConvexPolygon = (
       }
     }
     if (polygon.length >= 3) {
-      for (let polygonIndex = 1; polygonIndex + 1 < polygon.length; polygonIndex += 1) {
-        clipped.push(polygon[0]!, polygon[polygonIndex]!, polygon[polygonIndex + 1]!);
-      }
+      clipped.push(...triangulateColoredPolygon(polygon));
     }
   }
 
   return Object.freeze(clipped);
 };
 
+const subtractColoredTrianglesByConvexPolygon = (
+  triangles: readonly DrawingPreparedVertex[],
+  clipPolygon: readonly Point2D[],
+): readonly DrawingPreparedVertex[] => {
+  const clip = ensureCounterClockwise(clipPolygon);
+  const difference: DrawingPreparedVertex[] = [];
+
+  for (let index = 0; index + 2 < triangles.length; index += 3) {
+    let pending: DrawingPreparedVertex[][] = [[
+      triangles[index]!,
+      triangles[index + 1]!,
+      triangles[index + 2]!,
+    ]];
+    for (let clipIndex = 0; clipIndex < clip.length && pending.length > 0; clipIndex += 1) {
+      const nextPending: DrawingPreparedVertex[][] = [];
+      for (const polygon of pending) {
+        const split = splitColoredPolygonAgainstEdge(
+          polygon,
+          clip[clipIndex]!,
+          clip[(clipIndex + 1) % clip.length]!,
+        );
+        if (split.outside.length >= 3) {
+          difference.push(...triangulateColoredPolygon(split.outside));
+        }
+        if (split.inside.length >= 3) {
+          nextPending.push([...split.inside]);
+        }
+      }
+      pending = nextPending;
+    }
+  }
+
+  return Object.freeze(difference);
+};
 type ScanEdge = Readonly<{
   x0: number;
   y0: number;
@@ -1796,8 +1962,13 @@ const applyDashPattern = (
 
 type PreparedClipStack = Readonly<{
   bounds?: Rect;
-  convexPolygons: readonly (readonly Point2D[])[];
+  convexClips: readonly Readonly<{
+    polygon: readonly Point2D[];
+    bounds: Rect;
+    op: DrawingClipOp;
+  }>[];
   stencilClips: readonly DrawingPreparedClip[];
+  unsupportedReason?: string;
 }>;
 
 const createRectClipPolygon = (
@@ -1816,18 +1987,95 @@ const createRectClipPolygon = (
   ]);
 };
 
+const rectsOverlap = (left: Rect, right: Rect): boolean =>
+  left.origin[0] < right.origin[0] + right.size.width &&
+  left.origin[0] + left.size.width > right.origin[0] &&
+  left.origin[1] < right.origin[1] + right.size.height &&
+  left.origin[1] + left.size.height > right.origin[1];
+
+const subtractRectBounds = (bounds: Rect | undefined, clipBounds: Rect): Rect | undefined => {
+  if (!bounds || !rectsOverlap(bounds, clipBounds)) {
+    return bounds;
+  }
+
+  const left = bounds.origin[0];
+  const top = bounds.origin[1];
+  const right = left + bounds.size.width;
+  const bottom = top + bounds.size.height;
+  const clipLeft = Math.max(left, clipBounds.origin[0]);
+  const clipTop = Math.max(top, clipBounds.origin[1]);
+  const clipRight = Math.min(right, clipBounds.origin[0] + clipBounds.size.width);
+  const clipBottom = Math.min(bottom, clipBounds.origin[1] + clipBounds.size.height);
+
+  if (clipLeft <= left && clipRight >= right && clipTop <= top && clipBottom >= bottom) {
+    return {
+      origin: [left, top],
+      size: { width: 0, height: 0 },
+    };
+  }
+
+  const clipsFullHeight = clipTop <= top + epsilon && clipBottom >= bottom - epsilon;
+  if (clipsFullHeight) {
+    if (Math.abs(clipLeft - left) <= epsilon) {
+      return {
+        origin: [clipRight, top],
+        size: { width: Math.max(0, right - clipRight), height: bounds.size.height },
+      };
+    }
+    if (Math.abs(clipRight - right) <= epsilon) {
+      return {
+        origin: [left, top],
+        size: { width: Math.max(0, clipLeft - left), height: bounds.size.height },
+      };
+    }
+  }
+
+  const clipsFullWidth = clipLeft <= left + epsilon && clipRight >= right - epsilon;
+  if (clipsFullWidth) {
+    if (Math.abs(clipTop - top) <= epsilon) {
+      return {
+        origin: [left, clipBottom],
+        size: { width: bounds.size.width, height: Math.max(0, bottom - clipBottom) },
+      };
+    }
+    if (Math.abs(clipBottom - bottom) <= epsilon) {
+      return {
+        origin: [left, top],
+        size: { width: bounds.size.width, height: Math.max(0, clipTop - top) },
+      };
+    }
+  }
+
+  return bounds;
+};
+
+const updateConservativeClipBounds = (
+  bounds: Rect | undefined,
+  clipBounds: Rect,
+  op: DrawingClipOp,
+): Rect | undefined =>
+  op === 'intersect' ? intersectBounds(bounds, clipBounds) : subtractRectBounds(bounds, clipBounds);
+
 const prepareClipStack = (clips: readonly DrawingClip[]): PreparedClipStack | undefined => {
   if (clips.length === 0) return undefined;
 
-  const convexPolygons: Point2D[][] = [];
+  const convexClips: Array<
+    Readonly<{
+      polygon: readonly Point2D[];
+      bounds: Rect;
+      op: DrawingClipOp;
+    }>
+  > = [];
   let bounds: Rect | undefined;
   const stencilClips: DrawingPreparedClip[] = [];
+  let unsupportedReason: string | undefined;
 
   for (const clip of clips) {
     if (clip.kind === 'rect') {
       const polygon = createRectClipPolygon(clip.rect, clip.transform);
-      convexPolygons.push([...polygon]);
-      bounds = intersectBounds(bounds, computeBounds(polygon));
+      const clipBounds = computeBounds(polygon);
+      convexClips.push({ polygon: [...polygon], bounds: clipBounds, op: clip.op });
+      bounds = updateConservativeClipBounds(bounds, clipBounds, clip.op);
       continue;
     }
 
@@ -1837,17 +2085,28 @@ const prepareClipStack = (clips: readonly DrawingClip[]): PreparedClipStack | un
     }
 
     const clipBounds = unionBounds(subpaths.map((subpath) => computeBounds(subpath.points)));
-    bounds = intersectBounds(bounds, clipBounds);
 
     if (
       subpaths.length === 1 &&
       subpaths[0]!.closed &&
       isConvexPolygon(subpaths[0]!.points)
     ) {
-      convexPolygons.push([...subpaths[0]!.points]);
+      convexClips.push({
+        polygon: [...subpaths[0]!.points],
+        bounds: clipBounds,
+        op: clip.op,
+      });
+      bounds = updateConservativeClipBounds(bounds, clipBounds, clip.op);
       continue;
     }
 
+    const triangles = prepareFillTriangles(subpaths, clip.path.fillRule);
+    if (clip.op === 'difference') {
+      unsupportedReason = 'difference clip paths currently require convex geometry';
+      break;
+    }
+
+    bounds = updateConservativeClipBounds(bounds, clipBounds, clip.op);
     const triangles = prepareFillTriangles(subpaths, clip.path.fillRule);
     if (triangles && triangles.length > 0) {
       stencilClips.push({
@@ -1859,8 +2118,13 @@ const prepareClipStack = (clips: readonly DrawingClip[]): PreparedClipStack | un
 
   return {
     bounds,
-    convexPolygons: Object.freeze(convexPolygons.map((polygon) => Object.freeze(polygon))),
+    convexClips: Object.freeze(convexClips.map((clip) => ({
+      polygon: Object.freeze(clip.polygon),
+      bounds: clip.bounds,
+      op: clip.op,
+    }))),
     stencilClips: Object.freeze(stencilClips),
+    unsupportedReason,
   };
 };
 
@@ -1905,13 +2169,15 @@ const applyConvexClipStack = (
   triangles: readonly Point2D[],
   clipStack: PreparedClipStack | undefined,
 ): readonly Point2D[] => {
-  if (!clipStack || clipStack.convexPolygons.length === 0) {
+  if (!clipStack || clipStack.convexClips.length === 0) {
     return triangles;
   }
 
   let clipped = triangles;
-  for (const polygon of clipStack.convexPolygons) {
-    clipped = clipTrianglesAgainstConvexPolygon(clipped, polygon);
+  for (const clip of clipStack.convexClips) {
+    clipped = clip.op === 'intersect'
+      ? clipTrianglesAgainstConvexPolygon(clipped, clip.polygon)
+      : subtractTrianglesByConvexPolygon(clipped, clip.polygon);
     if (clipped.length === 0) {
       break;
     }
@@ -1923,15 +2189,17 @@ const applyConvexClipStackToColoredVertices = (
   triangles: readonly DrawingPreparedVertex[] | undefined,
   clipStack: PreparedClipStack | undefined,
 ): readonly DrawingPreparedVertex[] | undefined => {
-  if (!triangles || !clipStack || clipStack.convexPolygons.length === 0) {
+  if (!triangles || !clipStack || clipStack.convexClips.length === 0) {
     return triangles;
   }
 
   let clipped = triangles;
-  for (const polygon of clipStack.convexPolygons) {
-    clipped = clipColoredTrianglesAgainstConvexPolygon(clipped, polygon);
+  for (const clip of clipStack.convexClips) {
+    clipped = clip.op === 'intersect'
+      ? clipColoredTrianglesAgainstConvexPolygon(clipped, clip.polygon)
+      : subtractColoredTrianglesByConvexPolygon(clipped, clip.polygon);
     if (clipped.length === 0) {
-      break;
+      return undefined;
     }
   }
   return clipped;
@@ -1944,7 +2212,10 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
   }
 
   const preparedClipStack = prepareClipStack(command.clips);
-  const requiresDirectGeometryClip = Boolean(preparedClipStack?.convexPolygons.length);
+  if (preparedClipStack?.unsupportedReason) {
+    return { supported: false, reason: preparedClipStack.unsupportedReason };
+  }
+  const requiresDirectGeometryClip = Boolean(preparedClipStack?.convexClips.length);
   const style = command.paint.style ?? 'fill';
   if (style === 'fill') {
     const patches = preparePatches(command.path, command.transform);

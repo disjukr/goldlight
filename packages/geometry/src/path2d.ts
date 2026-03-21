@@ -39,7 +39,16 @@ export type PathVerb2D =
   | Readonly<{ kind: 'moveTo'; to: Point2D }>
   | Readonly<{ kind: 'lineTo'; to: Point2D }>
   | Readonly<{ kind: 'quadTo'; control: Point2D; to: Point2D }>
+  | Readonly<{ kind: 'conicTo'; control: Point2D; to: Point2D; weight: number }>
   | Readonly<{ kind: 'cubicTo'; control1: Point2D; control2: Point2D; to: Point2D }>
+  | Readonly<{
+    kind: 'arcTo';
+    center: Point2D;
+    radius: number;
+    startAngle: number;
+    endAngle: number;
+    counterClockwise?: boolean;
+  }>
   | Readonly<{ kind: 'close' }>;
 
 export type PathFillRule2D = 'nonzero' | 'evenodd';
@@ -125,6 +134,12 @@ export const transformPoint2D = (
   (matrix[1] * point[0]) + (matrix[3] * point[1]) + matrix[5],
 ];
 
+const approximateUniformScale = (matrix: Matrix2D): number => {
+  const sx = Math.hypot(matrix[0], matrix[1]);
+  const sy = Math.hypot(matrix[2], matrix[3]);
+  return (sx + sy) / 2;
+};
+
 export const withPath2DFillRule = (
   path: Path2D,
   fillRule: PathFillRule2D,
@@ -151,12 +166,28 @@ export const transformPath2D = (
           control: transformPoint2D(verb.control, matrix),
           to: transformPoint2D(verb.to, matrix),
         };
+      case 'conicTo':
+        return {
+          kind: 'conicTo',
+          control: transformPoint2D(verb.control, matrix),
+          to: transformPoint2D(verb.to, matrix),
+          weight: verb.weight,
+        };
       case 'cubicTo':
         return {
           kind: 'cubicTo',
           control1: transformPoint2D(verb.control1, matrix),
           control2: transformPoint2D(verb.control2, matrix),
           to: transformPoint2D(verb.to, matrix),
+        };
+      case 'arcTo':
+        return {
+          kind: 'arcTo',
+          center: transformPoint2D(verb.center, matrix),
+          radius: verb.radius * approximateUniformScale(matrix),
+          startAngle: verb.startAngle,
+          endAngle: verb.endAngle,
+          counterClockwise: verb.counterClockwise,
         };
       case 'close':
         return verb;

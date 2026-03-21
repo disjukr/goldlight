@@ -32,7 +32,7 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - `drawing` package exists and is wired into the workspace.
 - Shared 2D geometry model
   - Status: `started`
-  - `Path2D`, fill rules, cubic verbs, and basic transform helpers exist in `geometry`.
+  - `Path2D`, fill rules, cubic/conic/arc verbs, and basic transform helpers exist in `geometry`.
 - Backend context
   - Status: `started`
   - Dawn/WebGPU device lifecycle wrapper exists.
@@ -56,7 +56,7 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Queue manager can submit encoded command buffers and track in-flight work counts.
 - Path rendering
   - Status: `partial`
-  - Flattened contours can be pushed through direct tessellated fills, convex clip-stack clipping, self-intersection fallback, adaptive curve flattening, and stroke expansion.
+  - Flattened contours can be pushed through direct tessellated fills, convex clip-stack clipping, self-intersection fallback, adaptive curve flattening, patch preparation, and stroke expansion.
 - Paint system
   - Status: `started`
   - Minimal fill/stroke paint exists and first execution path is active.
@@ -96,7 +96,7 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Missing: broader draw path and draw shape encoding, richer pass replay
 - `DrawPass` -> `src/draw_pass.ts`
   - Status: `partial`
-  - What exists: prepared pass partitioning plus pipeline-key, bounds, stencil, and clip-stack metadata for draw steps
+  - What exists: prepared pass partitioning plus pipeline-key, bounds, stencil, clip-stack metadata, and patch-carrying draw steps
   - Missing: pipeline/state/resource preparation comparable to Skia DrawPass
 - `DawnQueueManager` -> `src/queue_manager.ts`
   - Status: `started`
@@ -150,7 +150,7 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Role: immutable recorded command package
 - `src/path_renderer.ts`
   - Status: `partial`
-  - Role: adaptive curve flattening, triangulation, scanline fallback, convex clip-stack clipping, clip preparation, and stroke expansion strategy
+  - Role: adaptive curve flattening, conic/arc flattening, patch preparation, triangulation, scanline fallback, convex clip-stack clipping, clip preparation, and stroke expansion strategy
 - `tests/`
   - Status: `started`
   - Role: package-local tests for drawing, including snapshot regression
@@ -184,13 +184,13 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
   - General polygon input
 - `Path2D` in `@rieul3d/geometry/src/path2d.ts`
   - Status: `started`
-  - Supports `moveTo`, `lineTo`, `quadTo`, `cubicTo`, `close`, fill rule state, and transform helpers
+  - Supports `moveTo`, `lineTo`, `quadTo`, `conicTo`, `cubicTo`, `arcTo`, `close`, fill rule state, and transform helpers
 - Cubic curves in `@rieul3d/geometry/src/path2d.ts`
   - Status: `started`
   - `cubicTo` exists and is flattened in drawing path preparation
 - Conics/arcs in `@rieul3d/geometry/src/path2d.ts`
-  - Status: `pending`
-  - No arc representation yet
+  - Status: `started`
+  - `conicTo` and `arcTo` are modeled and flattened in drawing path preparation
 - Path fill rules in `@rieul3d/geometry/src/path2d.ts`
   - Status: `started`
   - Fill rule metadata exists, and first stencil-based evenodd/nonzero execution path now exists
@@ -206,7 +206,7 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
   - Missing: better integration with richer draw-pass replay
 - `drawPath`
   - Status: `started`
-  - Current state: recordable, fill uses stencil-and-cover or scanline fallback, and stroke has expanded geometry path
+  - Current state: recordable, fill uses direct tessellation plus scanline fallback, path verbs include conic/arc flattening, and stroke has expanded geometry path
   - Missing: higher-quality rasterization and broader path feature coverage
 - `drawShape`
   - Status: `started`
@@ -336,10 +336,10 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
   - Shape to path conversion exists
 - Fill/stroke expansion
   - Status: `started`
-  - Flattened contours can be emitted for direct fill meshes, convex clip-stack clipping, join/cap-aware stroke geometry, and first AA fringe geometry
+  - Flattened contours can be emitted for direct fill meshes, convex clip-stack clipping, join/cap-aware stroke geometry, first AA fringe geometry, and patch metadata
 - Path tessellation
   - Status: `started`
-  - Adaptive CPU contour flattening exists for line, quadratic, and cubic path segments, with scanline fallback for more complex fill input
+  - Adaptive CPU contour flattening exists for line, quadratic, conic, cubic, and arc path segments, with scanline fallback for more complex fill input
 - Vertex/index generation
   - Status: `started`
   - Vertex generation exists for direct fills, clip-aware fills, complex clip replay, and expanded strokes
@@ -365,7 +365,7 @@ These decisions directly affect the remaining work and are not settled yet.
 
 - First fill strategy
   - Status: `started`
-  - First implementation triangulates simple contours directly and falls back to scanline tessellation for problematic contours
+  - First implementation triangulates simple contours directly, carries curve/wedge patch metadata, and falls back to scanline tessellation for problematic contours
 - First stroke strategy
   - Status: `started`
   - First implementation now includes miter/bevel/round joins, butt/square/round caps, dash slicing, and hairline alpha scaling
@@ -407,6 +407,7 @@ These decisions directly affect the remaining work and are not settled yet.
   Skia-like pipeline/state/resource data
 - no Skia-like draw-list or draw-pass preparation layer yet
 - arcs and advanced curve/path features are still missing
+- patch metadata now exists, but there is still no Skia-style GPU patch tessellation path
 - evenodd/nonzero fills now rely on prepared geometry plus scanline fallback rather than Skia-style path renderers, and coverage is still not Skia-grade
 - no SVG parser or SVG-to-`Path2D` ingestion path yet
 - no retained scene model

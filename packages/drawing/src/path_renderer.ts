@@ -23,10 +23,36 @@ export type DrawingPreparedClip = Readonly<{
   triangles?: readonly Point2D[];
 }>;
 
+export type DrawingPreparedPatch = Readonly<
+  | {
+    kind: 'line';
+    points: readonly [Point2D, Point2D];
+  }
+  | {
+    kind: 'quadratic';
+    points: readonly [Point2D, Point2D, Point2D];
+  }
+  | {
+    kind: 'conic';
+    points: readonly [Point2D, Point2D, Point2D];
+    weight: number;
+  }
+  | {
+    kind: 'cubic';
+    points: readonly [Point2D, Point2D, Point2D, Point2D];
+  }
+  | {
+    kind: 'wedge';
+    fanPoint: Point2D;
+    points: readonly [Point2D, Point2D];
+  }
+>;
+
 export type DrawingPreparedPathFill = Readonly<{
   kind: 'pathFill';
   triangles: readonly Point2D[];
   fringeVertices?: readonly DrawingPreparedVertex[];
+  patches: readonly DrawingPreparedPatch[];
   fillRule: PathFillRule2D;
   color: readonly [number, number, number, number];
   bounds: Rect;
@@ -39,6 +65,7 @@ export type DrawingPreparedPathStroke = Readonly<{
   kind: 'pathStroke';
   triangles: readonly Point2D[];
   fringeVertices?: readonly DrawingPreparedVertex[];
+  patches: readonly DrawingPreparedPatch[];
   color: readonly [number, number, number, number];
   bounds: Rect;
   clipRect?: DrawingClipRect;
@@ -152,6 +179,68 @@ const approximateCubicSegments = (
       Math.ceil(Math.sqrt(curvature / Math.max(curveFlatnessTolerance * 0.75, epsilon))),
     ),
   );
+};
+
+const evaluateConic = (
+  from: Point2D,
+  control: Point2D,
+  to: Point2D,
+  weight: number,
+  t: number,
+): Point2D => {
+  const oneMinusT = 1 - t;
+  const denominator = (oneMinusT * oneMinusT) + (2 * weight * oneMinusT * t) + (t * t);
+  const x = ((oneMinusT * oneMinusT * from[0]) +
+    (2 * weight * oneMinusT * t * control[0]) +
+    (t * t * to[0])) / denominator;
+  const y = ((oneMinusT * oneMinusT * from[1]) +
+    (2 * weight * oneMinusT * t * control[1]) +
+    (t * t * to[1])) / denominator;
+  return [x, y];
+};
+
+const flattenConic = (
+  from: Point2D,
+  control: Point2D,
+  to: Point2D,
+  weight: number,
+  out: Point2D[],
+): void => {
+  const segments = Math.max(
+    2,
+    Math.min(
+      1 << maxCurveSubdivisionDepth,
+      Math.ceil(Math.sqrt(approximateQuadraticSegments(from, control, to) * Math.max(weight, 1))),
+    ),
+  );
+  for (let index = 1; index <= segments; index += 1) {
+    out.push(evaluateConic(from, control, to, weight, index / segments));
+  }
+};
+
+const flattenArc = (
+  center: Point2D,
+  radius: number,
+  startAngle: number,
+  endAngle: number,
+  counterClockwise: boolean,
+  transform: readonly [number, number, number, number, number, number],
+  out: Point2D[],
+): void => {
+  let span = endAngle - startAngle;
+  if (counterClockwise && span > 0) {
+    span -= Math.PI * 2;
+  } else if (!counterClockwise && span < 0) {
+    span += Math.PI * 2;
+  }
+  const segments = Math.max(4, Math.ceil(Math.abs(span) / (Math.PI / 12)));
+  for (let index = 1; index <= segments; index += 1) {
+    const angle = startAngle + ((span * index) / segments);
+    out.push(transformPoint2D([
+      center[0] + (Math.cos(angle) * radius),
+      center[1] + (Math.sin(angle) * radius),
+    ], transform));
+  }
 };
 
 const polygonArea = (points: readonly Point2D[]): number => {
@@ -666,6 +755,35 @@ const flattenSubpaths = (
         currentPoint = to;
         }
         break;
+      case 'conicTo':
+        if (!currentPoint) return null;
+        {
+          const control = transformPoint2D(verb.control, transform);
+          const to = transformPoint2D(verb.to, transform);
+          flattenConic(currentPoint, control, to, verb.weight, points);
+          currentPoint = to;
+        }
+        break;
+      case 'arcTo':
+        if (!currentPoint) {
+          const startPoint = transformPoint2D([
+            verb.center[0] + (Math.cos(verb.startAngle) * verb.radius),
+            verb.center[1] + (Math.sin(verb.startAngle) * verb.radius),
+          ], transform);
+          points.push(startPoint);
+          currentPoint = startPoint;
+        }
+        flattenArc(
+          verb.center,
+          verb.radius,
+          verb.startAngle,
+          verb.endAngle,
+          verb.counterClockwise ?? false,
+          transform,
+          points,
+        );
+        currentPoint = points[points.length - 1] ?? currentPoint;
+        break;
       case 'close':
         if (!currentPoint) return null;
         sawClose = true;
@@ -676,6 +794,115 @@ const flattenSubpaths = (
 
   flush();
   return Object.freeze(subpaths);
+};
+
+const preparePatches = (
+  path: DrawingPath2D,
+  transform: readonly [number, number, number, number, number, number],
+): readonly DrawingPreparedPatch[] => {
+  const patches: DrawingPreparedPatch[] = [];
+  let currentPoint: Point2D | null = null;
+  let contourStart: Point2D | null = null;
+  let contourPoints: Point2D[] = [];
+
+  const flushWedges = (): void => {
+    if (contourPoints.length < 3) {
+      contourPoints = [];
+      contourStart = null;
+      return;
+    }
+    const fanPoint = computeBounds(contourPoints).origin;
+    for (let index = 0; index < contourPoints.length; index += 1) {
+      patches.push({
+        kind: 'wedge',
+        fanPoint,
+        points: [
+          contourPoints[index]!,
+          contourPoints[(index + 1) % contourPoints.length]!,
+        ],
+      });
+    }
+    contourPoints = [];
+    contourStart = null;
+  };
+
+  for (const verb of path.verbs) {
+    switch (verb.kind) {
+      case 'moveTo': {
+        flushWedges();
+        const to = transformPoint2D(verb.to, transform);
+        currentPoint = to;
+        contourStart = to;
+        contourPoints = [to];
+        break;
+      }
+      case 'lineTo': {
+        if (!currentPoint) break;
+        const to = transformPoint2D(verb.to, transform);
+        patches.push({ kind: 'line', points: [currentPoint, to] });
+        contourPoints.push(to);
+        currentPoint = to;
+        break;
+      }
+      case 'quadTo': {
+        if (!currentPoint) break;
+        const control = transformPoint2D(verb.control, transform);
+        const to = transformPoint2D(verb.to, transform);
+        patches.push({ kind: 'quadratic', points: [currentPoint, control, to] });
+        contourPoints.push(to);
+        currentPoint = to;
+        break;
+      }
+      case 'conicTo': {
+        if (!currentPoint) break;
+        const control = transformPoint2D(verb.control, transform);
+        const to = transformPoint2D(verb.to, transform);
+        patches.push({ kind: 'conic', points: [currentPoint, control, to], weight: verb.weight });
+        contourPoints.push(to);
+        currentPoint = to;
+        break;
+      }
+      case 'cubicTo': {
+        if (!currentPoint) break;
+        const control1 = transformPoint2D(verb.control1, transform);
+        const control2 = transformPoint2D(verb.control2, transform);
+        const to = transformPoint2D(verb.to, transform);
+        patches.push({ kind: 'cubic', points: [currentPoint, control1, control2, to] });
+        contourPoints.push(to);
+        currentPoint = to;
+        break;
+      }
+      case 'arcTo': {
+        if (!currentPoint) break;
+        const points: Point2D[] = [currentPoint];
+        flattenArc(
+          verb.center,
+          verb.radius,
+          verb.startAngle,
+          verb.endAngle,
+          verb.counterClockwise ?? false,
+          transform,
+          points,
+        );
+        for (let index = 1; index < points.length; index += 1) {
+          patches.push({ kind: 'line', points: [points[index - 1]!, points[index]!] });
+          contourPoints.push(points[index]!);
+        }
+        currentPoint = points[points.length - 1] ?? currentPoint;
+        break;
+      }
+      case 'close':
+        if (currentPoint && contourStart && !pointsEqual(currentPoint, contourStart)) {
+          patches.push({ kind: 'line', points: [currentPoint, contourStart] });
+        }
+        flushWedges();
+        currentPoint = contourStart;
+        break;
+    }
+  }
+
+  flushWedges();
+  return Object.freeze(patches);
 };
 
 const prepareFillTriangles = (
@@ -1206,6 +1433,7 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
   const preparedClipStack = prepareClipStack(command.clips);
   const style = command.paint.style ?? 'fill';
   if (style === 'fill') {
+    const patches = preparePatches(command.path, command.transform);
     const triangles = applyConvexClipStack(
       prepareFillTriangles(subpaths, command.path.fillRule) ?? [],
       preparedClipStack,
@@ -1219,6 +1447,7 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
         kind: 'pathFill',
         triangles,
         fringeVertices: buildFillFringe(subpaths, resolveFillColor(command.paint)),
+        patches,
         fillRule: command.path.fillRule,
         color: resolveFillColor(command.paint),
         bounds: unionBounds(subpaths.map((subpath) => computeBounds(subpath.points))),
@@ -1229,6 +1458,7 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
     };
   }
 
+  const patches = preparePatches(command.path, command.transform);
   const preparedStroke = prepareStrokeTriangles(subpaths, command.paint);
   const strokeTriangles = applyConvexClipStack(
     preparedStroke?.triangles ?? [],
@@ -1243,6 +1473,7 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
       kind: 'pathStroke',
       triangles: strokeTriangles,
       fringeVertices: preparedStroke?.fringeVertices,
+      patches,
       color: resolveStrokeColor(command.paint),
       bounds: computeBounds(strokeTriangles),
       clipRect: preparedClipStack?.bounds,

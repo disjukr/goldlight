@@ -355,6 +355,39 @@ Deno.test('drawing prepared recording flattens quadratic and cubic paths for fil
   assertEquals(draw?.kind, 'pathFill');
   assertEquals((draw?.triangles.length ?? 0) > 6, true);
   assertEquals(draw?.bounds.origin[0], 24);
+  assertEquals((draw?.patches.length ?? 0) > 0, true);
+});
+
+Deno.test('drawing prepared recording flattens conic and arc verbs', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [48, 120] },
+      { kind: 'conicTo', control: [120, 24], to: [192, 120], weight: 0.5 },
+      {
+        kind: 'arcTo',
+        center: [120, 120],
+        radius: 72,
+        startAngle: 0,
+        endAngle: Math.PI,
+      },
+      { kind: 'close' },
+    ),
+    { style: 'fill' },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const draw = prepared.passes[0]?.steps[0]?.draw;
+  assertEquals(draw?.kind, 'pathFill');
+  assertEquals((draw?.triangles.length ?? 0) > 6, true);
+  assertEquals(
+    draw?.patches.some((patch) => patch.kind === 'conic'),
+    true,
+  );
 });
 
 Deno.test('drawing prepared recording preserves evenodd fill rule through draw step metadata', () => {

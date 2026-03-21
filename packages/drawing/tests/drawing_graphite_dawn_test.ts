@@ -545,6 +545,71 @@ Deno.test('drawing prepared recording accumulates clip stack intersections', () 
   assertEquals(prepared.passes[0]?.steps[0]?.clipRect, createRect(32, 32, 48, 40));
 });
 
+Deno.test('drawing prepared recording preserves multiple complex clip paths in stencil order', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  clipDrawingRecorderPath(
+    recorder,
+    withPath2DFillRule(
+      createPath2D(
+        { kind: 'moveTo', to: [16, 16] },
+        { kind: 'lineTo', to: [112, 16] },
+        { kind: 'lineTo', to: [112, 112] },
+        { kind: 'lineTo', to: [16, 112] },
+        { kind: 'close' },
+        { kind: 'moveTo', to: [40, 40] },
+        { kind: 'lineTo', to: [88, 40] },
+        { kind: 'lineTo', to: [88, 88] },
+        { kind: 'lineTo', to: [40, 88] },
+        { kind: 'close' },
+      ),
+      'evenodd',
+    ),
+  );
+  clipDrawingRecorderPath(
+    recorder,
+    withPath2DFillRule(
+      createPath2D(
+        { kind: 'moveTo', to: [32, 24] },
+        { kind: 'lineTo', to: [120, 24] },
+        { kind: 'lineTo', to: [120, 120] },
+        { kind: 'lineTo', to: [32, 120] },
+        { kind: 'close' },
+        { kind: 'moveTo', to: [56, 48] },
+        { kind: 'lineTo', to: [104, 48] },
+        { kind: 'lineTo', to: [104, 96] },
+        { kind: 'lineTo', to: [56, 96] },
+        { kind: 'close' },
+      ),
+      'evenodd',
+    ),
+  );
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [0, 0] },
+      { kind: 'lineTo', to: [128, 0] },
+      { kind: 'lineTo', to: [128, 128] },
+      { kind: 'lineTo', to: [0, 128] },
+      { kind: 'close' },
+    ),
+    { style: 'fill' },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const draw = prepared.passes[0]?.steps[0]?.draw;
+  assertEquals(draw?.kind, 'pathFill');
+  if (draw?.kind !== 'pathFill') {
+    throw new Error('expected pathFill draw');
+  }
+  assertEquals(draw.usesStencil, true);
+  assertEquals(draw.clips?.length, 2);
+  assertEquals(prepared.passes[0]?.steps[0]?.pipelineKeys, ['clip-stencil-write', 'path-fill-clip-cover']);
+  assertEquals(prepared.passes[0]?.steps[0]?.clipRect, createRect(32, 24, 80, 88));
+});
+
 Deno.test('drawing prepared recording clips stroke AA fringe to convex clip bounds', () => {
   const mock = createMockGpuContext();
   const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
@@ -859,6 +924,70 @@ Deno.test('dawn command buffer clips via clip path bounds fallback', () => {
   encodeDawnCommandBuffer(sharedContext, finishDrawingRecorder(recorder), binding);
   assertEquals(mock.created.scissorCalls[0], [24, 30, 48, 48]);
   assertEquals(mock.created.drawCalls.length, 2);
+});
+
+Deno.test('dawn command buffer intersects multiple clip paths through stencil references', () => {
+  const mock = createMockGpuContext();
+  const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
+  const recorder = createDrawingRecorder(sharedContext);
+  const binding = createOffscreenBinding(mock.context);
+
+  clipDrawingRecorderPath(
+    recorder,
+    withPath2DFillRule(
+      createPath2D(
+        { kind: 'moveTo', to: [16, 16] },
+        { kind: 'lineTo', to: [112, 16] },
+        { kind: 'lineTo', to: [112, 112] },
+        { kind: 'lineTo', to: [16, 112] },
+        { kind: 'close' },
+        { kind: 'moveTo', to: [40, 40] },
+        { kind: 'lineTo', to: [88, 40] },
+        { kind: 'lineTo', to: [88, 88] },
+        { kind: 'lineTo', to: [40, 88] },
+        { kind: 'close' },
+      ),
+      'evenodd',
+    ),
+  );
+  clipDrawingRecorderPath(
+    recorder,
+    withPath2DFillRule(
+      createPath2D(
+        { kind: 'moveTo', to: [32, 24] },
+        { kind: 'lineTo', to: [120, 24] },
+        { kind: 'lineTo', to: [120, 120] },
+        { kind: 'lineTo', to: [32, 120] },
+        { kind: 'close' },
+        { kind: 'moveTo', to: [56, 48] },
+        { kind: 'lineTo', to: [104, 48] },
+        { kind: 'lineTo', to: [104, 96] },
+        { kind: 'lineTo', to: [56, 96] },
+        { kind: 'close' },
+      ),
+      'evenodd',
+    ),
+  );
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [0, 0] },
+      { kind: 'lineTo', to: [128, 0] },
+      { kind: 'lineTo', to: [128, 128] },
+      { kind: 'lineTo', to: [0, 128] },
+      { kind: 'close' },
+    ),
+    { style: 'fill' },
+  );
+
+  encodeDawnCommandBuffer(sharedContext, finishDrawingRecorder(recorder), binding);
+
+  assertEquals(mock.created.renderPasses.length, 1);
+  assertEquals(mock.created.renderPipelines.length, 3);
+  assertEquals(mock.created.drawCalls.length, 4);
+  assertEquals(mock.created.stencilReferences, [1, 2, 2]);
+  assertEquals(mock.created.scissorCalls[0], [32, 24, 80, 88]);
+  assertEquals(mock.created.renderPasses[0]?.depthStencilAttachment !== undefined, true);
 });
 
 Deno.test('dawn command buffer encodes stroke draws without stencil', () => {

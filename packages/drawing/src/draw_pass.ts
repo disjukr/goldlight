@@ -12,6 +12,7 @@ export type DrawingDrawCommand = DrawPathCommand | DrawShapeCommand;
 
 export type DrawingPipelineKey =
   | 'clip-stencil-write'
+  | 'clip-stencil-intersect'
   | 'path-fill-cover'
   | 'path-fill-patch-cover'
   | 'path-fill-curve-patch-cover'
@@ -58,26 +59,26 @@ const getPipelineKeysForDraw = (draw: DrawingPreparedDraw): readonly DrawingPipe
   switch (draw.kind) {
     case 'pathFill':
       if (draw.renderer === 'middle-out-fan' || draw.renderer === 'direct-triangles') {
-        return draw.clip?.triangles
+        return draw.clips?.length
           ? ['clip-stencil-write', 'path-fill-clip-cover']
           : ['path-fill-cover'];
       }
       if (draw.renderer === 'stencil-tessellated-curves') {
-        return draw.clip?.triangles
+        return draw.clips?.length
           ? ['clip-stencil-write', 'path-fill-curve-patch-clip-cover']
           : ['path-fill-curve-patch-cover'];
       }
-      if (draw.clip?.triangles) {
+      if (draw.clips?.length) {
         return ['clip-stencil-write', 'path-fill-patch-clip-cover'];
       }
       return ['path-fill-patch-cover'];
     case 'pathStroke':
       if (draw.patches.length === 0) {
-        return draw.clip?.triangles
+        return draw.clips?.length
           ? ['clip-stencil-write', 'path-stroke-clip-cover']
           : ['path-stroke-cover'];
       }
-      return draw.clip?.triangles
+      return draw.clips?.length
         ? ['clip-stencil-write', 'path-stroke-patch-clip-cover']
         : ['path-stroke-patch-cover'];
   }
@@ -134,7 +135,7 @@ export const prepareDrawingRecording = (
           pipelineKeys: getPipelineKeysForDraw(prepared.draw),
           clipRect: prepared.draw.clipRect,
           drawBounds: prepared.draw.bounds,
-          clipBounds: prepared.draw.clip?.bounds,
+          clipBounds: prepared.draw.clipRect,
           usesStencil: prepared.draw.usesStencil,
         });
       } else {

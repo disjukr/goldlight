@@ -287,6 +287,7 @@ export const createDawnResourceProvider = (
   }> = {},
 ): DawnResourceProvider => {
   let clipStencilWritePipeline: GPURenderPipeline | null = null;
+  let clipStencilIntersectPipeline: GPURenderPipeline | null = null;
   let pathFillCoverPipeline: GPURenderPipeline | null = null;
   let pathFillPatchCoverPipeline: GPURenderPipeline | null = null;
   let pathFillCurvePatchCoverPipeline: GPURenderPipeline | null = null;
@@ -432,6 +433,45 @@ export const createDawnResourceProvider = (
     });
   };
 
+  const createClipStencilIntersectPipeline = (): GPURenderPipeline => {
+    const shaderModule = createPathShaderModule(backend);
+    return backend.device.createRenderPipeline({
+      label: 'drawing-clip-stencil-intersect',
+      layout: 'auto',
+      vertex: {
+        module: shaderModule,
+        entryPoint: 'vs_main',
+        buffers: [createVertexLayout()],
+      },
+      fragment: {
+        module: shaderModule,
+        entryPoint: 'fs_main',
+        targets: [
+          {
+            format: backend.target.format,
+            writeMask: noColorWrites,
+          },
+        ],
+      },
+      primitive: {
+        topology: 'triangle-list',
+        cullMode: 'none',
+      },
+      multisample: {
+        count: sampleCount,
+      },
+      depthStencil: {
+        format: stencilFormat,
+        depthWriteEnabled: false,
+        depthCompare: 'always',
+        stencilReadMask: 0xff,
+        stencilWriteMask: 0xff,
+        stencilFront: createStencilFaceState('replace', 'equal'),
+        stencilBack: createStencilFaceState('replace', 'equal'),
+      },
+    });
+  };
+
   const createClipAwareColorPipeline = (label: string): GPURenderPipeline => {
     const shaderModule = createPathShaderModule(backend);
     return backend.device.createRenderPipeline({
@@ -543,6 +583,12 @@ export const createDawnResourceProvider = (
           }
           clipStencilWritePipeline = createClipStencilWritePipeline();
           return clipStencilWritePipeline;
+        case 'clip-stencil-intersect':
+          if (clipStencilIntersectPipeline) {
+            return clipStencilIntersectPipeline;
+          }
+          clipStencilIntersectPipeline = createClipStencilIntersectPipeline();
+          return clipStencilIntersectPipeline;
         case 'path-fill-cover':
           if (pathFillCoverPipeline) {
             return pathFillCoverPipeline;

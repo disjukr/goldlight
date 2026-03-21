@@ -25,7 +25,7 @@ export type DrawingPreparedVertex = Readonly<{
 
 export type DrawingPreparedClip = Readonly<{
   bounds?: Rect;
-  triangles?: readonly Point2D[];
+  triangles: readonly Point2D[];
 }>;
 
 export type DrawingPreparedPatch = Readonly<
@@ -63,7 +63,7 @@ export type DrawingPreparedPathFill = Readonly<{
   color: readonly [number, number, number, number];
   bounds: Rect;
   clipRect?: DrawingClipRect;
-  clip?: DrawingPreparedClip;
+  clips?: readonly DrawingPreparedClip[];
   usesStencil: boolean;
 }>;
 
@@ -77,7 +77,7 @@ export type DrawingPreparedPathStroke = Readonly<{
   halfWidth: number;
   bounds: Rect;
   clipRect?: DrawingClipRect;
-  clip?: DrawingPreparedClip;
+  clips?: readonly DrawingPreparedClip[];
   usesStencil: boolean;
 }>;
 
@@ -1797,7 +1797,7 @@ const applyDashPattern = (
 type PreparedClipStack = Readonly<{
   bounds?: Rect;
   convexPolygons: readonly (readonly Point2D[])[];
-  stencilClip?: DrawingPreparedClip;
+  stencilClips: readonly DrawingPreparedClip[];
 }>;
 
 const createRectClipPolygon = (
@@ -1821,7 +1821,7 @@ const prepareClipStack = (clips: readonly DrawingClip[]): PreparedClipStack | un
 
   const convexPolygons: Point2D[][] = [];
   let bounds: Rect | undefined;
-  let stencilClip: DrawingPreparedClip | undefined;
+  const stencilClips: DrawingPreparedClip[] = [];
 
   for (const clip of clips) {
     if (clip.kind === 'rect') {
@@ -1848,18 +1848,19 @@ const prepareClipStack = (clips: readonly DrawingClip[]): PreparedClipStack | un
       continue;
     }
 
-    if (!stencilClip) {
-      stencilClip = {
+    const triangles = prepareFillTriangles(subpaths, clip.path.fillRule);
+    if (triangles && triangles.length > 0) {
+      stencilClips.push({
         bounds: clipBounds,
-        triangles: prepareFillTriangles(subpaths, clip.path.fillRule) ?? undefined,
-      };
+        triangles,
+      });
     }
   }
 
   return {
     bounds,
     convexPolygons: Object.freeze(convexPolygons.map((polygon) => Object.freeze(polygon))),
-    stencilClip,
+    stencilClips: Object.freeze(stencilClips),
   };
 };
 
@@ -2005,8 +2006,8 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
         color: resolveFillColor(command.paint),
         bounds: unionBounds(subpaths.map((subpath) => computeBounds(subpath.points))),
         clipRect: preparedClipStack?.bounds,
-        clip: preparedClipStack?.stencilClip,
-        usesStencil: Boolean(preparedClipStack?.stencilClip?.triangles),
+        clips: preparedClipStack?.stencilClips,
+        usesStencil: Boolean(preparedClipStack && preparedClipStack.stencilClips.length > 0),
       },
     };
   }
@@ -2035,8 +2036,8 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
       halfWidth: Math.max(0.5, Math.max(command.paint.strokeWidth ?? 1, epsilon)) / 2,
       bounds: computeBounds(strokeTriangles),
       clipRect: preparedClipStack?.bounds,
-      clip: preparedClipStack?.stencilClip,
-      usesStencil: Boolean(preparedClipStack?.stencilClip?.triangles),
+      clips: preparedClipStack?.stencilClips,
+      usesStencil: Boolean(preparedClipStack && preparedClipStack.stencilClips.length > 0),
     },
   };
 };

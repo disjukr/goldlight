@@ -231,9 +231,11 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
 - Clip path
   - Status: `started`
   - Current state: clip stack is recorded explicitly, rect clips and convex path clips are
-    intersected through prepared geometry including AA fringe coverage vertices, and a complex
-    single clip path can still allocate a stencil clip pass
-  - Missing: full nested arbitrary clip-path coverage and Skia-like clip stack semantics
+    intersected through prepared geometry including AA fringe coverage vertices, and nested complex
+    path clips now accumulate through ordered stencil references instead of collapsing to one
+    payload
+  - Missing: inverse clip ops, clip-atlas-style masking, and more of Skia's clip-shape collapsing
+    rules
 - Transform stack
   - Status: `started`
   - Current state: recorder save/restore and per-draw transform state exist without mutating stored
@@ -377,7 +379,7 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
 - Render pass setup
   - Status: `started`
   - Recording can be partitioned into prepared draw passes, and draw replay now covers direct
-    fill/stroke plus clip stencil when needed
+    fill/stroke plus accumulated clip stencil replay when needed
 - Pipeline binding
   - Status: `started`
   - Basic fill, clip, and stroke pipelines exist for first path draws and are reused across command
@@ -454,8 +456,8 @@ These decisions directly affect the remaining work and are not settled yet.
   DrawPass command stream
 - `queue_manager` currently treats `tick()` as coarse completion rather than using explicit GPU
   fences
-- clip stack handling still diverges from Skia Graphite for multiple nested non-convex clip paths;
-  only one complex stencil clip payload is preserved today
+- clip stack handling still diverges from Skia Graphite for inverse clips, atlas-backed masking,
+  and clip-shape simplification beyond plain intersect accumulation
 - clip geometry clipping is still incomplete for AA fringe geometry, so coverage edges can diverge
   from Graphite under complex clips
 - stroke tessellation still uses simplified fixed-count subdivision instead of Wang's-formula-driven
@@ -465,12 +467,14 @@ These decisions directly affect the remaining work and are not settled yet.
 
 - `ClipStack.cpp`
   - Current local gap: Graphite accumulates and simplifies full clip stack state, while local
-    `prepareClipStack()` only keeps convex clips plus one complex stencil clip payload
+    `prepareClipStack()` now preserves intersecting complex clip payloads but still lacks inverse
+    clips and Graphite's deeper shape simplification rules
   - To match Skia behavior:
-    1. preserve all intersecting clip elements, not just the first complex path
+    1. add inverse/difference clip semantics and atlas-backed masking
     2. add clip stack simplification rules closer to Graphite's geometric intersection path
   - Completed in local port:
     1. convex clip stacks now clip AA fringe/coverage geometry as well as base fill/stroke triangles
+    2. multiple complex clip paths now accumulate through ordered stencil references during replay
   - Validation: `packages/drawing/tests/drawing_graphite_dawn_test.ts`
 - `DrawPass.cpp`
   - Current local gap: Graphite prepares reusable pipeline/resource state per draw pass; local code
@@ -500,15 +504,15 @@ These decisions directly affect the remaining work and are not settled yet.
 
 ## Recommended Next Steps
 
-1. Deepen `src/caps.ts`
-   - Replace static format assumptions with richer backend policy
-   - Add feature-gated fallbacks
+1. Improve transform and paint replay
+   - Move per-draw transform from CPU-prepared geometry toward uniform-driven replay
+   - Start separating paint data from vertex payloads and bind groups
 2. Harden the first fill path
    - Improve scanline fallback quality and unify it more cleanly with stencil rendering
-   - Add more winding and clip-path tests
-3. Improve transform and paint replay
-   - Move per-draw transform from CPU-prepared geometry toward uniform-driven replay
-   - Start separating paint data from vertex payloads
+   - Add more winding and nested clip-path tests
+3. Deepen `src/caps.ts`
+   - Replace static format assumptions with richer backend policy
+   - Add feature-gated fallbacks
 4. Add pipeline/resource caching
    - Extend reuse toward bind groups, transient buffers, and richer pipeline keys
 5. Add `src/queue_manager.ts`

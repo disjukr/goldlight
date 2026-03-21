@@ -54,7 +54,8 @@ stack that fits this repository's TypeScript and WebGPU architecture.
     clip paths, and first stroke command buffer translation exist.
 - Queue submission
   - Status: `started`
-  - Queue manager can submit encoded command buffers and track in-flight work counts.
+  - Queue manager can submit encoded command buffers, track in-flight work counts, and now keep
+    unresolved submissions in flight until Dawn/WebGPU queue completion signals arrive.
 - Path rendering
   - Status: `partial`
   - Flattened contours can be pushed through direct tessellated fills, convex clip-stack clipping,
@@ -389,7 +390,8 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
   - Command buffer submission helper exists for encoded clears and first fill draws
 - Async work completion
   - Status: `started`
-  - Tick and in-flight submission tracking exist, but completion is still coarse
+  - Tick and in-flight submission tracking exist, and queue-work-done completion can now keep
+    unresolved submissions in flight instead of treating every tick as a full fence
 
 ## Rendering Strategy Decisions
 
@@ -455,7 +457,8 @@ These decisions directly affect the remaining work and are not settled yet.
 - `command_buffer` still does per-draw render pass replay for stencil clears instead of a richer
   DrawPass command stream
 - `queue_manager` currently treats `tick()` as coarse completion rather than using explicit GPU
-  fences
+- `queue_manager` still lacks full Graphite-style per-submission objects and backend-specific wait
+  modes, even though queue-work-done completion now exists
 - clip stack handling still diverges from Skia Graphite for inverse clips, atlas-backed masking,
   and clip-shape simplification beyond plain intersect accumulation
 - clip geometry clipping is still incomplete for AA fringe geometry, so coverage edges can diverge
@@ -500,6 +503,15 @@ These decisions directly affect the remaining work and are not settled yet.
   - Remaining gap:
     1. align full deferred contour/cap handling with Graphite stroke patch writer
     2. align cusp/circle emission and transform-aware stroke tessellation counts
+  - Validation: `packages/drawing/tests/drawing_graphite_dawn_test.ts`
+- `dawn/DawnQueueManager.cpp`
+  - Current local gap: Graphite keeps explicit outstanding submission objects and backend-specific
+    wait paths; local queue tracking is still lighter weight
+  - Completed in local port:
+    1. `tick()` now preserves unresolved submissions until `queue.onSubmittedWorkDone()` settles
+  - Remaining gap:
+    1. model explicit outstanding submission objects instead of counters only
+    2. add broader backend error/completion propagation
   - Validation: `packages/drawing/tests/drawing_graphite_dawn_test.ts`
 
 ## Recommended Next Steps

@@ -50,6 +50,7 @@ const createMockGpuContext = () => {
   const mappedBuffers: ArrayBuffer[] = [];
   const offscreenView = { label: 'offscreen-view' } as unknown as GPUTextureView;
   const ticks: number[] = [];
+  const workDoneResolvers: Array<() => void> = [];
 
   return {
     created: {
@@ -66,6 +67,8 @@ const createMockGpuContext = () => {
       stencilReferences,
       mappedBuffers,
     },
+    ticks,
+    workDoneResolvers,
     context: {
       adapter: {
         features: new Set(['bgra8unorm-storage']),
@@ -140,6 +143,10 @@ const createMockGpuContext = () => {
         submit: (commandBuffers: Iterable<GPUCommandBuffer>) => {
           submitted.push([...commandBuffers]);
         },
+        onSubmittedWorkDone: () =>
+          new Promise<void>((resolve) => {
+            workDoneResolvers.push(resolve);
+          }),
       } as unknown as GPUQueue,
       target: {
         kind: 'offscreen',
@@ -149,7 +156,6 @@ const createMockGpuContext = () => {
         sampleCount: 1,
       } as const,
     },
-    ticks,
   };
 };
 
@@ -1084,6 +1090,9 @@ Deno.test('dawn queue manager tracks submit and tick completion', async () => {
   const backend = createDawnBackendContext(mock.context, {
     tick: () => {
       mock.ticks.push(1);
+      for (const resolve of mock.workDoneResolvers.splice(0)) {
+        resolve();
+      }
     },
   });
   const queueManager = createDawnQueueManager(backend);
@@ -1106,6 +1115,42 @@ Deno.test('dawn queue manager tracks submit and tick completion', async () => {
   await tickDawnQueueManager(queueManager);
 
   assertEquals(mock.ticks.length, 1);
+  assertEquals(queueManager.completedCount, 1);
+  assertEquals(queueManager.inFlightCount, 0);
+});
+
+Deno.test('dawn queue manager keeps unresolved submissions in flight until queue completion', async () => {
+  const mock = createMockGpuContext();
+  const backend = createDawnBackendContext(mock.context, {
+    tick: () => {
+      mock.ticks.push(1);
+    },
+  });
+  const queueManager = createDawnQueueManager(backend);
+  const sharedContext = createDawnSharedContext(backend);
+  const recorder = createDrawingRecorder(sharedContext);
+  const binding = createOffscreenBinding(mock.context);
+
+  recordClear(recorder, [0, 0, 0, 1]);
+  const commandBuffer = encodeDawnCommandBuffer(
+    sharedContext,
+    finishDrawingRecorder(recorder),
+    binding,
+  );
+  submitToDawnQueueManager(queueManager, commandBuffer);
+
+  await tickDawnQueueManager(queueManager);
+
+  assertEquals(mock.ticks.length, 1);
+  assertEquals(queueManager.completedCount, 0);
+  assertEquals(queueManager.inFlightCount, 1);
+
+  for (const resolve of mock.workDoneResolvers.splice(0)) {
+    resolve();
+  }
+  await Promise.resolve();
+  await tickDawnQueueManager(queueManager);
+
   assertEquals(queueManager.completedCount, 1);
   assertEquals(queueManager.inFlightCount, 0);
 });

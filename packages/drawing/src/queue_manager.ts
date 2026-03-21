@@ -8,6 +8,10 @@ export type DawnQueueManager = Readonly<{
   completedCount: number;
   inFlightCount: number;
   lastSubmittedRecorderId: number | null;
+  pendingSubmissions: readonly Readonly<{
+    settled: boolean;
+    completion: Promise<void>;
+  }>[];
 }>;
 
 const asMutableQueueManager = (
@@ -17,12 +21,20 @@ const asMutableQueueManager = (
   completedCount: number;
   inFlightCount: number;
   lastSubmittedRecorderId: number | null;
+  pendingSubmissions: Array<{
+    settled: boolean;
+    completion: Promise<void>;
+  }>;
 } =>
-  queueManager as {
+  queueManager as unknown as {
     submittedCount: number;
     completedCount: number;
     inFlightCount: number;
     lastSubmittedRecorderId: number | null;
+    pendingSubmissions: Array<{
+      settled: boolean;
+      completion: Promise<void>;
+    }>;
   };
 
 export const createDawnQueueManager = (
@@ -33,6 +45,7 @@ export const createDawnQueueManager = (
   completedCount: 0,
   inFlightCount: 0,
   lastSubmittedRecorderId: null,
+  pendingSubmissions: [],
 });
 
 export const submitToDawnQueueManager = (
@@ -45,6 +58,19 @@ export const submitToDawnQueueManager = (
   mutable.submittedCount += 1;
   mutable.inFlightCount += 1;
   mutable.lastSubmittedRecorderId = commandBuffer.recording.recorderId;
+
+  const queueWithCompletion = queueManager.backend.queue as GPUQueue & {
+    onSubmittedWorkDone?: () => Promise<void>;
+  };
+  if (typeof queueWithCompletion.onSubmittedWorkDone === 'function') {
+    const pendingSubmission = {
+      settled: false,
+      completion: Promise.resolve(queueWithCompletion.onSubmittedWorkDone()).then(() => {
+        pendingSubmission.settled = true;
+      }),
+    };
+    mutable.pendingSubmissions.push(pendingSubmission);
+  }
 };
 
 export const tickDawnQueueManager = async (
@@ -53,6 +79,20 @@ export const tickDawnQueueManager = async (
   await tickDawnBackendContext(queueManager.backend);
 
   const mutable = asMutableQueueManager(queueManager);
-  mutable.completedCount += mutable.inFlightCount;
-  mutable.inFlightCount = 0;
+  if (mutable.pendingSubmissions.length === 0) {
+    mutable.completedCount += mutable.inFlightCount;
+    mutable.inFlightCount = 0;
+    return;
+  }
+
+  let completedThisTick = 0;
+  mutable.pendingSubmissions = mutable.pendingSubmissions.filter((submission) => {
+    if (!submission.settled) {
+      return true;
+    }
+    completedThisTick += 1;
+    return false;
+  });
+  mutable.completedCount += completedThisTick;
+  mutable.inFlightCount = Math.max(0, mutable.inFlightCount - completedThisTick);
 };

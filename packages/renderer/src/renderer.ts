@@ -576,6 +576,110 @@ const pathtracedAccumulationStates = new WeakMap<
 >();
 const pathtracedMeshSceneStates = new WeakMap<RenderContextBinding, PathtracedMeshSceneState>();
 const exrLoader = new EXRLoader();
+type ForwardEnvironmentPrefilterLevel = Readonly<{
+  width: number;
+  height: number;
+  data: Uint16Array;
+}>;
+
+type ForwardEnvironmentPrefilterState =
+  | Readonly<{
+    status: 'pending';
+  }>
+  | Readonly<{
+    status: 'ready';
+    width: number;
+    height: number;
+    levels: readonly ForwardEnvironmentPrefilterLevel[];
+  }>
+  | Readonly<{
+    status: 'error';
+    error: string;
+  }>;
+
+let forwardEnvironmentPrefilterWorker: Worker | null = null;
+const forwardEnvironmentPrefilterStates = new Map<string, ForwardEnvironmentPrefilterState>();
+
+const getForwardEnvironmentPrefilterWorker = (): Worker | null => {
+  if (typeof Worker === 'undefined') {
+    return null;
+  }
+  if (forwardEnvironmentPrefilterWorker) {
+    return forwardEnvironmentPrefilterWorker;
+  }
+
+  const worker = new Worker(
+    new URL('./environment_prefilter_worker.ts', import.meta.url).href,
+    { type: 'module' },
+  );
+  worker.onmessage = (event: MessageEvent) => {
+    const message = event.data as
+      | Readonly<{
+        type: 'prefiltered';
+        cacheId: string;
+        width: number;
+        height: number;
+        levels: readonly Readonly<{
+          width: number;
+          height: number;
+          data: ArrayBuffer;
+        }>[];
+      }>
+      | Readonly<{
+        type: 'error';
+        cacheId: string;
+        error: string;
+      }>;
+    if (message?.type === 'prefiltered') {
+      forwardEnvironmentPrefilterStates.set(message.cacheId, {
+        status: 'ready',
+        width: message.width,
+        height: message.height,
+        levels: message.levels.map((level) => ({
+          width: level.width,
+          height: level.height,
+          data: new Uint16Array(level.data),
+        })),
+      });
+      return;
+    }
+    if (message?.type === 'error') {
+      forwardEnvironmentPrefilterStates.set(message.cacheId, {
+        status: 'error',
+        error: message.error,
+      });
+    }
+  };
+  forwardEnvironmentPrefilterWorker = worker;
+  return worker;
+};
+
+const queueForwardEnvironmentPrefilter = (
+  cacheId: string,
+  environmentMap: ForwardEnvironmentMap,
+): boolean => {
+  if (forwardEnvironmentPrefilterStates.get(cacheId)?.status === 'pending') {
+    return true;
+  }
+  const worker = getForwardEnvironmentPrefilterWorker();
+  if (!worker) {
+    return false;
+  }
+  const bytesCopy = new Uint8Array(environmentMap.image.bytes);
+  const bytes = bytesCopy.buffer as ArrayBuffer;
+  forwardEnvironmentPrefilterStates.set(cacheId, { status: 'pending' });
+  worker.postMessage({
+    type: 'prefilter',
+    cacheId,
+    image: {
+      id: environmentMap.image.id,
+      mimeType: environmentMap.image.mimeType,
+      bytes,
+    },
+  }, [bytes]);
+  return true;
+};
+
 const pathtracedFallbackTextureBindings = new WeakMap<
   object,
   Readonly<{ texture: GPUTexture; textureView: GPUTextureView; sampler: GPUSampler }>
@@ -3321,6 +3425,17 @@ const createFloatEnvironmentData = (decoded: Uint16Array): Float32Array => {
   return floatData;
 };
 
+const environmentPrefilterRoughnessForMip = (
+  mipLevel: number,
+  maxMipLevel: number,
+): number => {
+  if (maxMipLevel <= 0) {
+    return 0;
+  }
+  const normalizedLod = Math.max(0, Math.min(1, mipLevel / maxMipLevel));
+  return normalizedLod * normalizedLod;
+};
+
 const createPrefilteredEnvironmentMipChain = (
   width: number,
   height: number,
@@ -3336,13 +3451,14 @@ const createPrefilteredEnvironmentMipChain = (
     height,
     data,
   }];
-  const maxMipLevel = Math.max(1, Math.floor(Math.log2(Math.max(width, height)))) + 1;
+  const maxMipLevel = Math.floor(Math.log2(Math.max(width, height))) + 1;
+  const maxPrefilterMip = Math.max(maxMipLevel - 1, 1);
 
   for (let mipLevel = 1; mipLevel < maxMipLevel; mipLevel += 1) {
     const levelWidth = Math.max(1, width >> mipLevel);
     const levelHeight = Math.max(1, height >> mipLevel);
     const levelData = new Uint16Array(levelWidth * levelHeight * 4);
-    const roughness = mipLevel / Math.max(maxMipLevel - 1, 1);
+    const roughness = environmentPrefilterRoughnessForMip(mipLevel, maxPrefilterMip);
     const sampleCount = Math.max(16, 64 - (mipLevel * 4));
 
     for (let y = 0; y < levelHeight; y += 1) {
@@ -3468,39 +3584,29 @@ const createEnvironmentBrdfLutData = (
   };
 };
 
-const ensureForwardEnvironmentTexture = (
+const uploadForwardEnvironmentTexture = (
   context: GpuRenderExecutionContext,
   residency: RuntimeResidency,
-  environmentMap?: ForwardEnvironmentMap,
-): Readonly<{
-  residency: TextureResidency;
-  intensity: number;
-}> => {
-  const cacheId = environmentMap
-    ? `__forward-environment:${environmentMap.id}`
-    : '__forward-environment:default';
-  const cached = residency.textures.get(cacheId);
-  if (cached) {
-    return {
-      residency: cached,
-      intensity: environmentMap?.intensity ?? 0,
-    };
-  }
-
+  cacheId: string,
+  decoded:
+    | Readonly<{
+      width: number;
+      height: number;
+      data: Uint16Array;
+    }>
+    | Readonly<{
+      width: number;
+      height: number;
+      levels: readonly ForwardEnvironmentPrefilterLevel[];
+    }>,
+): TextureResidency => {
   if (!context.queue.writeTexture) {
     throw new Error('forward environment map upload requires GPUQueue.writeTexture support');
   }
 
-  const decoded = environmentMap ? decodeEnvironmentImageAsset(environmentMap.image) : {
-    width: 1,
-    height: 1,
-    data: createDefaultEnvironmentPixels(),
-  };
-  const mipChain = createPrefilteredEnvironmentMipChain(
-    decoded.width,
-    decoded.height,
-    decoded.data,
-  );
+  const mipChain = 'levels' in decoded
+    ? decoded.levels
+    : createPrefilteredEnvironmentMipChain(decoded.width, decoded.height, decoded.data);
 
   const texture = context.device.createTexture({
     label: cacheId,
@@ -3530,8 +3636,11 @@ const ensureForwardEnvironmentTexture = (
   const uploaded: TextureResidency = {
     textureId: cacheId,
     texture,
-    view: texture.createView(),
+    view: texture.createView({
+      label: `${cacheId}:view`,
+    }),
     sampler: context.device.createSampler({
+      label: `${cacheId}:sampler`,
       magFilter: 'linear',
       minFilter: 'linear',
       mipmapFilter: 'linear',
@@ -3544,10 +3653,73 @@ const ensureForwardEnvironmentTexture = (
     format: 'rgba16float',
   };
   residency.textures.set(cacheId, uploaded);
+  return uploaded;
+};
 
+const ensureForwardEnvironmentTexture = (
+  context: GpuRenderExecutionContext,
+  residency: RuntimeResidency,
+  environmentMap?: ForwardEnvironmentMap,
+): Readonly<{
+  residency: TextureResidency;
+  intensity: number;
+  ready: boolean;
+}> => {
+  const cacheId = environmentMap
+    ? `__forward-environment:${environmentMap.id}`
+    : '__forward-environment:default';
+  const cached = residency.textures.get(cacheId);
+  if (cached) {
+    return {
+      residency: cached,
+      intensity: environmentMap?.intensity ?? 0,
+      ready: true,
+    };
+  }
+
+  if (!environmentMap) {
+    const uploaded = uploadForwardEnvironmentTexture(context, residency, cacheId, {
+      width: 1,
+      height: 1,
+      data: createDefaultEnvironmentPixels(),
+    });
+    return {
+      residency: uploaded,
+      intensity: 0,
+      ready: true,
+    };
+  }
+
+  const pendingState = forwardEnvironmentPrefilterStates.get(cacheId);
+  if (pendingState?.status === 'ready') {
+    const uploaded = uploadForwardEnvironmentTexture(context, residency, cacheId, pendingState);
+    forwardEnvironmentPrefilterStates.delete(cacheId);
+    return {
+      residency: uploaded,
+      intensity: environmentMap.intensity ?? 0,
+      ready: true,
+    };
+  }
+
+  if (pendingState?.status !== 'pending') {
+    const queued = queueForwardEnvironmentPrefilter(cacheId, environmentMap);
+    if (!queued || pendingState?.status === 'error') {
+      const decoded = decodeEnvironmentImageAsset(environmentMap.image);
+      const uploaded = uploadForwardEnvironmentTexture(context, residency, cacheId, decoded);
+      forwardEnvironmentPrefilterStates.delete(cacheId);
+      return {
+        residency: uploaded,
+        intensity: environmentMap.intensity ?? 0,
+        ready: true,
+      };
+    }
+  }
+
+  const fallback = ensureForwardEnvironmentTexture(context, residency);
   return {
-    residency: uploaded,
-    intensity: environmentMap?.intensity ?? 0,
+    residency: fallback.residency,
+    intensity: 0,
+    ready: false,
   };
 };
 
@@ -3590,8 +3762,11 @@ const ensureForwardEnvironmentBrdfLut = (
   const uploaded: TextureResidency = {
     textureId: cacheId,
     texture,
-    view: texture.createView(),
+    view: texture.createView({
+      label: `${cacheId}:view`,
+    }),
     sampler: context.device.createSampler({
+      label: `${cacheId}:sampler`,
       magFilter: 'linear',
       minFilter: 'linear',
       addressModeU: 'clamp-to-edge',
@@ -3672,6 +3847,7 @@ const renderForwardEnvironmentBackground = (
   environment: Readonly<{
     residency: TextureResidency;
   }>,
+  transientBuffers: GPUBuffer[],
 ): void => {
   const pipeline = ensureEnvironmentBackgroundPipeline(
     context,
@@ -3685,12 +3861,14 @@ const renderForwardEnvironmentBackground = (
     size: uniformData.byteLength,
     usage: uniformUsage | bufferCopyDstUsage,
   });
+  transientBuffers.push(uniformBuffer);
   context.queue.writeBuffer(uniformBuffer, 0, toBufferSource(uniformData));
 
   pass.setPipeline(pipeline);
   pass.setBindGroup(
     0,
     context.device.createBindGroup({
+      label: 'forward-environment-background:bind-group',
       layout: pipeline.getBindGroupLayout(0),
       entries: [
         {
@@ -3720,6 +3898,8 @@ const renderEnvironmentBackgroundBlurPasses = (
   residency: RuntimeResidency,
   inputView: GPUTextureView,
   outputView: GPUTextureView,
+  transientTextures: GPUTexture[],
+  transientBuffers: GPUBuffer[],
 ): number => {
   const sampler = context.device.createSampler({
     label: 'environment-background-blur-sampler',
@@ -3732,6 +3912,7 @@ const renderEnvironmentBackgroundBlurPasses = (
     'environment-background-blur-temp',
     binding.target.format,
   );
+  transientTextures.push(blurTempTexture);
   const blurTempView = blurTempTexture.createView();
   const blurPasses = [
     {
@@ -3773,8 +3954,10 @@ const renderEnvironmentBackgroundBlurPasses = (
       size: blurPass.uniformData.byteLength,
       usage: uniformUsage | bufferCopyDstUsage,
     });
+    transientBuffers.push(uniformBuffer);
     context.queue.writeBuffer(uniformBuffer, 0, blurPass.uniformData);
     const bindGroup = context.device.createBindGroup({
+      label: `${blurPass.id}:bind-group`,
       layout: pipeline.getBindGroupLayout(0),
       entries: [
         { binding: 0, resource: sourceView },
@@ -3925,15 +4108,12 @@ const renderForwardMeshPass = (
   inverseViewMatrix: readonly number[],
   directionalLights: readonly DirectionalLightItem[],
   cameraPosition: readonly [number, number, number],
+  environment: ReturnType<typeof ensureForwardEnvironmentTexture>,
   extension: ForwardSceneExtension,
+  transientBuffers: GPUBuffer[],
   passKind: 'opaque' | 'transparent' = 'opaque',
 ): number => {
   let drawCount = 0;
-  const environment = ensureForwardEnvironmentTexture(
-    context,
-    residency,
-    extension.environmentMap,
-  );
   const environmentBrdfLut = ensureForwardEnvironmentBrdfLut(context, residency);
 
   for (const node of nodes) {
@@ -4010,8 +4190,10 @@ const renderForwardMeshPass = (
         size: transformData.byteLength,
         usage: uniformUsage | bufferCopyDstUsage,
       });
+      transientBuffers.push(transformBuffer);
       context.queue.writeBuffer(transformBuffer, 0, toBufferSource(transformData));
       const transformBindGroup = context.device.createBindGroup({
+        label: `${node.node.id}:transform-bind-group`,
         layout: pipeline.getBindGroupLayout(0),
         entries: [{
           binding: 0,
@@ -4030,6 +4212,7 @@ const renderForwardMeshPass = (
         current: undefined as ReturnType<typeof ensureMaterialResidency> | undefined,
       };
       const bindGroup = context.device.createBindGroup({
+        label: `${node.node.id}:material-bind-group`,
         layout: pipeline.getBindGroupLayout(materialBindGroupIndex),
         entries: materialBindings.map((descriptor) =>
           resolveMaterialBindingResource(
@@ -4062,11 +4245,13 @@ const renderForwardMeshPass = (
         size: lightingData.byteLength,
         usage: uniformUsage | bufferCopyDstUsage,
       });
+      transientBuffers.push(lightingBuffer);
       context.queue.writeBuffer(lightingBuffer, 0, toBufferSource(lightingData));
       if (lightingBindings.length > 0) {
         pass.setBindGroup(
           2,
           context.device.createBindGroup({
+            label: `${node.node.id}:lighting-bind-group`,
             layout: pipeline.getBindGroupLayout(2),
             entries: lightingBindings.map((descriptor) =>
               resolveForwardPassBindingResource(
@@ -4083,6 +4268,7 @@ const renderForwardMeshPass = (
         pass.setBindGroup(
           3,
           context.device.createBindGroup({
+            label: `${node.node.id}:environment-bind-group`,
             layout: pipeline.getBindGroupLayout(3),
             entries: environmentBindings.map((descriptor) =>
               resolveForwardPassBindingResource(
@@ -5753,7 +5939,15 @@ const renderForwardFrameInternal = (
   const encoder = context.device.createCommandEncoder({
     label: 'forward-frame',
   });
-  const hasEnvironmentBackground = Boolean(options.extension?.environmentMap);
+  const transientTextures: GPUTexture[] = [];
+  const transientBuffers: GPUBuffer[] = [];
+  const forwardEnvironment = ensureForwardEnvironmentTexture(
+    context,
+    residency,
+    options.extension?.environmentMap,
+  );
+  const hasEnvironmentBackground = Boolean(options.extension?.environmentMap) &&
+    forwardEnvironment.ready;
   if (hasEnvironmentBackground) {
     const backgroundSourceTexture = createTransientRenderTexture(
       context,
@@ -5761,6 +5955,7 @@ const renderForwardFrameInternal = (
       'forward-environment-background-source',
       binding.target.format,
     );
+    transientTextures.push(backgroundSourceTexture);
     const backgroundSourceView = backgroundSourceTexture.createView();
     const backgroundPass = encoder.beginRenderPass({
       colorAttachments: [{
@@ -5776,7 +5971,8 @@ const renderForwardFrameInternal = (
       binding,
       residency,
       evaluatedScene.activeCamera,
-      ensureForwardEnvironmentTexture(context, residency, options.extension?.environmentMap),
+      forwardEnvironment,
+      transientBuffers,
     );
     backgroundPass.end();
     renderEnvironmentBackgroundBlurPasses(
@@ -5786,6 +5982,8 @@ const renderForwardFrameInternal = (
       residency,
       backgroundSourceView,
       colorView,
+      transientTextures,
+      transientBuffers,
     );
   }
   const forwardOpaqueNodes = evaluatedScene.nodes.filter((node) =>
@@ -5829,7 +6027,9 @@ const renderForwardFrameInternal = (
     inverseViewMatrix,
     directionalLights,
     cameraPosition,
+    forwardEnvironment,
     options.extension ?? {},
+    transientBuffers,
     'opaque',
   );
 
@@ -5860,7 +6060,9 @@ const renderForwardFrameInternal = (
       inverseViewMatrix,
       directionalLights,
       cameraPosition,
+      forwardEnvironment,
       options.extension ?? {},
+      transientBuffers,
       'transparent',
     );
     transparentPass.end();
@@ -5879,6 +6081,12 @@ const renderForwardFrameInternal = (
 
   const commandBuffer = encoder.finish();
   context.queue.submit([commandBuffer]);
+  for (const buffer of transientBuffers) {
+    buffer.destroy();
+  }
+  for (const texture of transientTextures) {
+    texture.destroy();
+  }
 
   return {
     drawCount,
@@ -6462,7 +6670,9 @@ export const renderDeferredFrame = (
       inverseViewMatrix,
       directionalLights,
       cameraPosition,
+      ensureForwardEnvironmentTexture(context, residency),
       {},
+      [],
     );
     forwardLitPass.end();
   }
@@ -6949,7 +7159,9 @@ export const renderUberFrame = (
       inverseViewMatrix,
       directionalLights,
       cameraPosition,
+      ensureForwardEnvironmentTexture(context, residency),
       {},
+      [],
       'opaque',
     );
     forwardOpaquePass.end();
@@ -6980,7 +7192,9 @@ export const renderUberFrame = (
       inverseViewMatrix,
       directionalLights,
       cameraPosition,
+      ensureForwardEnvironmentTexture(context, residency),
       {},
+      [],
       'transparent',
     );
     forwardTransparentPass.end();

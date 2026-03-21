@@ -145,12 +145,16 @@ fn sampleEnvironmentDiffuse(normal: vec3<f32>) -> vec3<f32> {
   ).rgb;
 }
 
+fn environmentPrefilterLodForRoughness(roughness: f32, maxMipLevel: f32) -> f32 {
+  return maxMipLevel * sqrt(clamp(roughness, 0.0, 1.0));
+}
+
 fn sampleEnvironmentSpecular(
   reflectionDirection: vec3<f32>,
   roughness: f32,
 ) -> vec3<f32> {
   let maxMipLevel = max(f32(textureNumLevels(environmentTexture)) - 1.0, 0.0);
-  let lod = mix(0.0, maxMipLevel, clamp(roughness, 0.0, 1.0));
+  let lod = environmentPrefilterLodForRoughness(roughness, maxMipLevel);
   return textureSampleLevel(
     environmentTexture,
     environmentSampler,

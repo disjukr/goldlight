@@ -13,9 +13,15 @@ export type DrawingDrawCommand = DrawPathCommand | DrawShapeCommand;
 export type DrawingPipelineKey =
   | 'clip-stencil-write'
   | 'path-fill-cover'
+  | 'path-fill-patch-cover'
+  | 'path-fill-curve-patch-cover'
   | 'path-fill-clip-cover'
+  | 'path-fill-patch-clip-cover'
+  | 'path-fill-curve-patch-clip-cover'
   | 'path-stroke-cover'
-  | 'path-stroke-clip-cover';
+  | 'path-stroke-patch-cover'
+  | 'path-stroke-clip-cover'
+  | 'path-stroke-patch-clip-cover';
 
 export type DrawingPreparedStep = Readonly<{
   draw: DrawingPreparedDraw;
@@ -51,14 +57,24 @@ const isDrawCommand = (command: DrawingCommand): command is DrawingDrawCommand =
 const getPipelineKeysForDraw = (draw: DrawingPreparedDraw): readonly DrawingPipelineKey[] => {
   switch (draw.kind) {
     case 'pathFill':
-      if (draw.clip?.triangles) {
-        return ['clip-stencil-write', 'path-fill-clip-cover'];
+      if (draw.renderer === 'middle-out-fan') {
+        return draw.clip?.triangles
+          ? ['clip-stencil-write', 'path-fill-clip-cover']
+          : ['path-fill-cover'];
       }
-      return ['path-fill-cover'];
+      if (draw.renderer === 'stencil-tessellated-curves') {
+        return draw.clip?.triangles
+          ? ['clip-stencil-write', 'path-fill-curve-patch-clip-cover']
+          : ['path-fill-curve-patch-cover'];
+      }
+      if (draw.clip?.triangles) {
+        return ['clip-stencil-write', 'path-fill-patch-clip-cover'];
+      }
+      return ['path-fill-patch-cover'];
     case 'pathStroke':
       return draw.clip?.triangles
-        ? ['clip-stencil-write', 'path-stroke-clip-cover']
-        : ['path-stroke-cover'];
+        ? ['clip-stencil-write', 'path-stroke-patch-clip-cover']
+        : ['path-stroke-patch-cover'];
   }
 };
 

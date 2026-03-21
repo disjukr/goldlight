@@ -50,7 +50,7 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Initial caps and limits layer exists.
 - GPU encoding
   - Status: `partial`
-  - Clear, direct fill/stroke replay, clip-stencil replay for complex clip paths, and first stroke command buffer translation exist.
+  - Clear, direct fill replay, patch-instance fill/stroke replay, clip-stencil replay for complex clip paths, and first stroke command buffer translation exist.
 - Queue submission
   - Status: `started`
   - Queue manager can submit encoded command buffers and track in-flight work counts.
@@ -76,7 +76,7 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Missing: bind group layouts and pipeline helpers
 - `DawnResourceProvider` -> `src/resource_provider.ts`
   - Status: `started`
-  - What exists: simple resource allocation plus cached fill/stroke/clip pipelines, stencil attachment reuse, and multisample-aware pipelines
+  - What exists: simple resource allocation plus cached fill/stroke/clip pipelines, first patch-instance pipelines, stencil attachment reuse, and multisample-aware pipelines
   - Missing: bind groups, wrapped resources, broader cache policy
 - `Context` -> `src/context.ts`
   - Status: `started`
@@ -92,7 +92,7 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Missing: richer probing and backend-specific fallbacks
 - `DawnCommandBuffer` -> `src/command_buffer.ts`
   - Status: `partial`
-  - What exists: clear plus direct fill/stroke replay, convex-clip scissor replay, and stencil replay for complex clip paths
+  - What exists: clear plus direct fill replay, first patch-instance fill/stroke replay, convex-clip scissor replay, and stencil replay for complex clip paths
   - Missing: broader draw path and draw shape encoding, richer pass replay
 - `DrawPass` -> `src/draw_pass.ts`
   - Status: `partial`
@@ -339,13 +339,13 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
   - Shape to path conversion exists
 - Fill/stroke expansion
   - Status: `started`
-  - Flattened contours can be emitted for direct fill meshes, convex clip-stack clipping, join/cap-aware stroke geometry, first AA fringe geometry, and patch metadata
+  - Flattened contours can be emitted for direct fill meshes, first patch-instance fill/stroke inputs, convex clip-stack clipping, join/cap-aware stroke geometry, first AA fringe geometry, and patch metadata
 - Path tessellation
   - Status: `started`
   - Adaptive CPU contour flattening exists for line, quadratic, conic, cubic, and arc path segments, with scanline fallback for more complex fill input
 - Vertex/index generation
   - Status: `started`
-  - Vertex generation exists for direct fills, clip-aware fills, complex clip replay, and expanded strokes
+  - Vertex generation exists for direct fills, patch-instance wedges/curves/strokes, clip-aware fills, complex clip replay, and expanded strokes
 - GPU upload
   - Status: `started`
   - Simple per-draw vertex buffer upload exists for stencil and cover passes
@@ -411,7 +411,7 @@ These decisions directly affect the remaining work and are not settled yet.
 - no Skia-like draw-list or draw-pass preparation layer yet
 - broader advanced curve/path features are still missing
 - curve patch preparation is closer to Skia Graphite terminology now, but it is still CPU-generated geometry instead of true GPU patch tessellation
-- patch metadata now exists, but there is still no Skia-style GPU patch tessellation path
+- patch-instance replay now exists for wedges, curves, and strokes, but it still uses simplified fixed-count WGSL subdivision instead of Skia-style Wang's-formula tessellation
 - evenodd/nonzero fills now rely on prepared geometry plus scanline fallback rather than Skia-style path renderers, and coverage is still not Skia-grade
 - no SVG parser or SVG-to-`Path2D` ingestion path yet
 - no retained scene model

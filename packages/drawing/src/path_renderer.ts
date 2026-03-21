@@ -74,6 +74,7 @@ export type DrawingPreparedPathStroke = Readonly<{
   fringeVertices?: readonly DrawingPreparedVertex[];
   patches: readonly DrawingPreparedPatch[];
   color: readonly [number, number, number, number];
+  halfWidth: number;
   bounds: Rect;
   clipRect?: DrawingClipRect;
   clip?: DrawingPreparedClip;
@@ -1788,6 +1789,7 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
       fringeVertices: preparedStroke?.fringeVertices,
       patches,
       color: resolveStrokeColor(command.paint),
+      halfWidth: Math.max(0.5, Math.max(command.paint.strokeWidth ?? 1, epsilon)) / 2,
       bounds: computeBounds(strokeTriangles),
       clipRect: preparedClipStack?.bounds,
       clip: preparedClipStack?.stencilClip,

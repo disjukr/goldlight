@@ -475,7 +475,7 @@ Deno.test('drawing prepared recording preserves evenodd fill rule through draw s
     throw new Error('expected pathFill draw');
   }
   assertEquals(draw.fillRule, 'evenodd');
-  assertEquals(step?.pipelineKeys, ['path-fill-cover']);
+  assertEquals(step?.pipelineKeys, ['path-fill-patch-cover']);
 });
 
 Deno.test('drawing prepared recording derives clip bounds from clip path', () => {
@@ -740,7 +740,7 @@ Deno.test('dawn command buffer encodes stroke draws without stencil', () => {
 
   assertEquals(commandBuffer.unsupportedCommands.length, 0);
   assertEquals(mock.created.renderPasses.length, 1);
-  assertEquals(mock.created.renderPipelines.length, 1);
+  assertEquals(mock.created.renderPipelines.length, 2);
   assertEquals(mock.created.drawCalls.length, 2);
 });
 
@@ -772,8 +772,8 @@ Deno.test('dawn resource provider reuses pipelines across command buffers', () =
   encodeDawnCommandBuffer(sharedContext, createRecording('stroke'), binding);
   encodeDawnCommandBuffer(sharedContext, createRecording('stroke'), binding);
 
-  assertEquals(mock.created.renderPipelines.length, 2);
-  assertEquals(mock.created.shaderModules.length, 2);
+  assertEquals(mock.created.renderPipelines.length, 3);
+  assertEquals(mock.created.shaderModules.length, 3);
 });
 
 Deno.test('dawn pipelines honor target sample count for MSAA', () => {

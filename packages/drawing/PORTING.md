@@ -231,8 +231,8 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
 - Clip path
   - Status: `started`
   - Current state: clip stack is recorded explicitly, rect clips and convex path clips are
-    intersected through prepared geometry, and a complex single clip path can still allocate a
-    stencil clip pass
+    intersected through prepared geometry including AA fringe coverage vertices, and a complex
+    single clip path can still allocate a stencil clip pass
   - Missing: full nested arbitrary clip-path coverage and Skia-like clip stack semantics
 - Transform stack
   - Status: `started`
@@ -468,8 +468,10 @@ These decisions directly affect the remaining work and are not settled yet.
     `prepareClipStack()` only keeps convex clips plus one complex stencil clip payload
   - To match Skia behavior:
     1. preserve all intersecting clip elements, not just the first complex path
-    2. apply clip semantics to AA fringe/coverage geometry as well as base fill/stroke triangles
-    3. add clip stack simplification rules closer to Graphite's geometric intersection path
+    2. add clip stack simplification rules closer to Graphite's geometric intersection path
+  - Completed in local port:
+    1. convex clip stacks now clip AA fringe/coverage geometry as well as base fill/stroke triangles
+  - Validation: `packages/drawing/tests/drawing_graphite_dawn_test.ts`
 - `DrawPass.cpp`
   - Current local gap: Graphite prepares reusable pipeline/resource state per draw pass; local code
     still opens render passes per step and uploads per-draw transient buffers

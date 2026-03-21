@@ -545,6 +545,33 @@ Deno.test('drawing prepared recording accumulates clip stack intersections', () 
   assertEquals(prepared.passes[0]?.steps[0]?.clipRect, createRect(32, 32, 48, 40));
 });
 
+Deno.test('drawing prepared recording clips stroke AA fringe to convex clip bounds', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  clipDrawingRecorderRect(recorder, createRect(40, 40, 40, 40));
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [16, 60] },
+      { kind: 'lineTo', to: [112, 60] },
+    ),
+    { style: 'stroke', strokeWidth: 10 },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const draw = prepared.passes[0]?.steps[0]?.draw;
+  assertEquals(draw?.kind, 'pathStroke');
+  assertEquals(
+    draw?.fringeVertices?.every((vertex) =>
+      vertex.point[0] >= 40 && vertex.point[0] <= 80 && vertex.point[1] >= 40 &&
+      vertex.point[1] <= 80
+    ),
+    true,
+  );
+});
+
 Deno.test('drawing prepared recording falls back for self-intersecting fill paths', () => {
   const mock = createMockGpuContext();
   const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));

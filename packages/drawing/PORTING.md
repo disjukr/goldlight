@@ -52,8 +52,9 @@ stack that fits this repository's TypeScript and WebGPU architecture.
 - GPU encoding
   - Status: `partial`
   - Clear, direct fill replay, patch-instance fill/stroke replay, clip-stencil replay for complex
-    intersect clip paths, convex clip-geometry replay for intersect/difference stacks, and first
-    stroke command buffer translation exist.
+    intersect clip paths, chained stencil replay for multiple complex intersect clips, convex
+    clip-geometry replay for intersect/difference stacks, and first stroke command buffer
+    translation exist.
 - Queue submission
   - Status: `started`
   - Queue manager can submit encoded command buffers, track in-flight work counts, and now keep
@@ -101,8 +102,8 @@ stack that fits this repository's TypeScript and WebGPU architecture.
 - `DawnCommandBuffer` -> `src/command_buffer.ts`
   - Status: `partial`
   - What exists: clear plus direct fill replay, first patch-instance fill/stroke replay, convex-clip
-    geometry/scissor replay for intersect and exact difference cases, and stencil replay for a
-    complex intersect clip path
+    geometry/scissor replay for intersect and exact difference cases, and chained stencil replay for
+    multiple complex intersect clip paths
   - Missing: broader draw path and draw shape encoding, richer pass replay
 - `DrawPass` -> `src/draw_pass.ts`
   - Status: `partial`
@@ -163,7 +164,8 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Status: `partial`
   - Role: adaptive curve flattening, conic/arc flattening, cusp splitting, patch preparation,
     triangulation, scanline fallback, convex clip-stack intersect/difference clipping, clipped AA
-    fringe preparation, clip preparation, and stroke expansion strategy
+    fringe preparation, single-pass preparation for multiple complex intersect stencil clips, clip
+    preparation, and stroke expansion strategy
 - `src/renderer_provider.ts`
   - Status: `started`
   - Role: first renderer selection layer for middle-out fan, tessellated wedges, tessellated curves,
@@ -412,8 +414,8 @@ These decisions directly affect the remaining work and are not settled yet.
 - Clip implementation
   - Status: `started`
   - First implementation uses recorded clip stacks, convex intersect/difference geometry clipping,
-    clipped AA fringe replay, exact scissor reduction when representable, and stencil masking for a
-    remaining complex intersect clip path
+    clipped AA fringe replay, exact scissor reduction when representable, and chained stencil
+    masking for remaining complex intersect clip paths
 - Atlas/text approach
   - Status: `pending`
   - Deferred until shapes are rendering
@@ -458,6 +460,8 @@ These decisions directly affect the remaining work and are not settled yet.
   path renderers, and coverage is still not Skia-grade
 - clip ops now carry intersect/difference for convex clips, but non-convex difference and inverse
   semantics still diverge from Skia ClipStack
+- complex intersect clip stacks can now compose through stencil reference chaining, but they still
+  lack Skia's broader analytic/atlas clip selection and deferred clip draw model
 - no SVG parser or SVG-to-`Path2D` ingestion path yet
 - no retained scene model
 - no bind group cache

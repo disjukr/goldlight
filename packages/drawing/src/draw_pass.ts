@@ -84,6 +84,30 @@ const getPipelineKeysForDraw = (draw: DrawingPreparedDraw): readonly DrawingPipe
   }
 };
 
+const unionClipBounds = (clips: readonly { bounds?: Rect }[] | undefined): Rect | undefined =>
+  clips
+    ?.map((clip) => clip.bounds)
+    .filter((bounds): bounds is Rect => Boolean(bounds))
+    .reduce<Rect | undefined>((combined, bounds) =>
+      combined
+        ? {
+          origin: [
+            Math.min(combined.origin[0], bounds.origin[0]),
+            Math.min(combined.origin[1], bounds.origin[1]),
+          ],
+          size: {
+            width: Math.max(
+              combined.origin[0] + combined.size.width,
+              bounds.origin[0] + bounds.size.width,
+            ) - Math.min(combined.origin[0], bounds.origin[0]),
+            height: Math.max(
+              combined.origin[1] + combined.size.height,
+              bounds.origin[1] + bounds.size.height,
+            ) - Math.min(combined.origin[1], bounds.origin[1]),
+          },
+        }
+        : bounds, undefined);
+
 export const prepareDrawingRecording = (
   recording: DrawingRecording,
 ): DrawingPreparedRecording => {
@@ -135,7 +159,7 @@ export const prepareDrawingRecording = (
           pipelineKeys: getPipelineKeysForDraw(prepared.draw),
           clipRect: prepared.draw.clipRect,
           drawBounds: prepared.draw.bounds,
-          clipBounds: prepared.draw.clipRect,
+          clipBounds: unionClipBounds(prepared.draw.clips) ?? prepared.draw.clipRect,
           usesStencil: prepared.draw.usesStencil,
         });
       } else {

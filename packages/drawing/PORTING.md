@@ -52,8 +52,8 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Status: `started`
   - Clear-only command buffer translation exists.
 - Queue submission
-  - Status: `pending`
-  - No queue manager or GPU work tracking yet.
+  - Status: `started`
+  - Queue manager can submit encoded command buffers and track in-flight work counts.
 - Path rendering
   - Status: `pending`
   - No tessellation or rasterization strategy implemented.
@@ -95,8 +95,9 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - What exists: clear-only WebGPU render-pass encoding
   - Missing: draw path and draw shape encoding
 - `DawnQueueManager` -> `src/queue_manager.ts`
-  - Status: `pending`
-  - Missing: queue submit, tick, unfinished work tracking
+  - Status: `started`
+  - What exists: queue submit, tick, and unfinished work tracking
+  - Missing: real GPU completion fences and error handling
 - `GraphicsPipeline` / caches -> `src/pipeline*.ts`
   - Status: `pending`
   - Missing: pipeline creation and reuse
@@ -135,7 +136,7 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Status: `started`
   - Role: command encoder translation
 - `src/queue_manager.ts`
-  - Status: `pending`
+  - Status: `started`
   - Role: queue submission and completion
 - `src/recording.ts`
   - Status: `started`
@@ -345,8 +346,8 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
   - Status: `started`
   - Command buffer submission helper exists for encoded clears
 - Async work completion
-  - Status: `pending`
-  - Tick exists, submission does not
+  - Status: `started`
+  - Tick and in-flight submission tracking exist, but completion is still coarse
 
 ## Rendering Strategy Decisions
 
@@ -400,6 +401,7 @@ These decisions directly affect the remaining work and are not settled yet.
 - no clipping, transforms, or retained state model
 - no pipeline or bind group cache
 - `command_buffer` currently skips draw commands and only encodes `clear`
+- `queue_manager` currently treats `tick()` as coarse completion rather than using explicit GPU fences
 
 ## Recommended Next Steps
 

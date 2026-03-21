@@ -3,18 +3,20 @@ import { createOffscreenBinding } from '@rieul3d/gpu';
 import { createPath2D, createRect } from '@rieul3d/geometry';
 import {
   createDawnBackendContext,
-  encodeDawnCommandBuffer,
   createDawnCaps,
+  createDawnQueueManager,
   createDawnSharedContext,
   createDrawingContext,
   createDrawingPath2DFromShape,
   createDrawingRecorder,
+  encodeDawnCommandBuffer,
   finishDrawingRecorder,
   recordClear,
   recordDrawPath,
   recordDrawShape,
-  submitDawnCommandBuffer,
+  submitToDawnQueueManager,
   submitDrawingRecorder,
+  tickDawnQueueManager,
 } from '@rieul3d/drawing';
 
 const createMockGpuContext = () => {
@@ -25,6 +27,7 @@ const createMockGpuContext = () => {
   const submitted: GPUCommandBuffer[][] = [];
   const finishedCommandBuffers: GPUCommandBuffer[] = [];
   const offscreenView = { label: 'offscreen-view' } as unknown as GPUTextureView;
+  const ticks: number[] = [];
 
   return {
     created: {
@@ -93,6 +96,7 @@ const createMockGpuContext = () => {
         sampleCount: 1,
       } as const,
     },
+    ticks,
   };
 };
 
@@ -238,7 +242,7 @@ Deno.test('dawn command buffer encodes clear passes and tracks unsupported comma
 
   const recording = finishDrawingRecorder(recorder);
   const commandBuffer = encodeDawnCommandBuffer(sharedContext, recording, binding);
-  submitDawnCommandBuffer(sharedContext, commandBuffer);
+  submitToDawnQueueManager(sharedContext.queueManager, commandBuffer);
 
   assertEquals(commandBuffer.backend, 'graphite-dawn');
   assertEquals(commandBuffer.passCount, 1);
@@ -251,6 +255,38 @@ Deno.test('dawn command buffer encodes clear passes and tracks unsupported comma
   );
   assertEquals(mock.created.submitted.length, 1);
   assertEquals(mock.created.submitted[0]?.length, 1);
+  assertEquals(sharedContext.queueManager.submittedCount, 1);
+  assertEquals(sharedContext.queueManager.inFlightCount, 1);
+  assertEquals(sharedContext.queueManager.lastSubmittedRecorderId, recording.recorderId);
+});
+
+Deno.test('dawn queue manager tracks submit and tick completion', async () => {
+  const mock = createMockGpuContext();
+  const backend = createDawnBackendContext(mock.context, {
+    tick: () => {
+      mock.ticks.push(1);
+    },
+  });
+  const queueManager = createDawnQueueManager(backend);
+  const sharedContext = createDawnSharedContext(backend);
+  const binding = createOffscreenBinding(mock.context);
+  const recorder = createDrawingRecorder(sharedContext);
+
+  recordClear(recorder, [0, 0, 0, 1]);
+  const recording = finishDrawingRecorder(recorder);
+  const commandBuffer = encodeDawnCommandBuffer(sharedContext, recording, binding);
+
+  submitToDawnQueueManager(queueManager, commandBuffer);
+
+  assertEquals(queueManager.submittedCount, 1);
+  assertEquals(queueManager.completedCount, 0);
+  assertEquals(queueManager.inFlightCount, 1);
+
+  await tickDawnQueueManager(queueManager);
+
+  assertEquals(mock.ticks.length, 1);
+  assertEquals(queueManager.completedCount, 1);
+  assertEquals(queueManager.inFlightCount, 0);
 });
 
 Deno.test('drawing context increments recorder ids through shared context', () => {

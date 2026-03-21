@@ -3,8 +3,8 @@ import {
   type DawnBackendContext,
   type DawnBackendContextOptions,
   requestDawnBackendContext,
-  tickDawnBackendContext,
 } from './dawn_backend_context.ts';
+import { tickDawnQueueManager } from './queue_manager.ts';
 import { createDrawingRecorder, type DrawingRecorder } from './recorder.ts';
 import { createDawnSharedContext, type DawnSharedContext } from './shared_context.ts';
 
@@ -27,7 +27,7 @@ export const createDrawingContext = (
     backend,
     sharedContext,
     createRecorder: () => createDrawingRecorder(sharedContext),
-    tick: () => tickDawnBackendContext(backend),
+    tick: () => tickDawnQueueManager(sharedContext.queueManager),
   };
 };
 

@@ -1337,6 +1337,35 @@ Deno.test('dawn command buffer batches consecutive non-stencil draws into one pa
   assertEquals(mock.created.drawCalls.length, 4);
 });
 
+Deno.test('dawn command buffer sizes patch draws from max resolve level in the batch', () => {
+  const createStrokeDrawCount = (
+    control1: readonly [number, number],
+    control2: readonly [number, number],
+  ) => {
+    const mock = createMockGpuContext();
+    const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
+    const recorder = createDrawingRecorder(sharedContext);
+    const binding = createOffscreenBinding(mock.context);
+
+    recordDrawPath(
+      recorder,
+      createPath2D(
+        { kind: 'moveTo', to: [32, 96] },
+        { kind: 'cubicTo', control1, control2, to: [160, 96] },
+      ),
+      { style: 'stroke', strokeWidth: 8, color: [0.2, 0.4, 0.8, 1] },
+    );
+
+    encodeDawnCommandBuffer(sharedContext, finishDrawingRecorder(recorder), binding);
+    return mock.created.drawCalls[0] ?? 0;
+  };
+
+  const small = createStrokeDrawCount([48, 88], [144, 88]);
+  const large = createStrokeDrawCount([48, 0], [144, 192]);
+
+  assertEquals(large > small, true);
+});
+
 Deno.test('dawn resource provider reuses pipelines across command buffers', () => {
   const mock = createMockGpuContext();
   const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));

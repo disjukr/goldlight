@@ -389,11 +389,13 @@ export const createDawnResourceProvider = (
       bindGroup: GPUBindGroup;
     }>
     | null = null;
-  const singleTextureSamplerBindGroups: Array<Readonly<{
-    sampler: GPUSampler;
-    textureView: GPUTextureView;
-    bindGroup: GPUBindGroup;
-  }>> = [];
+  const singleTextureSamplerBindGroups: Array<
+    Readonly<{
+      sampler: GPUSampler;
+      textureView: GPUTextureView;
+      bindGroup: GPUBindGroup;
+    }>
+  > = [];
 
   const createVertexLayout = (): GPUVertexBufferLayout => ({
     arrayStride: floatBytes * floatsPerVertex,

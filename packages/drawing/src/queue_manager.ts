@@ -14,6 +14,11 @@ export type DawnQueueManager = Readonly<{
   }>[];
 }>;
 
+type PendingSubmission = {
+  settled: boolean;
+  completion: Promise<void>;
+};
+
 const asMutableQueueManager = (
   queueManager: DawnQueueManager,
 ): {
@@ -77,6 +82,7 @@ export const tickDawnQueueManager = async (
   queueManager: DawnQueueManager,
 ): Promise<void> => {
   await tickDawnBackendContext(queueManager.backend);
+  await Promise.resolve();
 
   const mutable = asMutableQueueManager(queueManager);
   if (mutable.pendingSubmissions.length === 0) {

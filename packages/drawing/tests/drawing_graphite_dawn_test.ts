@@ -51,6 +51,7 @@ const createMockGpuContext = () => {
   const scissorCalls: Array<readonly [number, number, number, number]> = [];
   const stencilReferences: number[] = [];
   const bindGroupCalls: number[] = [];
+  const workDoneCalls: number[] = [];
   const mappedBuffers: ArrayBuffer[] = [];
   const offscreenView = { label: 'offscreen-view' } as unknown as GPUTextureView;
   const ticks: number[] = [];
@@ -73,6 +74,7 @@ const createMockGpuContext = () => {
       scissorCalls,
       stencilReferences,
       bindGroupCalls,
+      workDoneCalls,
       mappedBuffers,
     },
     ticks,
@@ -1325,12 +1327,13 @@ Deno.test('dawn command buffer uses intrinsic uniform bind group for viewport tr
 
 Deno.test('dawn queue manager tracks submit and tick completion', async () => {
   const mock = createMockGpuContext();
+  mock.context.queue.onSubmittedWorkDone = () => {
+    mock.created.workDoneCalls.push(1);
+    return Promise.resolve(undefined);
+  };
   const backend = createDawnBackendContext(mock.context, {
     tick: () => {
       mock.ticks.push(1);
-      for (const resolve of mock.workDoneResolvers.splice(0)) {
-        resolve();
-      }
     },
   });
   const queueManager = createDawnQueueManager(backend);
@@ -1353,6 +1356,7 @@ Deno.test('dawn queue manager tracks submit and tick completion', async () => {
   await tickDawnQueueManager(queueManager);
 
   assertEquals(mock.ticks.length, 1);
+  assertEquals(mock.created.workDoneCalls.length, 1);
   assertEquals(queueManager.completedCount, 1);
   assertEquals(queueManager.inFlightCount, 0);
 });

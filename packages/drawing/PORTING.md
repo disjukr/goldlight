@@ -113,9 +113,10 @@ stack that fits this repository's TypeScript and WebGPU architecture.
     and patch-carrying draw steps
   - Missing: pipeline/state/resource preparation comparable to Skia DrawPass
 - `DawnQueueManager` -> `src/queue_manager.ts`
-  - Status: `started`
-  - What exists: queue submit, tick, and unfinished work tracking
-  - Missing: real GPU completion fences and error handling
+  - Status: `partial`
+  - What exists: queue submit, tick, unfinished work tracking, and first
+    `queue.onSubmittedWorkDone()`-based completion tracking when the runtime exposes it
+  - Missing: richer fence/error integration and per-submission lifecycle detail
 - `GraphicsPipeline` / caches -> `src/pipeline*.ts`
   - Status: `pending`
   - Missing: pipeline creation and reuse
@@ -475,7 +476,8 @@ These decisions directly affect the remaining work and are not settled yet.
   DrawPass command stream
 - `queue_manager` currently treats `tick()` as coarse completion rather than using explicit GPU
 - `queue_manager` still lacks full Graphite-style per-submission objects and backend-specific wait
-  modes, even though queue-work-done completion now exists
+  modes, even though queue-work-done completion now exists fences when `queue.onSubmittedWorkDone()`
+  is unavailable
 - clip stack handling still diverges from Skia Graphite for inverse clips, atlas-backed masking, and
   clip-shape simplification beyond plain intersect accumulation
 - clip geometry clipping is still incomplete for AA fringe geometry, so coverage edges can diverge
@@ -529,6 +531,7 @@ These decisions directly affect the remaining work and are not settled yet.
   - Remaining gap:
     1. model explicit outstanding submission objects instead of counters only
     2. add broader backend error/completion propagation
+    3. define stronger fallback completion fences when `queue.onSubmittedWorkDone()` is unavailable
   - Validation: `packages/drawing/tests/drawing_graphite_dawn_test.ts`
 
 ## Recommended Next Steps
@@ -591,7 +594,6 @@ These decisions directly affect the remaining work and are not settled yet.
 
 - 2026-03-22
   - Files: `src/resource_provider.ts`, `src/command_buffer.ts`, `src/caps.ts`,
-    `src/queue_manager.ts`, `tests/drawing_graphite_dawn_test.ts`
     `src/queue_manager.ts`, `tests/drawing_graphite_dawn_test.ts`
   - Status transition: resource binding `pending` -> `started`; `DawnResourceProvider` `started` ->
     `partial`; `DawnQueueManager` `started` -> `partial`

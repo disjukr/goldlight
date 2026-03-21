@@ -122,7 +122,8 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - What exists: queue submit, tick, unfinished work tracking, and first
     `queue.onSubmittedWorkDone()`-based completion tracking when the runtime exposes it, plus
     explicit pending submission objects with ids/recorder metadata and a tracked tick-fallback mode
-    when queue completion callbacks are unavailable
+    when queue completion callbacks are unavailable, along with last-completed recorder/submission
+    bookkeeping
   - Missing: richer fence/error integration and backend-specific wait modes
 - `GraphicsPipeline` / caches -> `src/pipeline*.ts`
   - Status: `pending`
@@ -413,7 +414,8 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
   - Tick and in-flight submission tracking exist, and queue-work-done completion can now keep
     unresolved submissions in flight instead of treating every tick as a full fence
   - Current state: pending submissions now retain explicit ids, recorder ids, and completion modes
-    instead of being reduced to counters only
+    instead of being reduced to counters only, and completion now records the last finished
+    recorder/submission ids for downstream tracking
 
 ## Rendering Strategy Decisions
 
@@ -543,6 +545,7 @@ These decisions directly affect the remaining work and are not settled yet.
     1. `tick()` now preserves unresolved submissions until `queue.onSubmittedWorkDone()` settles
     2. queue manager now tracks explicit pending submission objects with ids, recorder ids, and
        completion modes instead of counters only
+    3. completion bookkeeping now retains the last finished recorder/submission ids
   - Remaining gap:
     1. add broader backend error/completion propagation
     2. define stronger fallback completion fences when `queue.onSubmittedWorkDone()` is unavailable
@@ -660,8 +663,9 @@ These decisions directly affect the remaining work and are not settled yet.
   - Status transition: `DawnQueueManager` remains `partial`, but submission lifecycle tracking is
     now closer to Skia Graphite/Dawn
   - Change: queue manager now stores explicit pending submission objects with ids, recorder ids,
-    and completion modes; `queue.onSubmittedWorkDone()` and tick-fallback completions both settle
-    through that shared model instead of mutating counters alone
+    completion modes, and last-completed recorder/submission ids; `queue.onSubmittedWorkDone()` and
+    tick-fallback completions both settle through that shared model instead of mutating counters
+    alone
   - Remaining: backend-specific wait paths, stronger fallback fences, and richer error/completion
     propagation
   - Validation: `deno test packages/drawing/tests/drawing_graphite_dawn_test.ts`

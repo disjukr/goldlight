@@ -1566,6 +1566,7 @@ Deno.test('dawn queue manager tracks submit and tick completion', async () => {
   assertEquals(queueManager.completedCount, 1);
   assertEquals(queueManager.inFlightCount, 0);
   assertEquals(queueManager.lastCompletedSubmissionId, 1);
+  assertEquals(queueManager.lastCompletedRecorderId, commandBuffer.recording.recorderId);
 });
 
 Deno.test('dawn queue manager keeps unresolved submissions in flight until queue completion', async () => {
@@ -1604,6 +1605,7 @@ Deno.test('dawn queue manager keeps unresolved submissions in flight until queue
   assertEquals(queueManager.completedCount, 1);
   assertEquals(queueManager.inFlightCount, 0);
   assertEquals(queueManager.lastCompletedSubmissionId, 1);
+  assertEquals(queueManager.lastCompletedRecorderId, commandBuffer.recording.recorderId);
 });
 
 Deno.test('dawn queue manager tracks fallback submissions explicitly when queue completion is unavailable', async () => {
@@ -1645,6 +1647,7 @@ Deno.test('dawn queue manager tracks fallback submissions explicitly when queue 
   assertEquals(queueManager.completedCount, 1);
   assertEquals(queueManager.inFlightCount, 0);
   assertEquals(queueManager.lastCompletedSubmissionId, 1);
+  assertEquals(queueManager.lastCompletedRecorderId, commandBuffer.recording.recorderId);
   assertEquals(queueManager.pendingSubmissions.length, 0);
 });
 

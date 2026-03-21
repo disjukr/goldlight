@@ -8,6 +8,7 @@ export type DawnQueueManager = Readonly<{
   completedCount: number;
   inFlightCount: number;
   lastSubmittedRecorderId: number | null;
+  lastCompletedRecorderId: number | null;
   lastCompletedSubmissionId: number | null;
   nextSubmissionId: number;
   pendingSubmissions: readonly DawnPendingSubmission[];
@@ -36,6 +37,7 @@ const asMutableQueueManager = (
   completedCount: number;
   inFlightCount: number;
   lastSubmittedRecorderId: number | null;
+  lastCompletedRecorderId: number | null;
   lastCompletedSubmissionId: number | null;
   nextSubmissionId: number;
   pendingSubmissions: PendingSubmission[];
@@ -45,6 +47,7 @@ const asMutableQueueManager = (
     completedCount: number;
     inFlightCount: number;
     lastSubmittedRecorderId: number | null;
+    lastCompletedRecorderId: number | null;
     lastCompletedSubmissionId: number | null;
     nextSubmissionId: number;
     pendingSubmissions: PendingSubmission[];
@@ -58,6 +61,7 @@ export const createDawnQueueManager = (
   completedCount: 0,
   inFlightCount: 0,
   lastSubmittedRecorderId: null,
+  lastCompletedRecorderId: null,
   lastCompletedSubmissionId: null,
   nextSubmissionId: 1,
   pendingSubmissions: [],
@@ -110,6 +114,7 @@ export const tickDawnQueueManager = async (
 
   const mutable = asMutableQueueManager(queueManager);
   let completedThisTick = 0;
+  let lastCompletedRecorderId = mutable.lastCompletedRecorderId;
   let lastCompletedSubmissionId = mutable.lastCompletedSubmissionId;
   mutable.pendingSubmissions = mutable.pendingSubmissions.filter((submission) => {
     if (submission.completionMode === 'tick-fallback') {
@@ -119,10 +124,12 @@ export const tickDawnQueueManager = async (
       return true;
     }
     completedThisTick += 1;
+    lastCompletedRecorderId = submission.recorderId;
     lastCompletedSubmissionId = submission.id;
     return false;
   });
   mutable.completedCount += completedThisTick;
   mutable.inFlightCount = Math.max(0, mutable.inFlightCount - completedThisTick);
+  mutable.lastCompletedRecorderId = lastCompletedRecorderId;
   mutable.lastCompletedSubmissionId = lastCompletedSubmissionId;
 };

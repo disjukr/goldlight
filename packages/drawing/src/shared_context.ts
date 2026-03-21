@@ -1,8 +1,10 @@
+import { createDawnCaps, type DawnCaps } from './caps.ts';
 import { createDawnResourceProvider, type DawnResourceProvider } from './resource_provider.ts';
 import type { DawnBackendContext } from './dawn_backend_context.ts';
 
 export type DawnSharedContext = Readonly<{
   backend: DawnBackendContext;
+  caps: DawnCaps;
   resourceProvider: DawnResourceProvider;
   hasTick: boolean;
   recorderCount: number;
@@ -15,6 +17,7 @@ export const createDawnSharedContext = (
   }> = {},
 ): DawnSharedContext => ({
   backend,
+  caps: createDawnCaps(backend),
   resourceProvider: createDawnResourceProvider(backend, {
     resourceBudget: options.resourceBudget,
   }),

@@ -14,170 +14,367 @@ stack that fits this repository's TypeScript and WebGPU architecture.
 
 ## Status Legend
 
-- `pending`: not started
-- `started`: initial file or API shape exists
-- `partial`: significant pieces exist but execution is incomplete
-- `done`: implemented and verified
-- `blocked`: cannot proceed until a design or dependency is resolved
+- `pending`
+  - not started
+- `started`
+  - initial file or API shape exists
+- `partial`
+  - significant pieces exist but execution is incomplete
+- `done`
+  - implemented and verified
+- `blocked`
+  - cannot proceed until a design or dependency is resolved
 
 ## Overall Summary
 
-| Area | Status | Summary |
-| --- | --- | --- |
-| Package setup | `done` | `drawing` package exists and is wired into the workspace |
-| Shared 2D geometry model | `partial` | Basic `Path2D` and shape types exist in `geometry` |
-| Backend context | `started` | Dawn/WebGPU device lifecycle wrapper exists |
-| Shared context | `started` | Shared backend state and resource provider are present |
-| Resource allocation | `started` | Thin buffer/texture/sampler allocation layer exists |
-| Recording | `started` | Abstract commands for `clear`, `drawPath`, `drawShape` exist |
-| Capability probing | `pending` | No caps or limits layer yet |
-| GPU encoding | `pending` | No command buffer translation yet |
-| Queue submission | `pending` | No queue manager or GPU work tracking yet |
-| Path rendering | `pending` | No tessellation or rasterization strategy implemented |
-| Paint system | `started` | Minimal paint shape exists, not executable |
-| Testing | `partial` | Structural tests exist, no real GPU rendering tests yet |
+- Package setup
+  - Status: `done`
+  - `drawing` package exists and is wired into the workspace.
+- Shared 2D geometry model
+  - Status: `partial`
+  - Basic `Path2D` and shape types exist in `geometry`.
+- Backend context
+  - Status: `started`
+  - Dawn/WebGPU device lifecycle wrapper exists.
+- Shared context
+  - Status: `started`
+  - Shared backend state, caps, and resource provider are present.
+- Resource allocation
+  - Status: `started`
+  - Thin buffer/texture/sampler allocation layer exists.
+- Recording
+  - Status: `started`
+  - Abstract commands for `clear`, `drawPath`, `drawShape` exist.
+- Capability probing
+  - Status: `started`
+  - Initial caps and limits layer exists.
+- GPU encoding
+  - Status: `pending`
+  - No command buffer translation yet.
+- Queue submission
+  - Status: `pending`
+  - No queue manager or GPU work tracking yet.
+- Path rendering
+  - Status: `pending`
+  - No tessellation or rasterization strategy implemented.
+- Paint system
+  - Status: `started`
+  - Minimal paint shape exists, not executable.
+- Testing
+  - Status: `partial`
+  - Structural tests exist, no real GPU rendering tests yet.
 
 ## Architecture Mapping
 
-| Skia Graphite/Dawn | Local target | Status | What exists | What is missing |
-| --- | --- | --- | --- | --- |
-| `DawnBackendContext` | `src/dawn_backend_context.ts` | `started` | wraps adapter/device/queue/tick | no device feature negotiation policy |
-| `DawnSharedContext` | `src/shared_context.ts` | `started` | shared backend state and resource provider creation | no bind group layouts, no pipeline helpers |
-| `DawnResourceProvider` | `src/resource_provider.ts` | `started` | simple resource allocation methods | no caching, no bind groups, no wrapped resources |
-| `Context` | `src/context.ts` | `started` | context factory and recorder creation | no submit pipeline, no global backend orchestration |
-| `Recorder` | `src/recorder.ts` | `started` | abstract command collection | no recording object, no ordering or flush rules |
-| `DawnCaps` | `src/caps.ts` | `pending` | none | feature probing, format support, limits, fallbacks |
-| `DawnCommandBuffer` | `src/command_buffer.ts` | `pending` | none | WebGPU encoder translation |
-| `DawnQueueManager` | `src/queue_manager.ts` | `pending` | none | queue submit, tick, unfinished work tracking |
-| `GraphicsPipeline` / caches | `src/pipeline*.ts` | `pending` | none | pipeline creation and reuse |
-| `Recording` | `src/recording.ts` | `pending` | none | immutable recorded work unit |
+- `DawnBackendContext` -> `src/dawn_backend_context.ts`
+  - Status: `started`
+  - What exists: wraps adapter/device/queue/tick
+  - Missing: device feature negotiation policy
+- `DawnSharedContext` -> `src/shared_context.ts`
+  - Status: `started`
+  - What exists: shared backend state, caps, and resource provider creation
+  - Missing: bind group layouts and pipeline helpers
+- `DawnResourceProvider` -> `src/resource_provider.ts`
+  - Status: `started`
+  - What exists: simple resource allocation methods
+  - Missing: caching, bind groups, wrapped resources
+- `Context` -> `src/context.ts`
+  - Status: `started`
+  - What exists: context factory and recorder creation
+  - Missing: submit pipeline and global backend orchestration
+- `Recorder` -> `src/recorder.ts`
+  - Status: `started`
+  - What exists: abstract command collection
+  - Missing: immutable recording object, ordering rules, flush rules
+- `DawnCaps` -> `src/caps.ts`
+  - Status: `started`
+  - What exists: initial feature, format, and limit policy
+  - Missing: richer probing and backend-specific fallbacks
+- `DawnCommandBuffer` -> `src/command_buffer.ts`
+  - Status: `pending`
+  - Missing: WebGPU encoder translation
+- `DawnQueueManager` -> `src/queue_manager.ts`
+  - Status: `pending`
+  - Missing: queue submit, tick, unfinished work tracking
+- `GraphicsPipeline` / caches -> `src/pipeline*.ts`
+  - Status: `pending`
+  - Missing: pipeline creation and reuse
+- `Recording` -> `src/recording.ts`
+  - Status: `pending`
+  - Missing: immutable recorded work unit
 
 ## Local Files
 
-| File | Role | Status |
-| --- | --- | --- |
-| `src/context.ts` | high-level drawing context factory | `started` |
-| `src/dawn_backend_context.ts` | Dawn/WebGPU backend handles | `started` |
-| `src/shared_context.ts` | shared backend objects | `started` |
-| `src/resource_provider.ts` | low-level resource creation | `started` |
-| `src/recorder.ts` | command recording API | `started` |
-| `src/geometry.ts` | bridge from drawing to geometry | `started` |
-| `src/types.ts` | shared drawing command and paint types | `started` |
-| `src/caps.ts` | backend capability model | `pending` |
-| `src/command_buffer.ts` | command encoder translation | `pending` |
-| `src/queue_manager.ts` | queue submission and completion | `pending` |
-| `src/recording.ts` | immutable recorded command package | `pending` |
-| `src/path_renderer.ts` | path rendering strategy | `pending` |
+- `src/context.ts`
+  - Status: `started`
+  - Role: high-level drawing context factory
+- `src/dawn_backend_context.ts`
+  - Status: `started`
+  - Role: Dawn/WebGPU backend handles
+- `src/shared_context.ts`
+  - Status: `started`
+  - Role: shared backend objects
+- `src/resource_provider.ts`
+  - Status: `started`
+  - Role: low-level resource creation
+- `src/recorder.ts`
+  - Status: `started`
+  - Role: command recording API
+- `src/geometry.ts`
+  - Status: `started`
+  - Role: bridge from drawing to geometry
+- `src/types.ts`
+  - Status: `started`
+  - Role: shared drawing command and paint types
+- `src/caps.ts`
+  - Status: `started`
+  - Role: backend capability model
+- `src/command_buffer.ts`
+  - Status: `pending`
+  - Role: command encoder translation
+- `src/queue_manager.ts`
+  - Status: `pending`
+  - Role: queue submission and completion
+- `src/recording.ts`
+  - Status: `pending`
+  - Role: immutable recorded command package
+- `src/path_renderer.ts`
+  - Status: `pending`
+  - Role: path rendering strategy
 
 ## Geometry Model Progress
 
 Geometry that is reusable across packages should live in `@rieul3d/geometry`, not in `drawing`.
 
-| Item | Location | Status | Notes |
-| --- | --- | --- | --- |
-| `Point2D` | `@rieul3d/geometry/src/path2d.ts` | `done` | shared 2D point type |
-| `Size2D` | `@rieul3d/geometry/src/path2d.ts` | `done` | shared 2D size type |
-| `Rect` | `@rieul3d/geometry/src/path2d.ts` | `done` | basic rectangle type |
-| `RRect` | `@rieul3d/geometry/src/path2d.ts` | `started` | shape model exists |
-| `Circle` | `@rieul3d/geometry/src/path2d.ts` | `done` | basic circle type |
-| `Polygon` | `@rieul3d/geometry/src/path2d.ts` | `done` | general polygon input |
-| `Path2D` | `@rieul3d/geometry/src/path2d.ts` | `started` | `moveTo`, `lineTo`, `quadTo`, `close` |
-| cubic curves | `@rieul3d/geometry/src/path2d.ts` | `pending` | no `cubicTo` yet |
-| conics/arcs | `@rieul3d/geometry/src/path2d.ts` | `pending` | no arc representation yet |
-| path fill rules | `@rieul3d/geometry/src/path2d.ts` | `pending` | no winding/even-odd state yet |
-| path transforms/utilities | `@rieul3d/geometry/src/path2d.ts` | `pending` | no utility layer yet |
+- `Point2D` in `@rieul3d/geometry/src/path2d.ts`
+  - Status: `done`
+  - Shared 2D point type
+- `Size2D` in `@rieul3d/geometry/src/path2d.ts`
+  - Status: `done`
+  - Shared 2D size type
+- `Rect` in `@rieul3d/geometry/src/path2d.ts`
+  - Status: `done`
+  - Basic rectangle type
+- `RRect` in `@rieul3d/geometry/src/path2d.ts`
+  - Status: `started`
+  - Shape model exists
+- `Circle` in `@rieul3d/geometry/src/path2d.ts`
+  - Status: `done`
+  - Basic circle type
+- `Polygon` in `@rieul3d/geometry/src/path2d.ts`
+  - Status: `done`
+  - General polygon input
+- `Path2D` in `@rieul3d/geometry/src/path2d.ts`
+  - Status: `started`
+  - Supports `moveTo`, `lineTo`, `quadTo`, `close`
+- Cubic curves in `@rieul3d/geometry/src/path2d.ts`
+  - Status: `pending`
+  - No `cubicTo` yet
+- Conics/arcs in `@rieul3d/geometry/src/path2d.ts`
+  - Status: `pending`
+  - No arc representation yet
+- Path fill rules in `@rieul3d/geometry/src/path2d.ts`
+  - Status: `pending`
+  - No winding/even-odd state yet
+- Path transforms/utilities in `@rieul3d/geometry/src/path2d.ts`
+  - Status: `pending`
+  - No utility layer yet
 
 ## Drawing Command Progress
 
-| Command / concept | Status | Current state | Missing |
-| --- | --- | --- | --- |
-| `clear` | `started` | recordable | not executable on GPU |
-| `drawPath` | `started` | recordable with paint | no rasterization or tessellation |
-| `drawShape` | `started` | shape is converted to `Path2D` | no GPU execution |
-| clip path | `pending` | none | clip stack and pass integration |
-| transform stack | `pending` | none | per-draw transform model |
-| save/restore | `pending` | none | state stack model |
-| paint blending | `pending` | none | blend modes not modeled |
-| anti-aliasing | `pending` | none | no AA strategy yet |
-| text/glyph drawing | `pending` | none | out of scope for now |
+- `clear`
+  - Status: `started`
+  - Current state: recordable
+  - Missing: executable GPU path
+- `drawPath`
+  - Status: `started`
+  - Current state: recordable with paint
+  - Missing: rasterization or tessellation
+- `drawShape`
+  - Status: `started`
+  - Current state: shape is converted to `Path2D`
+  - Missing: GPU execution
+- Clip path
+  - Status: `pending`
+  - Missing: clip stack and pass integration
+- Transform stack
+  - Status: `pending`
+  - Missing: per-draw transform model
+- Save/restore
+  - Status: `pending`
+  - Missing: state stack model
+- Paint blending
+  - Status: `pending`
+  - Missing: blend mode model
+- Anti-aliasing
+  - Status: `pending`
+  - Missing: AA strategy
+- Text/glyph drawing
+  - Status: `pending`
+  - Out of scope for now
 
 ## Paint System Progress
 
-| Paint feature | Status | Notes |
-| --- | --- | --- |
-| RGBA color | `started` | exists in `DrawingPaint` |
-| fill vs stroke | `started` | represented, not executed |
-| stroke width | `started` | represented, not executed |
-| join/cap | `pending` | not modeled |
-| miter limit | `pending` | not modeled |
-| shader/gradient | `pending` | not modeled |
-| image pattern | `pending` | not modeled |
-| blend mode | `pending` | not modeled |
-| color filter | `pending` | not modeled |
+- RGBA color
+  - Status: `started`
+  - Exists in `DrawingPaint`
+- Fill vs stroke
+  - Status: `started`
+  - Represented, not executed
+- Stroke width
+  - Status: `started`
+  - Represented, not executed
+- Join/cap
+  - Status: `pending`
+  - Not modeled
+- Miter limit
+  - Status: `pending`
+  - Not modeled
+- Shader/gradient
+  - Status: `pending`
+  - Not modeled
+- Image pattern
+  - Status: `pending`
+  - Not modeled
+- Blend mode
+  - Status: `pending`
+  - Not modeled
+- Color filter
+  - Status: `pending`
+  - Not modeled
 
 ## Backend Capability Progress
 
-| Capability area | Status | Notes |
-| --- | --- | --- |
-| device availability | `started` | backend context requests a device |
-| feature negotiation | `pending` | no central policy |
-| limits tracking | `pending` | not exposed or cached |
-| format support | `pending` | no caps table |
-| sample count policy | `pending` | no MSAA strategy |
-| storage buffer support | `pending` | no capability model |
-| fallback/workaround policy | `pending` | no centralized backend policy |
+- Device availability
+  - Status: `started`
+  - Backend context requests a device
+- Feature negotiation
+  - Status: `started`
+  - Adapter/device features are collected
+- Limits tracking
+  - Status: `started`
+  - Key device limits are exposed in caps
+- Format support
+  - Status: `started`
+  - Initial static format policy exists
+- Sample count policy
+  - Status: `started`
+  - Simple `1` / `4` sample policy exists
+- Storage buffer support
+  - Status: `started`
+  - Capability is surfaced in caps
+- Fallback/workaround policy
+  - Status: `pending`
+  - No centralized backend policy
 
 ## Resource System Progress
 
-| Resource area | Status | Current state | Missing |
-| --- | --- | --- | --- |
-| buffer creation | `started` | direct wrapper exists | no pooling/caching |
-| texture creation | `started` | direct wrapper exists | no reuse strategy |
-| sampler creation | `started` | direct wrapper exists | no canonicalization/cache |
-| bind groups | `pending` | none | required for real draw execution |
-| shader modules | `pending` | none | no shader lifecycle |
-| pipelines | `pending` | none | no render pipeline creation |
-| global cache | `pending` | none | no shared backend caches |
-| resource budget | `started` | number is stored | not enforced |
-| resource destruction | `pending` | implicit only | no lifecycle policy |
+- Buffer creation
+  - Status: `started`
+  - Current state: direct wrapper exists
+  - Missing: pooling/caching
+- Texture creation
+  - Status: `started`
+  - Current state: direct wrapper exists
+  - Missing: reuse strategy
+- Sampler creation
+  - Status: `started`
+  - Current state: direct wrapper exists
+  - Missing: canonicalization/cache
+- Bind groups
+  - Status: `pending`
+  - Missing: required for real draw execution
+- Shader modules
+  - Status: `pending`
+  - Missing: shader lifecycle
+- Pipelines
+  - Status: `pending`
+  - Missing: render pipeline creation
+- Global cache
+  - Status: `pending`
+  - Missing: shared backend caches
+- Resource budget
+  - Status: `started`
+  - Current state: number is stored
+  - Missing: enforcement
+- Resource destruction
+  - Status: `pending`
+  - Current state: implicit only
+  - Missing: lifecycle policy
 
 ## Rendering Pipeline Progress
 
-| Stage | Status | Notes |
-| --- | --- | --- |
-| abstract draw recording | `started` | recorder collects draw commands |
-| path normalization | `started` | shape to path conversion exists |
-| fill/stroke expansion | `pending` | no geometry generation yet |
-| path tessellation | `pending` | no CPU or GPU tessellator |
-| vertex/index generation | `pending` | none |
-| GPU upload | `pending` | not connected to drawing commands |
-| render pass setup | `pending` | none |
-| pipeline binding | `pending` | none |
-| draw submission | `pending` | none |
-| async work completion | `pending` | tick exists, submission does not |
+- Abstract draw recording
+  - Status: `started`
+  - Recorder collects draw commands
+- Path normalization
+  - Status: `started`
+  - Shape to path conversion exists
+- Fill/stroke expansion
+  - Status: `pending`
+  - No geometry generation yet
+- Path tessellation
+  - Status: `pending`
+  - No CPU or GPU tessellator
+- Vertex/index generation
+  - Status: `pending`
+  - None
+- GPU upload
+  - Status: `pending`
+  - Not connected to drawing commands
+- Render pass setup
+  - Status: `pending`
+  - None
+- Pipeline binding
+  - Status: `pending`
+  - None
+- Draw submission
+  - Status: `pending`
+  - None
+- Async work completion
+  - Status: `pending`
+  - Tick exists, submission does not
 
 ## Rendering Strategy Decisions
 
 These decisions directly affect the remaining work and are not settled yet.
 
-| Topic | Status | Notes |
-| --- | --- | --- |
-| first fill strategy | `blocked` | choose CPU tessellation vs stencil-and-cover vs analytic |
-| first stroke strategy | `blocked` | depends on paint and path expansion model |
-| clip implementation | `blocked` | depends on render pass and coverage strategy |
-| atlas/text approach | `pending` | deferred until shapes are rendering |
-| pipeline cache shape | `pending` | depends on command buffer and shader layout |
+- First fill strategy
+  - Status: `blocked`
+  - Choose CPU tessellation vs stencil-and-cover vs analytic
+- First stroke strategy
+  - Status: `blocked`
+  - Depends on paint and path expansion model
+- Clip implementation
+  - Status: `blocked`
+  - Depends on render pass and coverage strategy
+- Atlas/text approach
+  - Status: `pending`
+  - Deferred until shapes are rendering
+- Pipeline cache shape
+  - Status: `pending`
+  - Depends on command buffer and shader layout
 
 ## Tests And Verification
 
-| Verification area | Status | Notes |
-| --- | --- | --- |
-| unit tests for package wiring | `done` | `tests/drawing_graphite_dawn_test.ts` |
-| type checking | `done` | package APIs type-check |
-| geometry path tests | `partial` | indirect coverage only |
-| real WebGPU integration test | `pending` | no draw execution yet |
-| image snapshot regression | `pending` | no rendered output yet |
-| backend capability tests | `pending` | no caps layer yet |
+- Unit tests for package wiring
+  - Status: `done`
+  - `tests/drawing_graphite_dawn_test.ts`
+- Type checking
+  - Status: `done`
+  - Package APIs type-check
+- Geometry path tests
+  - Status: `partial`
+  - Indirect coverage only
+- Real WebGPU integration test
+  - Status: `pending`
+  - No draw execution yet
+- Image snapshot regression
+  - Status: `pending`
+  - No rendered output yet
+- Backend capability tests
+  - Status: `started`
+  - Basic caps tests exist
 
 ## Known Gaps
 
@@ -190,16 +387,15 @@ These decisions directly affect the remaining work and are not settled yet.
 
 ## Recommended Next Steps
 
-1. Add `src/caps.ts`
-   - Probe WebGPU features and limits
-   - Decide minimum supported format/sample-count rules
-   - Centralize backend capability checks
+1. Deepen `src/caps.ts`
+   - Replace static format assumptions with richer backend policy
+   - Add feature-gated fallbacks
 2. Add `src/recording.ts`
    - Freeze recorder output into an immutable work package
    - Separate API recording from backend execution
 3. Add `src/command_buffer.ts`
    - Define the backend execution layer that consumes recording output
-   - Start with `clear` and one simple filled path path
+   - Start with `clear` and one simple filled path
 4. Decide and implement the first fill path
    - Prefer a simple CPU tessellation route first for momentum
 5. Add `src/queue_manager.ts`

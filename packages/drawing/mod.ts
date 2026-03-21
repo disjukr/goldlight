@@ -1,3 +1,4 @@
+export * from './src/caps.ts';
 export * from './src/context.ts';
 export * from './src/dawn_backend_context.ts';
 export * from './src/geometry.ts';

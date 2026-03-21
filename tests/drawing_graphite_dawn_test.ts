@@ -2,6 +2,7 @@ import { assertEquals, assertExists } from 'jsr:@std/assert@^1.0.14';
 import { createPath2D, createRect } from '@rieul3d/geometry';
 import {
   createDawnBackendContext,
+  createDawnCaps,
   createDawnSharedContext,
   createDrawingContext,
   createDrawingPath2DFromShape,
@@ -24,8 +25,18 @@ const createMockGpuContext = () => {
       samplers,
     },
     context: {
-      adapter: {} as GPUAdapter,
+      adapter: {
+        features: new Set(['bgra8unorm-storage']),
+      } as unknown as GPUAdapter,
       device: {
+        features: new Set(['timestamp-query']),
+        limits: {
+          maxTextureDimension2D: 8192,
+          maxColorAttachments: 8,
+          maxBufferSize: 1024 * 1024,
+          minUniformBufferOffsetAlignment: 256,
+          minStorageBufferOffsetAlignment: 256,
+        },
         createBuffer: (descriptor: GPUBufferDescriptor) => {
           buffers.push(descriptor);
           return { descriptor } as unknown as GPUBuffer;
@@ -82,9 +93,25 @@ Deno.test('dawn shared context exposes resource provider over gpu device', () =>
   });
 
   assertEquals(sharedContext.resourceProvider.resourceBudget, 1024);
+  assertEquals(sharedContext.caps.backend, 'graphite-dawn');
+  assertEquals(sharedContext.caps.supportsTimestampQuery, true);
   assertEquals(mock.created.buffers.length, 1);
   assertEquals(mock.created.textures.length, 1);
   assertEquals(mock.created.samplers.length, 1);
+});
+
+Deno.test('dawn caps expose feature, format, and sample count policy', () => {
+  const mock = createMockGpuContext();
+  const caps = createDawnCaps(createDawnBackendContext(mock.context));
+
+  assertEquals(caps.preferredCanvasFormat, 'rgba8unorm');
+  assertEquals(caps.supportsTimestampQuery, true);
+  assertEquals(caps.limits.maxTextureDimension2D, 8192);
+  assertEquals(caps.isFormatRenderable('rgba8unorm'), true);
+  assertEquals(caps.getFormatCapabilities('depth24plus').texturable, true);
+  assertEquals(caps.supportsSampleCount(1), true);
+  assertEquals(caps.supportsSampleCount(4), true);
+  assertEquals(caps.supportsSampleCount(8), false);
 });
 
 Deno.test('drawing recorder tracks graphite-dawn style command submission', () => {

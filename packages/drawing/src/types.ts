@@ -1,9 +1,11 @@
-import type { Path2D, Point2D, Shape2D, Size2D } from '@rieul3d/geometry';
+import type { Matrix2D, Path2D, Point2D, Rect, Shape2D, Size2D } from '@rieul3d/geometry';
 
 export type DrawingPoint2D = Point2D;
 export type DrawingSize2D = Size2D;
 export type DrawingPath2D = Path2D;
 export type DrawingShapeDescriptor = Shape2D;
+export type DrawingMatrix2D = Matrix2D;
+export type DrawingClipRect = Rect;
 
 export type DrawingBackendKind = 'graphite-dawn';
 
@@ -11,6 +13,9 @@ export type DrawingPaint = Readonly<{
   color?: readonly [number, number, number, number];
   style?: 'fill' | 'stroke';
   strokeWidth?: number;
+  strokeJoin?: 'miter' | 'bevel' | 'round';
+  strokeCap?: 'butt' | 'square' | 'round';
+  miterLimit?: number;
 }>;
 
 export type ClearCommand = Readonly<{
@@ -22,6 +27,9 @@ export type DrawPathCommand = Readonly<{
   kind: 'drawPath';
   path: DrawingPath2D;
   paint: DrawingPaint;
+  transform: DrawingMatrix2D;
+  clipRect?: DrawingClipRect;
+  clipPath?: DrawingPath2D;
 }>;
 
 export type DrawShapeCommand = Readonly<{
@@ -29,6 +37,9 @@ export type DrawShapeCommand = Readonly<{
   shape: DrawingShapeDescriptor;
   path: DrawingPath2D;
   paint: DrawingPaint;
+  transform: DrawingMatrix2D;
+  clipRect?: DrawingClipRect;
+  clipPath?: DrawingPath2D;
 }>;
 
 export type DrawingCommand = ClearCommand | DrawPathCommand | DrawShapeCommand;

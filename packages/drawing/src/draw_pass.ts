@@ -1,19 +1,36 @@
 import type { DrawingRecording } from './recording.ts';
 import { prepareDrawingPathCommand, type DrawingPreparedDraw } from './path_renderer.ts';
 import type {
+  DrawingClipRect,
   DrawingCommand,
   DrawPathCommand,
   DrawShapeCommand,
 } from './types.ts';
+import type { Rect } from '@rieul3d/geometry';
 
 export type DrawingDrawCommand = DrawPathCommand | DrawShapeCommand;
+
+export type DrawingPipelineKey =
+  | 'path-fill-nonzero-stencil'
+  | 'path-fill-evenodd-stencil'
+  | 'path-fill-cover'
+  | 'path-stroke-cover';
+
+export type DrawingPreparedStep = Readonly<{
+  draw: DrawingPreparedDraw;
+  pipelineKeys: readonly DrawingPipelineKey[];
+  clipRect?: DrawingClipRect;
+  drawBounds: DrawingPreparedDraw['bounds'];
+  clipBounds?: Rect;
+  usesStencil: boolean;
+}>;
 
 export type DrawingDrawPass = Readonly<{
   kind: 'drawPass';
   recorderId: number;
   loadOp: 'load' | 'clear';
   clearColor: readonly [number, number, number, number];
-  draws: readonly DrawingPreparedDraw[];
+  steps: readonly DrawingPreparedStep[];
   unsupportedDraws: readonly DrawingDrawCommand[];
 }>;
 
@@ -30,6 +47,17 @@ const defaultClearColor: readonly [number, number, number, number] = [0, 0, 0, 0
 const isDrawCommand = (command: DrawingCommand): command is DrawingDrawCommand =>
   command.kind === 'drawPath' || command.kind === 'drawShape';
 
+const getPipelineKeysForDraw = (draw: DrawingPreparedDraw): readonly DrawingPipelineKey[] => {
+  switch (draw.kind) {
+    case 'pathFill':
+      return draw.fillRule === 'evenodd'
+        ? ['path-fill-evenodd-stencil', 'path-fill-cover']
+        : ['path-fill-nonzero-stencil', 'path-fill-cover'];
+    case 'pathStroke':
+      return ['path-stroke-cover'];
+  }
+};
+
 export const prepareDrawingRecording = (
   recording: DrawingRecording,
 ): DrawingPreparedRecording => {
@@ -38,13 +66,13 @@ export const prepareDrawingRecording = (
 
   let currentLoadOp: 'load' | 'clear' = 'load';
   let currentClearColor = defaultClearColor;
-  let currentDraws: DrawingPreparedDraw[] = [];
+  let currentSteps: DrawingPreparedStep[] = [];
   let currentUnsupportedDraws: DrawingDrawCommand[] = [];
 
   const flushPass = (): void => {
     if (
       currentLoadOp === 'load' &&
-      currentDraws.length === 0 &&
+      currentSteps.length === 0 &&
       currentUnsupportedDraws.length === 0
     ) {
       return;
@@ -55,13 +83,13 @@ export const prepareDrawingRecording = (
       recorderId: recording.recorderId,
       loadOp: currentLoadOp,
       clearColor: currentClearColor,
-      draws: Object.freeze([...currentDraws]),
+      steps: Object.freeze([...currentSteps]),
       unsupportedDraws: Object.freeze([...currentUnsupportedDraws]),
     });
 
     currentLoadOp = 'load';
     currentClearColor = defaultClearColor;
-    currentDraws = [];
+    currentSteps = [];
     currentUnsupportedDraws = [];
   };
 
@@ -76,7 +104,14 @@ export const prepareDrawingRecording = (
     if (isDrawCommand(command)) {
       const prepared = prepareDrawingPathCommand(command);
       if (prepared.supported) {
-        currentDraws.push(prepared.draw);
+        currentSteps.push({
+          draw: prepared.draw,
+          pipelineKeys: getPipelineKeysForDraw(prepared.draw),
+          clipRect: prepared.draw.clipRect,
+          drawBounds: prepared.draw.bounds,
+          clipBounds: prepared.draw.clip?.bounds,
+          usesStencil: prepared.draw.usesStencil,
+        });
       } else {
         currentUnsupportedDraws.push(command);
         unsupportedCommands.push(command);

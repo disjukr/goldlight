@@ -1,3 +1,4 @@
+import type { Path2D } from '@rieul3d/geometry';
 import type { DawnSharedContext } from './shared_context.ts';
 import type { DrawingCommand, DrawingSubmission } from './types.ts';
 
@@ -9,6 +10,13 @@ export type DrawingRecording = Readonly<{
 }>;
 
 const cloneCommand = (command: DrawingCommand): DrawingCommand => {
+  const clonePath = (path: Path2D | undefined): Path2D | undefined =>
+    path
+      ? {
+        verbs: path.verbs.map((verb) => ({ ...verb })),
+        fillRule: path.fillRule,
+      }
+      : undefined;
   switch (command.kind) {
     case 'clear':
       return {
@@ -18,21 +26,31 @@ const cloneCommand = (command: DrawingCommand): DrawingCommand => {
     case 'drawPath':
       return {
         kind: 'drawPath',
-        path: {
-          verbs: command.path.verbs.map((verb) => ({ ...verb })),
-          fillRule: command.path.fillRule,
-        },
+        path: clonePath(command.path)!,
         paint: { ...command.paint },
+        transform: [...command.transform] as typeof command.transform,
+        clipRect: command.clipRect
+          ? {
+            origin: [...command.clipRect.origin] as typeof command.clipRect.origin,
+            size: { ...command.clipRect.size },
+          }
+          : undefined,
+        clipPath: clonePath(command.clipPath),
       };
     case 'drawShape':
       return {
         kind: 'drawShape',
         shape: structuredClone(command.shape),
-        path: {
-          verbs: command.path.verbs.map((verb) => ({ ...verb })),
-          fillRule: command.path.fillRule,
-        },
+        path: clonePath(command.path)!,
         paint: { ...command.paint },
+        transform: [...command.transform] as typeof command.transform,
+        clipRect: command.clipRect
+          ? {
+            origin: [...command.clipRect.origin] as typeof command.clipRect.origin,
+            size: { ...command.clipRect.size },
+          }
+          : undefined,
+        clipPath: clonePath(command.clipPath),
       };
   }
 };

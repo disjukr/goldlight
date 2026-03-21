@@ -1,5 +1,7 @@
 export type Point2D = readonly [number, number];
 
+export type Matrix2D = readonly [number, number, number, number, number, number];
+
 export type Size2D = Readonly<{
   width: number;
   height: number;
@@ -37,6 +39,7 @@ export type PathVerb2D =
   | Readonly<{ kind: 'moveTo'; to: Point2D }>
   | Readonly<{ kind: 'lineTo'; to: Point2D }>
   | Readonly<{ kind: 'quadTo'; control: Point2D; to: Point2D }>
+  | Readonly<{ kind: 'cubicTo'; control1: Point2D; control2: Point2D; to: Point2D }>
   | Readonly<{ kind: 'close' }>;
 
 export type PathFillRule2D = 'nonzero' | 'evenodd';
@@ -67,6 +70,8 @@ export type Shape2D =
 
 const defaultCircleSegments = 32;
 
+export const identityMatrix2D: Matrix2D = [1, 0, 0, 1, 0, 0];
+
 const clampRadii = (radius: CornerRadii | undefined, halfWidth: number, halfHeight: number) => ({
   x: Math.max(0, Math.min(radius?.x ?? 0, halfWidth)),
   y: Math.max(0, Math.min(radius?.y ?? 0, halfHeight)),
@@ -96,12 +101,68 @@ export const createPath2D = (...verbs: PathVerb2D[]): Path2D => ({
   fillRule: 'nonzero',
 });
 
+export const multiplyMatrix2D = (
+  left: Matrix2D,
+  right: Matrix2D,
+): Matrix2D => [
+  (left[0] * right[0]) + (left[2] * right[1]),
+  (left[1] * right[0]) + (left[3] * right[1]),
+  (left[0] * right[2]) + (left[2] * right[3]),
+  (left[1] * right[2]) + (left[3] * right[3]),
+  (left[0] * right[4]) + (left[2] * right[5]) + left[4],
+  (left[1] * right[4]) + (left[3] * right[5]) + left[5],
+];
+
+export const createTranslationMatrix2D = (tx: number, ty: number): Matrix2D => [1, 0, 0, 1, tx, ty];
+
+export const createScaleMatrix2D = (sx: number, sy = sx): Matrix2D => [sx, 0, 0, sy, 0, 0];
+
+export const transformPoint2D = (
+  point: Point2D,
+  matrix: Matrix2D,
+): Point2D => [
+  (matrix[0] * point[0]) + (matrix[2] * point[1]) + matrix[4],
+  (matrix[1] * point[0]) + (matrix[3] * point[1]) + matrix[5],
+];
+
 export const withPath2DFillRule = (
   path: Path2D,
   fillRule: PathFillRule2D,
 ): Path2D => ({
   verbs: path.verbs,
   fillRule,
+});
+
+export const transformPath2D = (
+  path: Path2D,
+  matrix: Matrix2D,
+): Path2D => ({
+  verbs: path.verbs.map((verb) => {
+    switch (verb.kind) {
+      case 'moveTo':
+      case 'lineTo':
+        return {
+          kind: verb.kind,
+          to: transformPoint2D(verb.to, matrix),
+        };
+      case 'quadTo':
+        return {
+          kind: 'quadTo',
+          control: transformPoint2D(verb.control, matrix),
+          to: transformPoint2D(verb.to, matrix),
+        };
+      case 'cubicTo':
+        return {
+          kind: 'cubicTo',
+          control1: transformPoint2D(verb.control1, matrix),
+          control2: transformPoint2D(verb.control2, matrix),
+          to: transformPoint2D(verb.to, matrix),
+        };
+      case 'close':
+        return verb;
+    }
+  }),
+  fillRule: path.fillRule,
 });
 
 export const createRectPath2D = (rect: Rect): Path2D => {

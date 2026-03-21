@@ -1,5 +1,6 @@
-import type { DawnBackendContext } from './dawn_backend_context.ts';
 import type { PathFillRule2D } from '@rieul3d/geometry';
+import type { DawnBackendContext } from './dawn_backend_context.ts';
+import type { DrawingPipelineKey } from './draw_pass.ts';
 
 export type DrawingBufferDescriptor = Readonly<{
   label?: string;
@@ -34,8 +35,7 @@ export type DawnResourceProvider = Readonly<{
   createBuffer: (descriptor: DrawingBufferDescriptor) => GPUBuffer;
   createTexture: (descriptor: DrawingTextureDescriptor) => GPUTexture;
   createSampler: (descriptor?: DrawingSamplerDescriptor) => GPUSampler;
-  getPathStencilPipeline: (fillRule: PathFillRule2D) => GPURenderPipeline;
-  getPathCoverPipeline: () => GPURenderPipeline;
+  getPipeline: (key: DrawingPipelineKey) => GPURenderPipeline;
   getStencilAttachmentView: () => GPUTextureView;
 }>;
 
@@ -91,7 +91,8 @@ export const createDawnResourceProvider = (
   }> = {},
 ): DawnResourceProvider => {
   const pathStencilPipelines = new Map<PathFillRule2D, GPURenderPipeline>();
-  let pathCoverPipeline: GPURenderPipeline | null = null;
+  let pathFillCoverPipeline: GPURenderPipeline | null = null;
+  let pathStrokeCoverPipeline: GPURenderPipeline | null = null;
   let stencilAttachment:
     | Readonly<{
       width: number;
@@ -156,11 +157,11 @@ export const createDawnResourceProvider = (
     });
   };
 
-  const createPathCoverPipeline = (): GPURenderPipeline => {
+  const createPathFillCoverPipeline = (): GPURenderPipeline => {
     const shaderModule = createPathShaderModule(backend);
 
     return backend.device.createRenderPipeline({
-      label: 'drawing-path-cover',
+      label: 'drawing-path-fill-cover',
       layout: 'auto',
       vertex: {
         module: shaderModule,
@@ -192,27 +193,72 @@ export const createDawnResourceProvider = (
     });
   };
 
+  const createPathStrokeCoverPipeline = (): GPURenderPipeline => {
+    const shaderModule = createPathShaderModule(backend);
+
+    return backend.device.createRenderPipeline({
+      label: 'drawing-path-stroke-cover',
+      layout: 'auto',
+      vertex: {
+        module: shaderModule,
+        entryPoint: 'vs_main',
+        buffers: [createVertexLayout()],
+      },
+      fragment: {
+        module: shaderModule,
+        entryPoint: 'fs_main',
+        targets: [
+          {
+            format: backend.target.format,
+          },
+        ],
+      },
+      primitive: {
+        topology: 'triangle-list',
+        cullMode: 'none',
+      },
+    });
+  };
+
   return {
     backend,
     resourceBudget: options.resourceBudget ?? Number.POSITIVE_INFINITY,
     createBuffer: (descriptor) => backend.device.createBuffer(descriptor),
     createTexture: (descriptor) => backend.device.createTexture(descriptor),
     createSampler: (descriptor = {}) => backend.device.createSampler(descriptor),
-    getPathStencilPipeline: (fillRule) => {
-      const cached = pathStencilPipelines.get(fillRule);
-      if (cached) {
-        return cached;
+    getPipeline: (key) => {
+      switch (key) {
+        case 'path-fill-nonzero-stencil': {
+          const cached = pathStencilPipelines.get('nonzero');
+          if (cached) {
+            return cached;
+          }
+          const pipeline = createPathStencilPipeline('nonzero');
+          pathStencilPipelines.set('nonzero', pipeline);
+          return pipeline;
+        }
+        case 'path-fill-evenodd-stencil': {
+          const cached = pathStencilPipelines.get('evenodd');
+          if (cached) {
+            return cached;
+          }
+          const pipeline = createPathStencilPipeline('evenodd');
+          pathStencilPipelines.set('evenodd', pipeline);
+          return pipeline;
+        }
+        case 'path-fill-cover':
+          if (pathFillCoverPipeline) {
+            return pathFillCoverPipeline;
+          }
+          pathFillCoverPipeline = createPathFillCoverPipeline();
+          return pathFillCoverPipeline;
+        case 'path-stroke-cover':
+          if (pathStrokeCoverPipeline) {
+            return pathStrokeCoverPipeline;
+          }
+          pathStrokeCoverPipeline = createPathStrokeCoverPipeline();
+          return pathStrokeCoverPipeline;
       }
-      const pipeline = createPathStencilPipeline(fillRule);
-      pathStencilPipelines.set(fillRule, pipeline);
-      return pipeline;
-    },
-    getPathCoverPipeline: () => {
-      if (pathCoverPipeline) {
-        return pathCoverPipeline;
-      }
-      pathCoverPipeline = createPathCoverPipeline();
-      return pathCoverPipeline;
     },
     getStencilAttachmentView: () => {
       const sampleCount = backend.target.kind === 'offscreen' ? backend.target.sampleCount : 1;

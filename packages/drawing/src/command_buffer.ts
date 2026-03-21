@@ -16,6 +16,10 @@ export type DawnCommandBuffer = Readonly<{
   unsupportedCommands: readonly DrawingCommand[];
 }>;
 
+const vertexBufferUsage = 0x0020;
+const floatBytes = Float32Array.BYTES_PER_ELEMENT;
+const floatsPerVertex = 6;
+
 const toGpuColor = (color: readonly [number, number, number, number]): GPUColor => ({
   r: color[0],
   g: color[1],
@@ -23,38 +27,26 @@ const toGpuColor = (color: readonly [number, number, number, number]): GPUColor 
   a: color[3],
 });
 
-const vertexBufferUsage = 0x0020;
-const floatBytes = Float32Array.BYTES_PER_ELEMENT;
-const floatsPerVertex = 6;
-
 const createClipSpaceVertexData = (
-  points: readonly (readonly [number, number])[],
+  triangles: readonly (readonly [number, number])[],
   color: readonly [number, number, number, number],
   target: Readonly<{
     width: number;
     height: number;
   }>,
 ): Float32Array => {
-  const triangleCount = points.length - 2;
-  const vertices = new Float32Array(triangleCount * 3 * floatsPerVertex);
+  const vertices = new Float32Array(triangles.length * floatsPerVertex);
   let offset = 0;
-
   const toClipX = (value: number) => (value / target.width) * 2 - 1;
   const toClipY = (value: number) => 1 - (value / target.height) * 2;
-  const writeVertex = (point: readonly [number, number]): void => {
+
+  for (const point of triangles) {
     vertices[offset++] = toClipX(point[0]);
     vertices[offset++] = toClipY(point[1]);
     vertices[offset++] = color[0];
     vertices[offset++] = color[1];
     vertices[offset++] = color[2];
     vertices[offset++] = color[3];
-  };
-
-  const origin = points[0]!;
-  for (let index = 1; index < points.length - 1; index += 1) {
-    writeVertex(origin);
-    writeVertex(points[index]!);
-    writeVertex(points[index + 1]!);
   }
 
   return vertices;
@@ -65,7 +57,7 @@ const createVertexBuffer = (
   vertices: Float32Array,
 ): GPUBuffer => {
   const buffer = sharedContext.backend.device.createBuffer({
-    label: 'drawing-path-fill-vertices',
+    label: 'drawing-vertices',
     size: vertices.byteLength,
     usage: vertexBufferUsage,
     mappedAtCreation: true,
@@ -86,6 +78,58 @@ const createCoverVertices = (
   -1, 1, color[0], color[1], color[2], color[3],
 ]);
 
+const applyClipRect = (
+  pass: GPURenderPassEncoder,
+  step: DrawingPreparedRecording['passes'][number]['steps'][number],
+  target: Readonly<{ width: number; height: number }>,
+): void => {
+  const clipRect = step.clipRect;
+  const clipBounds = step.clipBounds;
+  const clipX = clipRect?.origin[0] ?? clipBounds?.origin[0] ?? 0;
+  const clipY = clipRect?.origin[1] ?? clipBounds?.origin[1] ?? 0;
+  const clipRight = clipRect
+    ? clipRect.origin[0] + clipRect.size.width
+    : clipBounds
+    ? clipBounds.origin[0] + clipBounds.size.width
+    : target.width;
+  const clipBottom = clipRect
+    ? clipRect.origin[1] + clipRect.size.height
+    : clipBounds
+    ? clipBounds.origin[1] + clipBounds.size.height
+    : target.height;
+  const clip2X = clipBounds?.origin[0] ?? clipX;
+  const clip2Y = clipBounds?.origin[1] ?? clipY;
+  const clip2Right = clipBounds ? clipBounds.origin[0] + clipBounds.size.width : clipRight;
+  const clip2Bottom = clipBounds ? clipBounds.origin[1] + clipBounds.size.height : clipBottom;
+  const x = Math.max(0, Math.floor(Math.max(clipX, clip2X)));
+  const y = Math.max(0, Math.floor(Math.max(clipY, clip2Y)));
+  const right = Math.min(target.width, Math.ceil(Math.min(clipRight, clip2Right)));
+  const bottom = Math.min(target.height, Math.ceil(Math.min(clipBottom, clip2Bottom)));
+  const width = Math.max(0, right - x);
+  const height = Math.max(0, bottom - y);
+  pass.setScissorRect(x, y, width, height);
+};
+
+const applyFullClip = (
+  pass: GPURenderPassEncoder,
+  target: Readonly<{ width: number; height: number }>,
+): void => {
+  pass.setScissorRect(0, 0, target.width, target.height);
+};
+
+const applyStepClip = (
+  pass: GPURenderPassEncoder,
+  step: DrawingPreparedRecording['passes'][number]['steps'][number],
+  target: Readonly<{ width: number; height: number }>,
+): void => {
+  if (!step.clipRect && !step.clipBounds) {
+    applyFullClip(pass, target);
+    return;
+  }
+
+  applyClipRect(pass, step, target);
+};
+
 export const encodeDawnCommandBuffer = (
   sharedContext: DawnSharedContext,
   recording: DrawingRecording,
@@ -103,11 +147,10 @@ export const encodeDawnCommandBuffer = (
   );
   const unsupportedCommands: DrawingCommand[] = [...prepared.unsupportedCommands];
   let passCount = 0;
-  const coverPipeline = sharedContext.resourceProvider.getPathCoverPipeline();
   const stencilView = sharedContext.resourceProvider.getStencilAttachmentView();
 
   for (const passInfo of prepared.passes) {
-    if (passInfo.draws.length === 0) {
+    if (passInfo.steps.length === 0) {
       const pass = encoder.beginRenderPass({
         colorAttachments: [
           {
@@ -125,51 +168,78 @@ export const encodeDawnCommandBuffer = (
     }
 
     let colorLoadOp = passInfo.loadOp;
-    for (const draw of passInfo.draws) {
-      if (draw.kind !== 'pathFill') {
-        continue;
-      }
-
-      const stencilPipeline = sharedContext.resourceProvider.getPathStencilPipeline(draw.fillRule);
-      const pass = encoder.beginRenderPass({
-        colorAttachments: [
-          {
-            view: colorView,
-            clearValue: toGpuColor(passInfo.clearColor),
-            loadOp: colorLoadOp,
-            storeOp: 'store',
-          },
-        ],
-        depthStencilAttachment: {
-          view: stencilView,
-          depthClearValue: 1,
-          depthLoadOp: 'clear',
-          depthStoreOp: 'discard',
-          stencilClearValue: 0,
-          stencilLoadOp: 'clear',
-          stencilStoreOp: 'discard',
-        },
-      });
-
-      for (const contour of draw.contours) {
-        const vertices = createClipSpaceVertexData(contour, draw.color, sharedContext.backend.target);
-        if (vertices.length === 0) {
-          continue;
+    for (const step of passInfo.steps) {
+      switch (step.draw.kind) {
+        case 'pathFill': {
+          const stencilPipeline = sharedContext.resourceProvider.getPipeline(step.pipelineKeys[0]!);
+          const coverPipeline = sharedContext.resourceProvider.getPipeline(step.pipelineKeys[1]!);
+          const fillVertices = createClipSpaceVertexData(
+            step.draw.triangles,
+            step.draw.color,
+            sharedContext.backend.target,
+          );
+          const fillVertexBuffer = createVertexBuffer(sharedContext, fillVertices);
+          const coverVertices = createCoverVertices(step.draw.color);
+          const coverVertexBuffer = createVertexBuffer(sharedContext, coverVertices);
+          const pass = encoder.beginRenderPass({
+            colorAttachments: [
+              {
+                view: colorView,
+                clearValue: toGpuColor(passInfo.clearColor),
+                loadOp: colorLoadOp,
+                storeOp: 'store',
+              },
+            ],
+            depthStencilAttachment: {
+              view: stencilView,
+              depthClearValue: 1,
+              depthLoadOp: 'clear',
+              depthStoreOp: 'discard',
+              stencilClearValue: 0,
+              stencilLoadOp: 'clear',
+              stencilStoreOp: 'discard',
+            },
+          });
+          applyStepClip(pass, step, sharedContext.backend.target);
+          pass.setPipeline(stencilPipeline);
+          pass.setVertexBuffer(0, fillVertexBuffer);
+          pass.draw(fillVertices.length / floatsPerVertex);
+          pass.setPipeline(coverPipeline);
+          pass.setVertexBuffer(0, coverVertexBuffer);
+          pass.draw(coverVertices.length / floatsPerVertex);
+          pass.end();
+          passCount += 1;
+          colorLoadOp = 'load';
+          break;
         }
-        const vertexBuffer = createVertexBuffer(sharedContext, vertices);
-        pass.setPipeline(stencilPipeline);
-        pass.setVertexBuffer(0, vertexBuffer);
-        pass.draw(vertices.length / floatsPerVertex);
+        case 'pathStroke': {
+          const strokePipeline = sharedContext.resourceProvider.getPipeline(step.pipelineKeys[0]!);
+          const strokeVertices = createClipSpaceVertexData(
+            step.draw.triangles,
+            step.draw.color,
+            sharedContext.backend.target,
+          );
+          const strokeVertexBuffer = createVertexBuffer(sharedContext, strokeVertices);
+          const pass = encoder.beginRenderPass({
+            colorAttachments: [
+              {
+                view: colorView,
+                clearValue: toGpuColor(passInfo.clearColor),
+                loadOp: colorLoadOp,
+                storeOp: 'store',
+              },
+            ],
+          });
+          applyStepClip(pass, step, sharedContext.backend.target);
+          pass.setPipeline(strokePipeline);
+          pass.setVertexBuffer(0, strokeVertexBuffer);
+          pass.draw(strokeVertices.length / floatsPerVertex);
+          pass.end();
+          passCount += 1;
+          colorLoadOp = 'load';
+          break;
+        }
       }
-
-      const coverVertices = createCoverVertices(draw.color);
-      const coverVertexBuffer = createVertexBuffer(sharedContext, coverVertices);
-      pass.setPipeline(coverPipeline);
-      pass.setVertexBuffer(0, coverVertexBuffer);
-      pass.draw(coverVertices.length / floatsPerVertex);
-      pass.end();
-      passCount += 1;
-      colorLoadOp = 'load';
     }
 
     unsupportedCommands.push(...passInfo.unsupportedDraws);

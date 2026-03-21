@@ -97,10 +97,6 @@ const createVertexBuffer = (
   return buffer;
 };
 
-const hasStencilClipTriangles = (
-  clips: readonly { triangles?: readonly unknown[] }[] | undefined,
-): boolean => Boolean(clips?.some((clip) => Boolean(clip.triangles?.length)));
-
 const toCurveType = (patch: DrawingPreparedPatch): number => {
   switch (patch.kind) {
     case 'line':

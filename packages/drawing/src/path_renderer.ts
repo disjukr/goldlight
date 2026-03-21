@@ -2100,7 +2100,6 @@ const prepareClipStack = (clips: readonly DrawingClip[]): PreparedClipStack | un
       continue;
     }
 
-    const triangles = prepareFillTriangles(subpaths, clip.path.fillRule);
     if (clip.op === 'difference') {
       unsupportedReason = 'difference clip paths currently require convex geometry';
       break;

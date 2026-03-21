@@ -5,11 +5,7 @@ import {
 } from '@rieul3d/gpu';
 import { type DrawingPreparedRecording, prepareDrawingRecording } from './draw_pass.ts';
 import type { DrawingRecording } from './recording.ts';
-import type {
-  DrawingPreparedDraw,
-  DrawingPreparedPatch,
-  DrawingPreparedVertex,
-} from './path_renderer.ts';
+import type { DrawingPreparedPatch, DrawingPreparedVertex } from './path_renderer.ts';
 import type { DawnSharedContext } from './shared_context.ts';
 import type { DrawingCommand } from './types.ts';
 
@@ -509,7 +505,7 @@ export const encodeDawnCommandBuffer = (
       } while (
         !requiresStencilPass &&
         stepIndex < passInfo.steps.length &&
-        !Boolean(passInfo.steps[stepIndex]?.draw.clips?.length)
+        !(passInfo.steps[stepIndex]?.draw.clips?.length)
       );
 
       pass.end();

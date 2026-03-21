@@ -223,6 +223,24 @@ Deno.test('dawn shared context exposes resource provider over gpu device', () =>
   assertEquals(mock.created.samplers.length, 1);
 });
 
+Deno.test('dawn shared context owns reusable bind group layouts', () => {
+  const mock = createMockGpuContext();
+  const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
+
+  const firstIntrinsic = sharedContext.getIntrinsicBindGroupLayout();
+  const secondIntrinsic = sharedContext.getIntrinsicBindGroupLayout();
+  const firstTextureSampler = sharedContext.getSingleTextureSamplerBindGroupLayout();
+  const secondTextureSampler = sharedContext.getSingleTextureSamplerBindGroupLayout();
+  const firstPipelineLayout = sharedContext.getPathPipelineLayout();
+  const secondPipelineLayout = sharedContext.getPathPipelineLayout();
+
+  assertEquals(firstIntrinsic === secondIntrinsic, true);
+  assertEquals(firstTextureSampler === secondTextureSampler, true);
+  assertEquals(firstPipelineLayout === secondPipelineLayout, true);
+  assertEquals(mock.created.bindGroupLayouts.length, 2);
+  assertEquals(mock.created.pipelineLayouts.length, 1);
+});
+
 Deno.test('dawn resource provider refreshes intrinsic bind group after target resize', () => {
   const mock = createMockGpuContext();
   const backend = createDawnBackendContext(mock.context);
@@ -238,6 +256,32 @@ Deno.test('dawn resource provider refreshes intrinsic bind group after target re
     [...new Float32Array(mock.created.mappedBuffers[1]!)],
     [512, 384, 0, 0],
   );
+});
+
+Deno.test('dawn resource provider caches single texture sampler bind groups', () => {
+  const mock = createMockGpuContext();
+  const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
+  const sampler = sharedContext.resourceProvider.createSampler({ label: 'linear' });
+  const texture = sharedContext.resourceProvider.createTexture({
+    label: 'sampled',
+    size: { width: 16, height: 16, depthOrArrayLayers: 1 },
+    format: 'rgba8unorm',
+    usage: 0x10,
+  });
+  const textureView = texture.createView();
+
+  const firstBindGroup = sharedContext.resourceProvider.getSingleTextureSamplerBindGroup(
+    sampler,
+    textureView,
+  );
+  const secondBindGroup = sharedContext.resourceProvider.getSingleTextureSamplerBindGroup(
+    sampler,
+    textureView,
+  );
+
+  assertEquals(firstBindGroup === secondBindGroup, true);
+  assertEquals(mock.created.bindGroups.length, 1);
+  assertEquals(mock.created.bindGroupLayouts.length, 1);
 });
 
 Deno.test('dawn caps expose feature, format, and sample count policy', () => {

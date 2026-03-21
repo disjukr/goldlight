@@ -79,7 +79,8 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Missing: device feature negotiation policy
 - `DawnSharedContext` -> `src/shared_context.ts`
   - Status: `started`
-  - What exists: shared backend state, caps, and resource provider creation
+  - What exists: shared backend state, caps, resource provider creation, and shared ownership of
+    intrinsic uniform / single-texture-sampler bind group layouts plus the path pipeline layout
   - Missing: broader bind group layout families and multi-pass pipeline helpers
 - `DawnResourceProvider` -> `src/resource_provider.ts`
   - Status: `partial`
@@ -87,8 +88,9 @@ stack that fits this repository's TypeScript and WebGPU architecture.
     patch-instance pipelines, stencil attachment reuse, multisample-aware pipelines, and a first
     shared intrinsic uniform bind group and pipeline layout for viewport transforms, including
     target-resize invalidation for intrinsic bind-group state, plus WGSL patch shaders that adapt
-    tessellation density from stored resolve levels
-  - Missing: texture/sampler bind groups, wrapped resources, broader cache policy
+    tessellation density from stored resolve levels, and a first cached single-texture/sampler bind
+    group path wired through shared-context-owned layouts
+  - Missing: wrapped resources and broader cache policy
 - `Context` -> `src/context.ts`
   - Status: `started`
   - What exists: context factory and recorder creation
@@ -344,8 +346,10 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
   - Missing: canonicalization/cache
 - Bind groups
   - Status: `started`
-  - Current state: a shared intrinsic uniform bind group now exists for all path pipelines
-  - Missing: texture/sampler bind groups and generalized caching
+  - Current state: shared intrinsic uniform and single-texture/sampler bind groups now exist, with
+    shared-context-owned layouts and resource-provider-side reuse for identical texture/sampler
+    pairs
+  - Missing: generalized caching for larger bind group families and dynamic uniform payloads
 - Shader modules
   - Status: `pending`
   - Missing: shader lifecycle
@@ -475,6 +479,8 @@ These decisions directly affect the remaining work and are not settled yet.
 - no SVG parser or SVG-to-`Path2D` ingestion path yet
 - no retained scene model
 - no bind group cache
+- bind group caching currently only covers intrinsic uniforms and single texture/sampler pairs, not
+  the broader uniform/texture families Skia's DawnResourceProvider manages
 - `command_buffer` still does per-draw render pass replay for stencil clears instead of a richer
   DrawPass command stream
 - `queue_manager` currently treats `tick()` as coarse completion rather than using explicit GPU
@@ -573,10 +579,20 @@ These decisions directly affect the remaining work and are not settled yet.
   - Validation: `deno test packages/drawing/tests/drawing_graphite_dawn_test.ts`
 - `src/resource_provider.ts`
   - Status: `partial`
-  - Difference from Skia: no explicit bind group layouts or cached intrinsic bind groups existed, so
-    every pipeline relied on auto layout and could not grow toward Skia-style resource binding
-  - To match Skia more closely: own explicit bind group layouts, cache uniform/texture bind groups,
-    and let pipeline creation share those layouts
+  - Difference from Skia: shared bind group layout ownership and cached bind groups now exist for
+    intrinsic uniforms and the single-texture/sampler fast path, but broader uniform/texture
+    families are still missing
+  - To match Skia more closely: add larger uniform-buffer bind groups, broader texture/sampler bind
+    groups, and stronger cache policy/eviction
+  - Validation: `deno test packages/drawing/tests/drawing_graphite_dawn_test.ts`
+
+- `src/shared_context.ts`
+  - Status: `started`
+  - Difference from Skia: shared layout ownership now mirrors DawnSharedContext more closely for
+    intrinsic uniforms and single-texture/sampler bindings, but it still lacks the broader layout
+    families Skia creates for full Graphite pipeline binding
+  - To match Skia more closely: expand layout families alongside paint, transform, and texture
+    resource groups
   - Validation: `deno test packages/drawing/tests/drawing_graphite_dawn_test.ts`
 - `src/draw_pass.ts`
   - Status: `partial`
@@ -620,6 +636,18 @@ These decisions directly affect the remaining work and are not settled yet.
     everything on `tick()`; intrinsic bind groups now refresh when the render target size changes
   - Remaining: per-draw transform uniforms, paint/state buffers, broader bind group caches, and
     richer `DrawPass` metadata
+  - Validation: `deno test packages/drawing/tests/drawing_graphite_dawn_test.ts`
+- 2026-03-22
+  - Files: `src/shared_context.ts`, `src/resource_provider.ts`,
+    `tests/drawing_graphite_dawn_test.ts`
+  - Status transition: `DawnSharedContext` layout ownership `started` -> deeper `started`;
+    bind-group parity remains `started` but now covers the first texture/sampler cache path
+  - Change: moved intrinsic uniform layout ownership into `DawnSharedContext`, added a shared
+    single-texture/sampler bind group layout plus cached bind group creation in
+    `DawnResourceProvider`, and made the path pipelines reuse shared-context-owned layouts instead
+    of recreating local layout state
+  - Remaining: per-draw transform/state bind groups, larger uniform-buffer families, and broader
+    bind-group cache eviction/policy
   - Validation: `deno test packages/drawing/tests/drawing_graphite_dawn_test.ts`
 
 ## Update Rules

@@ -1,5 +1,5 @@
-import type { DawnBackendContext } from './dawn_backend_context.ts';
 import type { DrawingPipelineKey } from './draw_pass.ts';
+import type { DawnSharedContext } from './shared_context.ts';
 
 export type DrawingBufferDescriptor = Readonly<{
   label?: string;
@@ -29,13 +29,17 @@ export type DrawingSamplerDescriptor = Readonly<{
 }>;
 
 export type DawnResourceProvider = Readonly<{
-  backend: DawnBackendContext;
+  backend: DawnSharedContext['backend'];
   resourceBudget: number;
   createBuffer: (descriptor: DrawingBufferDescriptor) => GPUBuffer;
   createTexture: (descriptor: DrawingTextureDescriptor) => GPUTexture;
   createSampler: (descriptor?: DrawingSamplerDescriptor) => GPUSampler;
   getPipeline: (key: DrawingPipelineKey) => GPURenderPipeline;
   getIntrinsicBindGroup: () => GPUBindGroup;
+  getSingleTextureSamplerBindGroup: (
+    sampler: GPUSampler,
+    textureView: GPUTextureView,
+  ) => GPUBindGroup;
   getStencilAttachmentView: () => GPUTextureView;
 }>;
 
@@ -48,7 +52,6 @@ const curveFillSegments = 32;
 const strokePatchSegments = 32;
 const intrinsicUniformBytes = Float32Array.BYTES_PER_ELEMENT * 4;
 const uniformBufferUsage = 0x0040;
-const vertexShaderStage = 0x1;
 
 const intrinsicUniformsShaderBlock = `
 struct Intrinsics {
@@ -327,36 +330,37 @@ const createStencilFaceState = (
   passOp,
 });
 
-const createPathShaderModule = (backend: DawnBackendContext): GPUShaderModule =>
+const createPathShaderModule = (backend: DawnSharedContext['backend']): GPUShaderModule =>
   backend.device.createShaderModule({
     label: 'drawing-path-shader',
     code: fillPathShaderSource,
   });
 
-const createWedgePatchShaderModule = (backend: DawnBackendContext): GPUShaderModule =>
+const createWedgePatchShaderModule = (backend: DawnSharedContext['backend']): GPUShaderModule =>
   backend.device.createShaderModule({
     label: 'drawing-wedge-patch-shader',
     code: wedgePatchShaderSource,
   });
 
-const createCurvePatchShaderModule = (backend: DawnBackendContext): GPUShaderModule =>
+const createCurvePatchShaderModule = (backend: DawnSharedContext['backend']): GPUShaderModule =>
   backend.device.createShaderModule({
     label: 'drawing-curve-patch-shader',
     code: curvePatchShaderSource,
   });
 
-const createStrokePatchShaderModule = (backend: DawnBackendContext): GPUShaderModule =>
+const createStrokePatchShaderModule = (backend: DawnSharedContext['backend']): GPUShaderModule =>
   backend.device.createShaderModule({
     label: 'drawing-stroke-patch-shader',
     code: strokePatchShaderSource,
   });
 
 export const createDawnResourceProvider = (
-  backend: DawnBackendContext,
+  sharedContext: DawnSharedContext,
   options: Readonly<{
     resourceBudget?: number;
   }> = {},
 ): DawnResourceProvider => {
+  const backend = sharedContext.backend;
   let clipStencilWritePipeline: GPURenderPipeline | null = null;
   let clipStencilIntersectPipeline: GPURenderPipeline | null = null;
   let pathFillCoverPipeline: GPURenderPipeline | null = null;
@@ -378,8 +382,6 @@ export const createDawnResourceProvider = (
       view: GPUTextureView;
     }>
     | null = null;
-  let intrinsicBindGroupLayout: GPUBindGroupLayout | null = null;
-  let pipelineLayout: GPUPipelineLayout | null = null;
   let intrinsicBindGroup:
     | Readonly<{
       width: number;
@@ -387,6 +389,11 @@ export const createDawnResourceProvider = (
       bindGroup: GPUBindGroup;
     }>
     | null = null;
+  const singleTextureSamplerBindGroups: Array<Readonly<{
+    sampler: GPUSampler;
+    textureView: GPUTextureView;
+    bindGroup: GPUBindGroup;
+  }>> = [];
 
   const createVertexLayout = (): GPUVertexBufferLayout => ({
     arrayStride: floatBytes * floatsPerVertex,
@@ -447,36 +454,6 @@ export const createDawnResourceProvider = (
 
   const sampleCount = backend.target.kind === 'offscreen' ? backend.target.sampleCount : 1;
 
-  const getIntrinsicBindGroupLayout = (): GPUBindGroupLayout => {
-    if (intrinsicBindGroupLayout) {
-      return intrinsicBindGroupLayout;
-    }
-    intrinsicBindGroupLayout = backend.device.createBindGroupLayout({
-      label: 'drawing-intrinsics-layout',
-      entries: [
-        {
-          binding: 0,
-          visibility: vertexShaderStage,
-          buffer: {
-            type: 'uniform',
-          },
-        },
-      ],
-    });
-    return intrinsicBindGroupLayout;
-  };
-
-  const getPipelineLayout = (): GPUPipelineLayout => {
-    if (pipelineLayout) {
-      return pipelineLayout;
-    }
-    pipelineLayout = backend.device.createPipelineLayout({
-      label: 'drawing-path-pipeline-layout',
-      bindGroupLayouts: [getIntrinsicBindGroupLayout()],
-    });
-    return pipelineLayout;
-  };
-
   const createIntrinsicBindGroup = (): Readonly<{
     width: number;
     height: number;
@@ -500,7 +477,7 @@ export const createDawnResourceProvider = (
       height: backend.target.height,
       bindGroup: backend.device.createBindGroup({
         label: 'drawing-intrinsics-bind-group',
-        layout: getIntrinsicBindGroupLayout(),
+        layout: sharedContext.getIntrinsicBindGroupLayout(),
         entries: [
           {
             binding: 0,
@@ -518,7 +495,7 @@ export const createDawnResourceProvider = (
 
     return backend.device.createRenderPipeline({
       label: 'drawing-path-fill-cover',
-      layout: getPipelineLayout(),
+      layout: sharedContext.getPathPipelineLayout(),
       vertex: {
         module: shaderModule,
         entryPoint: 'vs_main',
@@ -547,7 +524,7 @@ export const createDawnResourceProvider = (
     const shaderModule = createPathShaderModule(backend);
     return backend.device.createRenderPipeline({
       label: 'drawing-clip-stencil-write',
-      layout: getPipelineLayout(),
+      layout: sharedContext.getPathPipelineLayout(),
       vertex: {
         module: shaderModule,
         entryPoint: 'vs_main',
@@ -586,7 +563,7 @@ export const createDawnResourceProvider = (
     const shaderModule = createPathShaderModule(backend);
     return backend.device.createRenderPipeline({
       label: 'drawing-clip-stencil-intersect',
-      layout: 'auto',
+      layout: sharedContext.getPathPipelineLayout(),
       vertex: {
         module: shaderModule,
         entryPoint: 'vs_main',
@@ -625,7 +602,7 @@ export const createDawnResourceProvider = (
     const shaderModule = createPathShaderModule(backend);
     return backend.device.createRenderPipeline({
       label,
-      layout: getPipelineLayout(),
+      layout: sharedContext.getPathPipelineLayout(),
       vertex: {
         module: shaderModule,
         entryPoint: 'vs_main',
@@ -664,7 +641,7 @@ export const createDawnResourceProvider = (
 
     return backend.device.createRenderPipeline({
       label: 'drawing-path-stroke-cover',
-      layout: getPipelineLayout(),
+      layout: sharedContext.getPathPipelineLayout(),
       vertex: {
         module: shaderModule,
         entryPoint: 'vs_main',
@@ -697,7 +674,7 @@ export const createDawnResourceProvider = (
   ): GPURenderPipeline =>
     backend.device.createRenderPipeline({
       label,
-      layout: getPipelineLayout(),
+      layout: sharedContext.getPathPipelineLayout(),
       vertex: {
         module: shaderModule,
         entryPoint: 'vs_main',
@@ -734,6 +711,37 @@ export const createDawnResourceProvider = (
       }
       intrinsicBindGroup = createIntrinsicBindGroup();
       return intrinsicBindGroup.bindGroup;
+    },
+    getSingleTextureSamplerBindGroup: (
+      sampler: GPUSampler,
+      textureView: GPUTextureView,
+    ): GPUBindGroup => {
+      const cached = singleTextureSamplerBindGroups.find((entry) =>
+        entry.sampler === sampler && entry.textureView === textureView
+      );
+      if (cached) {
+        return cached.bindGroup;
+      }
+      const bindGroup = backend.device.createBindGroup({
+        label: 'drawing-single-texture-sampler-bind-group',
+        layout: sharedContext.getSingleTextureSamplerBindGroupLayout(),
+        entries: [
+          {
+            binding: 0,
+            resource: sampler,
+          },
+          {
+            binding: 1,
+            resource: textureView,
+          },
+        ],
+      });
+      singleTextureSamplerBindGroups.push({
+        sampler,
+        textureView,
+        bindGroup,
+      });
+      return bindGroup;
     },
     getPipeline: (key) => {
       switch (key) {

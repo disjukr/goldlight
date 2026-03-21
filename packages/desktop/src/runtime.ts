@@ -166,10 +166,12 @@ export const createDesktopWindowRuntime = (
         });
         return;
       case 'keyboard':
-        dispatchTypedEvent(target, 'keyboard', {
+        const keyboardDetail = {
           keyCode: event.keyCode,
           pressed: event.pressed,
-        });
+        };
+        dispatchTypedEvent(target, 'keyboard', keyboardDetail);
+        dispatchTypedEvent(target, event.pressed ? 'keydown' : 'keyup', keyboardDetail);
         return;
       case 'message':
         dispatchTypedEvent(target, 'desktopmessage', {

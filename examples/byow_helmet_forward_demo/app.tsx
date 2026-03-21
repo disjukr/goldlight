@@ -20,16 +20,32 @@ import {
   DirectionalLight,
   PerspectiveCamera,
 } from '@rieul3d/react/reconciler';
-import { createMaterialRegistry } from '@rieul3d/renderer';
-import { createBoxMesh } from '@rieul3d/geometry';
+import {
+  createMaterialRegistry,
+  type ForwardDebugView,
+  type ForwardEnvironmentMap,
+  renderForwardFrame,
+} from '@rieul3d/renderer';
 
 const helmetSource = await Deno.readFile(
   new URL('../assets/damaged-helmet/DamagedHelmet.glb', import.meta.url),
+);
+const environmentSource = await Deno.readFile(
+  new URL('../assets/hdri/poly_haven_studio_1k.exr', import.meta.url),
 );
 const helmetScene = importGltfFromGlb(
   helmetSource,
   'damaged-helmet',
 );
+const environmentMap: ForwardEnvironmentMap = {
+  id: 'poly-haven-studio',
+  image: {
+    id: 'poly-haven-studio',
+    mimeType: 'image/exr',
+    bytes: environmentSource,
+  },
+  intensity: 1.15,
+};
 const sourceMesh = helmetScene.meshes[0];
 
 if (!sourceMesh) {
@@ -38,97 +54,93 @@ if (!sourceMesh) {
 
 const helmetBounds = getMeshBounds(sourceMesh);
 const helmetScale = 1.8 / helmetBounds.maxDimension;
-const floorMesh = createBoxMesh({
-  id: 'helmet-forward-floor',
-  materialId: 'helmet-forward-floor-material',
-  width: 7,
-  height: 0.16,
-  depth: 7,
-});
 const helmetMaterials = helmetScene.materials.map((material): Material => ({
   ...material,
   kind: 'lit',
 }));
+const helmetRotationDegreesPerSecond = 32;
+const maxRotationDeltaMs = 100;
 
-const HelmetScene = () => (
-  <scene id='byow-helmet-forward-demo' activeCameraId='helmet-forward-camera'>
-    {helmetScene.assets.map((asset) => <asset key={asset.id} {...asset} />)}
-    {helmetScene.textures.map((texture) => <texture key={texture.id} {...texture} />)}
-    {helmetMaterials.map((material) => <material key={material.id} {...material} />)}
-    {helmetScene.meshes.map((mesh) => <mesh key={mesh.id} {...mesh} />)}
-    <material
-      id='helmet-forward-floor-material'
-      kind='lit'
-      textures={[]}
-      parameters={{
-        color: { x: 0.58, y: 0.61, z: 0.66, w: 1 },
-        metallicRoughness: { x: 0.05, y: 0.92, z: 1, w: 1 },
-        emissive: { x: 0, y: 0, z: 0, w: 1 },
-      }}
-    />
-    <mesh {...floorMesh} />
-    <PerspectiveCamera
-      id='helmet-forward-camera'
-      position={[0.15, 0.2, 3.25]}
-      znear={0.05}
-      zfar={100}
-      yfov={Math.PI / 4.4}
-    />
-    <DirectionalLight
-      id='helmet-forward-key'
-      color={{ x: 1, y: 0.94, z: 0.88 }}
-      intensity={1.75}
-      nodeId='helmet-forward-key-node'
-      rotation={(() => {
-        const rotation = createQuaternionFromEulerDegrees(-54, -32, 0);
-        return [rotation.x, rotation.y, rotation.z, rotation.w] as const;
-      })()}
-    />
-    <DirectionalLight
-      id='helmet-forward-fill'
-      color={{ x: 0.46, y: 0.58, z: 0.95 }}
-      intensity={0.48}
-      nodeId='helmet-forward-fill-node'
-      rotation={(() => {
-        const rotation = createQuaternionFromEulerDegrees(-18, 52, 0);
-        return [rotation.x, rotation.y, rotation.z, rotation.w] as const;
-      })()}
-    />
-    <DirectionalLight
-      id='helmet-forward-rim'
-      color={{ x: 0.74, y: 0.86, z: 1 }}
-      intensity={0.82}
-      nodeId='helmet-forward-rim-node'
-      rotation={(() => {
-        const rotation = createQuaternionFromEulerDegrees(-38, 156, 0);
-        return [rotation.x, rotation.y, rotation.z, rotation.w] as const;
-      })()}
-    />
-    <node
-      id='helmet-forward-node'
-      meshId={sourceMesh.id}
-      position={[
-        -helmetBounds.center.x * helmetScale,
-        -(helmetBounds.min.y * helmetScale) - 0.92,
-        (-helmetBounds.center.z * helmetScale) - 0.5,
-      ]}
-      rotation={(() => {
-        const rotation = createQuaternionFromEulerDegrees(72, -30, 0);
-        return [rotation.x, rotation.y, rotation.z, rotation.w] as const;
-      })()}
-      scale={[helmetScale, helmetScale, helmetScale]}
-    />
-    <node
-      id='helmet-forward-floor-node'
-      meshId='helmet-forward-floor'
-      position={[0, -1.06, -0.85]}
-    />
-  </scene>
-);
+const HelmetScene = () => {
+  const [yawDegrees, setYawDegrees] = React.useState(-30);
+
+  React.useEffect(() => {
+    let lastUpdateMs = performance.now();
+    const timer = setInterval(() => {
+      const nowMs = performance.now();
+      const deltaMs = Math.min(nowMs - lastUpdateMs, maxRotationDeltaMs);
+      lastUpdateMs = nowMs;
+      setYawDegrees((value: number) =>
+        (value + ((deltaMs / 1000) * helmetRotationDegreesPerSecond)) % 360
+      );
+    }, 16);
+    return () => clearInterval(timer);
+  }, []);
+
+  const helmetRotation = createQuaternionFromEulerDegrees(72, yawDegrees, 0);
+  return (
+    <scene id='byow-helmet-forward-demo' activeCameraId='helmet-forward-camera'>
+      {helmetScene.assets.map((asset) => <asset key={asset.id} {...asset} />)}
+      {helmetScene.textures.map((texture) => <texture key={texture.id} {...texture} />)}
+      {helmetMaterials.map((material) => <material key={material.id} {...material} />)}
+      {helmetScene.meshes.map((mesh) => <mesh key={mesh.id} {...mesh} />)}
+      <PerspectiveCamera
+        id='helmet-forward-camera'
+        position={[0.15, 0.2, 3.25]}
+        znear={0.05}
+        zfar={100}
+        yfov={Math.PI / 4.4}
+      />
+      <DirectionalLight
+        id='helmet-forward-key'
+        color={{ x: 1, y: 0.95, z: 0.9 }}
+        intensity={4.8}
+        nodeId='helmet-forward-key-node'
+        rotation={(() => {
+          const rotation = createQuaternionFromEulerDegrees(-50, -28, 0);
+          return [rotation.x, rotation.y, rotation.z, rotation.w] as const;
+        })()}
+      />
+      <DirectionalLight
+        id='helmet-forward-fill'
+        color={{ x: 0.62, y: 0.7, z: 1 }}
+        intensity={1.35}
+        nodeId='helmet-forward-fill-node'
+        rotation={(() => {
+          const rotation = createQuaternionFromEulerDegrees(-26, 44, 0);
+          return [rotation.x, rotation.y, rotation.z, rotation.w] as const;
+        })()}
+      />
+      <DirectionalLight
+        id='helmet-forward-rim'
+        color={{ x: 0.9, y: 0.96, z: 1 }}
+        intensity={2.15}
+        nodeId='helmet-forward-rim-node'
+        rotation={(() => {
+          const rotation = createQuaternionFromEulerDegrees(-34, 150, 0);
+          return [rotation.x, rotation.y, rotation.z, rotation.w] as const;
+        })()}
+      />
+      <node
+        id='helmet-forward-node'
+        meshId={sourceMesh.id}
+        position={[
+          -helmetBounds.center.x * helmetScale,
+          -(helmetBounds.min.y * helmetScale) - 0.92,
+          (-helmetBounds.center.z * helmetScale) - 0.5,
+        ]}
+        rotation={[helmetRotation.x, helmetRotation.y, helmetRotation.z, helmetRotation.w]}
+        scale={[helmetScale, helmetScale, helmetScale]}
+      />
+    </scene>
+  );
+};
 
 export default async (
   { window }: DesktopModuleContext,
 ): Promise<void | DesktopModuleCleanup> => {
+  let normalDebugEnabled = false;
+  let selectedDebugView: ForwardDebugView = 'normal-world-mapped';
   const sceneRoot = createReactSceneRoot(<HelmetScene />);
   const target = {
     kind: 'surface' as const,
@@ -147,7 +159,71 @@ export default async (
     residency,
     materialRegistry,
     initialTimeMs: performance.now(),
+    hooks: {
+      renderForwardFrame: (
+        context,
+        binding,
+        residency,
+        evaluatedScene,
+        materialRegistry,
+        postProcessPasses,
+      ) =>
+        renderForwardFrame(context, binding, residency, evaluatedScene, {
+          materialRegistry,
+          postProcessPasses,
+          extension: {
+            environmentMap,
+            debugView: normalDebugEnabled ? selectedDebugView : 'none',
+          },
+        }),
+    },
   });
+
+  const handleKeyDown = (event: Event) => {
+    const detail = (event as CustomEvent<{ keyCode: number; pressed: boolean }>).detail;
+    if (detail.keyCode === 78) {
+      normalDebugEnabled = !normalDebugEnabled;
+      return;
+    }
+
+    if (detail.keyCode === 90) {
+      selectedDebugView = 'normal-world-geometric';
+      return;
+    }
+    if (detail.keyCode === 88) {
+      selectedDebugView = 'normal-tangent-sampled';
+      return;
+    }
+    if (detail.keyCode === 67) {
+      selectedDebugView = 'normal-world-mapped';
+      return;
+    }
+    if (detail.keyCode === 86) {
+      selectedDebugView = 'normal-view-mapped';
+      return;
+    }
+    if (detail.keyCode === 65) {
+      selectedDebugView = 'tangent-world';
+      return;
+    }
+    if (detail.keyCode === 83) {
+      selectedDebugView = 'bitangent-world';
+      return;
+    }
+    if (detail.keyCode === 68) {
+      selectedDebugView = 'tangent-handedness';
+      return;
+    }
+    if (detail.keyCode === 70) {
+      selectedDebugView = 'normal-tangent-sampled-raw';
+      return;
+    }
+    if (detail.keyCode === 71) {
+      selectedDebugView = 'uv';
+    }
+  };
+
+  window.runtime.addEventListener('keydown', handleKeyDown);
 
   window.runtime.addEventListener('resize', (event) => {
     const detail = (event as CustomEvent<{ width: number; height: number }>).detail;
@@ -167,6 +243,7 @@ export default async (
 
   return () => {
     cancelAnimationFrame(frameHandle);
+    window.runtime.removeEventListener('keydown', handleKeyDown);
     sceneRoot.unmount();
     forwardRenderer.dispose();
   };

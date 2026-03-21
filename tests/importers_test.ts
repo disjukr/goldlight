@@ -468,6 +468,50 @@ Deno.test('importGltfFromJson resolves external buffer and image URIs from provi
   assertEquals(scene.textures[0].source, { type: 'asset', assetId: 'external-image-0' });
 });
 
+Deno.test('importGltfFromJson preserves texture semantics and color spaces per material usage', () => {
+  const imageBytes = new Uint8Array([137, 80, 78, 71]);
+  const scene = importGltfFromJson({
+    images: [
+      { uri: encodeDataUri(imageBytes, 'image/png'), mimeType: 'image/png' },
+      { uri: encodeDataUri(imageBytes, 'image/png'), mimeType: 'image/png' },
+      { uri: encodeDataUri(imageBytes, 'image/png'), mimeType: 'image/png' },
+    ],
+    textures: [{ source: 0 }, { source: 1 }, { source: 2 }],
+    materials: [{
+      pbrMetallicRoughness: {
+        baseColorTexture: { index: 0 },
+        metallicRoughnessTexture: { index: 1 },
+      },
+      normalTexture: { index: 2 },
+    }],
+  }, 'texture-usage');
+
+  assertEquals(
+    scene.textures.map((texture) => ({
+      id: texture.id,
+      semantic: texture.semantic,
+      colorSpace: texture.colorSpace,
+    })),
+    [
+      {
+        id: 'texture-usage-texture-0',
+        semantic: 'baseColor',
+        colorSpace: 'srgb',
+      },
+      {
+        id: 'texture-usage-texture-1',
+        semantic: 'metallicRoughness',
+        colorSpace: 'linear',
+      },
+      {
+        id: 'texture-usage-texture-2',
+        semantic: 'normal',
+        colorSpace: 'linear',
+      },
+    ],
+  );
+});
+
 Deno.test('importGltfFromJson can inline external image assets when requested', () => {
   const positions = new Float32Array([
     0,
@@ -713,4 +757,98 @@ Deno.test('importGltfFromGlb ingests binary buffers and bufferView-backed images
   if (scene.textures[0].source?.type === 'inline') {
     assertEquals(scene.textures[0].source.image.mimeType, 'image/png');
   }
+});
+
+Deno.test('importGltfFromGlb preserves primitives without synthesized tangents', () => {
+  const positions = new Float32Array([
+    0,
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    1,
+    0,
+  ]);
+  const normals = new Float32Array([
+    0,
+    0,
+    1,
+    0,
+    0,
+    1,
+    0,
+    0,
+    1,
+  ]);
+  const texcoords = new Float32Array([
+    0,
+    0,
+    1,
+    0,
+    0,
+    1,
+  ]);
+  const indices = new Uint16Array([0, 1, 2]);
+  const imageBytes = new Uint8Array([137, 80, 78, 71]);
+  const positionBytes = new Uint8Array(positions.buffer);
+  const normalBytes = new Uint8Array(normals.buffer);
+  const texcoordBytes = new Uint8Array(texcoords.buffer);
+  const indexBytes = new Uint8Array(indices.buffer);
+  const glbBinary = concatBytes(positionBytes, normalBytes, texcoordBytes, indexBytes, imageBytes);
+  const glb = createGlb({
+    asset: { version: '2.0' },
+    buffers: [{ byteLength: glbBinary.byteLength }],
+    bufferViews: [
+      { buffer: 0, byteOffset: 0, byteLength: positionBytes.byteLength },
+      { buffer: 0, byteOffset: positionBytes.byteLength, byteLength: normalBytes.byteLength },
+      {
+        buffer: 0,
+        byteOffset: positionBytes.byteLength + normalBytes.byteLength,
+        byteLength: texcoordBytes.byteLength,
+      },
+      {
+        buffer: 0,
+        byteOffset: positionBytes.byteLength + normalBytes.byteLength + texcoordBytes.byteLength,
+        byteLength: indexBytes.byteLength,
+      },
+      {
+        buffer: 0,
+        byteOffset: positionBytes.byteLength + normalBytes.byteLength + texcoordBytes.byteLength +
+          indexBytes.byteLength,
+        byteLength: imageBytes.byteLength,
+      },
+    ],
+    accessors: [
+      { bufferView: 0, componentType: 5126, count: 3, type: 'VEC3' },
+      { bufferView: 1, componentType: 5126, count: 3, type: 'VEC3' },
+      { bufferView: 2, componentType: 5126, count: 3, type: 'VEC2' },
+      { bufferView: 3, componentType: 5123, count: 3, type: 'SCALAR' },
+    ],
+    images: [{ bufferView: 4, mimeType: 'image/png' }],
+    textures: [{ source: 0 }],
+    materials: [{ normalTexture: { index: 0 } }],
+    meshes: [{
+      primitives: [{
+        attributes: {
+          POSITION: 0,
+          NORMAL: 1,
+          TEXCOORD_0: 2,
+        },
+        indices: 3,
+        material: 0,
+      }],
+    }],
+    nodes: [{ mesh: 0 }],
+    scenes: [{ nodes: [0] }],
+    scene: 0,
+  }, glbBinary);
+
+  const scene = importGltfFromGlb(glb, 'glb');
+  const tangentAttribute = scene.meshes[0].attributes.find((attribute) =>
+    attribute.semantic === 'TANGENT'
+  );
+
+  assertEquals(tangentAttribute, undefined);
 });

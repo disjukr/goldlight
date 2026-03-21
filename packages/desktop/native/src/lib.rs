@@ -7,6 +7,7 @@ use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::event_loop::EventLoop;
+use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::platform::pump_events::{EventLoopExtPumpEvents, PumpStatus};
 use winit::window::{Window, WindowAttributes};
 
@@ -169,6 +170,58 @@ fn resolve_surface_info(
     }
 }
 
+fn to_desktop_key_code(physical_key: &PhysicalKey) -> i64 {
+    match physical_key {
+        PhysicalKey::Code(KeyCode::KeyA) => 65,
+        PhysicalKey::Code(KeyCode::KeyB) => 66,
+        PhysicalKey::Code(KeyCode::KeyC) => 67,
+        PhysicalKey::Code(KeyCode::KeyD) => 68,
+        PhysicalKey::Code(KeyCode::KeyE) => 69,
+        PhysicalKey::Code(KeyCode::KeyF) => 70,
+        PhysicalKey::Code(KeyCode::KeyG) => 71,
+        PhysicalKey::Code(KeyCode::KeyH) => 72,
+        PhysicalKey::Code(KeyCode::KeyI) => 73,
+        PhysicalKey::Code(KeyCode::KeyJ) => 74,
+        PhysicalKey::Code(KeyCode::KeyK) => 75,
+        PhysicalKey::Code(KeyCode::KeyL) => 76,
+        PhysicalKey::Code(KeyCode::KeyM) => 77,
+        PhysicalKey::Code(KeyCode::KeyN) => 78,
+        PhysicalKey::Code(KeyCode::KeyO) => 79,
+        PhysicalKey::Code(KeyCode::KeyP) => 80,
+        PhysicalKey::Code(KeyCode::KeyQ) => 81,
+        PhysicalKey::Code(KeyCode::KeyR) => 82,
+        PhysicalKey::Code(KeyCode::KeyS) => 83,
+        PhysicalKey::Code(KeyCode::KeyT) => 84,
+        PhysicalKey::Code(KeyCode::KeyU) => 85,
+        PhysicalKey::Code(KeyCode::KeyV) => 86,
+        PhysicalKey::Code(KeyCode::KeyW) => 87,
+        PhysicalKey::Code(KeyCode::KeyX) => 88,
+        PhysicalKey::Code(KeyCode::KeyY) => 89,
+        PhysicalKey::Code(KeyCode::KeyZ) => 90,
+        PhysicalKey::Code(KeyCode::Digit0) => 48,
+        PhysicalKey::Code(KeyCode::Digit1) => 49,
+        PhysicalKey::Code(KeyCode::Digit2) => 50,
+        PhysicalKey::Code(KeyCode::Digit3) => 51,
+        PhysicalKey::Code(KeyCode::Digit4) => 52,
+        PhysicalKey::Code(KeyCode::Digit5) => 53,
+        PhysicalKey::Code(KeyCode::Digit6) => 54,
+        PhysicalKey::Code(KeyCode::Digit7) => 55,
+        PhysicalKey::Code(KeyCode::Digit8) => 56,
+        PhysicalKey::Code(KeyCode::Digit9) => 57,
+        PhysicalKey::Code(KeyCode::Space) => 32,
+        PhysicalKey::Code(KeyCode::Enter) => 13,
+        PhysicalKey::Code(KeyCode::Escape) => 27,
+        PhysicalKey::Code(KeyCode::Tab) => 9,
+        PhysicalKey::Code(KeyCode::Backspace) => 8,
+        PhysicalKey::Code(KeyCode::ArrowLeft) => 37,
+        PhysicalKey::Code(KeyCode::ArrowUp) => 38,
+        PhysicalKey::Code(KeyCode::ArrowRight) => 39,
+        PhysicalKey::Code(KeyCode::ArrowDown) => 40,
+        PhysicalKey::Unidentified(_) => -1,
+        PhysicalKey::Code(code) => *code as i64,
+    }
+}
+
 impl ApplicationHandler for DesktopHostApplication {
     fn resumed(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {}
 
@@ -269,10 +322,7 @@ impl ApplicationHandler for DesktopHostApplication {
                 });
             }
             WindowEvent::KeyboardInput { event, .. } => {
-                let key_code = match event.physical_key {
-                    winit::keyboard::PhysicalKey::Code(code) => code as i64,
-                    winit::keyboard::PhysicalKey::Unidentified(_) => -1,
-                };
+                let key_code = to_desktop_key_code(&event.physical_key);
                 self.push_event(DesktopHostEvent {
                     kind: EVENT_KEYBOARD,
                     reserved: 0,

@@ -623,6 +623,30 @@ const createTextureRefs = (
   const assets: AssetRef[] = [];
   const textures: TextureRef[] = [];
   const imageAssets = new Map<string, ImageAsset>();
+  const inferredTextureUsage = new Map<number, Pick<TextureRef, 'semantic' | 'colorSpace'>>();
+
+  json.materials?.forEach((material) => {
+    const registerUsage = (
+      textureIndex: number | undefined,
+      semantic: TextureRef['semantic'],
+      colorSpace: TextureRef['colorSpace'],
+    ) => {
+      if (textureIndex === undefined || inferredTextureUsage.has(textureIndex)) {
+        return;
+      }
+      inferredTextureUsage.set(textureIndex, { semantic, colorSpace });
+    };
+
+    registerUsage(material.pbrMetallicRoughness?.baseColorTexture?.index, 'baseColor', 'srgb');
+    registerUsage(
+      material.pbrMetallicRoughness?.metallicRoughnessTexture?.index,
+      'metallicRoughness',
+      'linear',
+    );
+    registerUsage(material.normalTexture?.index, 'normal', 'linear');
+    registerUsage(material.occlusionTexture?.index, 'occlusion', 'linear');
+    registerUsage(material.emissiveTexture?.index, 'emissive', 'srgb');
+  });
 
   json.textures?.forEach((texture, textureIndex) => {
     const imageIndex = texture.source;
@@ -678,12 +702,16 @@ const createTextureRefs = (
       }
     }
 
+    const usage = inferredTextureUsage.get(textureIndex) ?? {
+      semantic: 'baseColor' as const,
+      colorSpace: 'srgb' as const,
+    };
     textures.push({
       id: textureId,
       assetId,
       source: inlineImageSource ?? (assetId ? createAssetTextureSource(assetId) : undefined),
-      semantic: 'baseColor',
-      colorSpace: 'srgb',
+      semantic: usage.semantic,
+      colorSpace: usage.colorSpace,
       sampler: 'linear-repeat',
     });
   });

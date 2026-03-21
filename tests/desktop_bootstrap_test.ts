@@ -64,3 +64,41 @@ Deno.test('desktop runtime postMessage dispatches queued message events', async 
   assertEquals(received[0], { kind: 'ping' });
   assertEquals(received[1], 'onmessage:[object Object]');
 });
+
+Deno.test('desktop runtime expands keyboard host events into keydown and keyup events', () => {
+  const runtime = createDesktopWindowRuntime(1n, () => {});
+  const received: Array<{ type: string; keyCode: number; pressed: boolean }> = [];
+
+  const handleKeyboardEvent = (type: string) => (event: Event) => {
+    const detail = (event as CustomEvent<{ keyCode: number; pressed: boolean }>).detail;
+    received.push({
+      type,
+      keyCode: detail.keyCode,
+      pressed: detail.pressed,
+    });
+  };
+
+  runtime.addEventListener('keydown', handleKeyboardEvent('keydown'));
+  runtime.addEventListener('keyup', handleKeyboardEvent('keyup'));
+  runtime.addEventListener('keyboard', handleKeyboardEvent('keyboard'));
+
+  runtime.dispatchHostEvent({
+    kind: 'keyboard',
+    windowId: 1n,
+    keyCode: 78,
+    pressed: true,
+  });
+  runtime.dispatchHostEvent({
+    kind: 'keyboard',
+    windowId: 1n,
+    keyCode: 78,
+    pressed: false,
+  });
+
+  assertEquals(received, [
+    { type: 'keyboard', keyCode: 78, pressed: true },
+    { type: 'keydown', keyCode: 78, pressed: true },
+    { type: 'keyboard', keyCode: 78, pressed: false },
+    { type: 'keyup', keyCode: 78, pressed: false },
+  ]);
+});

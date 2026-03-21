@@ -7,11 +7,13 @@ import {
   createOffscreenBinding,
   ensureMaterialResidency,
   type GpuReadbackContext,
+  type ImageAsset,
   readOffscreenSnapshot,
   type RenderContextBinding,
   type RuntimeResidency,
   type TextureResidency,
 } from '@rieul3d/gpu';
+import { EXRLoader } from 'npm:three@0.180.0/examples/jsm/loaders/EXRLoader.js';
 import builtInForwardShader from './shaders/built_in_forward_unlit.wgsl' with { type: 'text' };
 import builtInForwardLitShader from './shaders/built_in_forward_lit.wgsl' with { type: 'text' };
 import builtInForwardTexturedShader from './shaders/built_in_forward_unlit_textured.wgsl' with {
@@ -53,6 +55,9 @@ import builtInVolumeRaymarchShader from './shaders/built_in_volume_raymarch.wgsl
 };
 import builtInNodePickShader from './shaders/built_in_node_pick.wgsl' with { type: 'text' };
 import builtInPostProcessBlitShader from './shaders/built_in_post_process_blit.wgsl' with {
+  type: 'text',
+};
+import builtInEnvironmentBackgroundShader from './shaders/built_in_environment_background.wgsl' with {
   type: 'text',
 };
 import {
@@ -441,6 +446,35 @@ export type PathtracedRenderOptions = Readonly<{
   extension?: PathtracedSceneExtension;
 }>;
 
+export type ForwardEnvironmentMap = Readonly<{
+  id: string;
+  image: ImageAsset;
+  intensity?: number;
+}>;
+
+export type ForwardDebugView =
+  | 'none'
+  | 'normal-world-geometric'
+  | 'normal-tangent-sampled'
+  | 'normal-tangent-sampled-raw'
+  | 'normal-world-mapped'
+  | 'normal-view-mapped'
+  | 'tangent-world'
+  | 'bitangent-world'
+  | 'tangent-handedness'
+  | 'uv';
+
+export type ForwardSceneExtension = Readonly<{
+  environmentMap?: ForwardEnvironmentMap;
+  debugView?: ForwardDebugView;
+}>;
+
+export type ForwardRenderOptions = Readonly<{
+  materialRegistry?: MaterialRegistry;
+  postProcessPasses?: readonly PostProcessPass[];
+  extension?: ForwardSceneExtension;
+}>;
+
 export type VolumePassItem = Readonly<{
   nodeId: string;
   volumeId: string;
@@ -521,7 +555,7 @@ const pathtracedAccumulationFormat = 'rgba16float';
 const depthTextureFormat = 'depth24plus';
 const maxDirectionalLights = 4;
 const maxPathtracedMaterialTextures = 8;
-const defaultAmbientLight = 0.2;
+const defaultAmbientLight = 0.34;
 const defaultCubemapFormat = 'rgba8unorm';
 const defaultCubemapZnear = 0.1;
 const defaultCubemapZfar = 100;
@@ -530,6 +564,7 @@ const pathtracedAccumulationStates = new WeakMap<
   PathtracedAccumulationState
 >();
 const pathtracedMeshSceneStates = new WeakMap<RenderContextBinding, PathtracedMeshSceneState>();
+const exrLoader = new EXRLoader();
 const pathtracedFallbackTextureBindings = new WeakMap<
   object,
   Readonly<{ texture: GPUTexture; textureView: GPUTextureView; sampler: GPUSampler }>
@@ -1408,6 +1443,11 @@ const builtInLitProgramTemplate: MaterialProgramTemplate<BuiltInLitTemplateVaria
         ? Boolean(geometry.attributeBuffers.TEXCOORD_0)
         : geometry.attributes.some((attribute) => attribute.semantic === 'TEXCOORD_0')
       : false;
+    const usesTangent = geometry
+      ? 'attributeBuffers' in geometry
+        ? Boolean(geometry.attributeBuffers.TANGENT)
+        : geometry.attributes.some((attribute) => attribute.semantic === 'TANGENT')
+      : false;
     return {
       templateId: 'built-in:lit-template',
       materialId: material?.id ?? 'built-in:default-lit-material',
@@ -1420,6 +1460,7 @@ const builtInLitProgramTemplate: MaterialProgramTemplate<BuiltInLitTemplateVaria
       usesNormalTexture,
       usesOcclusionTexture,
       usesEmissiveTexture,
+      usesTangent,
       usesTexcoord0,
     };
   },
@@ -2478,6 +2519,28 @@ const isMaterialRegistry = (value: unknown): value is MaterialRegistry =>
   'programs' in value &&
   (value as { programs?: unknown }).programs instanceof Map;
 
+const resolveForwardRenderOptions = (
+  materialRegistryOrOptions?: MaterialRegistry | ForwardRenderOptions,
+  postProcessPasses: readonly PostProcessPass[] = [],
+): Required<ForwardRenderOptions> => {
+  if (
+    materialRegistryOrOptions === undefined ||
+    isMaterialRegistry(materialRegistryOrOptions)
+  ) {
+    return {
+      materialRegistry: materialRegistryOrOptions ?? createMaterialRegistry(),
+      postProcessPasses,
+      extension: {},
+    };
+  }
+
+  return {
+    materialRegistry: materialRegistryOrOptions.materialRegistry ?? createMaterialRegistry(),
+    postProcessPasses: materialRegistryOrOptions.postProcessPasses ?? [],
+    extension: materialRegistryOrOptions.extension ?? {},
+  };
+};
+
 const resolvePathtracedRenderOptions = (
   materialRegistryOrOptions?: MaterialRegistry | PathtracedRenderOptions,
   postProcessPasses: readonly PostProcessPass[] = [],
@@ -2713,8 +2776,11 @@ export const extractDirectionalLightItems = (
 
 const createDirectionalLightUniformData = (
   lights: readonly DirectionalLightItem[],
+  cameraPosition: readonly [number, number, number] = [0, 0, 0],
+  environmentIntensity = 0,
+  debugView: ForwardDebugView = 'none',
 ): Float32Array => {
-  const uniformData = new Float32Array((maxDirectionalLights * 8) + 4);
+  const uniformData = new Float32Array((maxDirectionalLights * 8) + 8);
   const clampedLights = lights.slice(0, maxDirectionalLights);
 
   for (let index = 0; index < clampedLights.length; index += 1) {
@@ -2726,9 +2792,697 @@ const createDirectionalLightUniformData = (
   }
 
   const settingsOffset = maxDirectionalLights * 8;
+  const debugViewCode = debugView === 'normal-world-geometric'
+    ? 1
+    : debugView === 'normal-tangent-sampled'
+    ? 2
+    : debugView === 'normal-tangent-sampled-raw'
+    ? 8
+    : debugView === 'normal-world-mapped'
+    ? 3
+    : debugView === 'normal-view-mapped'
+    ? 4
+    : debugView === 'tangent-world'
+    ? 5
+    : debugView === 'bitangent-world'
+    ? 6
+    : debugView === 'tangent-handedness'
+    ? 7
+    : debugView === 'uv'
+    ? 9
+    : 0;
   uniformData[settingsOffset] = clampedLights.length;
   uniformData[settingsOffset + 1] = defaultAmbientLight;
+  uniformData[settingsOffset + 2] = debugViewCode;
+  uniformData[settingsOffset + 4] = cameraPosition[0];
+  uniformData[settingsOffset + 5] = cameraPosition[1];
+  uniformData[settingsOffset + 6] = cameraPosition[2];
+  uniformData[settingsOffset + 7] = environmentIntensity;
   return uniformData;
+};
+
+const createDefaultEnvironmentPixels = (): Uint16Array => {
+  const toFloat16Bits = (value: number): number => {
+    const floatView = new Float32Array([value]);
+    const intView = new Uint32Array(floatView.buffer);
+    const x = intView[0] ?? 0;
+    const sign = (x >> 16) & 0x8000;
+    const mantissa = x & 0x007fffff;
+    const exponent = (x >> 23) & 0xff;
+
+    if (exponent === 0xff) {
+      return sign | (mantissa !== 0 ? 0x7e00 : 0x7c00);
+    }
+    if (exponent > 142) {
+      return sign | 0x7c00;
+    }
+    if (exponent < 113) {
+      if (exponent < 103) {
+        return sign;
+      }
+      const shiftedMantissa = mantissa | 0x00800000;
+      const shift = 125 - exponent;
+      const rounded = (shiftedMantissa >> shift) + ((shiftedMantissa >> (shift - 1)) & 1);
+      return sign | rounded;
+    }
+
+    const halfExponent = exponent - 112;
+    const halfMantissa = mantissa >> 13;
+    const roundedMantissa = halfMantissa + ((mantissa >> 12) & 1);
+    return sign | (halfExponent << 10) | (roundedMantissa & 0x03ff);
+  };
+
+  return new Uint16Array([
+    toFloat16Bits(0.9),
+    toFloat16Bits(0.94),
+    toFloat16Bits(1.0),
+    toFloat16Bits(1.0),
+  ]);
+};
+
+const decodeEnvironmentImageAsset = (
+  image: ImageAsset,
+): Readonly<{
+  width: number;
+  height: number;
+  data: Uint16Array;
+}> => {
+  if (
+    image.mimeType !== 'image/exr' &&
+    image.mimeType !== 'image/x-exr' &&
+    image.mimeType !== 'application/x-exr'
+  ) {
+    throw new Error(
+      `environment map "${image.id}" must be EXR, received "${image.mimeType}"`,
+    );
+  }
+
+  const parsed = exrLoader.parse(
+    image.bytes.buffer.slice(
+      image.bytes.byteOffset,
+      image.bytes.byteOffset + image.bytes.byteLength,
+    ),
+  ) as {
+    width: number;
+    height: number;
+    data: Uint16Array;
+  };
+
+  return {
+    width: parsed.width,
+    height: parsed.height,
+    data: parsed.data,
+  };
+};
+
+const halfFloatScratchBuffer = new ArrayBuffer(4);
+const halfFloatScratchView = new DataView(halfFloatScratchBuffer);
+
+const decodeHalfFloat = (value: number): number => {
+  const exponent = (value >> 10) & 0x1f;
+  const fraction = value & 0x03ff;
+  const sign = (value & 0x8000) << 16;
+
+  if (exponent === 0) {
+    if (fraction === 0) {
+      halfFloatScratchView.setUint32(0, sign);
+      return halfFloatScratchView.getFloat32(0);
+    }
+
+    let mantissa = fraction;
+    let adjustedExponent = -14;
+    while ((mantissa & 0x0400) === 0) {
+      mantissa <<= 1;
+      adjustedExponent -= 1;
+    }
+    mantissa &= 0x03ff;
+    const bits = sign | (((adjustedExponent + 127) & 0xff) << 23) | (mantissa << 13);
+    halfFloatScratchView.setUint32(0, bits);
+    return halfFloatScratchView.getFloat32(0);
+  }
+
+  if (exponent === 0x1f) {
+    const bits = sign | 0x7f800000 | (fraction << 13);
+    halfFloatScratchView.setUint32(0, bits);
+    return halfFloatScratchView.getFloat32(0);
+  }
+
+  const bits = sign | ((exponent + 112) << 23) | (fraction << 13);
+  halfFloatScratchView.setUint32(0, bits);
+  return halfFloatScratchView.getFloat32(0);
+};
+
+const encodeHalfFloat = (value: number): number => {
+  if (Number.isNaN(value)) {
+    return 0x7e00;
+  }
+  if (value === Infinity) {
+    return 0x7c00;
+  }
+  if (value === -Infinity) {
+    return 0xfc00;
+  }
+
+  halfFloatScratchView.setFloat32(0, value);
+  const bits = halfFloatScratchView.getUint32(0);
+  const sign = (bits >> 16) & 0x8000;
+  const exponent = (bits >> 23) & 0xff;
+  const mantissa = bits & 0x7fffff;
+
+  if (exponent <= 112) {
+    if (exponent < 103) {
+      return sign;
+    }
+
+    const shiftedMantissa = (mantissa | 0x800000) >> (126 - exponent);
+    return sign | ((shiftedMantissa + 0x1000) >> 13);
+  }
+
+  if (exponent >= 143) {
+    return sign | 0x7c00;
+  }
+
+  return sign | ((exponent - 112) << 10) | ((mantissa + 0x1000) >> 13);
+};
+
+const radicalInverseVdc = (bits: number): number => {
+  let value = bits >>> 0;
+  value = ((value << 16) | (value >>> 16)) >>> 0;
+  value = (((value & 0x55555555) << 1) | ((value & 0xaaaaaaaa) >>> 1)) >>> 0;
+  value = (((value & 0x33333333) << 2) | ((value & 0xcccccccc) >>> 2)) >>> 0;
+  value = (((value & 0x0f0f0f0f) << 4) | ((value & 0xf0f0f0f0) >>> 4)) >>> 0;
+  value = (((value & 0x00ff00ff) << 8) | ((value & 0xff00ff00) >>> 8)) >>> 0;
+  return value * 2.3283064365386963e-10;
+};
+
+const hammersley = (index: number, sampleCount: number): readonly [number, number] => [
+  index / sampleCount,
+  radicalInverseVdc(index),
+];
+
+const normalizeEnvironmentVector = (
+  x: number,
+  y: number,
+  z: number,
+): readonly [number, number, number] => {
+  const length = Math.hypot(x, y, z) || 1;
+  return [x / length, y / length, z / length];
+};
+
+const buildEnvironmentBasis = (
+  x: number,
+  y: number,
+  z: number,
+): Readonly<{
+  tangent: readonly [number, number, number];
+  bitangent: readonly [number, number, number];
+  normal: readonly [number, number, number];
+}> => {
+  const normal = normalizeEnvironmentVector(x, y, z);
+  const referenceUp = Math.abs(normal[1]) > 0.92 ? [1, 0, 0] as const : [0, 1, 0] as const;
+  const tangent = normalizeEnvironmentVector(
+    (referenceUp[1] * normal[2]) - (referenceUp[2] * normal[1]),
+    (referenceUp[2] * normal[0]) - (referenceUp[0] * normal[2]),
+    (referenceUp[0] * normal[1]) - (referenceUp[1] * normal[0]),
+  );
+  const bitangent = normalizeEnvironmentVector(
+    (normal[1] * tangent[2]) - (normal[2] * tangent[1]),
+    (normal[2] * tangent[0]) - (normal[0] * tangent[2]),
+    (normal[0] * tangent[1]) - (normal[1] * tangent[0]),
+  );
+  return { tangent, bitangent, normal };
+};
+
+const sampleEnvironmentBilinear = (
+  width: number,
+  height: number,
+  data: Float32Array,
+  direction: readonly [number, number, number],
+): readonly [number, number, number] => {
+  const [x, y, z] = normalizeEnvironmentVector(direction[0], direction[1], direction[2]);
+  const longitude = Math.atan2(z, x);
+  const latitude = Math.asin(Math.max(-1, Math.min(1, y)));
+  const u = longitude / (2 * Math.PI) + 0.5;
+  const v = Math.max(0, Math.min(1, 0.5 + (latitude / Math.PI)));
+  const wrappedU = u - Math.floor(u);
+  const fx = wrappedU * Math.max(width - 1, 1);
+  const fy = v * Math.max(height - 1, 1);
+  const x0 = Math.floor(fx);
+  const y0 = Math.floor(fy);
+  const x1 = (x0 + 1) % width;
+  const y1 = Math.min(y0 + 1, height - 1);
+  const tx = fx - x0;
+  const ty = fy - y0;
+  const sample = (sampleX: number, sampleY: number, channel: number): number =>
+    data[(((sampleY * width) + sampleX) * 4) + channel] ?? 0;
+
+  const lerp = (a: number, b: number, t: number): number => a + ((b - a) * t);
+  const c00 = [sample(x0, y0, 0), sample(x0, y0, 1), sample(x0, y0, 2)] as const;
+  const c10 = [sample(x1, y0, 0), sample(x1, y0, 1), sample(x1, y0, 2)] as const;
+  const c01 = [sample(x0, y1, 0), sample(x0, y1, 1), sample(x0, y1, 2)] as const;
+  const c11 = [sample(x1, y1, 0), sample(x1, y1, 1), sample(x1, y1, 2)] as const;
+  return [
+    lerp(lerp(c00[0], c10[0], tx), lerp(c01[0], c11[0], tx), ty),
+    lerp(lerp(c00[1], c10[1], tx), lerp(c01[1], c11[1], tx), ty),
+    lerp(lerp(c00[2], c10[2], tx), lerp(c01[2], c11[2], tx), ty),
+  ];
+};
+
+const importanceSampleGgx = (
+  xi: readonly [number, number],
+  roughness: number,
+  normal: readonly [number, number, number],
+): readonly [number, number, number] => {
+  const alpha = roughness * roughness;
+  const phi = 2 * Math.PI * xi[0];
+  const cosTheta = Math.sqrt((1 - xi[1]) / Math.max(1 + ((alpha * alpha) - 1) * xi[1], 1e-6));
+  const sinTheta = Math.sqrt(Math.max(0, 1 - (cosTheta * cosTheta)));
+  const halfVectorTangent = [
+    Math.cos(phi) * sinTheta,
+    Math.sin(phi) * sinTheta,
+    cosTheta,
+  ] as const;
+  const basis = buildEnvironmentBasis(normal[0], normal[1], normal[2]);
+  return normalizeEnvironmentVector(
+    (basis.tangent[0] * halfVectorTangent[0]) +
+      (basis.bitangent[0] * halfVectorTangent[1]) +
+      (basis.normal[0] * halfVectorTangent[2]),
+    (basis.tangent[1] * halfVectorTangent[0]) +
+      (basis.bitangent[1] * halfVectorTangent[1]) +
+      (basis.normal[1] * halfVectorTangent[2]),
+    (basis.tangent[2] * halfVectorTangent[0]) +
+      (basis.bitangent[2] * halfVectorTangent[1]) +
+      (basis.normal[2] * halfVectorTangent[2]),
+  );
+};
+
+const dotEnvironment = (
+  left: readonly [number, number, number],
+  right: readonly [number, number, number],
+): number => (left[0] * right[0]) + (left[1] * right[1]) + (left[2] * right[2]);
+
+const reflectEnvironment = (
+  vector: readonly [number, number, number],
+  normal: readonly [number, number, number],
+): readonly [number, number, number] => {
+  const scale = 2 * dotEnvironment(normal, vector);
+  return normalizeEnvironmentVector(
+    (scale * normal[0]) - vector[0],
+    (scale * normal[1]) - vector[1],
+    (scale * normal[2]) - vector[2],
+  );
+};
+
+const createFloatEnvironmentData = (decoded: Uint16Array): Float32Array => {
+  const floatData = new Float32Array(decoded.length);
+  for (let index = 0; index < decoded.length; index += 1) {
+    floatData[index] = decodeHalfFloat(decoded[index] ?? 0);
+  }
+  return floatData;
+};
+
+const createPrefilteredEnvironmentMipChain = (
+  width: number,
+  height: number,
+  data: Uint16Array,
+): readonly Readonly<{
+  width: number;
+  height: number;
+  data: Uint16Array;
+}>[] => {
+  const source = createFloatEnvironmentData(data);
+  const levels: Array<Readonly<{ width: number; height: number; data: Uint16Array }>> = [{
+    width,
+    height,
+    data,
+  }];
+  const maxMipLevel = Math.max(1, Math.floor(Math.log2(Math.max(width, height)))) + 1;
+
+  for (let mipLevel = 1; mipLevel < maxMipLevel; mipLevel += 1) {
+    const levelWidth = Math.max(1, width >> mipLevel);
+    const levelHeight = Math.max(1, height >> mipLevel);
+    const levelData = new Uint16Array(levelWidth * levelHeight * 4);
+    const roughness = mipLevel / Math.max(maxMipLevel - 1, 1);
+    const sampleCount = Math.max(16, 64 - (mipLevel * 4));
+
+    for (let y = 0; y < levelHeight; y += 1) {
+      for (let x = 0; x < levelWidth; x += 1) {
+        const u = (x + 0.5) / levelWidth;
+        const v = (y + 0.5) / levelHeight;
+        const longitude = (u - 0.5) * 2 * Math.PI;
+        const latitude = (v - 0.5) * Math.PI;
+        const normal = normalizeEnvironmentVector(
+          Math.cos(latitude) * Math.cos(longitude),
+          Math.sin(latitude),
+          Math.cos(latitude) * Math.sin(longitude),
+        );
+        const view = normal;
+        let red = 0;
+        let green = 0;
+        let blue = 0;
+        let weight = 0;
+
+        for (let sampleIndex = 0; sampleIndex < sampleCount; sampleIndex += 1) {
+          const halfVector = importanceSampleGgx(
+            hammersley(sampleIndex, sampleCount),
+            roughness,
+            normal,
+          );
+          const light = reflectEnvironment(view, halfVector);
+          const nDotL = Math.max(dotEnvironment(normal, light), 0);
+          if (nDotL <= 1e-4) {
+            continue;
+          }
+          const sample = sampleEnvironmentBilinear(width, height, source, light);
+          red += sample[0] * nDotL;
+          green += sample[1] * nDotL;
+          blue += sample[2] * nDotL;
+          weight += nDotL;
+        }
+
+        const offset = ((y * levelWidth) + x) * 4;
+        levelData[offset] = encodeHalfFloat(red / Math.max(weight, 1e-4));
+        levelData[offset + 1] = encodeHalfFloat(green / Math.max(weight, 1e-4));
+        levelData[offset + 2] = encodeHalfFloat(blue / Math.max(weight, 1e-4));
+        levelData[offset + 3] = encodeHalfFloat(1);
+      }
+    }
+
+    levels.push({
+      width: levelWidth,
+      height: levelHeight,
+      data: levelData,
+    });
+  }
+
+  return levels;
+};
+
+const geometrySchlickGgxBrdf = (nDotValue: number, roughness: number): number => {
+  const k = (roughness * roughness) / 2;
+  return nDotValue / Math.max((nDotValue * (1 - k)) + k, 1e-6);
+};
+
+const geometrySmithBrdf = (nDotV: number, nDotL: number, roughness: number): number =>
+  geometrySchlickGgxBrdf(nDotV, roughness) * geometrySchlickGgxBrdf(nDotL, roughness);
+
+const createEnvironmentBrdfLutData = (
+  size = 128,
+  sampleCount = 256,
+): Readonly<{
+  width: number;
+  height: number;
+  data: Uint16Array;
+}> => {
+  const data = new Uint16Array(size * size * 4);
+  for (let y = 0; y < size; y += 1) {
+    const roughness = (y + 0.5) / size;
+    for (let x = 0; x < size; x += 1) {
+      const nDotV = Math.max((x + 0.5) / size, 1e-4);
+      const view = [Math.sqrt(Math.max(0, 1 - (nDotV * nDotV))), 0, nDotV] as const;
+      const normal = [0, 0, 1] as const;
+      let scale = 0;
+      let bias = 0;
+
+      for (let sampleIndex = 0; sampleIndex < sampleCount; sampleIndex += 1) {
+        const halfVector = importanceSampleGgx(
+          hammersley(sampleIndex, sampleCount),
+          roughness,
+          normal,
+        );
+        const light = reflectEnvironment(view, halfVector);
+        const nDotL = Math.max(light[2], 0);
+        const nDotH = Math.max(halfVector[2], 0);
+        const vDotH = Math.max(dotEnvironment(view, halfVector), 0);
+        if (nDotL <= 1e-4 || nDotH <= 1e-4 || vDotH <= 1e-4) {
+          continue;
+        }
+
+        const geometry = geometrySmithBrdf(nDotV, nDotL, roughness);
+        const visibility = (geometry * vDotH) / Math.max(nDotH * nDotV, 1e-6);
+        const fresnel = Math.pow(1 - vDotH, 5);
+        scale += (1 - fresnel) * visibility;
+        bias += fresnel * visibility;
+      }
+
+      const offset = ((y * size) + x) * 4;
+      data[offset] = encodeHalfFloat(scale / sampleCount);
+      data[offset + 1] = encodeHalfFloat(bias / sampleCount);
+      data[offset + 2] = encodeHalfFloat(0);
+      data[offset + 3] = encodeHalfFloat(1);
+    }
+  }
+
+  return {
+    width: size,
+    height: size,
+    data,
+  };
+};
+
+const ensureForwardEnvironmentTexture = (
+  context: GpuRenderExecutionContext,
+  residency: RuntimeResidency,
+  environmentMap?: ForwardEnvironmentMap,
+): Readonly<{
+  residency: TextureResidency;
+  intensity: number;
+}> => {
+  const cacheId = environmentMap
+    ? `__forward-environment:${environmentMap.id}`
+    : '__forward-environment:default';
+  const cached = residency.textures.get(cacheId);
+  if (cached) {
+    return {
+      residency: cached,
+      intensity: environmentMap?.intensity ?? 0,
+    };
+  }
+
+  if (!context.queue.writeTexture) {
+    throw new Error('forward environment map upload requires GPUQueue.writeTexture support');
+  }
+
+  const decoded = environmentMap ? decodeEnvironmentImageAsset(environmentMap.image) : {
+    width: 1,
+    height: 1,
+    data: createDefaultEnvironmentPixels(),
+  };
+  const mipChain = createPrefilteredEnvironmentMipChain(
+    decoded.width,
+    decoded.height,
+    decoded.data,
+  );
+
+  const texture = context.device.createTexture({
+    label: cacheId,
+    size: { width: decoded.width, height: decoded.height, depthOrArrayLayers: 1 },
+    format: 'rgba16float',
+    mipLevelCount: mipChain.length,
+    usage: textureBindingUsage | textureCopyDstUsage,
+  });
+  for (let mipLevel = 0; mipLevel < mipChain.length; mipLevel += 1) {
+    const level = mipChain[mipLevel];
+    context.queue.writeTexture(
+      { texture, mipLevel },
+      toBufferSource(level.data),
+      {
+        offset: 0,
+        bytesPerRow: level.width * 8,
+        rowsPerImage: level.height,
+      },
+      {
+        width: level.width,
+        height: level.height,
+        depthOrArrayLayers: 1,
+      },
+    );
+  }
+
+  const uploaded: TextureResidency = {
+    textureId: cacheId,
+    texture,
+    view: texture.createView(),
+    sampler: context.device.createSampler({
+      magFilter: 'linear',
+      minFilter: 'linear',
+      mipmapFilter: 'linear',
+      addressModeU: 'repeat',
+      addressModeV: 'clamp-to-edge',
+      lodMaxClamp: Math.max(0, mipChain.length - 1),
+    }),
+    width: decoded.width,
+    height: decoded.height,
+    format: 'rgba16float',
+  };
+  residency.textures.set(cacheId, uploaded);
+
+  return {
+    residency: uploaded,
+    intensity: environmentMap?.intensity ?? 0,
+  };
+};
+
+const ensureForwardEnvironmentBrdfLut = (
+  context: GpuRenderExecutionContext,
+  residency: RuntimeResidency,
+): TextureResidency => {
+  const cacheId = '__forward-environment-brdf-lut';
+  const cached = residency.textures.get(cacheId);
+  if (cached) {
+    return cached;
+  }
+
+  if (!context.queue.writeTexture) {
+    throw new Error('forward BRDF LUT upload requires GPUQueue.writeTexture support');
+  }
+
+  const lut = createEnvironmentBrdfLutData();
+  const texture = context.device.createTexture({
+    label: cacheId,
+    size: { width: lut.width, height: lut.height, depthOrArrayLayers: 1 },
+    format: 'rgba16float',
+    usage: textureBindingUsage | textureCopyDstUsage,
+  });
+  context.queue.writeTexture(
+    { texture },
+    toBufferSource(lut.data),
+    {
+      offset: 0,
+      bytesPerRow: lut.width * 8,
+      rowsPerImage: lut.height,
+    },
+    {
+      width: lut.width,
+      height: lut.height,
+      depthOrArrayLayers: 1,
+    },
+  );
+
+  const uploaded: TextureResidency = {
+    textureId: cacheId,
+    texture,
+    view: texture.createView(),
+    sampler: context.device.createSampler({
+      magFilter: 'linear',
+      minFilter: 'linear',
+      addressModeU: 'clamp-to-edge',
+      addressModeV: 'clamp-to-edge',
+    }),
+    width: lut.width,
+    height: lut.height,
+    format: 'rgba16float',
+  };
+  residency.textures.set(cacheId, uploaded);
+  return uploaded;
+};
+
+const createEnvironmentBackgroundUniformData = (
+  binding: RenderContextBinding,
+  activeCamera?: EvaluatedCamera,
+): Float32Array => {
+  const aspect = binding.target.width / binding.target.height;
+  if (!activeCamera || activeCamera.camera.type !== 'perspective') {
+    return Float32Array.from([
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      -1,
+      0,
+      aspect,
+      Math.tan(Math.PI / 6),
+      0,
+      0,
+    ]);
+  }
+
+  const perspectiveCamera = activeCamera.camera;
+  const worldMatrix = activeCamera.worldMatrix;
+  const rightAxis = normalizeVector3(
+    worldMatrix[0] ?? 1,
+    worldMatrix[1] ?? 0,
+    worldMatrix[2] ?? 0,
+  );
+  const upAxis = normalizeVector3(
+    worldMatrix[4] ?? 0,
+    worldMatrix[5] ?? 1,
+    worldMatrix[6] ?? 0,
+  );
+  const forwardAxis = normalizeVector3(
+    -(worldMatrix[8] ?? 0),
+    -(worldMatrix[9] ?? 0),
+    -(worldMatrix[10] ?? 1),
+  );
+
+  return Float32Array.from([
+    ...rightAxis,
+    0,
+    ...upAxis,
+    0,
+    ...forwardAxis,
+    0,
+    aspect,
+    Math.tan((perspectiveCamera.yfov ?? Math.PI / 3) / 2),
+    0,
+    0,
+  ]);
+};
+
+const renderForwardEnvironmentBackground = (
+  context: GpuRenderExecutionContext,
+  pass: GPURenderPassEncoder,
+  binding: RenderContextBinding,
+  residency: RuntimeResidency,
+  activeCamera: EvaluatedCamera | undefined,
+  environment: Readonly<{
+    residency: TextureResidency;
+  }>,
+): void => {
+  const pipeline = ensureEnvironmentBackgroundPipeline(
+    context,
+    residency,
+    binding.target.format,
+    getRenderTargetSampleCount(binding),
+  );
+  const uniformData = createEnvironmentBackgroundUniformData(binding, activeCamera);
+  const uniformBuffer = context.device.createBuffer({
+    label: 'forward-environment-background',
+    size: uniformData.byteLength,
+    usage: uniformUsage | bufferCopyDstUsage,
+  });
+  context.queue.writeBuffer(uniformBuffer, 0, toBufferSource(uniformData));
+
+  pass.setPipeline(pipeline);
+  pass.setBindGroup(
+    0,
+    context.device.createBindGroup({
+      layout: pipeline.getBindGroupLayout(0),
+      entries: [
+        {
+          binding: 0,
+          resource: environment.residency.view,
+        },
+        {
+          binding: 1,
+          resource: environment.residency.sampler,
+        },
+        {
+          binding: 2,
+          resource: {
+            buffer: uniformBuffer,
+          },
+        },
+      ],
+    }),
+  );
+  pass.draw(3, 1, 0, 0);
 };
 
 const usesLitMaterialProgram = (program: MaterialProgram): boolean =>
@@ -2846,10 +3600,20 @@ const renderForwardMeshPass = (
   materialRegistry: MaterialRegistry,
   format: GPUTextureFormat,
   viewProjectionMatrix: readonly number[],
+  viewMatrix: readonly number[],
+  inverseViewMatrix: readonly number[],
   directionalLights: readonly DirectionalLightItem[],
+  cameraPosition: readonly [number, number, number],
+  extension: ForwardSceneExtension,
   passKind: 'opaque' | 'transparent' = 'opaque',
 ): number => {
   let drawCount = 0;
+  const environment = ensureForwardEnvironmentTexture(
+    context,
+    residency,
+    extension.environmentMap,
+  );
+  const environmentBrdfLut = ensureForwardEnvironmentBrdfLut(context, residency);
 
   for (const node of nodes) {
     const mesh = node.mesh;
@@ -2913,7 +3677,12 @@ const renderForwardMeshPass = (
 
     if (program.usesTransformBindings) {
       const transformData = usesLitMaterialProgram(program)
-        ? createForwardLitMeshTransformUniformData(node.worldMatrix, viewProjectionMatrix)
+        ? createForwardLitMeshTransformUniformData(
+          node.worldMatrix,
+          viewProjectionMatrix,
+          viewMatrix,
+          inverseViewMatrix,
+        )
         : createForwardMeshTransformUniformData(node.worldMatrix, viewProjectionMatrix);
       const transformBuffer = context.device.createBuffer({
         label: `${node.node.id}:mesh-transform`,
@@ -2955,7 +3724,12 @@ const renderForwardMeshPass = (
     }
 
     if (usesLitMaterialProgram(program)) {
-      const lightingData = createDirectionalLightUniformData(directionalLights);
+      const lightingData = createDirectionalLightUniformData(
+        directionalLights,
+        cameraPosition,
+        environment.intensity,
+        extension.debugView ?? 'none',
+      );
       const lightingBuffer = context.device.createBuffer({
         label: `${node.node.id}:lighting`,
         size: lightingData.byteLength,
@@ -2972,6 +3746,30 @@ const renderForwardMeshPass = (
               buffer: lightingBuffer,
             },
           }],
+        }),
+      );
+      pass.setBindGroup(
+        3,
+        context.device.createBindGroup({
+          layout: pipeline.getBindGroupLayout(3),
+          entries: [
+            {
+              binding: 0,
+              resource: environment.residency.view,
+            },
+            {
+              binding: 1,
+              resource: environment.residency.sampler,
+            },
+            {
+              binding: 2,
+              resource: environmentBrdfLut.view,
+            },
+            {
+              binding: 3,
+              resource: environmentBrdfLut.sampler,
+            },
+          ],
         }),
       );
     }
@@ -3513,6 +4311,48 @@ export const ensureVolumeRaymarchPipeline = (
   return pipeline;
 };
 
+export const ensureEnvironmentBackgroundPipeline = (
+  context: GpuRenderExecutionContext,
+  residency: RuntimeResidency,
+  format: GPUTextureFormat,
+  sampleCount = 1,
+): GPURenderPipeline => {
+  const cacheKey = `environment-background:${format}:${sampleCount}`;
+  const cached = residency.pipelines.get(cacheKey);
+  if (cached) {
+    return cached as GPURenderPipeline;
+  }
+
+  const shader = ensureShaderModule(
+    context,
+    residency,
+    cacheKey,
+    builtInEnvironmentBackgroundShader,
+  );
+  const pipeline = context.device.createRenderPipeline({
+    label: cacheKey,
+    layout: 'auto',
+    vertex: {
+      module: shader,
+      entryPoint: 'vsMain',
+    },
+    fragment: {
+      module: shader,
+      entryPoint: 'fsMain',
+      targets: [{ format }],
+    },
+    primitive: {
+      topology: 'triangle-list',
+    },
+    multisample: {
+      count: sampleCount,
+    },
+  });
+
+  residency.pipelines.set(cacheKey, pipeline);
+  return pipeline;
+};
+
 export const ensurePostProcessPipeline = (
   context: GpuRenderExecutionContext,
   residency: RuntimeResidency,
@@ -3602,10 +4442,14 @@ const createForwardMeshTransformUniformData = (
 const createForwardLitMeshTransformUniformData = (
   worldMatrix: readonly number[],
   viewProjectionMatrix: readonly number[],
+  viewMatrix: readonly number[],
+  inverseViewMatrix: readonly number[],
 ): Float32Array =>
   Float32Array.from([
     ...worldMatrix.slice(0, 16),
     ...viewProjectionMatrix.slice(0, 16),
+    ...viewMatrix.slice(0, 16),
+    ...inverseViewMatrix.slice(0, 16),
     ...createDeferredNormalMatrix(worldMatrix),
   ]);
 
@@ -4476,17 +5320,22 @@ export const renderForwardFrame = (
   binding: RenderContextBinding,
   residency: RuntimeResidency,
   evaluatedScene: EvaluatedScene,
-  materialRegistry = createMaterialRegistry(),
+  materialRegistryOrOptions: MaterialRegistry | ForwardRenderOptions = createMaterialRegistry(),
   postProcessPasses: readonly PostProcessPass[] = [],
-): ForwardRenderResult =>
-  renderForwardFrameInternal(
+): ForwardRenderResult => {
+  const options = resolveForwardRenderOptions(materialRegistryOrOptions, postProcessPasses);
+  return renderForwardFrameInternal(
     context,
     binding,
     residency,
     evaluatedScene,
-    materialRegistry,
-    postProcessPasses,
+    options.materialRegistry,
+    options.postProcessPasses,
+    {
+      extension: options.extension,
+    },
   );
+};
 
 const renderForwardFrameInternal = (
   context: GpuRenderExecutionContext,
@@ -4497,8 +5346,10 @@ const renderForwardFrameInternal = (
   postProcessPasses: readonly PostProcessPass[] = [],
   options: Readonly<{
     viewProjectionMatrix?: readonly number[];
+    viewMatrix?: readonly number[];
     includeRaymarchPasses?: boolean;
     raymarchCamera?: RaymarchCamera;
+    extension?: ForwardSceneExtension;
   }> = {},
 ): ForwardRenderResult => {
   assertRendererSceneCapabilities(
@@ -4524,6 +5375,26 @@ const renderForwardFrameInternal = (
   const encoder = context.device.createCommandEncoder({
     label: 'forward-frame',
   });
+  const hasEnvironmentBackground = Boolean(options.extension?.environmentMap);
+  if (hasEnvironmentBackground) {
+    const backgroundPass = encoder.beginRenderPass({
+      colorAttachments: [{
+        view: colorView,
+        clearValue: { r: 0.02, g: 0.02, b: 0.03, a: 1 },
+        loadOp: 'clear',
+        storeOp: 'store',
+      }],
+    });
+    renderForwardEnvironmentBackground(
+      context,
+      backgroundPass,
+      binding,
+      residency,
+      evaluatedScene.activeCamera,
+      ensureForwardEnvironmentTexture(context, residency, options.extension?.environmentMap),
+    );
+    backgroundPass.end();
+  }
   const forwardOpaqueNodes = evaluatedScene.nodes.filter((node) =>
     node.mesh && resolveMaterialRenderPolicy(node.material).renderQueue === 'opaque'
   );
@@ -4534,7 +5405,7 @@ const renderForwardFrameInternal = (
     colorAttachments: [{
       view: colorView,
       clearValue: { r: 0.02, g: 0.02, b: 0.03, a: 1 },
-      loadOp: 'clear',
+      loadOp: hasEnvironmentBackground ? 'load' : 'clear',
       storeOp: 'store',
     }],
     depthStencilAttachment: {
@@ -4546,7 +5417,14 @@ const renderForwardFrameInternal = (
   });
 
   const directionalLights = extractDirectionalLightItems(evaluatedScene);
-  let drawCount = renderForwardMeshPass(
+  const viewMatrix = options.viewMatrix ?? evaluatedScene.activeCamera?.viewMatrix ??
+    identityMat4();
+  const inverseViewMatrix = evaluatedScene.activeCamera?.worldMatrix ?? identityMat4();
+  const cameraPosition = evaluatedScene.activeCamera
+    ? getMatrixTranslation(evaluatedScene.activeCamera.worldMatrix)
+    : [0, 0, 0] as const;
+  let drawCount = hasEnvironmentBackground ? 1 : 0;
+  drawCount += renderForwardMeshPass(
     context,
     pass,
     residency,
@@ -4554,7 +5432,11 @@ const renderForwardFrameInternal = (
     materialRegistry,
     binding.target.format,
     viewProjectionMatrix,
+    viewMatrix,
+    inverseViewMatrix,
     directionalLights,
+    cameraPosition,
+    options.extension ?? {},
     'opaque',
   );
 
@@ -4581,7 +5463,11 @@ const renderForwardFrameInternal = (
       materialRegistry,
       binding.target.format,
       viewProjectionMatrix,
+      viewMatrix,
+      inverseViewMatrix,
       directionalLights,
+      cameraPosition,
+      options.extension ?? {},
       'transparent',
     );
     transparentPass.end();
@@ -4900,6 +5786,11 @@ export const renderDeferredFrame = (
   );
   const directionalLights = extractDirectionalLightItems(evaluatedScene);
   const viewProjectionMatrix = createViewProjectionMatrix(binding, evaluatedScene.activeCamera);
+  const viewMatrix = evaluatedScene.activeCamera?.viewMatrix ?? identityMat4();
+  const inverseViewMatrix = evaluatedScene.activeCamera?.worldMatrix ?? identityMat4();
+  const cameraPosition = evaluatedScene.activeCamera
+    ? getMatrixTranslation(evaluatedScene.activeCamera.worldMatrix)
+    : [0, 0, 0] as const;
   const forwardFallbackNodeIds = new Set(
     evaluatedScene.nodes.filter((node) => {
       const material = node.material;
@@ -5174,7 +6065,11 @@ export const renderDeferredFrame = (
       materialRegistry,
       binding.target.format,
       viewProjectionMatrix,
+      viewMatrix,
+      inverseViewMatrix,
       directionalLights,
+      cameraPosition,
+      {},
     );
     forwardLitPass.end();
   }
@@ -5395,6 +6290,11 @@ export const renderUberFrame = (
   );
   const directionalLights = extractDirectionalLightItems(evaluatedScene);
   const viewProjectionMatrix = createViewProjectionMatrix(binding, evaluatedScene.activeCamera);
+  const viewMatrix = evaluatedScene.activeCamera?.viewMatrix ?? identityMat4();
+  const inverseViewMatrix = evaluatedScene.activeCamera?.worldMatrix ?? identityMat4();
+  const cameraPosition = evaluatedScene.activeCamera
+    ? getMatrixTranslation(evaluatedScene.activeCamera.worldMatrix)
+    : [0, 0, 0] as const;
   let drawCount = 0;
 
   const depthPass = encoder.beginRenderPass({
@@ -5652,7 +6552,11 @@ export const renderUberFrame = (
       materialRegistry,
       binding.target.format,
       viewProjectionMatrix,
+      viewMatrix,
+      inverseViewMatrix,
       directionalLights,
+      cameraPosition,
+      {},
       'opaque',
     );
     forwardOpaquePass.end();
@@ -5679,7 +6583,11 @@ export const renderUberFrame = (
       materialRegistry,
       binding.target.format,
       viewProjectionMatrix,
+      viewMatrix,
+      inverseViewMatrix,
       directionalLights,
+      cameraPosition,
+      {},
       'transparent',
     );
     forwardTransparentPass.end();
@@ -6012,6 +6920,7 @@ export const renderForwardCubemapSnapshot = async (
       postProcessPasses,
       {
         viewProjectionMatrix: multiplyMat4(projectionMatrix, viewMatrix),
+        viewMatrix,
         raymarchCamera,
       },
     );

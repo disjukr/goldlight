@@ -504,7 +504,7 @@ export const encodeDawnCommandBuffer = (
     let colorLoadOp = passInfo.loadOp;
     for (let stepIndex = 0; stepIndex < passInfo.steps.length;) {
       const step = passInfo.steps[stepIndex]!;
-      const requiresStencilPass = Boolean(step.draw.clips && step.draw.clips.length > 0);
+      const requiresStencilPass = step.usesStencil;
       const pass = encoder.beginRenderPass({
         colorAttachments: [
           {
@@ -543,7 +543,7 @@ export const encodeDawnCommandBuffer = (
       } while (
         !requiresStencilPass &&
         stepIndex < passInfo.steps.length &&
-        !(passInfo.steps[stepIndex]?.draw.clips?.length)
+        !passInfo.steps[stepIndex]?.usesStencil
       );
 
       pass.end();

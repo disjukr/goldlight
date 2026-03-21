@@ -1523,6 +1523,51 @@ Deno.test('dawn command buffer batches consecutive non-stencil draws into one pa
   assertEquals(mock.created.drawCalls.length, 4);
 });
 
+Deno.test('dawn command buffer resets scissor between batched non-stencil steps', () => {
+  const mock = createMockGpuContext();
+  const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
+  const recorder = createDrawingRecorder(sharedContext);
+  const binding = createOffscreenBinding(mock.context);
+
+  saveDrawingRecorder(recorder);
+  clipDrawingRecorderRect(recorder, createRect(8, 10, 24, 28));
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [0, 0] },
+      { kind: 'lineTo', to: [32, 0] },
+      { kind: 'lineTo', to: [32, 32] },
+      { kind: 'lineTo', to: [0, 32] },
+      { kind: 'close' },
+    ),
+    { style: 'fill' },
+  );
+  restoreDrawingRecorder(recorder);
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [40, 40] },
+      { kind: 'lineTo', to: [72, 40] },
+      { kind: 'lineTo', to: [72, 72] },
+      { kind: 'lineTo', to: [40, 72] },
+      { kind: 'close' },
+    ),
+    { style: 'fill' },
+  );
+
+  const commandBuffer = encodeDawnCommandBuffer(
+    sharedContext,
+    finishDrawingRecorder(recorder),
+    binding,
+  );
+
+  assertEquals(commandBuffer.passCount, 1);
+  assertEquals(mock.created.renderPasses.length, 1);
+  assertEquals(mock.created.scissorCalls[0], [8, 10, 24, 22]);
+  assertEquals(mock.created.scissorCalls[1], [0, 0, 256, 256]);
+  assertEquals(mock.created.drawCalls.length, 4);
+});
+
 Deno.test('dawn command buffer sizes patch draws from max resolve level in the batch', () => {
   const createStrokeDrawCount = (
     control1: readonly [number, number],

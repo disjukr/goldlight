@@ -680,6 +680,16 @@ These decisions directly affect the remaining work and are not settled yet.
   - Remaining: inverse clips, non-convex difference clips, atlas-backed masking, and richer
     clip-stack simplification are still missing
   - Validation: `deno task check`
+- 2026-03-22
+  - Files: `src/command_buffer.ts`, `tests/drawing_graphite_dawn_test.ts`
+  - Status transition: `DawnCommandBuffer` remains `partial`, but batched draw-pass replay now uses
+    prepared `usesStencil` metadata directly
+  - Change: non-stencil batching now keys off prepared draw-pass stencil requirements instead of
+    re-deriving them from clip payload presence, and coverage tests now pin that scissor state is
+    reset correctly between batched steps
+  - Remaining: stencil-backed steps still split render passes, and richer Skia-style
+    pipeline/resource replay is still pending
+  - Validation: `deno test packages/drawing/tests/drawing_graphite_dawn_test.ts`
 
 ## Update Rules
 

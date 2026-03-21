@@ -336,7 +336,13 @@ export const createDawnResourceProvider = (
     | null = null;
   let intrinsicBindGroupLayout: GPUBindGroupLayout | null = null;
   let pipelineLayout: GPUPipelineLayout | null = null;
-  let intrinsicBindGroup: GPUBindGroup | null = null;
+  let intrinsicBindGroup:
+    | Readonly<{
+      width: number;
+      height: number;
+      bindGroup: GPUBindGroup;
+    }>
+    | null = null;
 
   const createVertexLayout = (): GPUVertexBufferLayout => ({
     arrayStride: floatBytes * floatsPerVertex,
@@ -424,7 +430,11 @@ export const createDawnResourceProvider = (
     return pipelineLayout;
   };
 
-  const createIntrinsicBindGroup = (): GPUBindGroup => {
+  const createIntrinsicBindGroup = (): Readonly<{
+    width: number;
+    height: number;
+    bindGroup: GPUBindGroup;
+  }> => {
     const buffer = backend.device.createBuffer({
       label: 'drawing-intrinsics',
       size: intrinsicUniformBytes,
@@ -438,18 +448,22 @@ export const createDawnResourceProvider = (
       0,
     ]);
     buffer.unmap();
-    return backend.device.createBindGroup({
-      label: 'drawing-intrinsics-bind-group',
-      layout: getIntrinsicBindGroupLayout(),
-      entries: [
-        {
-          binding: 0,
-          resource: {
-            buffer,
+    return {
+      width: backend.target.width,
+      height: backend.target.height,
+      bindGroup: backend.device.createBindGroup({
+        label: 'drawing-intrinsics-bind-group',
+        layout: getIntrinsicBindGroupLayout(),
+        entries: [
+          {
+            binding: 0,
+            resource: {
+              buffer,
+            },
           },
-        },
-      ],
-    });
+        ],
+      }),
+    };
   };
 
   const createPathFillCoverPipeline = (): GPURenderPipeline => {
@@ -664,11 +678,15 @@ export const createDawnResourceProvider = (
     createTexture: (descriptor) => backend.device.createTexture(descriptor),
     createSampler: (descriptor = {}) => backend.device.createSampler(descriptor),
     getIntrinsicBindGroup: () => {
-      if (intrinsicBindGroup) {
-        return intrinsicBindGroup;
+      if (
+        intrinsicBindGroup &&
+        intrinsicBindGroup.width === backend.target.width &&
+        intrinsicBindGroup.height === backend.target.height
+      ) {
+        return intrinsicBindGroup.bindGroup;
       }
       intrinsicBindGroup = createIntrinsicBindGroup();
-      return intrinsicBindGroup;
+      return intrinsicBindGroup.bindGroup;
     },
     getPipeline: (key) => {
       switch (key) {

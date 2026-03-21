@@ -223,6 +223,23 @@ Deno.test('dawn shared context exposes resource provider over gpu device', () =>
   assertEquals(mock.created.samplers.length, 1);
 });
 
+Deno.test('dawn resource provider refreshes intrinsic bind group after target resize', () => {
+  const mock = createMockGpuContext();
+  const backend = createDawnBackendContext(mock.context);
+  const sharedContext = createDawnSharedContext(backend, { resourceBudget: 1024 });
+
+  sharedContext.resourceProvider.getIntrinsicBindGroup();
+  (backend.target as { width: number; height: number }).width = 512;
+  (backend.target as { width: number; height: number }).height = 384;
+  sharedContext.resourceProvider.getIntrinsicBindGroup();
+
+  assertEquals(mock.created.bindGroups.length, 2);
+  assertEquals(
+    [...new Float32Array(mock.created.mappedBuffers[1]!)],
+    [512, 384, 0, 0],
+  );
+});
+
 Deno.test('dawn caps expose feature, format, and sample count policy', () => {
   const mock = createMockGpuContext();
   const caps = createDawnCaps(createDawnBackendContext(mock.context));

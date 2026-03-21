@@ -85,7 +85,8 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Status: `partial`
   - What exists: simple resource allocation plus cached fill/stroke/clip pipelines, first
     patch-instance pipelines, stencil attachment reuse, multisample-aware pipelines, and a first
-    shared intrinsic uniform bind group and pipeline layout for viewport transforms
+    shared intrinsic uniform bind group and pipeline layout for viewport transforms, including
+    target-resize invalidation for intrinsic bind-group state
   - Missing: texture/sampler bind groups, wrapped resources, broader cache policy
 - `Context` -> `src/context.ts`
   - Status: `started`
@@ -598,10 +599,11 @@ These decisions directly affect the remaining work and are not settled yet.
   - Status transition: resource binding `pending` -> `started`; `DawnResourceProvider` `started` ->
     `partial`; `DawnQueueManager` `started` -> `partial`
   - Change: ported the first Skia-like intrinsic uniform path so viewport-to-clip conversion now
-    uses a shared bind group and explicit pipeline layout instead of CPU clip-space baking,
-    non-stencil draws can batch into a shared render pass, caps policy now gates BGRA storage and
-    default sample count on enabled device features, and queue completion can track
-    `queue.onSubmittedWorkDone()` when exposed
+    uses a shared bind group and explicit pipeline layout instead of CPU clip-space baking, and
+    non-stencil draws now replay through a shared render pass instead of one pass per step; caps
+    policy now gates BGRA storage and default sample count on actual enabled device features; queue
+    completion now uses `queue.onSubmittedWorkDone()` when available instead of always completing
+    everything on `tick()`; intrinsic bind groups now refresh when the render target size changes
   - Remaining: per-draw transform uniforms, paint/state buffers, broader bind group caches, and
     richer `DrawPass` metadata
   - Validation: `deno test packages/drawing/tests/drawing_graphite_dawn_test.ts`

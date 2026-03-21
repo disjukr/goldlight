@@ -1556,6 +1556,8 @@ Deno.test('dawn queue manager tracks submit and tick completion', async () => {
   assertEquals(queueManager.submittedCount, 1);
   assertEquals(queueManager.completedCount, 0);
   assertEquals(queueManager.inFlightCount, 1);
+  assertEquals(queueManager.pendingSubmissions[0]?.recorderId, commandBuffer.recording.recorderId);
+  assertEquals(queueManager.pendingSubmissions[0]?.completionMode, 'queue-work-done');
 
   await tickDawnQueueManager(queueManager);
 
@@ -1563,6 +1565,7 @@ Deno.test('dawn queue manager tracks submit and tick completion', async () => {
   assertEquals(mock.created.workDoneCalls.length, 1);
   assertEquals(queueManager.completedCount, 1);
   assertEquals(queueManager.inFlightCount, 0);
+  assertEquals(queueManager.lastCompletedSubmissionId, 1);
 });
 
 Deno.test('dawn queue manager keeps unresolved submissions in flight until queue completion', async () => {
@@ -1590,6 +1593,7 @@ Deno.test('dawn queue manager keeps unresolved submissions in flight until queue
   assertEquals(mock.ticks.length, 1);
   assertEquals(queueManager.completedCount, 0);
   assertEquals(queueManager.inFlightCount, 1);
+  assertEquals(queueManager.pendingSubmissions[0]?.settled, false);
 
   for (const resolve of mock.workDoneResolvers.splice(0)) {
     resolve();
@@ -1599,6 +1603,49 @@ Deno.test('dawn queue manager keeps unresolved submissions in flight until queue
 
   assertEquals(queueManager.completedCount, 1);
   assertEquals(queueManager.inFlightCount, 0);
+  assertEquals(queueManager.lastCompletedSubmissionId, 1);
+});
+
+Deno.test('dawn queue manager tracks fallback submissions explicitly when queue completion is unavailable', async () => {
+  const mock = createMockGpuContext();
+  const queue = {
+    ...mock.context.queue,
+  } as unknown as {
+    submit: GPUQueue['submit'];
+    onSubmittedWorkDone?: () => Promise<void>;
+  };
+  queue.onSubmittedWorkDone = undefined;
+  const backend = createDawnBackendContext({
+    ...mock.context,
+    queue: queue as GPUQueue,
+  });
+  const queueManager = createDawnQueueManager(backend);
+  const sharedContext = createDawnSharedContext(backend);
+  const recorder = createDrawingRecorder(sharedContext);
+  const binding = createOffscreenBinding({
+    ...mock.context,
+    device: backend.device,
+    target: backend.target,
+  });
+
+  recordClear(recorder, [0, 0, 0, 1]);
+  const commandBuffer = encodeDawnCommandBuffer(
+    sharedContext,
+    finishDrawingRecorder(recorder),
+    binding,
+  );
+  submitToDawnQueueManager(queueManager, commandBuffer);
+
+  assertEquals(queueManager.pendingSubmissions.length, 1);
+  assertEquals(queueManager.pendingSubmissions[0]?.completionMode, 'tick-fallback');
+  assertEquals(queueManager.completedCount, 0);
+
+  await tickDawnQueueManager(queueManager);
+
+  assertEquals(queueManager.completedCount, 1);
+  assertEquals(queueManager.inFlightCount, 0);
+  assertEquals(queueManager.lastCompletedSubmissionId, 1);
+  assertEquals(queueManager.pendingSubmissions.length, 0);
 });
 
 Deno.test('drawing context increments recorder ids through shared context', () => {

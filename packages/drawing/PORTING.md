@@ -120,8 +120,10 @@ stack that fits this repository's TypeScript and WebGPU architecture.
 - `DawnQueueManager` -> `src/queue_manager.ts`
   - Status: `partial`
   - What exists: queue submit, tick, unfinished work tracking, and first
-    `queue.onSubmittedWorkDone()`-based completion tracking when the runtime exposes it
-  - Missing: richer fence/error integration and per-submission lifecycle detail
+    `queue.onSubmittedWorkDone()`-based completion tracking when the runtime exposes it, plus
+    explicit pending submission objects with ids/recorder metadata and a tracked tick-fallback mode
+    when queue completion callbacks are unavailable
+  - Missing: richer fence/error integration and backend-specific wait modes
 - `GraphicsPipeline` / caches -> `src/pipeline*.ts`
   - Status: `pending`
   - Missing: pipeline creation and reuse
@@ -410,6 +412,8 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
   - Status: `started`
   - Tick and in-flight submission tracking exist, and queue-work-done completion can now keep
     unresolved submissions in flight instead of treating every tick as a full fence
+  - Current state: pending submissions now retain explicit ids, recorder ids, and completion modes
+    instead of being reduced to counters only
 
 ## Rendering Strategy Decisions
 
@@ -483,10 +487,10 @@ These decisions directly affect the remaining work and are not settled yet.
   the broader uniform/texture families Skia's DawnResourceProvider manages
 - `command_buffer` still does per-draw render pass replay for stencil clears instead of a richer
   DrawPass command stream
-- `queue_manager` currently treats `tick()` as coarse completion rather than using explicit GPU
-- `queue_manager` still lacks full Graphite-style per-submission objects and backend-specific wait
-  modes, even though queue-work-done completion now exists fences when `queue.onSubmittedWorkDone()`
-  is unavailable
+- `queue_manager` still relies on coarse fallback completion when `queue.onSubmittedWorkDone()` is
+  unavailable
+- `queue_manager` now has explicit per-submission objects, but it still lacks full Graphite-style
+  backend-specific wait modes and richer completion/error propagation
 - clip stack handling still diverges from Skia Graphite for inverse clips, atlas-backed masking, and
   clip-shape simplification beyond plain intersect accumulation
 - clip geometry clipping is still incomplete for AA fringe geometry, so coverage edges can diverge
@@ -534,13 +538,15 @@ These decisions directly affect the remaining work and are not settled yet.
   - Validation: `packages/drawing/tests/drawing_graphite_dawn_test.ts`
 - `dawn/DawnQueueManager.cpp`
   - Current local gap: Graphite keeps explicit outstanding submission objects and backend-specific
-    wait paths; local queue tracking is still lighter weight
+    wait paths; local queue tracking now has explicit submission objects but is still lighter weight
   - Completed in local port:
     1. `tick()` now preserves unresolved submissions until `queue.onSubmittedWorkDone()` settles
+    2. queue manager now tracks explicit pending submission objects with ids, recorder ids, and
+       completion modes instead of counters only
   - Remaining gap:
-    1. model explicit outstanding submission objects instead of counters only
-    2. add broader backend error/completion propagation
-    3. define stronger fallback completion fences when `queue.onSubmittedWorkDone()` is unavailable
+    1. add broader backend error/completion propagation
+    2. define stronger fallback completion fences when `queue.onSubmittedWorkDone()` is unavailable
+    3. add backend-specific wait behavior closer to Dawn future/async-wait paths
   - Validation: `packages/drawing/tests/drawing_graphite_dawn_test.ts`
 
 ## Recommended Next Steps
@@ -648,6 +654,16 @@ These decisions directly affect the remaining work and are not settled yet.
     of recreating local layout state
   - Remaining: per-draw transform/state bind groups, larger uniform-buffer families, and broader
     bind-group cache eviction/policy
+  - Validation: `deno test packages/drawing/tests/drawing_graphite_dawn_test.ts`
+- 2026-03-22
+  - Files: `src/queue_manager.ts`, `tests/drawing_graphite_dawn_test.ts`
+  - Status transition: `DawnQueueManager` remains `partial`, but submission lifecycle tracking is
+    now closer to Skia Graphite/Dawn
+  - Change: queue manager now stores explicit pending submission objects with ids, recorder ids,
+    and completion modes; `queue.onSubmittedWorkDone()` and tick-fallback completions both settle
+    through that shared model instead of mutating counters alone
+  - Remaining: backend-specific wait paths, stronger fallback fences, and richer error/completion
+    propagation
   - Validation: `deno test packages/drawing/tests/drawing_graphite_dawn_test.ts`
 
 ## Update Rules

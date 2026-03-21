@@ -605,6 +605,31 @@ Deno.test('drawing prepared recording scales curve resolve level with curve size
   assertEquals(high > low, true);
 });
 
+Deno.test('drawing prepared recording pre-chops large cubic patches to stay within resolve limit', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [0, 0] },
+      { kind: 'cubicTo', control1: [0, 1024], control2: [1024, -1024], to: [1024, 0] },
+    ),
+    { style: 'stroke', strokeWidth: 10 },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const draw = prepared.passes[0]?.steps[0]?.draw;
+  if (draw?.kind !== 'pathStroke') {
+    throw new Error('expected pathStroke draw');
+  }
+
+  const cubics = draw.patches.filter((patch) => patch.kind === 'cubic');
+  assertEquals(cubics.length > 1, true);
+  assertEquals(cubics.every((patch) => patch.kind === 'cubic' && patch.resolveLevel <= 5), true);
+});
+
 Deno.test('drawing prepared recording preserves evenodd fill rule through draw step metadata', () => {
   const mock = createMockGpuContext();
   const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));

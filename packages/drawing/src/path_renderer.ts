@@ -389,17 +389,23 @@ const nextLog4 = (value: number): number => (nextLog2(value) + 1) >> 1;
 
 const nextLog16 = (value: number): number => (nextLog2(value) + 3) >> 2;
 
-const quadraticResolveLevel = (
+const quadraticResolveLevelRaw = (
   p0: Point2D,
   p1: Point2D,
   p2: Point2D,
 ): number => {
   const v = add(add(p0, p2), scale(p1, -2));
   const p4 = dot(v, v) * (((2 * 2) * (1 * 1)) / 64) * (wangsFormulaPrecision * wangsFormulaPrecision);
-  return Math.min(maxResolveLevel, nextLog16(p4));
+  return nextLog16(p4);
 };
 
-const cubicResolveLevel = (
+const quadraticResolveLevel = (
+  p0: Point2D,
+  p1: Point2D,
+  p2: Point2D,
+): number => Math.min(maxResolveLevel, quadraticResolveLevelRaw(p0, p1, p2));
+
+const cubicResolveLevelRaw = (
   p0: Point2D,
   p1: Point2D,
   p2: Point2D,
@@ -409,8 +415,15 @@ const cubicResolveLevel = (
   const v1 = add(add(p1, p3), scale(p2, -2));
   const p4 = Math.max(dot(v0, v0), dot(v1, v1)) *
     (((3 * 3) * (2 * 2)) / 64) * (wangsFormulaPrecision * wangsFormulaPrecision);
-  return Math.min(maxResolveLevel, nextLog16(p4));
+  return nextLog16(p4);
 };
+
+const cubicResolveLevel = (
+  p0: Point2D,
+  p1: Point2D,
+  p2: Point2D,
+  p3: Point2D,
+): number => Math.min(maxResolveLevel, cubicResolveLevelRaw(p0, p1, p2, p3));
 
 const conicResolveLevel = (
   p0: Point2D,
@@ -433,6 +446,39 @@ const conicResolveLevel = (
   const denom = 4 * Math.min(weight, 1);
   const p2Value = denom <= epsilon ? Number.POSITIVE_INFINITY : numer / denom;
   return Math.min(maxResolveLevel, nextLog4(p2Value));
+};
+
+const emitQuadraticPatches = (
+  p0: Point2D,
+  p1: Point2D,
+  p2: Point2D,
+  emit: (patch: Extract<DrawingPreparedPatch, { kind: 'quadratic' }>) => void,
+): void => {
+  const resolveLevel = quadraticResolveLevelRaw(p0, p1, p2);
+  if (resolveLevel <= maxResolveLevel) {
+    emit({ kind: 'quadratic', points: [p0, p1, p2], resolveLevel });
+    return;
+  }
+  const [left, right] = splitQuadraticAt(p0, p1, p2, 0.5);
+  emitQuadraticPatches(left[0], left[1], left[2], emit);
+  emitQuadraticPatches(right[0], right[1], right[2], emit);
+};
+
+const emitCubicPatches = (
+  p0: Point2D,
+  p1: Point2D,
+  p2: Point2D,
+  p3: Point2D,
+  emit: (patch: Extract<DrawingPreparedPatch, { kind: 'cubic' }>) => void,
+): void => {
+  const resolveLevel = cubicResolveLevelRaw(p0, p1, p2, p3);
+  if (resolveLevel <= maxResolveLevel) {
+    emit({ kind: 'cubic', points: [p0, p1, p2, p3], resolveLevel });
+    return;
+  }
+  const [left, right] = splitCubicAt(p0, p1, p2, p3, 0.5);
+  emitCubicPatches(left[0], left[1], left[2], left[3], emit);
+  emitCubicPatches(right[0], right[1], right[2], right[3], emit);
 };
 
 const polygonArea = (points: readonly Point2D[]): number => {
@@ -1354,22 +1400,10 @@ const preparePatches = (
         const cuspT = findQuadraticCuspT(currentPoint, control, to);
         if (cuspT !== null) {
           const [left, right] = splitQuadraticAt(currentPoint, control, to, cuspT);
-          pushContourPatch({
-            kind: 'quadratic',
-            points: left,
-            resolveLevel: quadraticResolveLevel(left[0], left[1], left[2]),
-          });
-          pushContourPatch({
-            kind: 'quadratic',
-            points: right,
-            resolveLevel: quadraticResolveLevel(right[0], right[1], right[2]),
-          });
+          emitQuadraticPatches(left[0], left[1], left[2], pushContourPatch);
+          emitQuadraticPatches(right[0], right[1], right[2], pushContourPatch);
         } else {
-          pushContourPatch({
-            kind: 'quadratic',
-            points: [currentPoint, control, to],
-            resolveLevel: quadraticResolveLevel(currentPoint, control, to),
-          });
+          emitQuadraticPatches(currentPoint, control, to, pushContourPatch);
         }
         contourPoints.push(to);
         currentPoint = to;
@@ -1408,22 +1442,10 @@ const preparePatches = (
         );
         if (cuspT !== null) {
           const [left, right] = splitCubicAt(currentPoint, control1, control2, to, cuspT);
-          pushContourPatch({
-            kind: 'cubic',
-            points: left,
-            resolveLevel: cubicResolveLevel(left[0], left[1], left[2], left[3]),
-          });
-          pushContourPatch({
-            kind: 'cubic',
-            points: right,
-            resolveLevel: cubicResolveLevel(right[0], right[1], right[2], right[3]),
-          });
+          emitCubicPatches(left[0], left[1], left[2], left[3], pushContourPatch);
+          emitCubicPatches(right[0], right[1], right[2], right[3], pushContourPatch);
         } else {
-          pushContourPatch({
-            kind: 'cubic',
-            points: [currentPoint, control1, control2, to],
-            resolveLevel: cubicResolveLevel(currentPoint, control1, control2, to),
-          });
+          emitCubicPatches(currentPoint, control1, control2, to, pushContourPatch);
         }
         contourPoints.push(to);
         currentPoint = to;

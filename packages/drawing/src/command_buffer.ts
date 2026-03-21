@@ -5,6 +5,7 @@ import {
 } from '@rieul3d/gpu';
 import { prepareDrawingRecording, type DrawingPreparedRecording } from './draw_pass.ts';
 import type { DrawingRecording } from './recording.ts';
+import type { DrawingPreparedVertex } from './path_renderer.ts';
 import type { DawnSharedContext } from './shared_context.ts';
 import type { DrawingCommand } from './types.ts';
 
@@ -48,6 +49,30 @@ const createClipSpaceVertexData = (
     vertices[offset++] = color[1];
     vertices[offset++] = color[2];
     vertices[offset++] = color[3];
+  }
+
+  return vertices;
+};
+
+const createColoredClipSpaceVertexData = (
+  triangles: readonly DrawingPreparedVertex[],
+  target: Readonly<{
+    width: number;
+    height: number;
+  }>,
+): Float32Array => {
+  const vertices = new Float32Array(triangles.length * floatsPerVertex);
+  let offset = 0;
+  const toClipX = (value: number) => (value / target.width) * 2 - 1;
+  const toClipY = (value: number) => 1 - (value / target.height) * 2;
+
+  for (const vertex of triangles) {
+    vertices[offset++] = toClipX(vertex.point[0]);
+    vertices[offset++] = toClipY(vertex.point[1]);
+    vertices[offset++] = vertex.color[0];
+    vertices[offset++] = vertex.color[1];
+    vertices[offset++] = vertex.color[2];
+    vertices[offset++] = vertex.color[3];
   }
 
   return vertices;
@@ -169,6 +194,12 @@ export const encodeDawnCommandBuffer = (
             sharedContext.backend.target,
           );
           const fillVertexBuffer = createVertexBuffer(sharedContext, fillVertices);
+          const fringeVertices = step.draw.fringeVertices
+            ? createColoredClipSpaceVertexData(step.draw.fringeVertices, sharedContext.backend.target)
+            : null;
+          const fringeVertexBuffer = fringeVertices
+            ? createVertexBuffer(sharedContext, fringeVertices)
+            : null;
           const pass = encoder.beginRenderPass({
             colorAttachments: [
               {
@@ -209,11 +240,19 @@ export const encodeDawnCommandBuffer = (
             pass.setPipeline(colorPipeline);
             pass.setVertexBuffer(0, fillVertexBuffer);
             pass.draw(fillVertices.length / floatsPerVertex);
+            if (fringeVertices && fringeVertexBuffer) {
+              pass.setVertexBuffer(0, fringeVertexBuffer);
+              pass.draw(fringeVertices.length / floatsPerVertex);
+            }
           } else {
             const fillPipeline = sharedContext.resourceProvider.getPipeline(step.pipelineKeys[0]!);
             pass.setPipeline(fillPipeline);
             pass.setVertexBuffer(0, fillVertexBuffer);
             pass.draw(fillVertices.length / floatsPerVertex);
+            if (fringeVertices && fringeVertexBuffer) {
+              pass.setVertexBuffer(0, fringeVertexBuffer);
+              pass.draw(fringeVertices.length / floatsPerVertex);
+            }
           }
           pass.end();
           passCount += 1;
@@ -227,6 +266,12 @@ export const encodeDawnCommandBuffer = (
             sharedContext.backend.target,
           );
           const strokeVertexBuffer = createVertexBuffer(sharedContext, strokeVertices);
+          const fringeVertices = step.draw.fringeVertices
+            ? createColoredClipSpaceVertexData(step.draw.fringeVertices, sharedContext.backend.target)
+            : null;
+          const fringeVertexBuffer = fringeVertices
+            ? createVertexBuffer(sharedContext, fringeVertices)
+            : null;
           const pass = encoder.beginRenderPass({
             colorAttachments: [
               {
@@ -269,6 +314,10 @@ export const encodeDawnCommandBuffer = (
           }
           pass.setVertexBuffer(0, strokeVertexBuffer);
           pass.draw(strokeVertices.length / floatsPerVertex);
+          if (fringeVertices && fringeVertexBuffer) {
+            pass.setVertexBuffer(0, fringeVertexBuffer);
+            pass.draw(fringeVertices.length / floatsPerVertex);
+          }
           pass.end();
           passCount += 1;
           colorLoadOp = 'load';

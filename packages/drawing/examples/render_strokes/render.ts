@@ -177,18 +177,34 @@ export const renderStrokesSnapshot = async (): Promise<
   recordDrawPath(
     recorder,
     createPath2D(
-      { kind: 'moveTo', to: [80, 560] },
+      { kind: 'moveTo', to: [88, 470] },
+      { kind: 'lineTo', to: [552, 470] },
+    ),
+    {
+      style: 'stroke',
+      strokeWidth: 14,
+      strokeCap: 'round',
+      dashArray: [28, 18],
+      dashOffset: 6,
+      color: [0.62, 0.21, 0.22, 1],
+    },
+  );
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [80, 580] },
       {
         kind: 'cubicTo',
-        control1: [180, 420],
-        control2: [280, 700],
-        to: [380, 560],
+        control1: [180, 440],
+        control2: [280, 720],
+        to: [380, 580],
       },
       {
         kind: 'cubicTo',
-        control1: [450, 470],
-        control2: [540, 470],
-        to: [600, 560],
+        control1: [450, 490],
+        control2: [540, 490],
+        to: [600, 580],
       },
     ),
     {

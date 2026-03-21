@@ -524,6 +524,47 @@ Deno.test('drawing prepared recording expands stroke joins and caps', () => {
   assertEquals((draw?.triangles.length ?? 0) > 18, true);
 });
 
+Deno.test('drawing prepared recording applies dash pattern to strokes', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [16, 48] },
+      { kind: 'lineTo', to: [208, 48] },
+    ),
+    { style: 'stroke', strokeWidth: 8, dashArray: [24, 12] },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const draw = prepared.passes[0]?.steps[0]?.draw;
+  assertEquals(draw?.kind, 'pathStroke');
+  assertEquals((draw?.triangles.length ?? 0) > 0, true);
+  assertEquals((draw?.triangles.length ?? 0) < 72, true);
+});
+
+Deno.test('drawing prepared recording scales hairline alpha coverage', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [32, 32] },
+      { kind: 'lineTo', to: [160, 32] },
+    ),
+    { style: 'stroke', strokeWidth: 0.5, color: [0.4, 0.6, 0.8, 1] },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const draw = prepared.passes[0]?.steps[0]?.draw;
+  assertEquals(draw?.kind, 'pathStroke');
+  assertEquals(draw?.color, [0.4, 0.6, 0.8, 0.5]);
+});
+
 Deno.test('dawn command buffer encodes fill draws with stencil and cover pipelines', () => {
   const mock = createMockGpuContext();
   const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
@@ -551,7 +592,7 @@ Deno.test('dawn command buffer encodes fill draws with stencil and cover pipelin
   assertEquals(commandBuffer.unsupportedCommands.length, 0);
   assertEquals(mock.created.renderPasses.length, 1);
   assertEquals(mock.created.renderPipelines.length, 1);
-  assertEquals(mock.created.drawCalls.length, 1);
+  assertEquals(mock.created.drawCalls.length, 2);
   assertEquals(mock.created.renderPasses[0]?.depthStencilAttachment, undefined);
   assertEquals(mock.created.scissorCalls[0], [4, 6, 40, 50]);
   assertEquals(
@@ -590,7 +631,7 @@ Deno.test('dawn command buffer clips via clip path bounds fallback', () => {
 
   encodeDawnCommandBuffer(sharedContext, finishDrawingRecorder(recorder), binding);
   assertEquals(mock.created.scissorCalls[0], [24, 30, 48, 48]);
-  assertEquals(mock.created.drawCalls.length, 1);
+  assertEquals(mock.created.drawCalls.length, 2);
 });
 
 Deno.test('dawn command buffer encodes stroke draws without stencil', () => {
@@ -614,7 +655,7 @@ Deno.test('dawn command buffer encodes stroke draws without stencil', () => {
   assertEquals(commandBuffer.unsupportedCommands.length, 0);
   assertEquals(mock.created.renderPasses.length, 1);
   assertEquals(mock.created.renderPipelines.length, 1);
-  assertEquals(mock.created.drawCalls.length, 1);
+  assertEquals(mock.created.drawCalls.length, 2);
 });
 
 Deno.test('dawn resource provider reuses pipelines across command buffers', () => {

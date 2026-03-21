@@ -28,6 +28,8 @@ export type DrawingPaint = Readonly<{
   strokeJoin?: 'miter' | 'bevel' | 'round';
   strokeCap?: 'butt' | 'square' | 'round';
   miterLimit?: number;
+  dashArray?: readonly number[];
+  dashOffset?: number;
 }>;
 
 export type ClearCommand = Readonly<{

@@ -56,7 +56,7 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Queue manager can submit encoded command buffers and track in-flight work counts.
 - Path rendering
   - Status: `partial`
-  - Flattened contours can be pushed through direct tessellated fills, convex clip-stack clipping, self-intersection fallback, and first stroke expansion.
+  - Flattened contours can be pushed through direct tessellated fills, convex clip-stack clipping, self-intersection fallback, adaptive curve flattening, and stroke expansion.
 - Paint system
   - Status: `started`
   - Minimal fill/stroke paint exists and first execution path is active.
@@ -229,8 +229,8 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
   - Missing: blend mode model
 - Anti-aliasing
   - Status: `started`
-  - Current state: pipeline multisample count follows target sample count, and the basic snapshot example now renders through a supersampled offscreen path before PNG export
-  - Missing: coverage/analytic AA beyond MSAA and example-specific supersampling
+  - Current state: pipeline multisample count follows target sample count, the basic snapshot example renders through a supersampled offscreen path before PNG export, and fill/stroke draws now emit a first geometry-fringe AA pass
+  - Missing: coverage/analytic AA beyond geometry fringe and example-specific supersampling
 - Text/glyph drawing
   - Status: `pending`
   - Out of scope for now
@@ -245,10 +245,10 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
   - Represented and first execution path exists
 - Stroke width
   - Status: `started`
-  - Represented and first segment-expansion path exists
+  - Represented, with segment-expansion, hairline alpha scaling, and dash slicing
 - Join/cap
   - Status: `started`
-  - Modeled, with first join/cap geometry generation path
+  - Modeled, with first join/cap geometry generation path and AA fringe expansion
 - Miter limit
   - Status: `started`
   - Modeled, with first miter fallback path
@@ -336,7 +336,7 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
   - Shape to path conversion exists
 - Fill/stroke expansion
   - Status: `started`
-  - Flattened contours can be emitted for direct fill meshes, convex clip-stack clipping, and first join/cap-aware stroke geometry
+  - Flattened contours can be emitted for direct fill meshes, convex clip-stack clipping, join/cap-aware stroke geometry, and first AA fringe geometry
 - Path tessellation
   - Status: `started`
   - Adaptive CPU contour flattening exists for line, quadratic, and cubic path segments, with scanline fallback for more complex fill input
@@ -368,7 +368,7 @@ These decisions directly affect the remaining work and are not settled yet.
   - First implementation triangulates simple contours directly and falls back to scanline tessellation for problematic contours
 - First stroke strategy
   - Status: `started`
-  - First implementation now includes miter/bevel/round joins and butt/square/round caps
+  - First implementation now includes miter/bevel/round joins, butt/square/round caps, dash slicing, and hairline alpha scaling
 - Clip implementation
   - Status: `started`
   - First implementation uses recorded clip stacks, convex geometry clipping, scissor reduction, and stencil masking for a remaining complex clip path

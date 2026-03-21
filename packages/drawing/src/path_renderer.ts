@@ -13,6 +13,11 @@ type FlattenedSubpath = Readonly<{
   closed: boolean;
 }>;
 
+export type DrawingPreparedVertex = Readonly<{
+  point: Point2D;
+  color: readonly [number, number, number, number];
+}>;
+
 export type DrawingPreparedClip = Readonly<{
   bounds?: Rect;
   triangles?: readonly Point2D[];
@@ -21,6 +26,7 @@ export type DrawingPreparedClip = Readonly<{
 export type DrawingPreparedPathFill = Readonly<{
   kind: 'pathFill';
   triangles: readonly Point2D[];
+  fringeVertices?: readonly DrawingPreparedVertex[];
   fillRule: PathFillRule2D;
   color: readonly [number, number, number, number];
   bounds: Rect;
@@ -32,6 +38,7 @@ export type DrawingPreparedPathFill = Readonly<{
 export type DrawingPreparedPathStroke = Readonly<{
   kind: 'pathStroke';
   triangles: readonly Point2D[];
+  fringeVertices?: readonly DrawingPreparedVertex[];
   color: readonly [number, number, number, number];
   bounds: Rect;
   clipRect?: DrawingClipRect;
@@ -48,12 +55,24 @@ export type DrawingDrawPreparation = Readonly<
 
 const defaultFillColor: readonly [number, number, number, number] = [0, 0, 0, 1];
 const epsilon = 1e-5;
-const maxCurveSubdivisionDepth = 6;
+const maxCurveSubdivisionDepth = 8;
 const curveFlatnessTolerance = 0.75;
-const roundStrokeSegments = 8;
+const roundStrokeSegments = 12;
+const hairlineCoverageWidth = 1;
+const aaFringeWidth = 1;
 
 const resolveFillColor = (paint: DrawingPaint): readonly [number, number, number, number] =>
   paint.color ?? defaultFillColor;
+
+const resolveStrokeColor = (paint: DrawingPaint): readonly [number, number, number, number] => {
+  const color = paint.color ?? defaultFillColor;
+  const strokeWidth = paint.strokeWidth ?? 1;
+  if (strokeWidth >= hairlineCoverageWidth) {
+    return color;
+  }
+  const coverage = Math.max(0, strokeWidth / hairlineCoverageWidth);
+  return [color[0], color[1], color[2], color[3] * coverage];
+};
 
 const pointsEqual = (left: Point2D, right: Point2D): boolean =>
   Math.abs(left[0] - right[0]) <= epsilon && Math.abs(left[1] - right[1]) <= epsilon;
@@ -81,6 +100,11 @@ const perpendicular = (vector: Point2D): Point2D => [-vector[1], vector[0]];
 
 const midpoint = (a: Point2D, b: Point2D): Point2D => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
 
+const lerp = (a: Point2D, b: Point2D, t: number): Point2D => [
+  a[0] + ((b[0] - a[0]) * t),
+  a[1] + ((b[1] - a[1]) * t),
+];
+
 const distanceFromLine = (point: Point2D, start: Point2D, end: Point2D): number => {
   const dx = end[0] - start[0];
   const dy = end[1] - start[1];
@@ -90,6 +114,44 @@ const distanceFromLine = (point: Point2D, start: Point2D, end: Point2D): number 
   }
   return Math.abs((dy * point[0]) - (dx * point[1]) + (end[0] * start[1]) - (end[1] * start[0])) /
     length;
+};
+
+const approximateQuadraticSegments = (
+  from: Point2D,
+  control: Point2D,
+  to: Point2D,
+): number => {
+  const chord = Math.hypot(to[0] - from[0], to[1] - from[1]);
+  const controlPolygon = Math.hypot(control[0] - from[0], control[1] - from[1]) +
+    Math.hypot(to[0] - control[0], to[1] - control[1]);
+  const curvature = Math.max(0, controlPolygon - chord);
+  return Math.max(
+    1,
+    Math.min(
+      1 << maxCurveSubdivisionDepth,
+      Math.ceil(Math.sqrt(curvature / Math.max(curveFlatnessTolerance, epsilon))),
+    ),
+  );
+};
+
+const approximateCubicSegments = (
+  from: Point2D,
+  control1: Point2D,
+  control2: Point2D,
+  to: Point2D,
+): number => {
+  const chord = Math.hypot(to[0] - from[0], to[1] - from[1]);
+  const controlPolygon = Math.hypot(control1[0] - from[0], control1[1] - from[1]) +
+    Math.hypot(control2[0] - control1[0], control2[1] - control1[1]) +
+    Math.hypot(to[0] - control2[0], to[1] - control2[1]);
+  const curvature = Math.max(0, controlPolygon - chord);
+  return Math.max(
+    1,
+    Math.min(
+      1 << maxCurveSubdivisionDepth,
+      Math.ceil(Math.sqrt(curvature / Math.max(curveFlatnessTolerance * 0.75, epsilon))),
+    ),
+  );
 };
 
 const polygonArea = (points: readonly Point2D[]): number => {
@@ -480,17 +542,22 @@ const flattenQuadraticRecursive = (
   control: Point2D,
   to: Point2D,
   depth: number,
+  targetDepth: number,
   out: Point2D[],
 ): void => {
-  if (depth >= maxCurveSubdivisionDepth || distanceFromLine(control, from, to) <= curveFlatnessTolerance) {
+  if (
+    depth >= targetDepth ||
+    depth >= maxCurveSubdivisionDepth ||
+    distanceFromLine(control, from, to) <= curveFlatnessTolerance
+  ) {
     out.push(to);
     return;
   }
   const p01 = midpoint(from, control);
   const p12 = midpoint(control, to);
   const split = midpoint(p01, p12);
-  flattenQuadraticRecursive(from, p01, split, depth + 1, out);
-  flattenQuadraticRecursive(split, p12, to, depth + 1, out);
+  flattenQuadraticRecursive(from, p01, split, depth + 1, targetDepth, out);
+  flattenQuadraticRecursive(split, p12, to, depth + 1, targetDepth, out);
 };
 
 const flattenCubicRecursive = (
@@ -499,13 +566,14 @@ const flattenCubicRecursive = (
   control2: Point2D,
   to: Point2D,
   depth: number,
+  targetDepth: number,
   out: Point2D[],
 ): void => {
   const flatness = Math.max(
     distanceFromLine(control1, from, to),
     distanceFromLine(control2, from, to),
   );
-  if (depth >= maxCurveSubdivisionDepth || flatness <= curveFlatnessTolerance) {
+  if (depth >= targetDepth || depth >= maxCurveSubdivisionDepth || flatness <= curveFlatnessTolerance) {
     out.push(to);
     return;
   }
@@ -515,8 +583,8 @@ const flattenCubicRecursive = (
   const p012 = midpoint(p01, p12);
   const p123 = midpoint(p12, p23);
   const split = midpoint(p012, p123);
-  flattenCubicRecursive(from, p01, p012, split, depth + 1, out);
-  flattenCubicRecursive(split, p123, p23, to, depth + 1, out);
+  flattenCubicRecursive(from, p01, p012, split, depth + 1, targetDepth, out);
+  flattenCubicRecursive(split, p123, p23, to, depth + 1, targetDepth, out);
 };
 
 const flattenSubpaths = (
@@ -559,26 +627,44 @@ const flattenSubpaths = (
         break;
       case 'quadTo':
         if (!currentPoint) return null;
+        {
+          const control = transformPoint2D(verb.control, transform);
+          const to = transformPoint2D(verb.to, transform);
+          const targetDepth = Math.ceil(Math.log2(approximateQuadraticSegments(currentPoint, control, to)));
         flattenQuadraticRecursive(
           currentPoint,
-          transformPoint2D(verb.control, transform),
-          transformPoint2D(verb.to, transform),
+          control,
+          to,
           0,
+          targetDepth,
           points,
         );
-        currentPoint = transformPoint2D(verb.to, transform);
+        currentPoint = to;
+        }
         break;
       case 'cubicTo':
         if (!currentPoint) return null;
+        {
+          const control1 = transformPoint2D(verb.control1, transform);
+          const control2 = transformPoint2D(verb.control2, transform);
+          const to = transformPoint2D(verb.to, transform);
+          const targetDepth = Math.ceil(Math.log2(approximateCubicSegments(
+            currentPoint,
+            control1,
+            control2,
+            to,
+          )));
         flattenCubicRecursive(
           currentPoint,
-          transformPoint2D(verb.control1, transform),
-          transformPoint2D(verb.control2, transform),
-          transformPoint2D(verb.to, transform),
+          control1,
+          control2,
+          to,
           0,
+          targetDepth,
           points,
         );
-        currentPoint = transformPoint2D(verb.to, transform);
+        currentPoint = to;
+        }
         break;
       case 'close':
         if (!currentPoint) return null;
@@ -636,7 +722,26 @@ const appendTriangle = (triangles: Point2D[], a: Point2D, b: Point2D, c: Point2D
   triangles.push(a, b, c);
 };
 
+const appendColoredTriangle = (
+  triangles: DrawingPreparedVertex[],
+  a: DrawingPreparedVertex,
+  b: DrawingPreparedVertex,
+  c: DrawingPreparedVertex,
+): void => {
+  triangles.push(a, b, c);
+};
+
 const appendQuad = (triangles: Point2D[], a: Point2D, b: Point2D, c: Point2D, d: Point2D): void => {
+  triangles.push(a, b, c, a, c, d);
+};
+
+const appendColoredQuad = (
+  triangles: DrawingPreparedVertex[],
+  a: DrawingPreparedVertex,
+  b: DrawingPreparedVertex,
+  c: DrawingPreparedVertex,
+  d: DrawingPreparedVertex,
+): void => {
   triangles.push(a, b, c, a, c, d);
 };
 
@@ -664,6 +769,39 @@ const appendRoundFan = (
     appendTriangle(triangles, center, previous, next);
     previous = next;
   }
+};
+
+const buildFillFringe = (
+  subpaths: readonly FlattenedSubpath[],
+  color: readonly [number, number, number, number],
+): readonly DrawingPreparedVertex[] | undefined => {
+  const transparent: readonly [number, number, number, number] = [color[0], color[1], color[2], 0];
+  const fringe: DrawingPreparedVertex[] = [];
+  for (const subpath of subpaths) {
+    if (!subpath.closed || subpath.points.length < 2) {
+      continue;
+    }
+    const winding = polygonArea(subpath.points) >= 0 ? 1 : -1;
+    for (let index = 0; index < subpath.points.length; index += 1) {
+      const start = subpath.points[index]!;
+      const end = subpath.points[(index + 1) % subpath.points.length]!;
+      const direction = normalize(subtract(end, start));
+      if (!direction) {
+        continue;
+      }
+      const outward = scale(perpendicular(direction), winding > 0 ? -aaFringeWidth : aaFringeWidth);
+      const outerStart = add(start, outward);
+      const outerEnd = add(end, outward);
+      appendColoredQuad(
+        fringe,
+        { point: start, color },
+        { point: end, color },
+        { point: outerEnd, color: transparent },
+        { point: outerStart, color: transparent },
+      );
+    }
+  }
+  return fringe.length > 0 ? Object.freeze(fringe) : undefined;
 };
 
 const appendStrokeCap = (
@@ -734,14 +872,21 @@ const appendStrokeJoin = (
 const prepareStrokeTriangles = (
   subpaths: readonly FlattenedSubpath[],
   paint: DrawingPaint,
-): readonly Point2D[] | null => {
-  const halfWidth = Math.max(0.5, paint.strokeWidth ?? 1) / 2;
+): Readonly<{
+  triangles: readonly Point2D[];
+  fringeVertices?: readonly DrawingPreparedVertex[];
+}> | null => {
+  const strokeWidth = Math.max(paint.strokeWidth ?? 1, epsilon);
+  const halfWidth = Math.max(0.5, strokeWidth) / 2;
   const join = paint.strokeJoin ?? 'miter';
   const cap = paint.strokeCap ?? 'butt';
   const miterLimit = Math.max(1, paint.miterLimit ?? 4);
   const triangles: Point2D[] = [];
+  const fringeVertices: DrawingPreparedVertex[] = [];
+  const color = resolveStrokeColor(paint);
+  const transparent: readonly [number, number, number, number] = [color[0], color[1], color[2], 0];
 
-  for (const subpath of subpaths) {
+  for (const subpath of applyDashPattern(subpaths, paint)) {
     if (subpath.points.length < 2) continue;
     const segmentData = [];
     for (let index = 0; index < subpath.points.length - 1; index += 1) {
@@ -755,6 +900,24 @@ const prepareStrokeTriangles = (
       const leftEnd = add(end, scale(normal, halfWidth));
       const rightEnd = add(end, scale(normal, -halfWidth));
       appendQuad(triangles, leftStart, leftEnd, rightEnd, rightStart);
+      const leftOuterStart = add(start, scale(normal, halfWidth + aaFringeWidth));
+      const leftOuterEnd = add(end, scale(normal, halfWidth + aaFringeWidth));
+      const rightOuterStart = add(start, scale(normal, -(halfWidth + aaFringeWidth)));
+      const rightOuterEnd = add(end, scale(normal, -(halfWidth + aaFringeWidth)));
+      appendColoredQuad(
+        fringeVertices,
+        { point: leftStart, color },
+        { point: leftEnd, color },
+        { point: leftOuterEnd, color: transparent },
+        { point: leftOuterStart, color: transparent },
+      );
+      appendColoredQuad(
+        fringeVertices,
+        { point: rightEnd, color },
+        { point: rightStart, color },
+        { point: rightOuterStart, color: transparent },
+        { point: rightOuterEnd, color: transparent },
+      );
       segmentData.push({ start, end, direction, normal, leftStart, rightStart, leftEnd, rightEnd });
     }
     if (subpath.closed && subpath.points.length > 2) {
@@ -819,7 +982,122 @@ const prepareStrokeTriangles = (
     }
   }
 
-  return triangles.length > 0 ? Object.freeze(triangles) : null;
+  return triangles.length > 0
+    ? {
+      triangles: Object.freeze(triangles),
+      fringeVertices: fringeVertices.length > 0 ? Object.freeze(fringeVertices) : undefined,
+    }
+    : null;
+};
+
+const normalizeDashArray = (paint: DrawingPaint): readonly number[] | null => {
+  const dashArray = paint.dashArray?.filter((value) => value > epsilon) ?? [];
+  if (dashArray.length === 0) {
+    return null;
+  }
+  if (dashArray.length % 2 === 1) {
+    return Object.freeze([...dashArray, ...dashArray]);
+  }
+  return Object.freeze(dashArray);
+};
+
+const pathLength = (points: readonly Point2D[], closed: boolean): number => {
+  let length = 0;
+  for (let index = 1; index < points.length; index += 1) {
+    length += Math.hypot(points[index]![0] - points[index - 1]![0], points[index]![1] - points[index - 1]![1]);
+  }
+  if (closed && points.length > 1) {
+    length += Math.hypot(points[0]![0] - points[points.length - 1]![0], points[0]![1] - points[points.length - 1]![1]);
+  }
+  return length;
+};
+
+const buildDashedPolyline = (
+  points: readonly Point2D[],
+  closed: boolean,
+  dashArray: readonly number[],
+  dashOffset: number,
+): readonly FlattenedSubpath[] => {
+  if (points.length < 2) {
+    return [];
+  }
+
+  const totalPatternLength = dashArray.reduce((sum, value) => sum + value, 0);
+  if (totalPatternLength <= epsilon) {
+    return [];
+  }
+
+  let offset = ((dashOffset % totalPatternLength) + totalPatternLength) % totalPatternLength;
+  let dashIndex = 0;
+  while (offset > dashArray[dashIndex]!) {
+    offset -= dashArray[dashIndex]!;
+    dashIndex = (dashIndex + 1) % dashArray.length;
+  }
+  let dashRemaining = dashArray[dashIndex]! - offset;
+  let drawing = dashIndex % 2 === 0;
+
+  const segments: Array<readonly [Point2D, Point2D]> = [];
+  const pointCount = closed ? points.length + 1 : points.length;
+  for (let index = 1; index < pointCount; index += 1) {
+    let start = points[(index - 1) % points.length]!;
+    const end = points[index % points.length]!;
+    let remaining = Math.hypot(end[0] - start[0], end[1] - start[1]);
+    if (remaining <= epsilon) {
+      continue;
+    }
+
+    while (remaining > epsilon) {
+      const step = Math.min(remaining, dashRemaining);
+      const t = step / remaining;
+      const split = lerp(start, end, t);
+      if (drawing) {
+        segments.push([start, split]);
+      }
+      start = split;
+      remaining -= step;
+      dashRemaining -= step;
+      if (dashRemaining <= epsilon) {
+        dashIndex = (dashIndex + 1) % dashArray.length;
+        dashRemaining = dashArray[dashIndex]!;
+        drawing = dashIndex % 2 === 0;
+      }
+    }
+  }
+
+  const dashed: FlattenedSubpath[] = [];
+  let current: Point2D[] = [];
+  for (const [start, end] of segments) {
+    if (current.length === 0) {
+      current.push(start, end);
+      continue;
+    }
+    if (pointsEqual(current[current.length - 1]!, start)) {
+      current.push(end);
+      continue;
+    }
+    dashed.push({ points: Object.freeze(current), closed: false });
+    current = [start, end];
+  }
+  if (current.length > 0) {
+    dashed.push({ points: Object.freeze(current), closed: false });
+  }
+  return Object.freeze(dashed);
+};
+
+const applyDashPattern = (
+  subpaths: readonly FlattenedSubpath[],
+  paint: DrawingPaint,
+): readonly FlattenedSubpath[] => {
+  const dashArray = normalizeDashArray(paint);
+  if (!dashArray) {
+    return subpaths;
+  }
+  const dashOffset = paint.dashOffset ?? 0;
+  const dashed: FlattenedSubpath[] = [];
+  for (const subpath of subpaths) {
+    dashed.push(...buildDashedPolyline(subpath.points, subpath.closed, dashArray, dashOffset));
+  }
+  return Object.freeze(dashed);
 };
 
 const prepareClip = (clipPath: Path2D | undefined): DrawingPreparedClip | undefined => {
@@ -940,6 +1218,7 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
       draw: {
         kind: 'pathFill',
         triangles,
+        fringeVertices: buildFillFringe(subpaths, resolveFillColor(command.paint)),
         fillRule: command.path.fillRule,
         color: resolveFillColor(command.paint),
         bounds: unionBounds(subpaths.map((subpath) => computeBounds(subpath.points))),
@@ -950,8 +1229,9 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
     };
   }
 
+  const preparedStroke = prepareStrokeTriangles(subpaths, command.paint);
   const strokeTriangles = applyConvexClipStack(
-    prepareStrokeTriangles(subpaths, command.paint) ?? [],
+    preparedStroke?.triangles ?? [],
     preparedClipStack,
   );
   if (!strokeTriangles) {
@@ -962,7 +1242,8 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
     draw: {
       kind: 'pathStroke',
       triangles: strokeTriangles,
-      color: resolveFillColor(command.paint),
+      fringeVertices: preparedStroke?.fringeVertices,
+      color: resolveStrokeColor(command.paint),
       bounds: computeBounds(strokeTriangles),
       clipRect: preparedClipStack?.bounds,
       clip: preparedClipStack?.stencilClip,

@@ -53,8 +53,9 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Status: `partial`
   - Clear, direct fill replay, patch-instance fill/stroke replay, clip-stencil replay for complex
     intersect clip paths, chained stencil replay for multiple complex intersect clips, convex
-    clip-geometry replay for intersect/difference stacks, and first stroke command buffer
-    translation exist.
+    clip-geometry replay for intersect/difference stacks, first stroke command buffer
+    translation, and Wang-style per-patch resolve levels for curve, wedge, and stroke patch
+    instances exist.
 - Queue submission
   - Status: `started`
   - Queue manager can submit encoded command buffers, track in-flight work counts, and now keep
@@ -86,7 +87,8 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - What exists: simple resource allocation plus cached fill/stroke/clip pipelines, first
     patch-instance pipelines, stencil attachment reuse, multisample-aware pipelines, and a first
     shared intrinsic uniform bind group and pipeline layout for viewport transforms, including
-    target-resize invalidation for intrinsic bind-group state
+    target-resize invalidation for intrinsic bind-group state, plus WGSL patch shaders that adapt
+    tessellation density from stored resolve levels
   - Missing: texture/sampler bind groups, wrapped resources, broader cache policy
 - `Context` -> `src/context.ts`
   - Status: `started`
@@ -104,8 +106,9 @@ stack that fits this repository's TypeScript and WebGPU architecture.
 - `DawnCommandBuffer` -> `src/command_buffer.ts`
   - Status: `partial`
   - What exists: clear plus direct fill replay, first patch-instance fill/stroke replay, convex-clip
-    scissor replay, stencil replay for complex clip paths, and intrinsic-uniform bind group replay
-    instead of CPU clip-space baking
+    scissor replay, stencil replay for complex clip paths, intrinsic-uniform bind group replay
+    instead of CPU clip-space baking, dynamic curve/wedge/stroke patch instance encoding keyed by
+    per-patch resolve level, and draw calls sized to the highest resolve level in the batch
   - Missing: broader draw path and draw shape encoding, richer pass replay, and pass-level state
     reuse closer to Skia
 - `DrawPass` -> `src/draw_pass.ts`
@@ -593,6 +596,18 @@ These decisions directly affect the remaining work and are not settled yet.
 
 ## Latest Update
 
+- 2026-03-22
+  - Files: `src/path_renderer.ts`, `src/command_buffer.ts`, `src/resource_provider.ts`,
+    `tests/drawing_graphite_dawn_test.ts`, `tests/render_basic_paths_snapshot_test.ts`
+  - Status transition: patch-instance tessellation fidelity improved within the existing
+    `DawnResourceProvider` / `DawnCommandBuffer` partial state
+  - Change: wedge patches now retain original curve metadata; curve, wedge, and stroke patches now
+    carry Wang-style resolve levels; oversized quadratic/cubic patches pre-chop instead of silently
+    clamping; patch draw calls size themselves from the batch's max resolve level; the basic path
+    snapshot hash was refreshed to the new output
+  - Remaining: per-draw transform uniforms, Graphite-style stencil/cover fill-rule parity, and
+    shared static tessellation buffers / indirect patch draws
+  - Validation: `deno task check`
 - 2026-03-22
   - Files: `src/resource_provider.ts`, `src/command_buffer.ts`, `src/caps.ts`,
     `src/queue_manager.ts`, `tests/drawing_graphite_dawn_test.ts`

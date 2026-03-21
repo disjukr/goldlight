@@ -44,8 +44,8 @@ const floatBytes = Float32Array.BYTES_PER_ELEMENT;
 const floatsPerVertex = 6;
 const stencilFormat = 'depth24plus-stencil8';
 const noColorWrites = 0;
-const curveFillSegments = 16;
-const strokePatchSegments = 16;
+const curveFillSegments = 32;
+const strokePatchSegments = 32;
 const intrinsicUniformBytes = Float32Array.BYTES_PER_ELEMENT * 4;
 const uniformBufferUsage = 0x0040;
 const vertexShaderStage = 0x1;
@@ -94,11 +94,39 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
 
 const wedgePatchShaderSource = `
 ${intrinsicUniformsShaderBlock}
+const SEGMENTS: u32 = ${curveFillSegments}u;
 
 struct VertexOut {
   @builtin(position) position: vec4<f32>,
   @location(0) color: vec4<f32>,
 };
+
+fn eval_patch(
+  curveType: f32,
+  weight: f32,
+  p0: vec2<f32>,
+  p1: vec2<f32>,
+  p2: vec2<f32>,
+  p3: vec2<f32>,
+  t: f32,
+) -> vec2<f32> {
+  let oneMinusT = 1.0 - t;
+  if (curveType < 0.5) {
+    return mix(p0, p1, t);
+  }
+  if (curveType < 1.5) {
+    return (oneMinusT * oneMinusT * p0) + (2.0 * oneMinusT * t * p1) + (t * t * p2);
+  }
+  if (curveType < 2.5) {
+    let denom = (oneMinusT * oneMinusT) + (2.0 * weight * oneMinusT * t) + (t * t);
+    return ((oneMinusT * oneMinusT * p0) + (2.0 * weight * oneMinusT * t * p1) + (t * t * p2)) / max(denom, 1e-5);
+  }
+  return
+    (oneMinusT * oneMinusT * oneMinusT * p0) +
+    (3.0 * oneMinusT * oneMinusT * t * p1) +
+    (3.0 * oneMinusT * t * t * p2) +
+    (t * t * t * p3);
+}
 
 @vertex
 fn vs_main(
@@ -106,19 +134,26 @@ fn vs_main(
   @location(0) fanPoint: vec2<f32>,
   @location(1) p0: vec2<f32>,
   @location(2) p1: vec2<f32>,
-  @location(3) color: vec4<f32>,
+  @location(3) p2: vec2<f32>,
+  @location(4) p3: vec2<f32>,
+  @location(5) curveMeta: vec4<f32>,
+  @location(6) color: vec4<f32>,
 ) -> VertexOut {
+  let triVertex = vertexIndex % 3u;
+  let segmentIndex = vertexIndex / 3u;
+  let actualSegments = min(1u << u32(clamp(curveMeta.z, 0.0, 5.0)), SEGMENTS);
+  let clampedSegment = min(segmentIndex, actualSegments);
+  let t0 = f32(clampedSegment) / f32(actualSegments);
+  let t1 = f32(min(clampedSegment + 1u, actualSegments)) / f32(actualSegments);
   var local: vec2<f32>;
-  switch (vertexIndex) {
-    case 0u: {
-      local = fanPoint;
-    }
-    case 1u: {
-      local = p0;
-    }
-    default: {
-      local = p1;
-    }
+  if (segmentIndex >= actualSegments) {
+    local = eval_patch(curveMeta.x, curveMeta.y, p0, p1, p2, p3, 1.0);
+  } else if (triVertex == 0u) {
+    local = fanPoint;
+  } else if (triVertex == 1u) {
+    local = eval_patch(curveMeta.x, curveMeta.y, p0, p1, p2, p3, t0);
+  } else {
+    local = eval_patch(curveMeta.x, curveMeta.y, p0, p1, p2, p3, t1);
   }
   var out: VertexOut;
   out.position = to_clip_space(local);
@@ -175,15 +210,19 @@ fn vs_main(
   @location(1) p1: vec2<f32>,
   @location(2) p2: vec2<f32>,
   @location(3) p3: vec2<f32>,
-  @location(4) curveMeta: vec2<f32>,
+  @location(4) curveMeta: vec4<f32>,
   @location(5) color: vec4<f32>,
 ) -> VertexOut {
   let triVertex = vertexIndex % 3u;
   let segmentIndex = vertexIndex / 3u;
-  let t0 = f32(segmentIndex) / f32(SEGMENTS);
-  let t1 = f32(min(segmentIndex + 1u, SEGMENTS)) / f32(SEGMENTS);
+  let actualSegments = min(1u << u32(clamp(curveMeta.z, 0.0, 5.0)), SEGMENTS);
+  let clampedSegment = min(segmentIndex, actualSegments);
+  let t0 = f32(clampedSegment) / f32(actualSegments);
+  let t1 = f32(min(clampedSegment + 1u, actualSegments)) / f32(actualSegments);
   var local: vec2<f32>;
-  if (triVertex == 0u) {
+  if (segmentIndex >= actualSegments) {
+    local = eval_patch(curveMeta.x, curveMeta.y, p0, p1, p2, p3, 1.0);
+  } else if (triVertex == 0u) {
     local = p0;
   } else if (triVertex == 1u) {
     local = eval_patch(curveMeta.x, curveMeta.y, p0, p1, p2, p3, t0);
@@ -245,16 +284,21 @@ fn vs_main(
   @location(1) p1: vec2<f32>,
   @location(2) p2: vec2<f32>,
   @location(3) p3: vec2<f32>,
-  @location(4) curveMeta: vec2<f32>,
+  @location(4) curveMeta: vec4<f32>,
   @location(5) strokeMeta: vec2<f32>,
   @location(6) color: vec4<f32>,
 ) -> VertexOut {
   let quadVertex = vertexIndex % 6u;
   let segmentIndex = vertexIndex / 6u;
-  let t0 = f32(segmentIndex) / f32(SEGMENTS);
-  let t1 = f32(min(segmentIndex + 1u, SEGMENTS)) / f32(SEGMENTS);
+  let actualSegments = min(1u << u32(clamp(curveMeta.z, 0.0, 5.0)), SEGMENTS);
+  let clampedSegment = min(segmentIndex, actualSegments);
+  let t0 = f32(clampedSegment) / f32(actualSegments);
+  let t1 = f32(min(clampedSegment + 1u, actualSegments)) / f32(actualSegments);
   let a = eval_patch(curveMeta.x, curveMeta.y, p0, p1, p2, p3, t0);
-  let b = eval_patch(curveMeta.x, curveMeta.y, p0, p1, p2, p3, t1);
+  var b = eval_patch(curveMeta.x, curveMeta.y, p0, p1, p2, p3, t1);
+  if (segmentIndex >= actualSegments) {
+    b = a;
+  }
   let delta = b - a;
   let deltaLength = max(length(delta), 1e-5);
   let normal = vec2<f32>(-delta.y / deltaLength, delta.x / deltaLength) * strokeMeta.x;
@@ -361,18 +405,7 @@ export const createDawnResourceProvider = (
   });
 
   const createWedgePatchLayout = (): GPUVertexBufferLayout => ({
-    arrayStride: floatBytes * 10,
-    stepMode: 'instance',
-    attributes: [
-      { shaderLocation: 0, offset: floatBytes * 0, format: 'float32x2' },
-      { shaderLocation: 1, offset: floatBytes * 2, format: 'float32x2' },
-      { shaderLocation: 2, offset: floatBytes * 4, format: 'float32x2' },
-      { shaderLocation: 3, offset: floatBytes * 6, format: 'float32x4' },
-    ],
-  });
-
-  const createCurvePatchLayout = (): GPUVertexBufferLayout => ({
-    arrayStride: floatBytes * 14,
+    arrayStride: floatBytes * 18,
     stepMode: 'instance',
     attributes: [
       { shaderLocation: 0, offset: floatBytes * 0, format: 'float32x2' },
@@ -381,10 +414,11 @@ export const createDawnResourceProvider = (
       { shaderLocation: 3, offset: floatBytes * 6, format: 'float32x2' },
       { shaderLocation: 4, offset: floatBytes * 8, format: 'float32x2' },
       { shaderLocation: 5, offset: floatBytes * 10, format: 'float32x4' },
+      { shaderLocation: 6, offset: floatBytes * 14, format: 'float32x4' },
     ],
   });
 
-  const createStrokePatchLayout = (): GPUVertexBufferLayout => ({
+  const createCurvePatchLayout = (): GPUVertexBufferLayout => ({
     arrayStride: floatBytes * 16,
     stepMode: 'instance',
     attributes: [
@@ -392,9 +426,22 @@ export const createDawnResourceProvider = (
       { shaderLocation: 1, offset: floatBytes * 2, format: 'float32x2' },
       { shaderLocation: 2, offset: floatBytes * 4, format: 'float32x2' },
       { shaderLocation: 3, offset: floatBytes * 6, format: 'float32x2' },
-      { shaderLocation: 4, offset: floatBytes * 8, format: 'float32x2' },
-      { shaderLocation: 5, offset: floatBytes * 10, format: 'float32x2' },
-      { shaderLocation: 6, offset: floatBytes * 12, format: 'float32x4' },
+      { shaderLocation: 4, offset: floatBytes * 8, format: 'float32x4' },
+      { shaderLocation: 5, offset: floatBytes * 12, format: 'float32x4' },
+    ],
+  });
+
+  const createStrokePatchLayout = (): GPUVertexBufferLayout => ({
+    arrayStride: floatBytes * 18,
+    stepMode: 'instance',
+    attributes: [
+      { shaderLocation: 0, offset: floatBytes * 0, format: 'float32x2' },
+      { shaderLocation: 1, offset: floatBytes * 2, format: 'float32x2' },
+      { shaderLocation: 2, offset: floatBytes * 4, format: 'float32x2' },
+      { shaderLocation: 3, offset: floatBytes * 6, format: 'float32x2' },
+      { shaderLocation: 4, offset: floatBytes * 8, format: 'float32x4' },
+      { shaderLocation: 5, offset: floatBytes * 12, format: 'float32x2' },
+      { shaderLocation: 6, offset: floatBytes * 14, format: 'float32x4' },
     ],
   });
 

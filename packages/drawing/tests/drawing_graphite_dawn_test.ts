@@ -486,6 +486,37 @@ Deno.test('drawing prepared recording flattens quadratic and cubic paths for fil
   assertEquals((draw?.patches.length ?? 0) > 0, true);
 });
 
+Deno.test('drawing prepared recording annotates fill wedges with curve metadata and resolve level', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [24, 96] },
+      { kind: 'quadTo', control: [96, 24], to: [168, 96] },
+      { kind: 'lineTo', to: [24, 144] },
+      { kind: 'close' },
+    ),
+    { style: 'fill' },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const draw = prepared.passes[0]?.steps[0]?.draw;
+  const wedge = draw?.kind === 'pathFill'
+    ? draw.patches.find((patch) => patch.kind === 'wedge' && patch.curveKind === 'quadratic')
+    : undefined;
+
+  assertEquals(draw?.kind, 'pathFill');
+  assertEquals(Boolean(wedge), true);
+  if (!wedge || wedge.kind !== 'wedge') {
+    throw new Error('expected quadratic wedge patch');
+  }
+  assertEquals(wedge.resolveLevel > 0, true);
+  assertEquals(wedge.points[2], wedge.points[3]);
+});
+
 Deno.test('drawing prepared recording flattens conic and arc verbs', () => {
   const mock = createMockGpuContext();
   const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
@@ -540,6 +571,38 @@ Deno.test('drawing prepared recording splits cusp-like cubic patches', () => {
     (draw?.patches.filter((patch) => patch.kind === 'cubic').length ?? 0) >= 1,
     true,
   );
+});
+
+Deno.test('drawing prepared recording scales curve resolve level with curve size', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+
+  const resolveLevelFor = (control1: readonly [number, number], control2: readonly [number, number]) => {
+    const recorder = drawingContext.createRecorder();
+    recordDrawPath(
+      recorder,
+      createPath2D(
+        { kind: 'moveTo', to: [0, 0] },
+        { kind: 'cubicTo', control1, control2, to: [128, 0] },
+      ),
+      { style: 'stroke', strokeWidth: 6 },
+    );
+    const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+    const draw = prepared.passes[0]?.steps[0]?.draw;
+    if (draw?.kind !== 'pathStroke') {
+      throw new Error('expected pathStroke draw');
+    }
+    const cubic = draw.patches.find((patch) => patch.kind === 'cubic');
+    if (!cubic || cubic.kind !== 'cubic') {
+      throw new Error('expected cubic patch');
+    }
+    return cubic.resolveLevel;
+  };
+
+  const low = resolveLevelFor([32, 4], [96, -4]);
+  const high = resolveLevelFor([32, 96], [96, -96]);
+
+  assertEquals(high > low, true);
 });
 
 Deno.test('drawing prepared recording preserves evenodd fill rule through draw step metadata', () => {

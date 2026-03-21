@@ -20,11 +20,9 @@ export type DawnCommandBuffer = Readonly<{
 
 const vertexBufferUsage = 0x0020;
 const floatsPerVertex = 6;
-const wedgePatchFloats = 10;
-const curvePatchFloats = 14;
-const strokePatchFloats = 16;
-const curvePatchVertexCount = 16 * 3;
-const strokePatchVertexCount = 16 * 6;
+const wedgePatchFloats = 18;
+const curvePatchFloats = 16;
+const strokePatchFloats = 18;
 
 const toGpuColor = (color: readonly [number, number, number, number]): GPUColor => ({
   r: color[0],
@@ -84,6 +82,14 @@ const createWedgePatchInstanceData = (
     data[offset++] = patch.points[0][1];
     data[offset++] = patch.points[1][0];
     data[offset++] = patch.points[1][1];
+    data[offset++] = patch.points[2][0];
+    data[offset++] = patch.points[2][1];
+    data[offset++] = patch.points[3][0];
+    data[offset++] = patch.points[3][1];
+    data[offset++] = toCurveType(patch);
+    data[offset++] = patch.weight;
+    data[offset++] = patch.resolveLevel;
+    data[offset++] = 0;
     data[offset++] = color[0];
     data[offset++] = color[1];
     data[offset++] = color[2];
@@ -117,6 +123,8 @@ const createCurvePatchInstanceData = (
     data[offset++] = points[3]![1];
     data[offset++] = toCurveType(patch);
     data[offset++] = patch.kind === 'conic' ? patch.weight : 1;
+    data[offset++] = patch.resolveLevel;
+    data[offset++] = 0;
     data[offset++] = color[0];
     data[offset++] = color[1];
     data[offset++] = color[2];
@@ -151,6 +159,8 @@ const createStrokePatchInstanceData = (
     data[offset++] = points[3]![1];
     data[offset++] = toCurveType(patch);
     data[offset++] = patch.kind === 'conic' ? patch.weight : 1;
+    data[offset++] = patch.resolveLevel;
+    data[offset++] = 0;
     data[offset++] = halfWidth;
     data[offset++] = 0;
     data[offset++] = color[0];
@@ -187,8 +197,27 @@ const toCurveType = (patch: DrawingPreparedPatch): number => {
     case 'cubic':
       return 3;
     case 'wedge':
-      return -1;
+      switch (patch.curveKind) {
+        case 'line':
+          return 0;
+        case 'quadratic':
+          return 1;
+        case 'conic':
+          return 2;
+        case 'cubic':
+          return 3;
+      }
   }
+};
+
+const maxResolveLevelForPatches = (
+  patches: readonly DrawingPreparedPatch[],
+  kind: 'wedge' | 'curve' | 'stroke',
+): number => {
+  const relevant = patches.filter((patch) =>
+    kind === 'wedge' ? patch.kind === 'wedge' : patch.kind !== 'wedge'
+  );
+  return relevant.reduce((max, patch) => Math.max(max, patch.resolveLevel), 0);
 };
 
 const applyClipRect = (
@@ -303,6 +332,9 @@ const encodePathFillStep = (
   const patchVertexBuffer = patchVertices && patchVertices.length > 0
     ? createVertexBuffer(sharedContext, patchVertices)
     : null;
+  const patchVertexCount = step.draw.renderer === 'stencil-tessellated-wedges'
+    ? (1 << maxResolveLevelForPatches(step.draw.patches, 'wedge')) * 3
+    : (1 << maxResolveLevelForPatches(step.draw.patches, 'curve')) * 3;
   const fringeVertices = step.draw.fringeVertices
     ? createColoredVertexData(step.draw.fringeVertices)
     : null;
@@ -324,7 +356,7 @@ const encodePathFillStep = (
     if (usesPatchFill && patchVertexBuffer && patchVertices) {
       pass.setVertexBuffer(0, patchVertexBuffer);
       pass.draw(
-        step.draw.renderer === 'stencil-tessellated-wedges' ? 3 : curvePatchVertexCount,
+        Math.max(3, patchVertexCount),
         patchVertices.length /
           (step.draw.renderer === 'stencil-tessellated-wedges'
             ? wedgePatchFloats
@@ -348,7 +380,7 @@ const encodePathFillStep = (
   if (usesPatchFill && patchVertexBuffer && patchVertices) {
     pass.setVertexBuffer(0, patchVertexBuffer);
     pass.draw(
-      step.draw.renderer === 'stencil-tessellated-wedges' ? 3 : curvePatchVertexCount,
+      Math.max(3, patchVertexCount),
       patchVertices.length /
         (step.draw.renderer === 'stencil-tessellated-wedges' ? wedgePatchFloats : curvePatchFloats),
     );
@@ -381,6 +413,7 @@ const encodePathStrokeStep = (
     ? createVertexBuffer(sharedContext, patchVertices)
     : null;
   const usesPatchStroke = Boolean(patchVertexBuffer);
+  const patchVertexCount = (1 << maxResolveLevelForPatches(step.draw.patches, 'stroke')) * 6;
   const fringeVertices = step.draw.fringeVertices
     ? createColoredVertexData(step.draw.fringeVertices)
     : null;
@@ -407,7 +440,7 @@ const encodePathStrokeStep = (
   }
   if (usesPatchStroke && patchVertexBuffer) {
     pass.setVertexBuffer(0, patchVertexBuffer);
-    pass.draw(strokePatchVertexCount, patchVertices.length / strokePatchFloats);
+    pass.draw(Math.max(6, patchVertexCount), patchVertices.length / strokePatchFloats);
   } else {
     pass.setVertexBuffer(0, strokeVertexBuffer);
     pass.draw(strokeVertices.length / floatsPerVertex);

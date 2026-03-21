@@ -35,6 +35,7 @@ export type DawnResourceProvider = Readonly<{
   createTexture: (descriptor: DrawingTextureDescriptor) => GPUTexture;
   createSampler: (descriptor?: DrawingSamplerDescriptor) => GPUSampler;
   getPipeline: (key: DrawingPipelineKey) => GPURenderPipeline;
+  getIntrinsicBindGroup: () => GPUBindGroup;
   getStencilAttachmentView: () => GPUTextureView;
 }>;
 
@@ -45,8 +46,30 @@ const stencilFormat = 'depth24plus-stencil8';
 const noColorWrites = 0;
 const curveFillSegments = 16;
 const strokePatchSegments = 16;
+const intrinsicUniformBytes = Float32Array.BYTES_PER_ELEMENT * 4;
+const uniformBufferUsage = 0x0040;
+const vertexShaderStage = 0x1;
+
+const intrinsicUniformsShaderBlock = `
+struct Intrinsics {
+  targetSize: vec2<f32>,
+  _padding: vec2<f32>,
+};
+
+@group(0) @binding(0) var<uniform> intrinsics: Intrinsics;
+
+fn to_clip_space(position: vec2<f32>) -> vec4<f32> {
+  let clip = vec2<f32>(
+    (position.x / intrinsics.targetSize.x) * 2.0 - 1.0,
+    1.0 - ((position.y / intrinsics.targetSize.y) * 2.0),
+  );
+  return vec4<f32>(clip, 0.0, 1.0);
+}
+`;
 
 const fillPathShaderSource = `
+${intrinsicUniformsShaderBlock}
+
 struct VertexOut {
   @builtin(position) position: vec4<f32>,
   @location(0) color: vec4<f32>,
@@ -58,7 +81,7 @@ fn vs_main(
   @location(1) color: vec4<f32>,
 ) -> VertexOut {
   var out: VertexOut;
-  out.position = vec4<f32>(position, 0.0, 1.0);
+  out.position = to_clip_space(position);
   out.color = color;
   return out;
 }
@@ -70,6 +93,8 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
 `;
 
 const wedgePatchShaderSource = `
+${intrinsicUniformsShaderBlock}
+
 struct VertexOut {
   @builtin(position) position: vec4<f32>,
   @location(0) color: vec4<f32>,
@@ -96,7 +121,7 @@ fn vs_main(
     }
   }
   var out: VertexOut;
-  out.position = vec4<f32>(local, 0.0, 1.0);
+  out.position = to_clip_space(local);
   out.color = color;
   return out;
 }
@@ -109,6 +134,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
 
 const curvePatchShaderSource = `
 const SEGMENTS: u32 = ${curveFillSegments}u;
+${intrinsicUniformsShaderBlock}
 
 struct VertexOut {
   @builtin(position) position: vec4<f32>,
@@ -165,7 +191,7 @@ fn vs_main(
     local = eval_patch(curveMeta.x, curveMeta.y, p0, p1, p2, p3, t1);
   }
   var out: VertexOut;
-  out.position = vec4<f32>(local, 0.0, 1.0);
+  out.position = to_clip_space(local);
   out.color = color;
   return out;
 }
@@ -178,6 +204,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
 
 const strokePatchShaderSource = `
 const SEGMENTS: u32 = ${strokePatchSegments}u;
+${intrinsicUniformsShaderBlock}
 
 struct VertexOut {
   @builtin(position) position: vec4<f32>,
@@ -235,7 +262,7 @@ fn vs_main(
   let indices = array<u32, 6>(0u, 1u, 2u, 0u, 2u, 3u);
   let local = corners[indices[quadVertex]];
   var out: VertexOut;
-  out.position = vec4<f32>(local, 0.0, 1.0);
+  out.position = to_clip_space(local);
   out.color = color;
   return out;
 }
@@ -307,6 +334,9 @@ export const createDawnResourceProvider = (
       view: GPUTextureView;
     }>
     | null = null;
+  let intrinsicBindGroupLayout: GPUBindGroupLayout | null = null;
+  let pipelineLayout: GPUPipelineLayout | null = null;
+  let intrinsicBindGroup: GPUBindGroup | null = null;
 
   const createVertexLayout = (): GPUVertexBufferLayout => ({
     arrayStride: floatBytes * floatsPerVertex,
@@ -364,12 +394,70 @@ export const createDawnResourceProvider = (
 
   const sampleCount = backend.target.kind === 'offscreen' ? backend.target.sampleCount : 1;
 
+  const getIntrinsicBindGroupLayout = (): GPUBindGroupLayout => {
+    if (intrinsicBindGroupLayout) {
+      return intrinsicBindGroupLayout;
+    }
+    intrinsicBindGroupLayout = backend.device.createBindGroupLayout({
+      label: 'drawing-intrinsics-layout',
+      entries: [
+        {
+          binding: 0,
+          visibility: vertexShaderStage,
+          buffer: {
+            type: 'uniform',
+          },
+        },
+      ],
+    });
+    return intrinsicBindGroupLayout;
+  };
+
+  const getPipelineLayout = (): GPUPipelineLayout => {
+    if (pipelineLayout) {
+      return pipelineLayout;
+    }
+    pipelineLayout = backend.device.createPipelineLayout({
+      label: 'drawing-path-pipeline-layout',
+      bindGroupLayouts: [getIntrinsicBindGroupLayout()],
+    });
+    return pipelineLayout;
+  };
+
+  const createIntrinsicBindGroup = (): GPUBindGroup => {
+    const buffer = backend.device.createBuffer({
+      label: 'drawing-intrinsics',
+      size: intrinsicUniformBytes,
+      usage: uniformBufferUsage,
+      mappedAtCreation: true,
+    });
+    new Float32Array(buffer.getMappedRange()).set([
+      backend.target.width,
+      backend.target.height,
+      0,
+      0,
+    ]);
+    buffer.unmap();
+    return backend.device.createBindGroup({
+      label: 'drawing-intrinsics-bind-group',
+      layout: getIntrinsicBindGroupLayout(),
+      entries: [
+        {
+          binding: 0,
+          resource: {
+            buffer,
+          },
+        },
+      ],
+    });
+  };
+
   const createPathFillCoverPipeline = (): GPURenderPipeline => {
     const shaderModule = createPathShaderModule(backend);
 
     return backend.device.createRenderPipeline({
       label: 'drawing-path-fill-cover',
-      layout: 'auto',
+      layout: getPipelineLayout(),
       vertex: {
         module: shaderModule,
         entryPoint: 'vs_main',
@@ -398,7 +486,7 @@ export const createDawnResourceProvider = (
     const shaderModule = createPathShaderModule(backend);
     return backend.device.createRenderPipeline({
       label: 'drawing-clip-stencil-write',
-      layout: 'auto',
+      layout: getPipelineLayout(),
       vertex: {
         module: shaderModule,
         entryPoint: 'vs_main',
@@ -476,7 +564,7 @@ export const createDawnResourceProvider = (
     const shaderModule = createPathShaderModule(backend);
     return backend.device.createRenderPipeline({
       label,
-      layout: 'auto',
+      layout: getPipelineLayout(),
       vertex: {
         module: shaderModule,
         entryPoint: 'vs_main',
@@ -515,7 +603,7 @@ export const createDawnResourceProvider = (
 
     return backend.device.createRenderPipeline({
       label: 'drawing-path-stroke-cover',
-      layout: 'auto',
+      layout: getPipelineLayout(),
       vertex: {
         module: shaderModule,
         entryPoint: 'vs_main',
@@ -548,7 +636,7 @@ export const createDawnResourceProvider = (
   ): GPURenderPipeline =>
     backend.device.createRenderPipeline({
       label,
-      layout: 'auto',
+      layout: getPipelineLayout(),
       vertex: {
         module: shaderModule,
         entryPoint: 'vs_main',
@@ -575,6 +663,13 @@ export const createDawnResourceProvider = (
     createBuffer: (descriptor) => backend.device.createBuffer(descriptor),
     createTexture: (descriptor) => backend.device.createTexture(descriptor),
     createSampler: (descriptor = {}) => backend.device.createSampler(descriptor),
+    getIntrinsicBindGroup: () => {
+      if (intrinsicBindGroup) {
+        return intrinsicBindGroup;
+      }
+      intrinsicBindGroup = createIntrinsicBindGroup();
+      return intrinsicBindGroup;
+    },
     getPipeline: (key) => {
       switch (key) {
         case 'clip-stencil-write':

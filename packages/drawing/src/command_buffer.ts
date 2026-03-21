@@ -33,22 +33,16 @@ const toGpuColor = (color: readonly [number, number, number, number]): GPUColor 
   a: color[3],
 });
 
-const createClipSpaceVertexData = (
+const createVertexData = (
   triangles: readonly (readonly [number, number])[],
   color: readonly [number, number, number, number],
-  target: Readonly<{
-    width: number;
-    height: number;
-  }>,
 ): Float32Array => {
   const vertices = new Float32Array(triangles.length * floatsPerVertex);
   let offset = 0;
-  const toClipX = (value: number) => (value / target.width) * 2 - 1;
-  const toClipY = (value: number) => 1 - (value / target.height) * 2;
 
   for (const point of triangles) {
-    vertices[offset++] = toClipX(point[0]);
-    vertices[offset++] = toClipY(point[1]);
+    vertices[offset++] = point[0];
+    vertices[offset++] = point[1];
     vertices[offset++] = color[0];
     vertices[offset++] = color[1];
     vertices[offset++] = color[2];
@@ -58,21 +52,15 @@ const createClipSpaceVertexData = (
   return vertices;
 };
 
-const createColoredClipSpaceVertexData = (
+const createColoredVertexData = (
   triangles: readonly DrawingPreparedVertex[],
-  target: Readonly<{
-    width: number;
-    height: number;
-  }>,
 ): Float32Array => {
   const vertices = new Float32Array(triangles.length * floatsPerVertex);
   let offset = 0;
-  const toClipX = (value: number) => (value / target.width) * 2 - 1;
-  const toClipY = (value: number) => 1 - (value / target.height) * 2;
 
   for (const vertex of triangles) {
-    vertices[offset++] = toClipX(vertex.point[0]);
-    vertices[offset++] = toClipY(vertex.point[1]);
+    vertices[offset++] = vertex.point[0];
+    vertices[offset++] = vertex.point[1];
     vertices[offset++] = vertex.color[0];
     vertices[offset++] = vertex.color[1];
     vertices[offset++] = vertex.color[2];
@@ -80,6 +68,97 @@ const createColoredClipSpaceVertexData = (
   }
 
   return vertices;
+};
+
+const createWedgePatchInstanceData = (
+  patches: readonly DrawingPreparedPatch[],
+  color: readonly [number, number, number, number],
+): Float32Array => {
+  const wedgePatches = patches.filter((patch) => patch.kind === 'wedge');
+  const data = new Float32Array(wedgePatches.length * wedgePatchFloats);
+  let offset = 0;
+  for (const patch of wedgePatches) {
+    data[offset++] = patch.fanPoint[0];
+    data[offset++] = patch.fanPoint[1];
+    data[offset++] = patch.points[0][0];
+    data[offset++] = patch.points[0][1];
+    data[offset++] = patch.points[1][0];
+    data[offset++] = patch.points[1][1];
+    data[offset++] = color[0];
+    data[offset++] = color[1];
+    data[offset++] = color[2];
+    data[offset++] = color[3];
+  }
+  return data;
+};
+
+const createCurvePatchInstanceData = (
+  patches: readonly DrawingPreparedPatch[],
+  color: readonly [number, number, number, number],
+): Float32Array => {
+  const curvePatches = patches.filter((patch) => patch.kind !== 'wedge');
+  const data = new Float32Array(curvePatches.length * curvePatchFloats);
+  let offset = 0;
+  for (const patch of curvePatches) {
+    const points = patch.kind === 'line'
+      ? [patch.points[0], patch.points[1], patch.points[1], patch.points[1]]
+      : patch.kind === 'quadratic'
+      ? [patch.points[0], patch.points[1], patch.points[2], patch.points[2]]
+      : patch.kind === 'conic'
+      ? [patch.points[0], patch.points[1], patch.points[2], patch.points[2]]
+      : [patch.points[0], patch.points[1], patch.points[2], patch.points[3]];
+    data[offset++] = points[0]![0];
+    data[offset++] = points[0]![1];
+    data[offset++] = points[1]![0];
+    data[offset++] = points[1]![1];
+    data[offset++] = points[2]![0];
+    data[offset++] = points[2]![1];
+    data[offset++] = points[3]![0];
+    data[offset++] = points[3]![1];
+    data[offset++] = toCurveType(patch);
+    data[offset++] = patch.kind === 'conic' ? patch.weight : 1;
+    data[offset++] = color[0];
+    data[offset++] = color[1];
+    data[offset++] = color[2];
+    data[offset++] = color[3];
+  }
+  return data;
+};
+
+const createStrokePatchInstanceData = (
+  patches: readonly DrawingPreparedPatch[],
+  color: readonly [number, number, number, number],
+  halfWidth: number,
+): Float32Array => {
+  const curvePatches = patches.filter((patch) => patch.kind !== 'wedge');
+  const data = new Float32Array(curvePatches.length * strokePatchFloats);
+  let offset = 0;
+  for (const patch of curvePatches) {
+    const points = patch.kind === 'line'
+      ? [patch.points[0], patch.points[1], patch.points[1], patch.points[1]]
+      : patch.kind === 'quadratic'
+      ? [patch.points[0], patch.points[1], patch.points[2], patch.points[2]]
+      : patch.kind === 'conic'
+      ? [patch.points[0], patch.points[1], patch.points[2], patch.points[2]]
+      : [patch.points[0], patch.points[1], patch.points[2], patch.points[3]];
+    data[offset++] = points[0]![0];
+    data[offset++] = points[0]![1];
+    data[offset++] = points[1]![0];
+    data[offset++] = points[1]![1];
+    data[offset++] = points[2]![0];
+    data[offset++] = points[2]![1];
+    data[offset++] = points[3]![0];
+    data[offset++] = points[3]![1];
+    data[offset++] = toCurveType(patch);
+    data[offset++] = patch.kind === 'conic' ? patch.weight : 1;
+    data[offset++] = halfWidth;
+    data[offset++] = 0;
+    data[offset++] = color[0];
+    data[offset++] = color[1];
+    data[offset++] = color[2];
+    data[offset++] = color[3];
+  }
+  return data;
 };
 
 const createVertexBuffer = (
@@ -110,110 +189,6 @@ const toCurveType = (patch: DrawingPreparedPatch): number => {
     case 'wedge':
       return -1;
   }
-};
-
-const createWedgePatchInstanceData = (
-  patches: readonly DrawingPreparedPatch[],
-  color: readonly [number, number, number, number],
-  target: Readonly<{ width: number; height: number }>,
-): Float32Array => {
-  const wedgePatches = patches.filter((patch) => patch.kind === 'wedge');
-  const data = new Float32Array(wedgePatches.length * wedgePatchFloats);
-  const toClipX = (value: number) => (value / target.width) * 2 - 1;
-  const toClipY = (value: number) => 1 - (value / target.height) * 2;
-  let offset = 0;
-  for (const patch of wedgePatches) {
-    data[offset++] = toClipX(patch.fanPoint[0]);
-    data[offset++] = toClipY(patch.fanPoint[1]);
-    data[offset++] = toClipX(patch.points[0][0]);
-    data[offset++] = toClipY(patch.points[0][1]);
-    data[offset++] = toClipX(patch.points[1][0]);
-    data[offset++] = toClipY(patch.points[1][1]);
-    data[offset++] = color[0];
-    data[offset++] = color[1];
-    data[offset++] = color[2];
-    data[offset++] = color[3];
-  }
-  return data;
-};
-
-const createCurvePatchInstanceData = (
-  patches: readonly DrawingPreparedPatch[],
-  color: readonly [number, number, number, number],
-  target: Readonly<{ width: number; height: number }>,
-): Float32Array => {
-  const curvePatches = patches.filter((patch) => patch.kind !== 'wedge');
-  const data = new Float32Array(curvePatches.length * curvePatchFloats);
-  const toClipX = (value: number) => (value / target.width) * 2 - 1;
-  const toClipY = (value: number) => 1 - (value / target.height) * 2;
-  let offset = 0;
-  for (const patch of curvePatches) {
-    const points = patch.kind === 'line'
-      ? [patch.points[0], patch.points[1], patch.points[1], patch.points[1]]
-      : patch.kind === 'quadratic'
-      ? [patch.points[0], patch.points[1], patch.points[2], patch.points[2]]
-      : patch.kind === 'conic'
-      ? [patch.points[0], patch.points[1], patch.points[2], patch.points[2]]
-      : [patch.points[0], patch.points[1], patch.points[2], patch.points[3]];
-    data[offset++] = toClipX(points[0]![0]);
-    data[offset++] = toClipY(points[0]![1]);
-    data[offset++] = toClipX(points[1]![0]);
-    data[offset++] = toClipY(points[1]![1]);
-    data[offset++] = toClipX(points[2]![0]);
-    data[offset++] = toClipY(points[2]![1]);
-    data[offset++] = toClipX(points[3]![0]);
-    data[offset++] = toClipY(points[3]![1]);
-    data[offset++] = toCurveType(patch);
-    data[offset++] = patch.kind === 'conic' ? patch.weight : 1;
-    data[offset++] = color[0];
-    data[offset++] = color[1];
-    data[offset++] = color[2];
-    data[offset++] = color[3];
-  }
-  return data;
-};
-
-const createStrokePatchInstanceData = (
-  patches: readonly DrawingPreparedPatch[],
-  color: readonly [number, number, number, number],
-  halfWidth: number,
-  target: Readonly<{ width: number; height: number }>,
-): Float32Array => {
-  const curvePatches = patches.filter((patch) => patch.kind !== 'wedge');
-  const data = new Float32Array(curvePatches.length * strokePatchFloats);
-  const toClipX = (value: number) => (value / target.width) * 2 - 1;
-  const toClipY = (value: number) => 1 - (value / target.height) * 2;
-  let offset = 0;
-  const clipHalfWidth = Math.max(
-    1 / Math.max(target.width, 1),
-    1 / Math.max(target.height, 1),
-  ) * halfWidth * 2;
-  for (const patch of curvePatches) {
-    const points = patch.kind === 'line'
-      ? [patch.points[0], patch.points[1], patch.points[1], patch.points[1]]
-      : patch.kind === 'quadratic'
-      ? [patch.points[0], patch.points[1], patch.points[2], patch.points[2]]
-      : patch.kind === 'conic'
-      ? [patch.points[0], patch.points[1], patch.points[2], patch.points[2]]
-      : [patch.points[0], patch.points[1], patch.points[2], patch.points[3]];
-    data[offset++] = toClipX(points[0]![0]);
-    data[offset++] = toClipY(points[0]![1]);
-    data[offset++] = toClipX(points[1]![0]);
-    data[offset++] = toClipY(points[1]![1]);
-    data[offset++] = toClipX(points[2]![0]);
-    data[offset++] = toClipY(points[2]![1]);
-    data[offset++] = toClipX(points[3]![0]);
-    data[offset++] = toClipY(points[3]![1]);
-    data[offset++] = toCurveType(patch);
-    data[offset++] = patch.kind === 'conic' ? patch.weight : 1;
-    data[offset++] = clipHalfWidth;
-    data[offset++] = 0;
-    data[offset++] = color[0];
-    data[offset++] = color[1];
-    data[offset++] = color[2];
-    data[offset++] = color[3];
-  }
-  return data;
 };
 
 const applyClipRect = (
@@ -283,10 +258,9 @@ const encodeStencilClipStack = (
     if (!clip.triangles.length) {
       continue;
     }
-    const clipVertices = createClipSpaceVertexData(
+    const clipVertices = createVertexData(
       clip.triangles,
       [0, 0, 0, 0],
-      sharedContext.backend.target,
     );
     const clipVertexBuffer = createVertexBuffer(sharedContext, clipVertices);
     emittedClipCount += 1;
@@ -320,6 +294,7 @@ export const encodeDawnCommandBuffer = (
   const unsupportedCommands: DrawingCommand[] = [...prepared.unsupportedCommands];
   let passCount = 0;
   const stencilView = sharedContext.resourceProvider.getStencilAttachmentView();
+  const intrinsicBindGroup = sharedContext.resourceProvider.getIntrinsicBindGroup();
 
   for (const passInfo of prepared.passes) {
     if (passInfo.steps.length === 0) {
@@ -346,10 +321,9 @@ export const encodeDawnCommandBuffer = (
         case 'pathFill': {
           const usesPatchFill = step.draw.renderer === 'stencil-tessellated-wedges' ||
             step.draw.renderer === 'stencil-tessellated-curves';
-          const fillVertices = usesPatchFill ? null : createClipSpaceVertexData(
+          const fillVertices = usesPatchFill ? null : createVertexData(
             step.draw.triangles,
             step.draw.color,
-            sharedContext.backend.target,
           );
           const fillVertexBuffer = fillVertices
             ? createVertexBuffer(sharedContext, fillVertices)
@@ -358,23 +332,18 @@ export const encodeDawnCommandBuffer = (
             ? createWedgePatchInstanceData(
               step.draw.patches,
               step.draw.color,
-              sharedContext.backend.target,
             )
             : step.draw.renderer === 'stencil-tessellated-curves'
             ? createCurvePatchInstanceData(
               step.draw.patches,
               step.draw.color,
-              sharedContext.backend.target,
             )
             : null;
           const patchVertexBuffer = patchVertices && patchVertices.length > 0
             ? createVertexBuffer(sharedContext, patchVertices)
             : null;
           const fringeVertices = step.draw.fringeVertices
-            ? createColoredClipSpaceVertexData(
-              step.draw.fringeVertices,
-              sharedContext.backend.target,
-            )
+            ? createColoredVertexData(step.draw.fringeVertices)
             : null;
           const fringeVertexBuffer = fringeVertices
             ? createVertexBuffer(sharedContext, fringeVertices)
@@ -402,6 +371,7 @@ export const encodeDawnCommandBuffer = (
               : undefined,
           });
           applyStepClip(pass, step, sharedContext.backend.target);
+          pass.setBindGroup(0, intrinsicBindGroup);
           if (step.draw.clips && step.draw.clips.length > 0) {
             const colorPipeline = sharedContext.resourceProvider.getPipeline(step.pipelineKeys[1]!);
             const stencilReference = encodeStencilClipStack(
@@ -464,27 +434,22 @@ export const encodeDawnCommandBuffer = (
           break;
         }
         case 'pathStroke': {
-          const strokeVertices = createClipSpaceVertexData(
+          const strokeVertices = createVertexData(
             step.draw.triangles,
             step.draw.color,
-            sharedContext.backend.target,
           );
           const strokeVertexBuffer = createVertexBuffer(sharedContext, strokeVertices);
           const patchVertices = createStrokePatchInstanceData(
             step.draw.patches,
             step.draw.color,
             step.draw.halfWidth,
-            sharedContext.backend.target,
           );
           const patchVertexBuffer = patchVertices.length > 0
             ? createVertexBuffer(sharedContext, patchVertices)
             : null;
           const usesPatchStroke = Boolean(patchVertexBuffer);
           const fringeVertices = step.draw.fringeVertices
-            ? createColoredClipSpaceVertexData(
-              step.draw.fringeVertices,
-              sharedContext.backend.target,
-            )
+            ? createColoredVertexData(step.draw.fringeVertices)
             : null;
           const fringeVertexBuffer = fringeVertices
             ? createVertexBuffer(sharedContext, fringeVertices)
@@ -512,6 +477,7 @@ export const encodeDawnCommandBuffer = (
               : undefined,
           });
           applyStepClip(pass, step, sharedContext.backend.target);
+          pass.setBindGroup(0, intrinsicBindGroup);
           if (step.draw.clips && step.draw.clips.length > 0) {
             const stencilReference = encodeStencilClipStack(
               pass,

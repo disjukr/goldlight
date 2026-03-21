@@ -80,12 +80,13 @@ stack that fits this repository's TypeScript and WebGPU architecture.
 - `DawnSharedContext` -> `src/shared_context.ts`
   - Status: `started`
   - What exists: shared backend state, caps, and resource provider creation
-  - Missing: bind group layouts and pipeline helpers
+  - Missing: broader bind group layout families and multi-pass pipeline helpers
 - `DawnResourceProvider` -> `src/resource_provider.ts`
-  - Status: `started`
+  - Status: `partial`
   - What exists: simple resource allocation plus cached fill/stroke/clip pipelines, first
-    patch-instance pipelines, stencil attachment reuse, and multisample-aware pipelines
-  - Missing: bind groups, wrapped resources, broader cache policy
+    patch-instance pipelines, stencil attachment reuse, multisample-aware pipelines, and a first
+    shared intrinsic uniform bind group and pipeline layout for viewport transforms
+  - Missing: texture/sampler bind groups, wrapped resources, broader cache policy
 - `Context` -> `src/context.ts`
   - Status: `started`
   - What exists: context factory and recorder creation
@@ -102,9 +103,10 @@ stack that fits this repository's TypeScript and WebGPU architecture.
 - `DawnCommandBuffer` -> `src/command_buffer.ts`
   - Status: `partial`
   - What exists: clear plus direct fill replay, first patch-instance fill/stroke replay, convex-clip
-    geometry/scissor replay for intersect and exact difference cases, and chained stencil replay for
-    multiple complex intersect clip paths
-  - Missing: broader draw path and draw shape encoding, richer pass replay
+    scissor replay, stencil replay for complex clip paths, and intrinsic-uniform bind group replay
+    instead of CPU clip-space baking
+  - Missing: broader draw path and draw shape encoding, richer pass replay, and pass-level state
+    reuse closer to Skia
 - `DrawPass` -> `src/draw_pass.ts`
   - Status: `partial`
   - What exists: prepared pass partitioning plus pipeline-key, bounds, stencil, clip-stack metadata,
@@ -246,8 +248,9 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
 - Transform stack
   - Status: `started`
   - Current state: recorder save/restore and per-draw transform state exist without mutating stored
-    source geometry
-  - Missing: uniform-driven transform replay
+    source geometry, and viewport-to-clip conversion now runs through a shared intrinsic uniform
+    bind group
+  - Missing: per-draw local transform matrices in GPU uniforms instead of CPU-prepared geometry
 - Save/restore
   - Status: `started`
   - Current state: recorder state stack exists for transform and clip stack
@@ -336,8 +339,9 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
   - Current state: direct wrapper exists
   - Missing: canonicalization/cache
 - Bind groups
-  - Status: `pending`
-  - Missing: required for real draw execution
+  - Status: `started`
+  - Current state: a shared intrinsic uniform bind group now exists for all path pipelines
+  - Missing: texture/sampler bind groups and generalized caching
 - Shader modules
   - Status: `pending`
   - Missing: shader lifecycle
@@ -390,7 +394,7 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
 - Pipeline binding
   - Status: `started`
   - Basic fill, clip, and stroke pipelines exist for first path draws and are reused across command
-    buffers
+    buffers, with a shared explicit pipeline layout for intrinsic uniforms
 - Draw submission
   - Status: `started`
   - Command buffer submission helper exists for encoded clears and first fill draws
@@ -450,6 +454,8 @@ These decisions directly affect the remaining work and are not settled yet.
 - `Path2D` is still very small compared to Skia `SkPath`
 - recording snapshots can be partitioned into coarse draw passes, but they do not yet carry
   Skia-like pipeline/state/resource data
+- only viewport intrinsics are GPU-uniform driven; per-draw transform and paint data are still baked
+  into prepared geometry or vertex payloads
 - no Skia-like draw-list or draw-pass preparation layer yet
 - broader advanced curve/path features are still missing
 - curve patch preparation is closer to Skia Graphite terminology now, but it is still CPU-generated
@@ -530,16 +536,16 @@ These decisions directly affect the remaining work and are not settled yet.
 1. Deepen `src/caps.ts`
    - Replace static format assumptions with richer backend policy
    - Add feature-gated fallbacks
-2. Deepen clip-stack parity
+2. Move per-draw transform/painters toward bind groups
+   - Add local-to-device transform uniforms instead of CPU-baked vertex positions
+   - Separate shared intrinsic uniforms from per-draw paint/state buffers
+3. Deepen clip-stack parity
    - Add inverse and non-convex difference semantics comparable to Skia ClipStack
    - Extend the current stacked complex-intersect stencil path toward Graphite-style clip
      simplification and atlas-backed masking
-3. Harden the first fill path
+4. Harden the first fill path
    - Improve scanline fallback quality and unify it more cleanly with stencil rendering
-   - Add more winding and nested clip-path tests
-4. Improve transform and paint replay
-   - Move per-draw transform from CPU-prepared geometry toward uniform-driven replay
-   - Start separating paint data from vertex payloads and bind groups
+   - Add more winding, nested clip-path, and clip-op tests
 5. Add pipeline/resource caching
    - Extend reuse toward bind groups, transient buffers, and richer pipeline keys
 6. Add `src/queue_manager.ts`
@@ -548,6 +554,53 @@ These decisions directly affect the remaining work and are not settled yet.
 7. Expand `Path2D`
    - Add arcs/conics
    - Add more utility helpers
+
+## Skia Divergence Audit
+
+- `src/command_buffer.ts`
+  - Status: `partial`
+  - Difference from Skia: local vertices and patch instances were converted to clip space on the CPU
+    before upload, while Skia Graphite/Dawn binds intrinsic uniforms and lets shaders derive
+    clip-space positions during replay
+  - To match Skia more closely: keep geometry in device/local space, bind shared viewport
+    intrinsics, and move per-draw transforms into uniform or storage-backed state
+  - Validation: `deno test packages/drawing/tests/drawing_graphite_dawn_test.ts`
+- `src/resource_provider.ts`
+  - Status: `partial`
+  - Difference from Skia: no explicit bind group layouts or cached intrinsic bind groups existed, so
+    every pipeline relied on auto layout and could not grow toward Skia-style resource binding
+  - To match Skia more closely: own explicit bind group layouts, cache uniform/texture bind groups,
+    and let pipeline creation share those layouts
+  - Validation: `deno test packages/drawing/tests/drawing_graphite_dawn_test.ts`
+- `src/draw_pass.ts`
+  - Status: `partial`
+  - Difference from Skia: prepared steps only choose coarse pipeline keys, without the richer
+    pipeline/state/resource payloads Skia bakes into `DrawPass`
+  - To match Skia more closely: attach bind-group compatible draw state and batch-compatible replay
+    metadata to prepared steps
+  - Validation: pending
+- `src/caps.ts`
+  - Status: `started`
+  - Difference from Skia: format/sample/storage policy is still mostly static, while Skia DawnCaps
+    derives backend workarounds and format behavior from actual adapter/device capabilities
+  - To match Skia more closely: probe required features and encode fallback policies centrally
+  - Validation: basic caps unit tests only
+
+## Latest Update
+
+- 2026-03-22
+  - Files: `src/resource_provider.ts`, `src/command_buffer.ts`, `src/caps.ts`,
+    `src/queue_manager.ts`, `tests/drawing_graphite_dawn_test.ts`
+  - Status transition: resource binding `pending` -> `started`; `DawnResourceProvider` `started` ->
+    `partial`; `DawnQueueManager` `started` -> `partial`
+  - Change: ported the first Skia-like intrinsic uniform path so viewport-to-clip conversion now
+    uses a shared bind group and explicit pipeline layout instead of CPU clip-space baking,
+    non-stencil draws can batch into a shared render pass, caps policy now gates BGRA storage and
+    default sample count on enabled device features, and queue completion can track
+    `queue.onSubmittedWorkDone()` when exposed
+  - Remaining: per-draw transform uniforms, paint/state buffers, broader bind group caches, and
+    richer `DrawPass` metadata
+  - Validation: `deno test packages/drawing/tests/drawing_graphite_dawn_test.ts`
 
 ## Update Rules
 

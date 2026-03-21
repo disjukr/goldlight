@@ -44,9 +44,13 @@ const createMockGpuContext = () => {
   const finishedCommandBuffers: GPUCommandBuffer[] = [];
   const shaderModules: GPUShaderModuleDescriptor[] = [];
   const renderPipelines: GPURenderPipelineDescriptor[] = [];
+  const bindGroupLayouts: GPUBindGroupLayoutDescriptor[] = [];
+  const pipelineLayouts: GPUPipelineLayoutDescriptor[] = [];
+  const bindGroups: GPUBindGroupDescriptor[] = [];
   const drawCalls: number[] = [];
   const scissorCalls: Array<readonly [number, number, number, number]> = [];
   const stencilReferences: number[] = [];
+  const bindGroupCalls: number[] = [];
   const mappedBuffers: ArrayBuffer[] = [];
   const offscreenView = { label: 'offscreen-view' } as unknown as GPUTextureView;
   const ticks: number[] = [];
@@ -62,9 +66,13 @@ const createMockGpuContext = () => {
       finishedCommandBuffers,
       shaderModules,
       renderPipelines,
+      bindGroupLayouts,
+      pipelineLayouts,
+      bindGroups,
       drawCalls,
       scissorCalls,
       stencilReferences,
+      bindGroupCalls,
       mappedBuffers,
     },
     ticks,
@@ -107,6 +115,18 @@ const createMockGpuContext = () => {
           shaderModules.push(descriptor);
           return { descriptor } as unknown as GPUShaderModule;
         },
+        createBindGroupLayout: (descriptor: GPUBindGroupLayoutDescriptor) => {
+          bindGroupLayouts.push(descriptor);
+          return { descriptor } as unknown as GPUBindGroupLayout;
+        },
+        createPipelineLayout: (descriptor: GPUPipelineLayoutDescriptor) => {
+          pipelineLayouts.push(descriptor);
+          return { descriptor } as unknown as GPUPipelineLayout;
+        },
+        createBindGroup: (descriptor: GPUBindGroupDescriptor) => {
+          bindGroups.push(descriptor);
+          return { descriptor } as unknown as GPUBindGroup;
+        },
         createRenderPipeline: (descriptor: GPURenderPipelineDescriptor) => {
           renderPipelines.push(descriptor);
           return { descriptor } as unknown as GPURenderPipeline;
@@ -120,6 +140,9 @@ const createMockGpuContext = () => {
                 setVertexBuffer: () => undefined,
                 setScissorRect: (x: number, y: number, width: number, height: number) => {
                   scissorCalls.push([x, y, width, height]);
+                },
+                setBindGroup: (index: number) => {
+                  bindGroupCalls.push(index);
                 },
                 setStencilReference: (reference: number) => {
                   stencilReferences.push(reference);
@@ -990,6 +1013,8 @@ Deno.test('dawn command buffer encodes fill draws with stencil and cover pipelin
   assertEquals(mock.created.drawCalls.length, 2);
   assertEquals(mock.created.renderPasses[0]?.depthStencilAttachment, undefined);
   assertEquals(mock.created.scissorCalls[0], [4, 6, 40, 50]);
+  assertEquals(mock.created.bindGroupCalls, [0]);
+  assertEquals(mock.created.bindGroups.length, 1);
   assertEquals(
     mock.created.renderPasses[0]?.colorAttachments[0]?.clearValue,
     { r: 0.25, g: 0.5, b: 0.75, a: 1 },
@@ -1204,6 +1229,38 @@ Deno.test('dawn pipelines honor target sample count for MSAA', () => {
 
   encodeDawnCommandBuffer(sharedContext, finishDrawingRecorder(recorder), binding);
   assertEquals(mock.created.renderPipelines[0]?.multisample?.count, 4);
+});
+
+Deno.test('dawn command buffer uses intrinsic uniform bind group for viewport transforms', () => {
+  const mock = createMockGpuContext();
+  const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
+  const recorder = createDrawingRecorder(sharedContext);
+  const binding = createOffscreenBinding(mock.context);
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [16, 24] },
+      { kind: 'lineTo', to: [48, 24] },
+      { kind: 'lineTo', to: [48, 56] },
+      { kind: 'close' },
+    ),
+    { style: 'fill', color: [1, 0, 0, 1] },
+  );
+
+  encodeDawnCommandBuffer(sharedContext, finishDrawingRecorder(recorder), binding);
+
+  assertEquals(mock.created.bindGroupLayouts.length, 1);
+  assertEquals(mock.created.pipelineLayouts.length, 1);
+  assertEquals(mock.created.bindGroups.length, 1);
+  assertEquals(
+    [...new Float32Array(mock.created.mappedBuffers[0]!)],
+    [256, 256, 0, 0],
+  );
+  assertEquals(
+    [...new Float32Array(mock.created.mappedBuffers[1]!).slice(0, 6)],
+    [16, 24, 1, 0, 0, 1],
+  );
 });
 
 Deno.test('dawn queue manager tracks submit and tick completion', async () => {

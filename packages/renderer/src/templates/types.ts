@@ -9,19 +9,23 @@ export type TemplateMaterialVertexAttribute = Readonly<{
 export type TemplateMaterialBindingDescriptor = Readonly<
   | {
     kind: 'uniform';
+    group?: number;
     binding: number;
   }
   | {
     kind: 'alpha-policy';
+    group?: number;
     binding: number;
   }
   | {
     kind: 'texture';
+    group?: number;
     binding: number;
     textureSemantic: string;
   }
   | {
     kind: 'sampler';
+    group?: number;
     binding: number;
     textureSemantic: string;
   }
@@ -36,6 +40,7 @@ export type TemplateMaterialProgram = Readonly<{
   vertexAttributes: readonly TemplateMaterialVertexAttribute[];
   usesMaterialBindings?: boolean;
   usesTransformBindings?: boolean;
+  programBindings?: readonly TemplateMaterialBindingDescriptor[];
   materialBindings?: readonly TemplateMaterialBindingDescriptor[];
 }>;
 
@@ -69,6 +74,7 @@ export type TemplateBindingResource = Readonly<
   | {
     id: string;
     kind: 'uniform';
+    group?: number;
     binding?: number;
     varName: string;
     typeName: string;
@@ -76,6 +82,7 @@ export type TemplateBindingResource = Readonly<
   | {
     id: string;
     kind: 'alpha-policy';
+    group?: number;
     binding?: number;
     varName: string;
     typeName: string;
@@ -83,6 +90,7 @@ export type TemplateBindingResource = Readonly<
   | {
     id: string;
     kind: 'texture';
+    group?: number;
     binding?: number;
     textureSemantic: string;
     varName: string;
@@ -91,6 +99,7 @@ export type TemplateBindingResource = Readonly<
   | {
     id: string;
     kind: 'sampler';
+    group?: number;
     binding?: number;
     textureSemantic: string;
     varName: string;

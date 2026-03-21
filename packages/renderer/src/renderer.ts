@@ -115,8 +115,10 @@ export type GpuRenderExecutionContext = Readonly<{
   device: Pick<
     GPUDevice,
     | 'createBindGroup'
+    | 'createBindGroupLayout'
     | 'createBuffer'
     | 'createCommandEncoder'
+    | 'createPipelineLayout'
     | 'createRenderPipeline'
     | 'createSampler'
     | 'createShaderModule'
@@ -301,25 +303,30 @@ export type MaterialProgram = Readonly<{
   vertexAttributes: readonly MaterialVertexAttribute[];
   usesMaterialBindings?: boolean;
   usesTransformBindings?: boolean;
+  programBindings?: readonly MaterialBindingDescriptor[];
   materialBindings?: readonly MaterialBindingDescriptor[];
 }>;
 
 export type MaterialBindingDescriptor = Readonly<
   | {
     kind: 'uniform';
+    group?: number;
     binding: number;
   }
   | {
     kind: 'alpha-policy';
+    group?: number;
     binding: number;
   }
   | {
     kind: 'texture';
+    group?: number;
     binding: number;
     textureSemantic: string;
   }
   | {
     kind: 'sampler';
+    group?: number;
     binding: number;
     textureSemantic: string;
   }
@@ -373,6 +380,7 @@ export type MaterialTemplateBakeReport<TVariant extends BaseMaterialVariant = Ba
     activeFeatureIds: readonly string[];
     wgsl: string;
     bindings: readonly MaterialBindingDescriptor[];
+    programBindings?: readonly MaterialBindingDescriptor[];
     vertexAttributes: readonly MaterialVertexAttribute[];
   }>;
 
@@ -1220,6 +1228,11 @@ const builtInUnlitProgram: MaterialProgram = {
   fragmentEntryPoint: 'fsMain',
   usesMaterialBindings: true,
   usesTransformBindings: true,
+  programBindings: [{
+    kind: 'uniform',
+    group: 1,
+    binding: 0,
+  }],
   materialBindings: [{
     kind: 'uniform',
     binding: 0,
@@ -1241,6 +1254,42 @@ const builtInLitProgram: MaterialProgram = {
   fragmentEntryPoint: 'fsMain',
   usesMaterialBindings: true,
   usesTransformBindings: true,
+  programBindings: [
+    {
+      kind: 'uniform',
+      group: 1,
+      binding: 0,
+    },
+    {
+      kind: 'uniform',
+      group: 2,
+      binding: 0,
+    },
+    {
+      kind: 'texture',
+      group: 3,
+      binding: 0,
+      textureSemantic: 'environment',
+    },
+    {
+      kind: 'sampler',
+      group: 3,
+      binding: 1,
+      textureSemantic: 'environment',
+    },
+    {
+      kind: 'texture',
+      group: 3,
+      binding: 2,
+      textureSemantic: 'brdfLut',
+    },
+    {
+      kind: 'sampler',
+      group: 3,
+      binding: 3,
+      textureSemantic: 'brdfLut',
+    },
+  ],
   materialBindings: [{
     kind: 'uniform',
     binding: 0,
@@ -1271,6 +1320,22 @@ const builtInTexturedUnlitProgram: MaterialProgram = {
   fragmentEntryPoint: 'fsMain',
   usesMaterialBindings: true,
   usesTransformBindings: true,
+  programBindings: [
+    {
+      kind: 'uniform',
+      binding: 0,
+    },
+    {
+      kind: 'texture',
+      binding: 1,
+      textureSemantic: 'baseColor',
+    },
+    {
+      kind: 'sampler',
+      binding: 2,
+      textureSemantic: 'baseColor',
+    },
+  ],
   materialBindings: [
     {
       kind: 'uniform',
@@ -1313,18 +1378,69 @@ const builtInTexturedLitProgram: MaterialProgram = {
   fragmentEntryPoint: 'fsMain',
   usesMaterialBindings: true,
   usesTransformBindings: true,
-  materialBindings: [
+  programBindings: [
     {
       kind: 'uniform',
+      group: 1,
       binding: 0,
     },
     {
       kind: 'texture',
+      group: 1,
       binding: 1,
       textureSemantic: 'baseColor',
     },
     {
       kind: 'sampler',
+      group: 1,
+      binding: 2,
+      textureSemantic: 'baseColor',
+    },
+    {
+      kind: 'uniform',
+      group: 2,
+      binding: 0,
+    },
+    {
+      kind: 'texture',
+      group: 3,
+      binding: 0,
+      textureSemantic: 'environment',
+    },
+    {
+      kind: 'sampler',
+      group: 3,
+      binding: 1,
+      textureSemantic: 'environment',
+    },
+    {
+      kind: 'texture',
+      group: 3,
+      binding: 2,
+      textureSemantic: 'brdfLut',
+    },
+    {
+      kind: 'sampler',
+      group: 3,
+      binding: 3,
+      textureSemantic: 'brdfLut',
+    },
+  ],
+  materialBindings: [
+    {
+      kind: 'uniform',
+      group: 1,
+      binding: 0,
+    },
+    {
+      kind: 'texture',
+      group: 1,
+      binding: 1,
+      textureSemantic: 'baseColor',
+    },
+    {
+      kind: 'sampler',
+      group: 1,
       binding: 2,
       textureSemantic: 'baseColor',
     },
@@ -1396,7 +1512,8 @@ const builtInUnlitProgramTemplate: MaterialProgramTemplate<BuiltInUnlitTemplateV
       program: report.program,
       activeFeatureIds: report.activeFeatureIds,
       wgsl: report.spec.wgsl,
-      bindings: report.spec.bindings,
+      bindings: report.program.materialBindings ?? [],
+      programBindings: report.spec.bindings,
       vertexAttributes: report.spec.vertexAttributes,
     };
   },
@@ -1474,7 +1591,8 @@ const builtInLitProgramTemplate: MaterialProgramTemplate<BuiltInLitTemplateVaria
       program: report.program,
       activeFeatureIds: report.activeFeatureIds,
       wgsl: report.spec.wgsl,
-      bindings: report.spec.bindings,
+      bindings: report.program.materialBindings ?? [],
+      programBindings: report.spec.bindings,
       vertexAttributes: report.spec.vertexAttributes,
     };
   },
@@ -1684,6 +1802,7 @@ export const inspectMaterialTemplateBake = <TVariant extends BaseMaterialVariant
     activeFeatureIds: [],
     wgsl: program.wgsl,
     bindings: getMaterialBindingDescriptors(program),
+    programBindings: getProgramBindingDescriptors(program),
     vertexAttributes: program.vertexAttributes,
   };
 };
@@ -1930,10 +2049,22 @@ const defaultMaterialBindings = [{
   binding: 0,
 }] as const satisfies readonly MaterialBindingDescriptor[];
 
+const getProgramBindingGroup = (descriptor: MaterialBindingDescriptor): number =>
+  descriptor.group ?? 1;
+
+const getProgramBindingDescriptors = (
+  program: MaterialProgram,
+): readonly MaterialBindingDescriptor[] =>
+  program.programBindings ?? program.materialBindings ??
+    (program.usesMaterialBindings ? defaultMaterialBindings : []);
+
 const getMaterialBindingDescriptors = (
   program: MaterialProgram,
 ): readonly MaterialBindingDescriptor[] =>
-  program.materialBindings ?? (program.usesMaterialBindings ? defaultMaterialBindings : []);
+  program.materialBindings ??
+    getProgramBindingDescriptors(program).filter((descriptor) =>
+      getProgramBindingGroup(descriptor) === 1
+    );
 
 const resolveMaterialBindingResource = (
   context: GpuRenderExecutionContext,
@@ -1994,6 +2125,58 @@ const resolveMaterialBindingResource = (
       };
     }
   }
+};
+
+const resolveForwardPassBindingResource = (
+  descriptor: MaterialBindingDescriptor,
+  lightingBuffer: GPUBuffer,
+  environment: ReturnType<typeof ensureForwardEnvironmentTexture>,
+  environmentBrdfLut: ReturnType<typeof ensureForwardEnvironmentBrdfLut>,
+): GPUBindGroupEntry => {
+  switch (descriptor.kind) {
+    case 'uniform':
+    case 'alpha-policy':
+      return {
+        binding: descriptor.binding,
+        resource: {
+          buffer: lightingBuffer,
+        },
+      };
+    case 'texture':
+      if (descriptor.textureSemantic === 'environment') {
+        return {
+          binding: descriptor.binding,
+          resource: environment.residency.view,
+        };
+      }
+      if (descriptor.textureSemantic === 'brdfLut') {
+        return {
+          binding: descriptor.binding,
+          resource: environmentBrdfLut.view,
+        };
+      }
+      break;
+    case 'sampler':
+      if (descriptor.textureSemantic === 'environment') {
+        return {
+          binding: descriptor.binding,
+          resource: environment.residency.sampler,
+        };
+      }
+      if (descriptor.textureSemantic === 'brdfLut') {
+        return {
+          binding: descriptor.binding,
+          resource: environmentBrdfLut.sampler,
+        };
+      }
+      break;
+  }
+
+  throw new Error(
+    `unsupported forward pass binding "${descriptor.kind}"${
+      'textureSemantic' in descriptor ? `:${descriptor.textureSemantic}` : ''
+    } in group ${getProgramBindingGroup(descriptor)}`,
+  );
 };
 
 const createPostProcessPassPlans = (
@@ -3724,6 +3907,12 @@ const renderForwardMeshPass = (
     }
 
     if (usesLitMaterialProgram(program)) {
+      const lightingBindings = getProgramBindingDescriptors(program).filter((descriptor) =>
+        getProgramBindingGroup(descriptor) === 2
+      );
+      const environmentBindings = getProgramBindingDescriptors(program).filter((descriptor) =>
+        getProgramBindingGroup(descriptor) === 3
+      );
       const lightingData = createDirectionalLightUniformData(
         directionalLights,
         cameraPosition,
@@ -3736,42 +3925,38 @@ const renderForwardMeshPass = (
         usage: uniformUsage | bufferCopyDstUsage,
       });
       context.queue.writeBuffer(lightingBuffer, 0, toBufferSource(lightingData));
-      pass.setBindGroup(
-        2,
-        context.device.createBindGroup({
-          layout: pipeline.getBindGroupLayout(2),
-          entries: [{
-            binding: 0,
-            resource: {
-              buffer: lightingBuffer,
-            },
-          }],
-        }),
-      );
-      pass.setBindGroup(
-        3,
-        context.device.createBindGroup({
-          layout: pipeline.getBindGroupLayout(3),
-          entries: [
-            {
-              binding: 0,
-              resource: environment.residency.view,
-            },
-            {
-              binding: 1,
-              resource: environment.residency.sampler,
-            },
-            {
-              binding: 2,
-              resource: environmentBrdfLut.view,
-            },
-            {
-              binding: 3,
-              resource: environmentBrdfLut.sampler,
-            },
-          ],
-        }),
-      );
+      if (lightingBindings.length > 0) {
+        pass.setBindGroup(
+          2,
+          context.device.createBindGroup({
+            layout: pipeline.getBindGroupLayout(2),
+            entries: lightingBindings.map((descriptor) =>
+              resolveForwardPassBindingResource(
+                descriptor,
+                lightingBuffer,
+                environment,
+                environmentBrdfLut,
+              )
+            ),
+          }),
+        );
+      }
+      if (environmentBindings.length > 0) {
+        pass.setBindGroup(
+          3,
+          context.device.createBindGroup({
+            layout: pipeline.getBindGroupLayout(3),
+            entries: environmentBindings.map((descriptor) =>
+              resolveForwardPassBindingResource(
+                descriptor,
+                lightingBuffer,
+                environment,
+                environmentBrdfLut,
+              )
+            ),
+          }),
+        );
+      }
     }
 
     if (geometry.indexBuffer && geometry.indexCount > 0) {
@@ -4024,9 +4209,64 @@ export const ensureMaterialPipeline = (
     preparedProgram.key,
     preparedProgram.program.wgsl,
   );
+  const programBindings = getProgramBindingDescriptors(preparedProgram.program);
+  const bindGroupDescriptors = new Map<number, MaterialBindingDescriptor[]>();
+  if (preparedProgram.program.usesTransformBindings) {
+    bindGroupDescriptors.set(0, [{ kind: 'uniform', group: 0, binding: 0 }]);
+  }
+  for (const descriptor of programBindings) {
+    const group = getProgramBindingGroup(descriptor);
+    const groupDescriptors = bindGroupDescriptors.get(group) ?? [];
+    groupDescriptors.push(descriptor);
+    bindGroupDescriptors.set(group, groupDescriptors);
+  }
+  const canCreateExplicitLayouts = 'createBindGroupLayout' in context.device &&
+    typeof context.device.createBindGroupLayout === 'function' &&
+    'createPipelineLayout' in context.device &&
+    typeof context.device.createPipelineLayout === 'function';
+  const explicitLayout = canCreateExplicitLayouts
+    ? context.device.createPipelineLayout({
+      label: `${cacheKey}:layout`,
+      bindGroupLayouts: Array.from(
+        { length: Math.max(...bindGroupDescriptors.keys(), 0) + 1 },
+        (_value, group) => {
+          const descriptors = bindGroupDescriptors.get(group) ?? [];
+          return context.device.createBindGroupLayout({
+            label: `${cacheKey}:group-${group}`,
+            entries: descriptors
+              .slice()
+              .sort((left, right) => left.binding - right.binding)
+              .map((descriptor) => {
+                switch (descriptor.kind) {
+                  case 'uniform':
+                  case 'alpha-policy':
+                    return {
+                      binding: descriptor.binding,
+                      visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+                      buffer: { type: 'uniform' as const },
+                    };
+                  case 'texture':
+                    return {
+                      binding: descriptor.binding,
+                      visibility: GPUShaderStage.FRAGMENT,
+                      texture: { sampleType: 'float' as const },
+                    };
+                  case 'sampler':
+                    return {
+                      binding: descriptor.binding,
+                      visibility: GPUShaderStage.FRAGMENT,
+                      sampler: { type: 'filtering' as const },
+                    };
+                }
+              }),
+          });
+        },
+      ),
+    })
+    : 'auto';
   const pipeline = context.device.createRenderPipeline({
     label: cacheKey,
-    layout: 'auto',
+    layout: explicitLayout,
     vertex: {
       module: shader,
       entryPoint: preparedProgram.program.vertexEntryPoint,

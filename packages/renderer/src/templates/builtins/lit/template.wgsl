@@ -120,11 +120,6 @@ struct VsOut {
 
 @group(0) @binding(0) var<uniform> meshTransform: MeshTransform;
 // @slot bindings
-@group(2) @binding(0) var<uniform> lighting: LightingUniforms;
-@group(3) @binding(0) var environmentTexture: texture_2d<f32>;
-@group(3) @binding(1) var environmentSampler: sampler;
-@group(3) @binding(2) var brdfLutTexture: texture_2d<f32>;
-@group(3) @binding(3) var brdfLutSampler: sampler;
 
 @vertex
 fn vsMain(
@@ -156,16 +151,24 @@ fn fsMain(inValue: VsOut) -> @location(0) vec4<f32> {
   var baseColor = material.values[0];
   var emissive = material.values[2].xyz;
   var metallic = clamp(material.values[3].x, 0.0, 1.0);
-  var roughness = clamp(material.values[3].y, 0.04, 1.0);
+  var roughness = clamp(material.values[3].y, 0.0, 1.0);
   var occlusion = 1.0;
   var surfaceNormal = normalize(in.worldNormal);
 // @slot fragment_body
   let lightCount = i32(lighting.settings.x);
   let ambient = lighting.settings.y;
   let surfaceColor = baseColor.rgb;
+  let nonPerturbedNormal = normalize(in.worldNormal);
+  let normalDxy = max(abs(dpdx(nonPerturbedNormal)), abs(dpdy(nonPerturbedNormal)));
+  let geometryRoughness = max(max(normalDxy.x, normalDxy.y), normalDxy.z);
+  roughness = max(roughness, 0.0525);
+  roughness = min(roughness + geometryRoughness, 1.0);
   let viewDirection = normalize(lighting.cameraPosition.xyz - in.worldPosition);
   let nDotV = max(dot(surfaceNormal, viewDirection), 1e-4);
-  let reflectionDirection = reflect(-viewDirection, surfaceNormal);
+  let reflectedViewDirection = reflect(-viewDirection, surfaceNormal);
+  let reflectionDirection = normalize(
+    mix(reflectedViewDirection, surfaceNormal, roughness * roughness),
+  );
   let dielectricF0 = vec3<f32>(0.04, 0.04, 0.04);
   let f0 = mix(dielectricF0, surfaceColor, metallic);
   let diffuseColor = surfaceColor * (1.0 - metallic);

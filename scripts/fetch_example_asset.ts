@@ -1,26 +1,26 @@
 import { emptyDir, ensureDir } from '@std/fs';
 import { dirname, fromFileUrl, join, resolve } from '@std/path';
 
-type AssetTarget = 'stanford-bunny' | 'damaged-helmet' | 'sponza';
+type AssetTarget = 'stanford-bunny' | 'damaged-helmet' | 'sponza' | 'hdri';
 
 const repoRoot = resolve(dirname(fromFileUrl(import.meta.url)), '..');
 const includedAssetsRoot = join(repoRoot, 'examples', 'assets');
 
-const assetTargets = new Set<AssetTarget>(['stanford-bunny', 'damaged-helmet', 'sponza']);
+const assetTargets = new Set<AssetTarget>(['stanford-bunny', 'damaged-helmet', 'sponza', 'hdri']);
 
 const parseTargets = (args: readonly string[]): AssetTarget[] => {
   if (args.length === 0 || args.includes('included')) {
-    return ['stanford-bunny', 'damaged-helmet'];
+    return ['stanford-bunny', 'damaged-helmet', 'hdri'];
   }
 
   if (args.includes('all')) {
-    return ['stanford-bunny', 'damaged-helmet', 'sponza'];
+    return ['stanford-bunny', 'damaged-helmet', 'sponza', 'hdri'];
   }
 
   const targets = args.filter((arg): arg is AssetTarget => assetTargets.has(arg as AssetTarget));
   if (targets.length === 0) {
     throw new Error(
-      'usage: deno run -A ./scripts/fetch_example_asset.ts [included|all|stanford-bunny|damaged-helmet|sponza]',
+      'usage: deno run -A ./scripts/fetch_example_asset.ts [included|all|stanford-bunny|damaged-helmet|sponza|hdri]',
     );
   }
 
@@ -118,6 +118,30 @@ const fetchSponza = async () => {
   }
 };
 
+const fetchHdriSamples = async () => {
+  const assetRoot = join(includedAssetsRoot, 'hdri');
+  await ensureDir(assetRoot);
+
+  const downloads = [
+    {
+      url: 'https://dl.polyhaven.org/file/ph-assets/HDRIs/exr/1k/poly_haven_studio_1k.exr',
+      path: join(assetRoot, 'poly_haven_studio_1k.exr'),
+    },
+    {
+      url: 'https://dl.polyhaven.org/file/ph-assets/HDRIs/exr/1k/ferndale_studio_08_1k.exr',
+      path: join(assetRoot, 'ferndale_studio_08_1k.exr'),
+    },
+    {
+      url: 'https://dl.polyhaven.org/file/ph-assets/HDRIs/exr/1k/pav_studio_01_1k.exr',
+      path: join(assetRoot, 'pav_studio_01_1k.exr'),
+    },
+  ] as const;
+
+  for (const download of downloads) {
+    await downloadToFile(download.url, download.path);
+  }
+};
+
 const targets = parseTargets(Deno.args);
 for (const target of targets) {
   switch (target) {
@@ -129,6 +153,9 @@ for (const target of targets) {
       break;
     case 'sponza':
       await fetchSponza();
+      break;
+    case 'hdri':
+      await fetchHdriSamples();
       break;
   }
 }

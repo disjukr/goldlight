@@ -49,20 +49,23 @@ const createBindingDescriptor = (
   resource: TemplateBindingResource,
   binding: number,
 ): TemplateMaterialBindingDescriptor => {
+  const group = resource.group ?? 1;
   switch (resource.kind) {
     case 'uniform':
-      return { kind: 'uniform', binding };
+      return { kind: 'uniform', group, binding };
     case 'alpha-policy':
-      return { kind: 'alpha-policy', binding };
+      return { kind: 'alpha-policy', group, binding };
     case 'texture':
       return {
         kind: 'texture',
+        group,
         binding,
         textureSemantic: resource.textureSemantic,
       };
     case 'sampler':
       return {
         kind: 'sampler',
+        group,
         binding,
         textureSemantic: resource.textureSemantic,
       };
@@ -73,15 +76,16 @@ const createBindingDeclaration = (
   resource: TemplateBindingResource,
   binding: number,
 ): string => {
+  const group = resource.group ?? 1;
   switch (resource.kind) {
     case 'uniform':
-      return `@group(1) @binding(${binding}) var<uniform> ${resource.varName}: ${resource.typeName};`;
+      return `@group(${group}) @binding(${binding}) var<uniform> ${resource.varName}: ${resource.typeName};`;
     case 'alpha-policy':
-      return `@group(1) @binding(${binding}) var<uniform> ${resource.varName}: ${resource.typeName};`;
+      return `@group(${group}) @binding(${binding}) var<uniform> ${resource.varName}: ${resource.typeName};`;
     case 'texture':
-      return `@group(1) @binding(${binding}) var ${resource.varName}: ${resource.textureType};`;
+      return `@group(${group}) @binding(${binding}) var ${resource.varName}: ${resource.textureType};`;
     case 'sampler':
-      return `@group(1) @binding(${binding}) var ${resource.varName}: sampler;`;
+      return `@group(${group}) @binding(${binding}) var ${resource.varName}: sampler;`;
   }
 };
 
@@ -91,13 +95,15 @@ const assignBindings = (
   bindings: readonly TemplateMaterialBindingDescriptor[];
   declarations: readonly string[];
 }> => {
-  let nextBinding = 0;
+  const nextBindings = new Map<number, number>();
   const bindings: TemplateMaterialBindingDescriptor[] = [];
   const declarations: string[] = [];
 
   for (const resource of resources) {
+    const group = resource.group ?? 1;
+    const nextBinding = nextBindings.get(group) ?? 0;
     const binding = resource.binding ?? nextBinding;
-    nextBinding = Math.max(nextBinding, binding + 1);
+    nextBindings.set(group, Math.max(nextBinding, binding + 1));
     bindings.push(createBindingDescriptor(resource, binding));
     declarations.push(createBindingDeclaration(resource, binding));
   }

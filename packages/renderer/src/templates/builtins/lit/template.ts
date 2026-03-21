@@ -8,6 +8,9 @@ import emissiveTextureFeatureSource from './features/emissive_texture.wgsl' with
 import metallicRoughnessTextureFeatureSource from './features/metallic_roughness_texture.wgsl' with {
   type: 'text',
 };
+import normalTextureDerivativeFeatureSource from './features/normal_texture_derivative.wgsl' with {
+  type: 'text',
+};
 import normalTextureFeatureSource from './features/normal_texture.wgsl' with {
   type: 'text',
 };
@@ -32,6 +35,7 @@ export type BuiltInLitTemplateVariant =
     usesMetallicRoughnessTexture: boolean;
     usesNormalTexture: boolean;
     usesOcclusionTexture: boolean;
+    usesTangent: boolean;
     usesTexcoord0: boolean;
   }>;
 
@@ -57,6 +61,14 @@ const texcoordVertexAttribute = {
   format: 'float32x2',
   offset: 0,
   arrayStride: 8,
+} as const;
+
+const tangentVertexAttribute = {
+  semantic: 'TANGENT',
+  shaderLocation: 3,
+  format: 'float32x4',
+  offset: 0,
+  arrayStride: 16,
 } as const;
 
 const baseColorTextureFeature = createShaderTemplateFeature<BuiltInLitTemplateVariant>({
@@ -103,8 +115,8 @@ const metallicRoughnessTextureFeature = createShaderTemplateFeature<BuiltInLitTe
 });
 
 const normalTextureFeature = createShaderTemplateFeature<BuiltInLitTemplateVariant>({
-  id: 'normal_texture',
-  when: (variant) => variant.usesNormalTexture && variant.usesTexcoord0,
+  id: 'normal_texture_tangent',
+  when: (variant) => variant.usesNormalTexture && variant.usesTexcoord0 && variant.usesTangent,
   resources: [
     {
       id: 'normalTexture',
@@ -120,7 +132,29 @@ const normalTextureFeature = createShaderTemplateFeature<BuiltInLitTemplateVaria
       varName: 'normalSampler',
     },
   ],
+  vertexAttributes: [tangentVertexAttribute],
   source: normalTextureFeatureSource,
+});
+
+const normalTextureDerivativeFeature = createShaderTemplateFeature<BuiltInLitTemplateVariant>({
+  id: 'normal_texture',
+  when: (variant) => variant.usesNormalTexture && variant.usesTexcoord0 && !variant.usesTangent,
+  resources: [
+    {
+      id: 'normalTexture',
+      kind: 'texture',
+      textureSemantic: 'normal',
+      varName: 'normalTexture',
+      textureType: 'texture_2d<f32>',
+    },
+    {
+      id: 'normalSampler',
+      kind: 'sampler',
+      textureSemantic: 'normal',
+      varName: 'normalSampler',
+    },
+  ],
+  source: normalTextureDerivativeFeatureSource,
 });
 
 const occlusionTextureFeature = createShaderTemplateFeature<BuiltInLitTemplateVariant>({
@@ -178,15 +212,54 @@ const builtInLitShaderTemplate: ShaderTemplate<BuiltInLitTemplateVariant> = {
   baseResources: [{
     id: 'materialUniforms',
     kind: 'uniform',
+    group: 1,
     binding: 0,
     varName: 'material',
     typeName: 'MaterialUniforms',
+  }, {
+    id: 'lightingUniforms',
+    kind: 'uniform',
+    group: 2,
+    binding: 0,
+    varName: 'lighting',
+    typeName: 'LightingUniforms',
+  }, {
+    id: 'environmentTexture',
+    kind: 'texture',
+    group: 3,
+    binding: 0,
+    textureSemantic: 'environment',
+    varName: 'environmentTexture',
+    textureType: 'texture_2d<f32>',
+  }, {
+    id: 'environmentSampler',
+    kind: 'sampler',
+    group: 3,
+    binding: 1,
+    textureSemantic: 'environment',
+    varName: 'environmentSampler',
+  }, {
+    id: 'brdfLutTexture',
+    kind: 'texture',
+    group: 3,
+    binding: 2,
+    textureSemantic: 'brdfLut',
+    varName: 'brdfLutTexture',
+    textureType: 'texture_2d<f32>',
+  }, {
+    id: 'brdfLutSampler',
+    kind: 'sampler',
+    group: 3,
+    binding: 3,
+    textureSemantic: 'brdfLut',
+    varName: 'brdfLutSampler',
   }],
   baseVertexAttributes: [positionVertexAttribute, normalVertexAttribute],
   features: [
     baseColorTextureFeature,
     metallicRoughnessTextureFeature,
     normalTextureFeature,
+    normalTextureDerivativeFeature,
     occlusionTextureFeature,
     emissiveTextureFeature,
     alphaMaskFeature,

@@ -7,7 +7,14 @@ export const emitMaterialProgram = (spec: ProgramSpec): TemplateMaterialProgram 
   vertexEntryPoint: spec.vertexEntryPoint,
   fragmentEntryPoint: spec.fragmentEntryPoint,
   vertexAttributes: spec.vertexAttributes,
-  usesMaterialBindings: spec.usesMaterialBindings,
+  usesMaterialBindings: spec.usesMaterialBindings &&
+    spec.bindings.some((binding) => binding.group === 1),
   usesTransformBindings: spec.usesTransformBindings,
-  materialBindings: spec.bindings,
+  programBindings: spec.bindings,
+  materialBindings: spec.bindings
+    .filter((binding) => binding.group === 1)
+    .map((binding) => {
+      const { group: _group, ...descriptor } = binding;
+      return descriptor;
+    }),
 });

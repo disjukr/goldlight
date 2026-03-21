@@ -134,7 +134,7 @@ Deno.test('createTextureUploadPlan derives texture dimensions and upload layout'
   assertEquals(plan.width, 2);
   assertEquals(plan.height, 2);
   assertEquals(plan.bytesPerRow, 8);
-  assertEquals(plan.format, 'rgba8unorm');
+  assertEquals(plan.format, 'rgba8unorm-srgb');
 });
 
 Deno.test('uploadTextureResidency creates texture, view, sampler, and upload write', () => {
@@ -156,6 +156,7 @@ Deno.test('uploadTextureResidency creates texture, view, sampler, and upload wri
   assertEquals(context.textures.length, 1);
   assertEquals(context.samplers.length, 1);
   assertEquals(context.writes.length, 1);
+  assertEquals(context.textures[0].format, 'rgba8unorm-srgb');
   assertEquals(context.samplers[0].descriptor.magFilter, 'nearest');
   assertEquals(context.samplers[0].descriptor.addressModeU, 'clamp-to-edge');
 });

@@ -1,6 +1,7 @@
 import { assertAlmostEquals, assertEquals, assertThrows } from 'jsr:@std/assert@^1.0.14';
 import {
   createMeshNormalsAttribute,
+  createMeshTangentsAttribute,
   createQuaternionFromEulerDegrees,
   getMeshBounds,
 } from '@rieul3d/core';
@@ -161,4 +162,38 @@ Deno.test('createMeshNormalsAttribute rejects invalid triangle topology', () => 
       }],
     }))
   );
+});
+
+Deno.test('createMeshTangentsAttribute builds tangent basis from indexed uv triangles', () => {
+  const tangents = createMeshTangentsAttribute(createMesh({
+    id: 'mesh',
+    indices: [0, 1, 2],
+    attributes: [
+      {
+        semantic: 'POSITION',
+        itemSize: 3,
+        values: [0, 0, 0, 1, 0, 0, 0, 1, 0],
+      },
+      {
+        semantic: 'NORMAL',
+        itemSize: 3,
+        values: [0, 0, 1, 0, 0, 1, 0, 0, 1],
+      },
+      {
+        semantic: 'TEXCOORD_0',
+        itemSize: 2,
+        values: [0, 0, 1, 0, 0, 1],
+      },
+    ],
+  }));
+
+  assertEquals(tangents.semantic, 'TANGENT');
+  assertEquals(tangents.itemSize, 4);
+  assertEquals(tangents.values.length, 12);
+  for (let index = 0; index < tangents.values.length; index += 4) {
+    assertAlmostEquals(tangents.values[index] ?? 0, 1, 1e-6);
+    assertAlmostEquals(tangents.values[index + 1] ?? 0, 0, 1e-6);
+    assertAlmostEquals(tangents.values[index + 2] ?? 0, 0, 1e-6);
+    assertAlmostEquals(Math.abs(tangents.values[index + 3] ?? 0), 1, 1e-6);
+  }
 });

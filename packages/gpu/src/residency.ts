@@ -645,6 +645,18 @@ const inlineImageAssetToRuntime = (
   };
 };
 
+const resolveRuntimeTextureFormat = (
+  textureRef: SceneIr['textures'][number],
+  imageAsset: ImageAsset,
+): GPUTextureFormat => {
+  if (imageAsset.pixelFormat === 'rgba8unorm' && textureRef.colorSpace === 'srgb') {
+    return 'rgba8unorm-srgb';
+  }
+
+  return imageAsset.pixelFormat ??
+    (textureRef.colorSpace === 'srgb' ? 'rgba8unorm-srgb' : 'rgba8unorm');
+};
+
 export const createTextureUploadPlan = (
   textureRef: SceneIr['textures'][number],
   imageAsset: ImageAsset,
@@ -659,7 +671,7 @@ export const createTextureUploadPlan = (
     textureId: textureRef.id,
     width: decodedAsset.width,
     height: decodedAsset.height,
-    format: decodedAsset.pixelFormat ?? 'rgba8unorm',
+    format: resolveRuntimeTextureFormat(textureRef, decodedAsset),
     bytesPerRow: decodedAsset.bytesPerRow ?? decodedAsset.width * 4,
     rowsPerImage: decodedAsset.rowsPerImage ?? decodedAsset.height,
   };

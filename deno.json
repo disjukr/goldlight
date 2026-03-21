@@ -46,6 +46,7 @@
     "asset:examples": "deno run -A ./scripts/fetch_example_asset.ts included",
     "asset:stanford-bunny": "deno run -A ./scripts/fetch_example_asset.ts stanford-bunny",
     "asset:damaged-helmet": "deno run -A ./scripts/fetch_example_asset.ts damaged-helmet",
+    "asset:hdri": "deno run -A ./scripts/fetch_example_asset.ts hdri",
     "asset:sponza": "deno run -A ./scripts/fetch_example_asset.ts sponza",
     "desktop:host:build": "deno run -A ./scripts/build_desktop_host.ts",
     "desktop:host:check": "deno run -A ./scripts/build_desktop_host.ts --check",

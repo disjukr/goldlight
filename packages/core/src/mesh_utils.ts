@@ -181,3 +181,138 @@ export const createMeshNormalsAttribute = (mesh: MeshPrimitive): MeshAttribute =
     values: Array.from(normals),
   };
 };
+
+export const createMeshTangentsAttribute = (mesh: MeshPrimitive): MeshAttribute => {
+  const positions = getPositionValues(mesh);
+  const normals = mesh.attributes.find((attribute) => attribute.semantic === 'NORMAL')?.values;
+  const texcoords = mesh.attributes.find((attribute) => attribute.semantic === 'TEXCOORD_0')
+    ?.values;
+
+  if (!normals || normals.length !== positions.length) {
+    throw new Error(`Mesh "${mesh.id}" is missing NORMAL data required for tangent generation`);
+  }
+  if (!texcoords || texcoords.length !== (positions.length / 3) * 2) {
+    throw new Error(`Mesh "${mesh.id}" is missing TEXCOORD_0 data required for tangent generation`);
+  }
+
+  const vertexCount = positions.length / 3;
+  const tan1 = new Float32Array(vertexCount * 3);
+  const tan2 = new Float32Array(vertexCount * 3);
+  const tangents = new Float32Array(vertexCount * 4);
+  const indices = mesh.indices;
+
+  const accumulateTriangle = (aIndex: number, bIndex: number, cIndex: number) => {
+    const a = requireTriangleIndex(mesh, vertexCount, aIndex);
+    const b = requireTriangleIndex(mesh, vertexCount, bIndex);
+    const c = requireTriangleIndex(mesh, vertexCount, cIndex);
+
+    const ax = positions[a * 3] ?? 0;
+    const ay = positions[(a * 3) + 1] ?? 0;
+    const az = positions[(a * 3) + 2] ?? 0;
+    const bx = positions[b * 3] ?? 0;
+    const by = positions[(b * 3) + 1] ?? 0;
+    const bz = positions[(b * 3) + 2] ?? 0;
+    const cx = positions[c * 3] ?? 0;
+    const cy = positions[(c * 3) + 1] ?? 0;
+    const cz = positions[(c * 3) + 2] ?? 0;
+
+    const au = texcoords[a * 2] ?? 0;
+    const av = texcoords[(a * 2) + 1] ?? 0;
+    const bu = texcoords[b * 2] ?? 0;
+    const bv = texcoords[(b * 2) + 1] ?? 0;
+    const cu = texcoords[c * 2] ?? 0;
+    const cv = texcoords[(c * 2) + 1] ?? 0;
+
+    const x1 = bx - ax;
+    const y1 = by - ay;
+    const z1 = bz - az;
+    const x2 = cx - ax;
+    const y2 = cy - ay;
+    const z2 = cz - az;
+    const s1 = bu - au;
+    const t1 = bv - av;
+    const s2 = cu - au;
+    const t2 = cv - av;
+    const denominator = (s1 * t2) - (s2 * t1);
+    if (Math.abs(denominator) <= 1e-8) {
+      return;
+    }
+
+    const inverse = 1 / denominator;
+    const tangent = [
+      (t2 * x1 - t1 * x2) * inverse,
+      (t2 * y1 - t1 * y2) * inverse,
+      (t2 * z1 - t1 * z2) * inverse,
+    ] as const;
+    const bitangent = [
+      (s1 * x2 - s2 * x1) * inverse,
+      (s1 * y2 - s2 * y1) * inverse,
+      (s1 * z2 - s2 * z1) * inverse,
+    ] as const;
+
+    for (const index of [a, b, c]) {
+      tan1[index * 3] += tangent[0];
+      tan1[(index * 3) + 1] += tangent[1];
+      tan1[(index * 3) + 2] += tangent[2];
+      tan2[index * 3] += bitangent[0];
+      tan2[(index * 3) + 1] += bitangent[1];
+      tan2[(index * 3) + 2] += bitangent[2];
+    }
+  };
+
+  if (indices && indices.length > 0) {
+    if (indices.length % 3 !== 0) {
+      throw new Error(`Mesh "${mesh.id}" must provide triangle indices in groups of three`);
+    }
+    for (let index = 0; index < indices.length; index += 3) {
+      accumulateTriangle(indices[index] ?? -1, indices[index + 1] ?? -1, indices[index + 2] ?? -1);
+    }
+  } else {
+    if (vertexCount % 3 !== 0) {
+      throw new Error(
+        `Mesh "${mesh.id}" must provide indexed triangles or a non-indexed POSITION count divisible by three`,
+      );
+    }
+    for (let index = 0; index < vertexCount; index += 3) {
+      accumulateTriangle(index, index + 1, index + 2);
+    }
+  }
+
+  for (let index = 0; index < vertexCount; index += 1) {
+    const nx = normals[index * 3] ?? 0;
+    const ny = normals[(index * 3) + 1] ?? 0;
+    const nz = normals[(index * 3) + 2] ?? 0;
+    const tx = tan1[index * 3] ?? 0;
+    const ty = tan1[(index * 3) + 1] ?? 0;
+    const tz = tan1[(index * 3) + 2] ?? 0;
+    const handednessX = tan2[index * 3] ?? 0;
+    const handednessY = tan2[(index * 3) + 1] ?? 0;
+    const handednessZ = tan2[(index * 3) + 2] ?? 0;
+
+    const dot = (nx * tx) + (ny * ty) + (nz * tz);
+    let tangentX = tx - (nx * dot);
+    let tangentY = ty - (ny * dot);
+    let tangentZ = tz - (nz * dot);
+    const tangentLength = Math.hypot(tangentX, tangentY, tangentZ) || 1;
+    tangentX /= tangentLength;
+    tangentY /= tangentLength;
+    tangentZ /= tangentLength;
+
+    const crossX = (ny * tangentZ) - (nz * tangentY);
+    const crossY = (nz * tangentX) - (nx * tangentZ);
+    const crossZ = (nx * tangentY) - (ny * tangentX);
+    const handedness =
+      ((crossX * handednessX) + (crossY * handednessY) + (crossZ * handednessZ)) < 0 ? -1 : 1;
+
+    tangents[index * 4] = tangentX;
+    tangents[(index * 4) + 1] = tangentY;
+    tangents[(index * 4) + 2] = tangentZ;
+    tangents[(index * 4) + 3] = handedness;
+  }
+
+  return {
+    semantic: 'TANGENT',
+    itemSize: 4,
+    values: Array.from(tangents),
+  };
+};

@@ -150,6 +150,10 @@ export default async (
     alphaMode: 'opaque' as const,
   };
   const gpuContext = await requestGpuContext({ target });
+  gpuContext.device.addEventListener('uncapturederror', (event) => {
+    const detail = event as Event & { error?: unknown };
+    console.error('[helmet-forward] GPU uncaptured error:', detail.error ?? event);
+  });
   const binding = createSurfaceBinding(gpuContext, window.canvasContext);
   const residency = createRuntimeResidency();
   const materialRegistry = createMaterialRegistry();

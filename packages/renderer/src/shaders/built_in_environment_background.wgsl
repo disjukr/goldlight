@@ -49,9 +49,17 @@ fn directionToEquirectUv(direction: vec3<f32>) -> vec2<f32> {
   );
 }
 
-@fragment
-fn fsMain(in: VsOut) -> @location(0) vec4<f32> {
-  let ndc = vec2<f32>(in.uv.x * 2.0 - 1.0, 1.0 - in.uv.y * 2.0);
+fn toneMapAcesApprox(color: vec3<f32>) -> vec3<f32> {
+  let a = 2.51;
+  let b = 0.03;
+  let c = 2.43;
+  let d = 0.59;
+  let e = 0.14;
+  return clamp((color * (a * color + b)) / (color * (c * color + d) + e), vec3<f32>(0.0), vec3<f32>(1.0));
+}
+
+fn sampleEnvironmentBackground(uv: vec2<f32>) -> vec3<f32> {
+  let ndc = vec2<f32>(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
   let aspect = cameraData.settings.x;
   let tanHalfFov = cameraData.settings.y;
   let direction = normalize(
@@ -59,11 +67,18 @@ fn fsMain(in: VsOut) -> @location(0) vec4<f32> {
       cameraData.right.xyz * (ndc.x * aspect * tanHalfFov) +
       cameraData.up.xyz * (ndc.y * tanHalfFov),
   );
-  let color = textureSampleLevel(
+  return textureSampleLevel(
     environmentTexture,
     environmentSampler,
     directionToEquirectUv(direction),
     0.0,
   ).rgb;
+}
+
+@fragment
+fn fsMain(in: VsOut) -> @location(0) vec4<f32> {
+  let exposure = max(cameraData.settings.z, 1e-4);
+  let hdrColor = sampleEnvironmentBackground(in.uv);
+  let color = toneMapAcesApprox(hdrColor * exposure);
   return vec4<f32>(color, 1.0);
 }

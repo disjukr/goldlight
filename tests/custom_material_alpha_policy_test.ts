@@ -445,7 +445,7 @@ Deno.test('inspectMaterialTemplateBake reports all lit helmet-style features', (
   assert(report.wgsl.includes('var metallic = clamp(material.values[3].x, 0.0, 1.0);'));
   assert(report.wgsl.includes('occlusion = mix(1.0, occlusionSample'));
   assert(report.wgsl.includes('fn distributionGgx(nDotH: f32, roughness: f32) -> f32'));
-  assert(report.wgsl.includes('let specular = (distribution * geometry) * fresnel /'));
+  assert(report.wgsl.includes('fn directBrdfGgxMultiscatter('));
 });
 
 Deno.test('renderForwardFrame can prepare a custom WGSL template from material variant inputs', () => {

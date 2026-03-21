@@ -60,6 +60,9 @@ import builtInPostProcessBlitShader from './shaders/built_in_post_process_blit.w
 import builtInEnvironmentBackgroundShader from './shaders/built_in_environment_background.wgsl' with {
   type: 'text',
 };
+import builtInEnvironmentBackgroundBlurShader from './shaders/built_in_environment_background_blur.wgsl' with {
+  type: 'text',
+};
 import {
   type BuiltInLitTemplateVariant as BuiltInLitTemplateVariantFromTemplate,
   inspectBuiltInLitTemplateProgram,
@@ -1714,6 +1717,14 @@ const builtInPostProcessBlitProgram: PostProcessProgram = {
   fragmentEntryPoint: 'fsMain',
 };
 
+const builtInEnvironmentBackgroundBlurProgram: PostProcessProgram = {
+  id: 'built-in:environment-background-blur',
+  label: 'Built-in Environment Background Blur',
+  wgsl: builtInEnvironmentBackgroundBlurShader,
+  fragmentEntryPoint: 'fsMain',
+  usesUniformBuffer: true,
+};
+
 export const createBlitPostProcessPass = (
   id = 'post-process:blit',
   label = 'Blit',
@@ -3259,6 +3270,32 @@ const importanceSampleGgx = (
   );
 };
 
+const importanceSampleGgxVndf = (
+  xi: readonly [number, number],
+  roughness: number,
+  normal: readonly [number, number, number],
+): readonly [number, number, number] => {
+  const alpha = roughness * roughness;
+  const r = Math.sqrt(xi[0]);
+  const phi = 2 * Math.PI * xi[1];
+  const t1 = r * Math.cos(phi);
+  const t2 = r * Math.sin(phi);
+  const nhZ = Math.sqrt(Math.max(0, 1 - (t1 * t1) - (t2 * t2)));
+  const halfVectorTangent = normalizeEnvironmentVector(alpha * t1, alpha * t2, Math.max(0, nhZ));
+  const basis = buildEnvironmentBasis(normal[0], normal[1], normal[2]);
+  return normalizeEnvironmentVector(
+    (basis.tangent[0] * halfVectorTangent[0]) +
+      (basis.bitangent[0] * halfVectorTangent[1]) +
+      (basis.normal[0] * halfVectorTangent[2]),
+    (basis.tangent[1] * halfVectorTangent[0]) +
+      (basis.bitangent[1] * halfVectorTangent[1]) +
+      (basis.normal[1] * halfVectorTangent[2]),
+    (basis.tangent[2] * halfVectorTangent[0]) +
+      (basis.bitangent[2] * halfVectorTangent[1]) +
+      (basis.normal[2] * halfVectorTangent[2]),
+  );
+};
+
 const dotEnvironment = (
   left: readonly [number, number, number],
   right: readonly [number, number, number],
@@ -3320,13 +3357,22 @@ const createPrefilteredEnvironmentMipChain = (
           Math.cos(latitude) * Math.sin(longitude),
         );
         const view = normal;
+        const offset = ((y * levelWidth) + x) * 4;
+        if (roughness < 0.001) {
+          const sample = sampleEnvironmentBilinear(width, height, source, normal);
+          levelData[offset] = encodeHalfFloat(sample[0]);
+          levelData[offset + 1] = encodeHalfFloat(sample[1]);
+          levelData[offset + 2] = encodeHalfFloat(sample[2]);
+          levelData[offset + 3] = encodeHalfFloat(1);
+          continue;
+        }
         let red = 0;
         let green = 0;
         let blue = 0;
         let weight = 0;
 
         for (let sampleIndex = 0; sampleIndex < sampleCount; sampleIndex += 1) {
-          const halfVector = importanceSampleGgx(
+          const halfVector = importanceSampleGgxVndf(
             hammersley(sampleIndex, sampleCount),
             roughness,
             normal,
@@ -3343,7 +3389,6 @@ const createPrefilteredEnvironmentMipChain = (
           weight += nDotL;
         }
 
-        const offset = ((y * levelWidth) + x) * 4;
         levelData[offset] = encodeHalfFloat(red / Math.max(weight, 1e-4));
         levelData[offset + 1] = encodeHalfFloat(green / Math.max(weight, 1e-4));
         levelData[offset + 2] = encodeHalfFloat(blue / Math.max(weight, 1e-4));
@@ -3379,9 +3424,9 @@ const createEnvironmentBrdfLutData = (
 }> => {
   const data = new Uint16Array(size * size * 4);
   for (let y = 0; y < size; y += 1) {
-    const roughness = (y + 0.5) / size;
     for (let x = 0; x < size; x += 1) {
-      const nDotV = Math.max((x + 0.5) / size, 1e-4);
+      const roughness = (x + 0.5) / size;
+      const nDotV = Math.max((y + 0.5) / size, 1e-4);
       const view = [Math.sqrt(Math.max(0, 1 - (nDotV * nDotV))), 0, nDotV] as const;
       const normal = [0, 0, 1] as const;
       let scale = 0;
@@ -3581,7 +3626,7 @@ const createEnvironmentBackgroundUniformData = (
       0,
       aspect,
       Math.tan(Math.PI / 6),
-      0,
+      0.7,
       0,
     ]);
   }
@@ -3613,7 +3658,7 @@ const createEnvironmentBackgroundUniformData = (
     0,
     aspect,
     Math.tan((perspectiveCamera.yfov ?? Math.PI / 3) / 2),
-    0,
+    0.7,
     0,
   ]);
 };
@@ -3666,6 +3711,99 @@ const renderForwardEnvironmentBackground = (
     }),
   );
   pass.draw(3, 1, 0, 0);
+};
+
+const renderEnvironmentBackgroundBlurPasses = (
+  context: GpuRenderExecutionContext,
+  encoder: GPUCommandEncoder,
+  binding: RenderContextBinding,
+  residency: RuntimeResidency,
+  inputView: GPUTextureView,
+  outputView: GPUTextureView,
+): number => {
+  const sampler = context.device.createSampler({
+    label: 'environment-background-blur-sampler',
+    magFilter: 'linear',
+    minFilter: 'linear',
+  });
+  const blurTempTexture = createTransientRenderTexture(
+    context,
+    binding,
+    'environment-background-blur-temp',
+    binding.target.format,
+  );
+  const blurTempView = blurTempTexture.createView();
+  const blurPasses = [
+    {
+      id: 'environment-background-blur-horizontal',
+      targetView: blurTempView,
+      sampleCount: 1,
+      uniformData: Float32Array.from([
+        1 / Math.max(binding.target.width, 1),
+        0,
+        10,
+        5,
+      ]),
+    },
+    {
+      id: 'environment-background-blur-vertical',
+      targetView: outputView,
+      sampleCount: getRenderTargetSampleCount(binding),
+      uniformData: Float32Array.from([
+        0,
+        1 / Math.max(binding.target.height, 1),
+        10,
+        5,
+      ]),
+    },
+  ] as const;
+
+  let sourceView = inputView;
+  let drawCount = 0;
+  for (const blurPass of blurPasses) {
+    const pipeline = ensurePostProcessPipeline(
+      context,
+      residency,
+      builtInEnvironmentBackgroundBlurProgram,
+      binding.target.format,
+      blurPass.sampleCount,
+    );
+    const uniformBuffer = context.device.createBuffer({
+      label: `${blurPass.id}:uniforms`,
+      size: blurPass.uniformData.byteLength,
+      usage: uniformUsage | bufferCopyDstUsage,
+    });
+    context.queue.writeBuffer(uniformBuffer, 0, blurPass.uniformData);
+    const bindGroup = context.device.createBindGroup({
+      layout: pipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: sourceView },
+        { binding: 1, resource: sampler },
+        {
+          binding: 2,
+          resource: {
+            buffer: uniformBuffer,
+          },
+        },
+      ],
+    });
+    const pass = encoder.beginRenderPass({
+      colorAttachments: [{
+        view: blurPass.targetView,
+        clearValue: { r: 0, g: 0, b: 0, a: 1 },
+        loadOp: 'clear',
+        storeOp: 'store',
+      }],
+    });
+    pass.setPipeline(pipeline);
+    pass.setBindGroup(0, bindGroup);
+    pass.draw(3, 1, 0, 0);
+    pass.end();
+    sourceView = blurPass.targetView;
+    drawCount += 1;
+  }
+
+  return drawCount;
 };
 
 const usesLitMaterialProgram = (program: MaterialProgram): boolean =>
@@ -5617,9 +5755,16 @@ const renderForwardFrameInternal = (
   });
   const hasEnvironmentBackground = Boolean(options.extension?.environmentMap);
   if (hasEnvironmentBackground) {
+    const backgroundSourceTexture = createTransientRenderTexture(
+      context,
+      binding,
+      'forward-environment-background-source',
+      binding.target.format,
+    );
+    const backgroundSourceView = backgroundSourceTexture.createView();
     const backgroundPass = encoder.beginRenderPass({
       colorAttachments: [{
-        view: colorView,
+        view: backgroundSourceView,
         clearValue: { r: 0.02, g: 0.02, b: 0.03, a: 1 },
         loadOp: 'clear',
         storeOp: 'store',
@@ -5634,6 +5779,14 @@ const renderForwardFrameInternal = (
       ensureForwardEnvironmentTexture(context, residency, options.extension?.environmentMap),
     );
     backgroundPass.end();
+    renderEnvironmentBackgroundBlurPasses(
+      context,
+      encoder,
+      binding,
+      residency,
+      backgroundSourceView,
+      colorView,
+    );
   }
   const forwardOpaqueNodes = evaluatedScene.nodes.filter((node) =>
     node.mesh && resolveMaterialRenderPolicy(node.material).renderQueue === 'opaque'
@@ -5663,7 +5816,7 @@ const renderForwardFrameInternal = (
   const cameraPosition = evaluatedScene.activeCamera
     ? getMatrixTranslation(evaluatedScene.activeCamera.worldMatrix)
     : [0, 0, 0] as const;
-  let drawCount = hasEnvironmentBackground ? 1 : 0;
+  let drawCount = hasEnvironmentBackground ? 3 : 0;
   drawCount += renderForwardMeshPass(
     context,
     pass,

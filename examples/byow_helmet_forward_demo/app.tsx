@@ -30,22 +30,48 @@ import {
 const helmetSource = await Deno.readFile(
   new URL('../assets/damaged-helmet/DamagedHelmet.glb', import.meta.url),
 );
-const environmentSource = await Deno.readFile(
+const polyHavenStudioSource = await Deno.readFile(
   new URL('../assets/hdri/poly_haven_studio_1k.exr', import.meta.url),
+);
+const ferndaleStudioSource = await Deno.readFile(
+  new URL('../assets/hdri/ferndale_studio_08_1k.exr', import.meta.url),
+);
+const pavStudioSource = await Deno.readFile(
+  new URL('../assets/hdri/pav_studio_01_1k.exr', import.meta.url),
 );
 const helmetScene = importGltfFromGlb(
   helmetSource,
   'damaged-helmet',
 );
-const environmentMap: ForwardEnvironmentMap = {
-  id: 'poly-haven-studio',
-  image: {
+const environmentMaps: readonly ForwardEnvironmentMap[] = [
+  {
     id: 'poly-haven-studio',
-    mimeType: 'image/exr',
-    bytes: environmentSource,
+    image: {
+      id: 'poly-haven-studio',
+      mimeType: 'image/exr',
+      bytes: polyHavenStudioSource,
+    },
+    intensity: 1.15,
   },
-  intensity: 1.15,
-};
+  {
+    id: 'ferndale-studio-08',
+    image: {
+      id: 'ferndale-studio-08',
+      mimeType: 'image/exr',
+      bytes: ferndaleStudioSource,
+    },
+    intensity: 1.05,
+  },
+  {
+    id: 'pav-studio-01',
+    image: {
+      id: 'pav-studio-01',
+      mimeType: 'image/exr',
+      bytes: pavStudioSource,
+    },
+    intensity: 0.95,
+  },
+];
 const sourceMesh = helmetScene.meshes[0];
 
 if (!sourceMesh) {
@@ -86,10 +112,10 @@ const HelmetScene = () => {
       {helmetScene.meshes.map((mesh) => <mesh key={mesh.id} {...mesh} />)}
       <PerspectiveCamera
         id='helmet-forward-camera'
-        position={[0.15, 0.2, 3.25]}
+        position={[0, 0.18, 2.35]}
         znear={0.05}
         zfar={100}
-        yfov={Math.PI / 4.4}
+        yfov={Math.PI / 3}
       />
       <DirectionalLight
         id='helmet-forward-key'
@@ -141,6 +167,7 @@ export default async (
 ): Promise<void | DesktopModuleCleanup> => {
   let normalDebugEnabled = false;
   let selectedDebugView: ForwardDebugView = 'normal-world-mapped';
+  let selectedEnvironmentMap: ForwardEnvironmentMap = environmentMaps[0]!;
   const sceneRoot = createReactSceneRoot(<HelmetScene />);
   const target = {
     kind: 'surface' as const,
@@ -176,7 +203,7 @@ export default async (
           materialRegistry,
           postProcessPasses,
           extension: {
-            environmentMap,
+            environmentMap: selectedEnvironmentMap,
             debugView: normalDebugEnabled ? selectedDebugView : 'none',
           },
         }),
@@ -224,6 +251,19 @@ export default async (
     }
     if (detail.keyCode === 71) {
       selectedDebugView = 'uv';
+      return;
+    }
+
+    if (detail.keyCode === 49) {
+      selectedEnvironmentMap = environmentMaps[0];
+      return;
+    }
+    if (detail.keyCode === 50) {
+      selectedEnvironmentMap = environmentMaps[1];
+      return;
+    }
+    if (detail.keyCode === 51) {
+      selectedEnvironmentMap = environmentMaps[2];
     }
   };
 

@@ -59,6 +59,62 @@ fn computeSpecularOcclusion(dotNV: f32, ambientOcclusion: f32, roughness: f32) -
   );
 }
 
+fn computeMultiscattering(
+  specularColor: vec3<f32>,
+  specularF90: f32,
+  environmentBrdf: vec2<f32>,
+) -> mat2x3<f32> {
+  let singleScatter =
+    specularColor * environmentBrdf.x + vec3<f32>(specularF90 * environmentBrdf.y);
+  let singleScatterEnergy = environmentBrdf.x + environmentBrdf.y;
+  let multiScatterEnergy = 1.0 - singleScatterEnergy;
+  let averageFresnel = specularColor + (vec3<f32>(1.0) - specularColor) * 0.047619;
+  let multiScatterFresnel = singleScatter * averageFresnel /
+    max(vec3<f32>(1.0) - vec3<f32>(multiScatterEnergy) * averageFresnel, vec3<f32>(1e-4));
+  let multiScatter = multiScatterFresnel * multiScatterEnergy;
+  return mat2x3<f32>(singleScatter, multiScatter);
+}
+
+fn directBrdfGgxMultiscatter(
+  lightDirection: vec3<f32>,
+  viewDirection: vec3<f32>,
+  normal: vec3<f32>,
+  roughness: f32,
+  specularColor: vec3<f32>,
+  specularF90: f32,
+  diffuseColor: vec3<f32>,
+  metallic: f32,
+  environmentBrdfView: vec2<f32>,
+  environmentBrdfLight: vec2<f32>,
+) -> vec3<f32> {
+  let halfVector = normalize(viewDirection + lightDirection);
+  let nDotL = saturate(dot(normal, lightDirection));
+  let nDotV = saturate(dot(normal, viewDirection));
+  let nDotH = saturate(dot(normal, halfVector));
+  let hDotV = saturate(dot(halfVector, viewDirection));
+  let distribution = distributionGgx(nDotH, roughness);
+  let geometry = geometrySmith(nDotV, nDotL, roughness);
+  let fresnel = fresnelSchlick(hDotV, specularColor);
+  let singleScatter = (distribution * geometry) * fresnel /
+    max(4.0 * max(nDotV, 1e-4) * max(nDotL, 1e-4), 1e-4);
+
+  let singleScatterEnergyView =
+    specularColor * environmentBrdfView.x + vec3<f32>(specularF90 * environmentBrdfView.y);
+  let singleScatterEnergyLight =
+    specularColor * environmentBrdfLight.x + vec3<f32>(specularF90 * environmentBrdfLight.y);
+  let energyView = environmentBrdfView.x + environmentBrdfView.y;
+  let energyLight = environmentBrdfLight.x + environmentBrdfLight.y;
+  let lostEnergyView = 1.0 - energyView;
+  let lostEnergyLight = 1.0 - energyLight;
+  let averageFresnel = specularColor + (vec3<f32>(1.0) - specularColor) * 0.047619;
+  let multiScatterFresnel = singleScatterEnergyView * singleScatterEnergyLight * averageFresnel /
+    max(vec3<f32>(1.0) - vec3<f32>(lostEnergyView * lostEnergyLight) * averageFresnel, vec3<f32>(1e-4));
+  let multiScatter = multiScatterFresnel * (lostEnergyView * lostEnergyLight);
+  let diffuseWeight = (vec3<f32>(1.0) - fresnel) * (1.0 - metallic);
+  let diffuse = diffuseWeight * diffuseColor / PI;
+  return diffuse + singleScatter + multiScatter;
+}
+
 fn wrap01(value: f32) -> f32 {
   return value - floor(value);
 }
@@ -167,29 +223,56 @@ fn fsMain(inValue: VsOut) -> @location(0) vec4<f32> {
   let nDotV = max(dot(surfaceNormal, viewDirection), 1e-4);
   let reflectedViewDirection = reflect(-viewDirection, surfaceNormal);
   let reflectionDirection = normalize(
-    mix(reflectedViewDirection, surfaceNormal, roughness * roughness),
+    mix(reflectedViewDirection, surfaceNormal, pow(roughness, 4.0)),
   );
   let dielectricF0 = vec3<f32>(0.04, 0.04, 0.04);
   let f0 = mix(dielectricF0, surfaceColor, metallic);
   let diffuseColor = surfaceColor * (1.0 - metallic);
+  let specularF90 = 1.0;
   let kS = fresnelSchlickRoughness(nDotV, f0, roughness);
   let kD = (vec3<f32>(1.0) - kS) * (1.0 - metallic);
   let environmentIntensity = lighting.cameraPosition.w;
   let ambientDiffuseStrength = ambient;
-  let environmentDiffuse = sampleEnvironmentDiffuse(surfaceNormal) * diffuseColor *
+  let cosineWeightedIrradiance = sampleEnvironmentDiffuse(surfaceNormal) *
     ambientDiffuseStrength * environmentIntensity * occlusion;
   let prefilteredSpecular = sampleEnvironmentSpecular(reflectionDirection, roughness);
   let environmentBrdf = textureSampleLevel(
     brdfLutTexture,
     brdfLutSampler,
-    vec2<f32>(saturate(nDotV), roughness),
+    vec2<f32>(roughness, saturate(nDotV)),
     0.0,
   ).rg;
   let ambientSpecularOcclusion = computeSpecularOcclusion(nDotV, occlusion, roughness);
-  let environmentSpecular = prefilteredSpecular *
-    (kS * environmentBrdf.x + vec3<f32>(environmentBrdf.y)) * environmentIntensity *
-    ambientSpecularOcclusion;
-  var litColor = kD * environmentDiffuse + environmentSpecular;
+  let multiscatteringDielectric = computeMultiscattering(
+    dielectricF0,
+    specularF90,
+    environmentBrdf,
+  );
+  let multiscatteringMetallic = computeMultiscattering(
+    surfaceColor,
+    specularF90,
+    environmentBrdf,
+  );
+  let singleScatter = mix(
+    multiscatteringDielectric[0],
+    multiscatteringMetallic[0],
+    metallic,
+  );
+  let multiScatter = mix(
+    multiscatteringDielectric[1],
+    multiscatteringMetallic[1],
+    metallic,
+  );
+  let totalScatteringDielectric =
+    multiscatteringDielectric[0] + multiscatteringDielectric[1];
+  let indirectDiffuse = diffuseColor *
+    max(vec3<f32>(1.0) - totalScatteringDielectric, vec3<f32>(0.0)) *
+    cosineWeightedIrradiance;
+  let indirectSpecular = (
+    prefilteredSpecular * singleScatter +
+    multiScatter * cosineWeightedIrradiance
+  ) * ambientSpecularOcclusion;
+  var litColor = indirectDiffuse + indirectSpecular;
 
   let debugView = i32(round(lighting.settings.z));
   if (debugView == 1) {
@@ -223,19 +306,26 @@ fn fsMain(inValue: VsOut) -> @location(0) vec4<f32> {
 
   for (var index = 0; index < lightCount; index += 1) {
     let lightDirection = normalize(-lighting.directions[index].xyz);
-    let halfVector = normalize(viewDirection + lightDirection);
     let nDotL = saturate(dot(surfaceNormal, lightDirection));
-    let nDotH = saturate(dot(surfaceNormal, halfVector));
-    let hDotV = saturate(dot(halfVector, viewDirection));
     let lightColor = lighting.colors[index].xyz * lighting.colors[index].w;
-    let distribution = distributionGgx(nDotH, roughness);
-    let geometry = geometrySmith(nDotV, nDotL, roughness);
-    let fresnel = fresnelSchlick(hDotV, f0);
-    let specular = (distribution * geometry) * fresnel /
-      max(4.0 * max(nDotV, 1e-4) * max(nDotL, 1e-4), 1e-4);
-    let diffuseWeight = (vec3<f32>(1.0) - fresnel) * (1.0 - metallic);
-    let diffuse = diffuseWeight * diffuseColor / PI;
-    litColor += (diffuse + specular) * lightColor * nDotL;
+    let directBrdf = directBrdfGgxMultiscatter(
+      lightDirection,
+      viewDirection,
+      surfaceNormal,
+      roughness,
+      f0,
+      specularF90,
+      diffuseColor,
+      metallic,
+      environmentBrdf,
+      textureSampleLevel(
+        brdfLutTexture,
+        brdfLutSampler,
+        vec2<f32>(roughness, nDotL),
+        0.0,
+      ).rg,
+    );
+    litColor += directBrdf * lightColor * nDotL;
   }
 
   return vec4<f32>(litColor + emissive, baseColor.a);

@@ -53,6 +53,7 @@ const createMockGpuContext = () => {
   const bindGroupCalls: number[] = [];
   const workDoneCalls: number[] = [];
   const mappedBuffers: ArrayBuffer[] = [];
+  const submittedWorkRejecters: Array<(reason?: unknown) => void> = [];
   const offscreenView = { label: 'offscreen-view' } as unknown as GPUTextureView;
   const ticks: number[] = [];
   const workDoneResolvers: Array<() => void> = [];
@@ -79,6 +80,7 @@ const createMockGpuContext = () => {
     },
     ticks,
     workDoneResolvers,
+    submittedWorkRejecters,
     context: {
       adapter: {
         features: new Set(['bgra8unorm-storage']),
@@ -89,6 +91,8 @@ const createMockGpuContext = () => {
           maxTextureDimension2D: 8192,
           maxColorAttachments: 8,
           maxBufferSize: 1024 * 1024,
+          maxStorageBuffersPerShaderStage: 8,
+          maxStorageBufferBindingSize: 1024 * 1024,
           minUniformBufferOffsetAlignment: 256,
           minStorageBufferOffsetAlignment: 256,
         },
@@ -169,8 +173,9 @@ const createMockGpuContext = () => {
           submitted.push([...commandBuffers]);
         },
         onSubmittedWorkDone: () =>
-          new Promise<void>((resolve) => {
+          new Promise<void>((resolve, reject) => {
             workDoneResolvers.push(resolve);
+            submittedWorkRejecters.push(reject);
           }),
       } as unknown as GPUQueue,
       target: {
@@ -284,16 +289,40 @@ Deno.test('dawn resource provider caches single texture sampler bind groups', ()
   assertEquals(mock.created.bindGroupLayouts.length, 1);
 });
 
+Deno.test('dawn resource provider reuses canonical samplers', () => {
+  const mock = createMockGpuContext();
+  const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
+
+  const first = sharedContext.resourceProvider.createSampler({
+    magFilter: 'linear',
+    minFilter: 'linear',
+  });
+  const second = sharedContext.resourceProvider.createSampler({
+    minFilter: 'linear',
+    magFilter: 'linear',
+    addressModeU: 'clamp-to-edge',
+    addressModeV: 'clamp-to-edge',
+    addressModeW: 'clamp-to-edge',
+    mipmapFilter: 'nearest',
+  });
+
+  assertEquals(first, second);
+  assertEquals(mock.created.samplers.length, 1);
+});
+
 Deno.test('dawn caps expose feature, format, and sample count policy', () => {
   const mock = createMockGpuContext();
   const caps = createDawnCaps(createDawnBackendContext(mock.context));
 
   assertEquals(caps.preferredCanvasFormat, 'rgba8unorm');
   assertEquals(caps.supportsTimestampQuery, true);
+  assertEquals(caps.supportsStorageBuffers, true);
   assertEquals(caps.defaultSampleCount, 1);
   assertEquals(caps.limits.maxTextureDimension2D, 8192);
   assertEquals(caps.isFormatRenderable('rgba8unorm'), true);
   assertEquals(caps.getFormatCapabilities('depth24plus').texturable, true);
+  assertEquals(caps.getFormatCapabilities('depth24plus-stencil8').renderable, true);
+  assertEquals(caps.getFormatCapabilities('bgra8unorm').storage, true);
   assertEquals(caps.supportsSampleCount(1), true);
   assertEquals(caps.supportsSampleCount(4), true);
   assertEquals(caps.supportsSampleCount(8), false);
@@ -303,6 +332,9 @@ Deno.test('dawn caps gate bgra storage support on enabled device features', () =
   const mock = createMockGpuContext();
   const bgraContext = {
     ...mock.context,
+    adapter: {
+      features: new Set<string>(),
+    } as unknown as GPUAdapter,
     target: {
       ...mock.context.target,
       format: 'bgra8unorm',
@@ -317,6 +349,32 @@ Deno.test('dawn caps gate bgra storage support on enabled device features', () =
 
   assertEquals(caps.getFormatCapabilities('bgra8unorm').storage, false);
   assertEquals(caps.supportsStorageBuffers, true);
+});
+
+Deno.test('dawn caps keep storage support conservative when limits are missing', () => {
+  const mock = createMockGpuContext();
+  const backend = createDawnBackendContext({
+    ...mock.context,
+    adapter: {
+      features: new Set<string>(),
+    } as unknown as GPUAdapter,
+    device: {
+      ...mock.context.device,
+      features: new Set<string>(),
+      limits: {
+        maxTextureDimension2D: 4096,
+        maxColorAttachments: 8,
+        maxBufferSize: 1024 * 1024,
+        minUniformBufferOffsetAlignment: 256,
+        minStorageBufferOffsetAlignment: 256,
+      },
+    } as unknown as GPUDevice,
+  });
+  const caps = createDawnCaps(backend);
+
+  assertEquals(caps.supportsStorageBuffers, false);
+  assertEquals(caps.getFormatCapabilities('rgba8unorm').storage, false);
+  assertEquals(caps.getFormatCapabilities('bgra8unorm').storage, false);
 });
 
 Deno.test('drawing recorder records transform and clip state into draw commands', () => {
@@ -1716,6 +1774,7 @@ Deno.test('dawn queue manager tracks submit and tick completion', async () => {
 
   assertEquals(queueManager.submittedCount, 1);
   assertEquals(queueManager.completedCount, 0);
+  assertEquals(queueManager.failedCount, 0);
   assertEquals(queueManager.inFlightCount, 1);
   assertEquals(queueManager.pendingSubmissions[0]?.recorderId, commandBuffer.recording.recorderId);
   assertEquals(queueManager.pendingSubmissions[0]?.completionMode, 'queue-work-done');
@@ -1725,6 +1784,7 @@ Deno.test('dawn queue manager tracks submit and tick completion', async () => {
   assertEquals(mock.ticks.length, 1);
   assertEquals(mock.created.workDoneCalls.length, 1);
   assertEquals(queueManager.completedCount, 1);
+  assertEquals(queueManager.failedCount, 0);
   assertEquals(queueManager.inFlightCount, 0);
   assertEquals(queueManager.lastCompletedSubmissionId, 1);
   assertEquals(queueManager.lastCompletedRecorderId, commandBuffer.recording.recorderId);
@@ -1767,6 +1827,33 @@ Deno.test('dawn queue manager keeps unresolved submissions in flight until queue
   assertEquals(queueManager.inFlightCount, 0);
   assertEquals(queueManager.lastCompletedSubmissionId, 1);
   assertEquals(queueManager.lastCompletedRecorderId, commandBuffer.recording.recorderId);
+});
+
+Deno.test('dawn queue manager records submission failures', async () => {
+  const mock = createMockGpuContext();
+  const backend = createDawnBackendContext(mock.context);
+  const queueManager = createDawnQueueManager(backend);
+  const sharedContext = createDawnSharedContext(backend);
+  const recorder = createDrawingRecorder(sharedContext);
+  const binding = createOffscreenBinding(mock.context);
+
+  recordClear(recorder, [0, 0, 0, 1]);
+  const commandBuffer = encodeDawnCommandBuffer(
+    sharedContext,
+    finishDrawingRecorder(recorder),
+    binding,
+  );
+  submitToDawnQueueManager(queueManager, commandBuffer);
+
+  const error = new Error('queue submission failed');
+  mock.submittedWorkRejecters[0]?.(error);
+  await Promise.resolve();
+  await tickDawnQueueManager(queueManager);
+
+  assertEquals(queueManager.completedCount, 1);
+  assertEquals(queueManager.failedCount, 1);
+  assertEquals(queueManager.lastError, error);
+  assertEquals(queueManager.inFlightCount, 0);
 });
 
 Deno.test('dawn queue manager tracks fallback submissions explicitly when queue completion is unavailable', async () => {

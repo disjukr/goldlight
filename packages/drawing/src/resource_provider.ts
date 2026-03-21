@@ -354,6 +354,30 @@ const createStrokePatchShaderModule = (backend: DawnSharedContext['backend']): G
     code: strokePatchShaderSource,
   });
 
+const canonicalizeSamplerDescriptor = (
+  descriptor: DrawingSamplerDescriptor = {},
+): GPUSamplerDescriptor => ({
+  label: descriptor.label,
+  magFilter: descriptor.magFilter ?? 'nearest',
+  minFilter: descriptor.minFilter ?? 'nearest',
+  mipmapFilter: descriptor.mipmapFilter ?? 'nearest',
+  addressModeU: descriptor.addressModeU ?? 'clamp-to-edge',
+  addressModeV: descriptor.addressModeV ?? 'clamp-to-edge',
+  addressModeW: descriptor.addressModeW ?? 'clamp-to-edge',
+});
+
+const createSamplerKey = (
+  descriptor: GPUSamplerDescriptor,
+): string =>
+  JSON.stringify({
+    magFilter: descriptor.magFilter,
+    minFilter: descriptor.minFilter,
+    mipmapFilter: descriptor.mipmapFilter,
+    addressModeU: descriptor.addressModeU,
+    addressModeV: descriptor.addressModeV,
+    addressModeW: descriptor.addressModeW,
+  });
+
 export const createDawnResourceProvider = (
   sharedContext: DawnSharedContext,
   options: Readonly<{
@@ -389,6 +413,7 @@ export const createDawnResourceProvider = (
       bindGroup: GPUBindGroup;
     }>
     | null = null;
+  const samplers = new Map<string, GPUSampler>();
   const singleTextureSamplerBindGroups: Array<
     Readonly<{
       sampler: GPUSampler;
@@ -702,7 +727,18 @@ export const createDawnResourceProvider = (
     resourceBudget: options.resourceBudget ?? Number.POSITIVE_INFINITY,
     createBuffer: (descriptor) => backend.device.createBuffer(descriptor),
     createTexture: (descriptor) => backend.device.createTexture(descriptor),
-    createSampler: (descriptor = {}) => backend.device.createSampler(descriptor),
+    createSampler: (descriptor = {}) => {
+      const normalized = canonicalizeSamplerDescriptor(descriptor);
+      const key = createSamplerKey(normalized);
+      const existing = samplers.get(key);
+      if (existing) {
+        return existing;
+      }
+
+      const sampler = backend.device.createSampler(normalized);
+      samplers.set(key, sampler);
+      return sampler;
+    },
     getIntrinsicBindGroup: () => {
       if (
         intrinsicBindGroup &&

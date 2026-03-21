@@ -33,33 +33,19 @@ export type DawnCaps = Readonly<{
   supportsSampleCount: (sampleCount: number) => boolean;
 }>;
 
-const renderableFormats = new Set<GPUTextureFormat>([
-  'bgra8unorm',
-  'bgra8unorm-srgb',
-  'rgba8unorm',
-  'rgba8unorm-srgb',
-  'rgba16float',
-  'r32float',
-]);
+type MutableFormatCapabilities = {
+  texturable?: boolean;
+  renderable?: boolean;
+  multisample?: boolean;
+  storage?: boolean;
+};
 
-const texturableFormats = new Set<GPUTextureFormat>([
-  'bgra8unorm',
-  'bgra8unorm-srgb',
-  'rgba8unorm',
-  'rgba8unorm-srgb',
-  'rgba16float',
-  'r32float',
-  'depth24plus',
-]);
-
-const storageFormats = new Set<GPUTextureFormat>([
-  'bgra8unorm',
-  'bgra8unorm-srgb',
-  'rgba8unorm',
-  'rgba8unorm-srgb',
-  'rgba16float',
-  'r32float',
-]);
+const defaultFormatCapabilities: DrawingFormatCapabilities = {
+  texturable: false,
+  renderable: false,
+  multisample: false,
+  storage: false,
+};
 
 const readFeatureSet = (
   source: { features?: Iterable<string> } | undefined,
@@ -87,31 +73,134 @@ const choosePreferredCanvasFormat = (
   backend: DawnBackendContext,
 ): GPUTextureFormat => backend.target.format;
 
-const hasFeature = (features: DrawingFeatureSet, feature: string): boolean => features.has(feature);
-
-const supportsStorageForFormat = (
-  format: GPUTextureFormat,
-  deviceFeatures: DrawingFeatureSet,
+const supportsStorageBuffers = (
+  backend: DawnBackendContext,
 ): boolean => {
-  if (!storageFormats.has(format)) {
-    return false;
-  }
-  if (format === 'bgra8unorm' || format === 'bgra8unorm-srgb') {
-    return hasFeature(deviceFeatures, 'bgra8unorm-storage');
-  }
-  return true;
+  const limits = backend.device.limits as unknown as Record<string, number> | undefined;
+  const perStage = limits?.maxStorageBuffersPerShaderStage;
+  const bindingSize = limits?.maxStorageBufferBindingSize;
+  return typeof perStage === 'number' &&
+    perStage >= 4 &&
+    typeof bindingSize === 'number' &&
+    bindingSize > 0;
 };
 
-const createFormatCapabilities = (
+const setCapabilities = (
+  table: Map<GPUTextureFormat, MutableFormatCapabilities>,
   format: GPUTextureFormat,
-  deviceFeatures: DrawingFeatureSet,
-  maxSampleCount: 1 | 4,
+  capabilities: MutableFormatCapabilities,
+): void => {
+  table.set(format, {
+    ...(table.get(format) ?? {}),
+    ...capabilities,
+  });
+};
+
+const finalizeCapabilities = (
+  capabilities: MutableFormatCapabilities | undefined,
 ): DrawingFormatCapabilities => ({
-  texturable: texturableFormats.has(format),
-  renderable: renderableFormats.has(format),
-  multisample: renderableFormats.has(format) && maxSampleCount > 1,
-  storage: supportsStorageForFormat(format, deviceFeatures),
+  texturable: capabilities?.texturable ?? false,
+  renderable: capabilities?.renderable ?? false,
+  multisample: capabilities?.multisample ?? false,
+  storage: capabilities?.storage ?? false,
 });
+
+const createFormatCapabilityTable = (
+  backend: DawnBackendContext,
+  storageBuffersSupported: boolean,
+): ReadonlyMap<GPUTextureFormat, DrawingFormatCapabilities> => {
+  const table = new Map<GPUTextureFormat, MutableFormatCapabilities>();
+
+  for (
+    const format of [
+      'r8unorm',
+      'rg8unorm',
+      'rgba8unorm',
+      'rgba8unorm-srgb',
+      'bgra8unorm',
+      'bgra8unorm-srgb',
+      'rgb10a2unorm',
+      'r16float',
+      'rg16float',
+      'rgba16float',
+      'r32float',
+      'rg32float',
+      'rgba32float',
+      'depth16unorm',
+      'depth24plus',
+      'depth24plus-stencil8',
+      'depth32float',
+      'stencil8',
+    ] as const
+  ) {
+    setCapabilities(table, format, { texturable: true });
+  }
+
+  for (
+    const format of [
+      'rgba8unorm',
+      'rgba8unorm-srgb',
+      'bgra8unorm',
+      'bgra8unorm-srgb',
+      'rgb10a2unorm',
+      'rgba16float',
+      'r32float',
+      'rg32float',
+      'rgba32float',
+      'depth16unorm',
+      'depth24plus',
+      'depth24plus-stencil8',
+      'depth32float',
+      'stencil8',
+    ] as const
+  ) {
+    setCapabilities(table, format, { renderable: true, multisample: true });
+  }
+
+  if (storageBuffersSupported) {
+    for (
+      const format of [
+        'rgba8unorm',
+        'rgba8unorm-srgb',
+        'rgba16float',
+        'r32float',
+        'rg32float',
+        'rgba32float',
+      ] as const
+    ) {
+      setCapabilities(table, format, { storage: true });
+    }
+
+    const combinedFeatures = new Set<string>([
+      ...readFeatureSet(backend.adapter),
+      ...readFeatureSet(backend.device),
+    ]);
+    if (combinedFeatures.has('bgra8unorm-storage')) {
+      setCapabilities(table, 'bgra8unorm', { storage: true });
+      setCapabilities(table, 'bgra8unorm-srgb', { storage: true });
+    }
+  }
+
+  return new Map(
+    [...table.entries()].map(([format, capabilities]) => [
+      format,
+      finalizeCapabilities(capabilities),
+    ]),
+  );
+};
+
+const createMaxSampleCount = (
+  limits: DrawingLimits,
+  preferredCanvasFormat: GPUTextureFormat,
+  formatTable: ReadonlyMap<GPUTextureFormat, DrawingFormatCapabilities>,
+): 1 | 4 => {
+  if (limits.maxColorAttachments < 1) {
+    return 1;
+  }
+
+  const preferred = formatTable.get(preferredCanvasFormat) ?? defaultFormatCapabilities;
+  return preferred.multisample ? 4 : 1;
+};
 
 export const createDawnCaps = (
   backend: DawnBackendContext,
@@ -119,14 +208,11 @@ export const createDawnCaps = (
   const adapterFeatures = readFeatureSet(backend.adapter);
   const deviceFeatures = readFeatureSet(backend.device);
   const limits = readLimits(backend.device);
-  const supportsTimestampQuery = deviceFeatures.has('timestamp-query');
-  const supportsStorageBuffers = limits.maxBufferSize > 0 &&
-    limits.minStorageBufferOffsetAlignment > 0;
   const preferredCanvasFormat = choosePreferredCanvasFormat(backend);
-  const maxSampleCount: 1 | 4 = renderableFormats.has(preferredCanvasFormat) &&
-      limits.maxColorAttachments > 0
-    ? 4
-    : 1;
+  const storageBufferSupport = supportsStorageBuffers(backend);
+  const formatTable = createFormatCapabilityTable(backend, storageBufferSupport);
+  const maxSampleCount = createMaxSampleCount(limits, preferredCanvasFormat, formatTable);
+  const supportsTimestampQuery = deviceFeatures.has('timestamp-query');
   const defaultSampleCount: 1 | 4 = backend.target.kind === 'offscreen' &&
       backend.target.sampleCount === 4 &&
       maxSampleCount === 4
@@ -140,15 +226,14 @@ export const createDawnCaps = (
     limits,
     preferredCanvasFormat,
     supportsTimestampQuery,
-    supportsStorageBuffers,
+    supportsStorageBuffers: storageBufferSupport,
     defaultSampleCount,
     maxSampleCount,
     isFormatTexturable: (format) =>
-      createFormatCapabilities(format, deviceFeatures, maxSampleCount).texturable,
+      (formatTable.get(format) ?? defaultFormatCapabilities).texturable,
     isFormatRenderable: (format) =>
-      createFormatCapabilities(format, deviceFeatures, maxSampleCount).renderable,
-    getFormatCapabilities: (format) =>
-      createFormatCapabilities(format, deviceFeatures, maxSampleCount),
+      (formatTable.get(format) ?? defaultFormatCapabilities).renderable,
+    getFormatCapabilities: (format) => formatTable.get(format) ?? defaultFormatCapabilities,
     supportsSampleCount: (sampleCount) => sampleCount === 1 || sampleCount === maxSampleCount,
   };
 };

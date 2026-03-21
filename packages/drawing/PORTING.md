@@ -47,8 +47,9 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Abstract commands, clip-stack state with first intersect/difference op tracking, and immutable
     recordings exist.
 - Capability probing
-  - Status: `started`
-  - Initial caps and limits layer exists.
+  - Status: `partial`
+  - Caps and limits layer exists, with broader format coverage and more conservative storage-buffer
+    probing.
 - GPU encoding
   - Status: `partial`
   - Clear, direct fill replay, patch-instance fill/stroke replay, clip-stencil replay for complex
@@ -56,7 +57,7 @@ stack that fits this repository's TypeScript and WebGPU architecture.
     clip-geometry replay for intersect/difference stacks, first stroke command buffer translation,
     and Wang-style per-patch resolve levels for curve, wedge, and stroke patch instances exist.
 - Queue submission
-  - Status: `started`
+  - Status: `partial`
   - Queue manager can submit encoded command buffers, track in-flight work counts, and now keep
     unresolved submissions in flight until Dawn/WebGPU queue completion signals arrive.
 - Path rendering
@@ -101,9 +102,10 @@ stack that fits this repository's TypeScript and WebGPU architecture.
     state with first clip-op recording
   - Missing: ordering rules and flush rules
 - `DawnCaps` -> `src/caps.ts`
-  - Status: `started`
-  - What exists: initial feature, format, and limit policy
-  - Missing: richer probing and backend-specific fallbacks
+  - Status: `partial`
+  - What exists: feature/limit capture, broader format capability table, BGRA storage gating, and
+    conservative storage-buffer/sample-count policy
+  - Missing: backend-specific resolve/transient-attachment/workaround policy
 - `DawnCommandBuffer` -> `src/command_buffer.ts`
   - Status: `partial`
   - What exists: clear plus direct fill replay, first patch-instance fill/stroke replay, convex-clip
@@ -123,7 +125,7 @@ stack that fits this repository's TypeScript and WebGPU architecture.
     `queue.onSubmittedWorkDone()`-based completion tracking when the runtime exposes it, plus
     explicit pending submission objects with ids/recorder metadata and a tracked tick-fallback mode
     when queue completion callbacks are unavailable, along with last-completed recorder/submission
-    bookkeeping
+    bookkeeping and failed-submission capture for rejected queue completions
   - Missing: richer fence/error integration and backend-specific wait modes
 - `GraphicsPipeline` / caches -> `src/pipeline*.ts`
   - Status: `pending`
@@ -321,14 +323,20 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
   - Status: `started`
   - Key device limits are exposed in caps
 - Format support
-  - Status: `started`
-  - Initial static format policy exists
+  - Status: `partial`
+  - Current state: color and depth/stencil format capability coverage is broader and no longer
+    purely static
+  - Missing: compressed/external format policy and backend-specific exclusions
 - Sample count policy
-  - Status: `started`
-  - Simple `1` / `4` sample policy exists
+  - Status: `partial`
+  - Current state: `1` / `4` sample policy now depends on the preferred target format being
+    multisample-capable
+  - Missing: per-format render-pass compatibility and resolve policy
 - Storage buffer support
-  - Status: `started`
-  - Capability is surfaced in caps
+  - Status: `partial`
+  - Current state: capability is surfaced conservatively from device limits and BGRA storage feature
+    probing
+  - Missing: backend blacklist/workaround policy like Skia's Dawn backend
 - Fallback/workaround policy
   - Status: `pending`
   - No centralized backend policy
@@ -344,9 +352,10 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
   - Current state: direct wrapper exists
   - Missing: reuse strategy
 - Sampler creation
-  - Status: `started`
-  - Current state: direct wrapper exists
-  - Missing: canonicalization/cache
+  - Status: `partial`
+  - Current state: descriptors are canonicalized and identical samplers are reused through the
+    resource provider
+  - Missing: broader global-cache integration and eviction policy
 - Bind groups
   - Status: `started`
   - Current state: shared intrinsic uniform and single-texture/sampler bind groups now exist, with
@@ -666,9 +675,18 @@ These decisions directly affect the remaining work and are not settled yet.
     completion modes, and last-completed recorder/submission ids; `queue.onSubmittedWorkDone()` and
     tick-fallback completions both settle through that shared model instead of mutating counters
     alone
-  - Remaining: backend-specific wait paths, stronger fallback fences, and richer error/completion
-    propagation
+  - Remaining: backend-specific wait paths and stronger fallback fences
   - Validation: `deno test packages/drawing/tests/drawing_graphite_dawn_test.ts`
+- 2026-03-22
+  - Files: `src/caps.ts`, `src/resource_provider.ts`, `src/queue_manager.ts`,
+    `tests/drawing_graphite_dawn_test.ts`
+  - Status transition: `DawnCaps` `started` -> `partial`; sampler creation `started` -> `partial`
+  - Change: expanded format capability probing beyond the tiny static set, made storage-buffer
+    support depend on device limits instead of optimistic defaults, reused canonical samplers across
+    equivalent descriptors, and surfaced rejected queue completion promises as failed submissions
+  - Remaining: resolve/transient-attachment policy, wider bind-group caches, and richer
+    backend-specific fence/error handling
+  - Validation: `deno task check`
 - 2026-03-22
   - Files: `src/path_renderer.ts`, `src/command_buffer.ts`, `tests/drawing_graphite_dawn_test.ts`,
     `tests/render_basic_paths_snapshot_test.ts`

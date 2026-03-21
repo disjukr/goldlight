@@ -486,6 +486,10 @@ These decisions directly affect the remaining work and are not settled yet.
     1. carry transform-aware tessellation inputs instead of only CPU-flattened triangles
     2. replace fixed subdivision with Wang's-formula-driven patch evaluation
     3. align winding/even-odd stencil handling with Graphite render-step semantics
+  - Completed in local port:
+    1. convex clip stacks now force direct clipped geometry replay instead of leaving patch replay
+       to escape polygon clips
+  - Validation: `packages/drawing/tests/drawing_graphite_dawn_test.ts`
 - `render/TessellateStrokesRenderStep.cpp`
   - Current local change: zero-length stroke contours with `round` or `square` caps now emit
     visible cap geometry instead of being discarded

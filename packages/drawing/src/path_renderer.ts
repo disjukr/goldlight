@@ -1943,6 +1943,7 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
   }
 
   const preparedClipStack = prepareClipStack(command.clips);
+  const requiresDirectGeometryClip = Boolean(preparedClipStack?.convexPolygons.length);
   const style = command.paint.style ?? 'fill';
   if (style === 'fill') {
     const patches = preparePatches(command.path, command.transform);
@@ -1953,18 +1954,22 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
     const isSingleConvexContour = subpaths.length === 1 &&
       subpaths[0]!.closed &&
       isConvexPolygon(subpaths[0]!.points);
-    const renderer = selectPathFillRenderer({
+    const selectedRenderer = selectPathFillRenderer({
       fillRule: command.path.fillRule,
       patchCount: patches.length,
       hasCurves,
       hasWedges,
       isSingleConvexContour,
     });
+    const renderer = requiresDirectGeometryClip ? 'direct-triangles' : selectedRenderer;
 
     let baseTriangles: readonly Point2D[] = [];
     switch (renderer) {
       case 'middle-out-fan':
         baseTriangles = middleOutFanTriangulate(subpaths[0]!.points) ?? [];
+        break;
+      case 'direct-triangles':
+        baseTriangles = prepareFillTriangles(subpaths, command.path.fillRule) ?? [];
         break;
       case 'stencil-tessellated-wedges':
         baseTriangles = tessellateFillFromPatches(patches) ??
@@ -2025,7 +2030,7 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
         preparedStroke?.fringeVertices,
         preparedClipStack,
       ),
-      patches,
+      patches: requiresDirectGeometryClip ? [] : patches,
       color: resolveStrokeColor(command.paint),
       halfWidth: Math.max(0.5, Math.max(command.paint.strokeWidth ?? 1, epsilon)) / 2,
       bounds: computeBounds(strokeTriangles),

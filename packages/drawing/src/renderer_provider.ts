@@ -3,6 +3,7 @@ import type { DrawingPreparedPatch } from './path_renderer.ts';
 
 export type DrawingRendererKind =
   | 'middle-out-fan'
+  | 'direct-triangles'
   | 'stencil-tessellated-wedges'
   | 'stencil-tessellated-curves'
   | 'tessellated-strokes';

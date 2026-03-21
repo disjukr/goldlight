@@ -311,7 +311,8 @@ export const encodeDawnCommandBuffer = (
     for (const step of passInfo.steps) {
       switch (step.draw.kind) {
         case 'pathFill': {
-          const usesPatchFill = step.draw.renderer !== 'middle-out-fan';
+          const usesPatchFill = step.draw.renderer === 'stencil-tessellated-wedges' ||
+            step.draw.renderer === 'stencil-tessellated-curves';
           const fillVertices = usesPatchFill ? null : createClipSpaceVertexData(
             step.draw.triangles,
             step.draw.color,
@@ -450,6 +451,7 @@ export const encodeDawnCommandBuffer = (
           const patchVertexBuffer = patchVertices.length > 0
             ? createVertexBuffer(sharedContext, patchVertices)
             : null;
+          const usesPatchStroke = Boolean(patchVertexBuffer);
           const fringeVertices = step.draw.fringeVertices
             ? createColoredClipSpaceVertexData(
               step.draw.fringeVertices,
@@ -495,11 +497,15 @@ export const encodeDawnCommandBuffer = (
             pass.setVertexBuffer(0, clipVertexBuffer);
             pass.draw(clipVertices.length / floatsPerVertex);
             pass.setStencilReference?.(1);
-            pass.setPipeline(sharedContext.resourceProvider.getPipeline(step.pipelineKeys[1]!));
+            pass.setPipeline(sharedContext.resourceProvider.getPipeline(
+              usesPatchStroke ? step.pipelineKeys[1]! : 'path-stroke-clip-cover',
+            ));
           } else {
-            pass.setPipeline(sharedContext.resourceProvider.getPipeline(step.pipelineKeys[0]!));
+            pass.setPipeline(sharedContext.resourceProvider.getPipeline(
+              usesPatchStroke ? step.pipelineKeys[0]! : 'path-stroke-cover',
+            ));
           }
-          if (patchVertexBuffer) {
+          if (usesPatchStroke && patchVertexBuffer) {
             pass.setVertexBuffer(0, patchVertexBuffer);
             pass.draw(strokePatchVertexCount, patchVertices.length / strokePatchFloats);
           } else {

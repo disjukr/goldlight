@@ -572,6 +572,72 @@ Deno.test('drawing prepared recording clips stroke AA fringe to convex clip boun
   );
 });
 
+Deno.test('drawing prepared recording falls back to direct fill geometry under convex clip stacks', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  clipDrawingRecorderPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [32, 32] },
+      { kind: 'lineTo', to: [96, 32] },
+      { kind: 'lineTo', to: [96, 96] },
+      { kind: 'lineTo', to: [32, 96] },
+      { kind: 'close' },
+    ),
+  );
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [24, 96] },
+      { kind: 'quadTo', control: [96, 24], to: [168, 96] },
+      { kind: 'cubicTo', control1: [192, 120], control2: [96, 180], to: [24, 144] },
+      { kind: 'close' },
+    ),
+    { style: 'fill' },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const draw = prepared.passes[0]?.steps[0]?.draw;
+  const step = prepared.passes[0]?.steps[0];
+  assertEquals(draw?.kind, 'pathFill');
+  assertEquals(draw?.renderer, 'direct-triangles');
+  assertEquals(step?.pipelineKeys, ['path-fill-cover']);
+});
+
+Deno.test('drawing prepared recording falls back to direct stroke geometry under convex clip stacks', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  clipDrawingRecorderPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [32, 32] },
+      { kind: 'lineTo', to: [96, 32] },
+      { kind: 'lineTo', to: [96, 96] },
+      { kind: 'lineTo', to: [32, 96] },
+      { kind: 'close' },
+    ),
+  );
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [32, 96] },
+      { kind: 'cubicTo', control1: [48, 16], control2: [144, 16], to: [160, 96] },
+    ),
+    { style: 'stroke', strokeWidth: 8 },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const draw = prepared.passes[0]?.steps[0]?.draw;
+  const step = prepared.passes[0]?.steps[0];
+  assertEquals(draw?.kind, 'pathStroke');
+  assertEquals(draw?.patches.length, 0);
+  assertEquals(step?.pipelineKeys, ['path-stroke-cover']);
+});
+
 Deno.test('drawing prepared recording falls back for self-intersecting fill paths', () => {
   const mock = createMockGpuContext();
   const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));

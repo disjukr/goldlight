@@ -57,7 +57,7 @@ const isDrawCommand = (command: DrawingCommand): command is DrawingDrawCommand =
 const getPipelineKeysForDraw = (draw: DrawingPreparedDraw): readonly DrawingPipelineKey[] => {
   switch (draw.kind) {
     case 'pathFill':
-      if (draw.renderer === 'middle-out-fan') {
+      if (draw.renderer === 'middle-out-fan' || draw.renderer === 'direct-triangles') {
         return draw.clip?.triangles
           ? ['clip-stencil-write', 'path-fill-clip-cover']
           : ['path-fill-cover'];
@@ -72,6 +72,11 @@ const getPipelineKeysForDraw = (draw: DrawingPreparedDraw): readonly DrawingPipe
       }
       return ['path-fill-patch-cover'];
     case 'pathStroke':
+      if (draw.patches.length === 0) {
+        return draw.clip?.triangles
+          ? ['clip-stencil-write', 'path-stroke-clip-cover']
+          : ['path-stroke-cover'];
+      }
       return draw.clip?.triangles
         ? ['clip-stencil-write', 'path-stroke-patch-clip-cover']
         : ['path-stroke-patch-cover'];

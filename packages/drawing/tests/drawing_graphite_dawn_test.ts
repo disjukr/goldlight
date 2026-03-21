@@ -11,6 +11,7 @@ import {
   createDrawingRecorder,
   encodeDawnCommandBuffer,
   finishDrawingRecorder,
+  prepareDrawingRecording,
   recordClear,
   recordDrawPath,
   recordDrawShape,
@@ -26,6 +27,10 @@ const createMockGpuContext = () => {
   const renderPasses: GPURenderPassDescriptor[] = [];
   const submitted: GPUCommandBuffer[][] = [];
   const finishedCommandBuffers: GPUCommandBuffer[] = [];
+  const shaderModules: GPUShaderModuleDescriptor[] = [];
+  const renderPipelines: GPURenderPipelineDescriptor[] = [];
+  const drawCalls: number[] = [];
+  const mappedBuffers: ArrayBuffer[] = [];
   const offscreenView = { label: 'offscreen-view' } as unknown as GPUTextureView;
   const ticks: number[] = [];
 
@@ -37,6 +42,10 @@ const createMockGpuContext = () => {
       renderPasses,
       submitted,
       finishedCommandBuffers,
+      shaderModules,
+      renderPipelines,
+      drawCalls,
+      mappedBuffers,
     },
     context: {
       adapter: {
@@ -53,7 +62,13 @@ const createMockGpuContext = () => {
         },
         createBuffer: (descriptor: GPUBufferDescriptor) => {
           buffers.push(descriptor);
-          return { descriptor } as unknown as GPUBuffer;
+          const range = new ArrayBuffer(descriptor.size);
+          mappedBuffers.push(range);
+          return {
+            descriptor,
+            getMappedRange: () => range,
+            unmap: () => undefined,
+          } as unknown as GPUBuffer;
         },
         createTexture: (descriptor: GPUTextureDescriptor) => {
           textures.push(descriptor);
@@ -66,13 +81,26 @@ const createMockGpuContext = () => {
           samplers.push(descriptor ?? {});
           return { descriptor } as unknown as GPUSampler;
         },
+        createShaderModule: (descriptor: GPUShaderModuleDescriptor) => {
+          shaderModules.push(descriptor);
+          return { descriptor } as unknown as GPUShaderModule;
+        },
+        createRenderPipeline: (descriptor: GPURenderPipelineDescriptor) => {
+          renderPipelines.push(descriptor);
+          return { descriptor } as unknown as GPURenderPipeline;
+        },
         createCommandEncoder: () =>
           ({
             beginRenderPass: (descriptor: GPURenderPassDescriptor) => {
               renderPasses.push(descriptor);
               return {
+                setPipeline: () => undefined,
+                setVertexBuffer: () => undefined,
+                draw: (vertexCount: number) => {
+                  drawCalls.push(vertexCount);
+                },
                 end: () => undefined,
-              } as GPURenderPassEncoder;
+              } as unknown as GPURenderPassEncoder;
             },
             finish: () => {
               const commandBuffer = {
@@ -221,6 +249,37 @@ Deno.test('drawing recorder finishes into an immutable recording snapshot', () =
   assertEquals(recorder.commands.length, 1);
 });
 
+Deno.test('drawing prepared recording groups clear and draw commands into passes', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  recordClear(recorder, [0.1, 0.2, 0.3, 1]);
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [0, 0] },
+      { kind: 'lineTo', to: [20, 0] },
+      { kind: 'lineTo', to: [20, 20] },
+      { kind: 'close' },
+    ),
+    { style: 'fill' },
+  );
+  recordClear(recorder, [0, 0, 0, 1]);
+
+  const recording = finishDrawingRecorder(recorder);
+  const prepared = prepareDrawingRecording(recording);
+
+  assertEquals(prepared.backend, 'graphite-dawn');
+  assertEquals(prepared.passCount, 2);
+  assertEquals(prepared.passes[0]?.loadOp, 'clear');
+  assertEquals(prepared.passes[0]?.draws.length, 1);
+  assertEquals(prepared.passes[0]?.unsupportedDraws.length, 0);
+  assertEquals(prepared.passes[1]?.loadOp, 'clear');
+  assertEquals(prepared.passes[1]?.draws.length, 0);
+  assertEquals(prepared.unsupportedCommands.length, 0);
+});
+
 Deno.test('dawn command buffer encodes clear passes and tracks unsupported commands', () => {
   const mock = createMockGpuContext();
   const backend = createDawnBackendContext(mock.context);
@@ -245,10 +304,14 @@ Deno.test('dawn command buffer encodes clear passes and tracks unsupported comma
   submitToDawnQueueManager(sharedContext.queueManager, commandBuffer);
 
   assertEquals(commandBuffer.backend, 'graphite-dawn');
+  assertEquals(commandBuffer.prepared.passCount, 1);
   assertEquals(commandBuffer.passCount, 1);
-  assertEquals(commandBuffer.unsupportedCommands.length, 1);
-  assertEquals(commandBuffer.unsupportedCommands[0]?.kind, 'drawPath');
+  assertEquals(commandBuffer.unsupportedCommands.length, 0);
   assertEquals(mock.created.renderPasses.length, 1);
+  assertEquals(mock.created.shaderModules.length, 1);
+  assertEquals(mock.created.renderPipelines.length, 1);
+  assertEquals(mock.created.drawCalls.length, 1);
+  assertEquals(mock.created.drawCalls[0], 3);
   assertEquals(
     mock.created.renderPasses[0]?.colorAttachments[0]?.clearValue,
     { r: 0.25, g: 0.5, b: 0.75, a: 1 },

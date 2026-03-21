@@ -55,8 +55,8 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Status: `started`
   - Queue manager can submit encoded command buffers and track in-flight work counts.
 - Path rendering
-  - Status: `pending`
-  - No tessellation or rasterization strategy implemented.
+  - Status: `started`
+  - Simple CPU triangle-fan fill path preparation exists for single closed polygons.
 - Paint system
   - Status: `started`
   - Minimal paint shape exists, not executable.
@@ -92,8 +92,16 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Missing: richer probing and backend-specific fallbacks
 - `DawnCommandBuffer` -> `src/command_buffer.ts`
   - Status: `started`
-  - What exists: clear-only WebGPU render-pass encoding
-  - Missing: draw path and draw shape encoding
+  - What exists: clear and first fill-path draw encoding over prepared draw passes
+  - Missing: broader draw path and draw shape encoding
+- `DrawPass` -> `src/draw_pass.ts`
+  - Status: `started`
+  - What exists: prepared pass partitioning for clear and pending draws
+  - Missing: pipeline/state/resource preparation comparable to Skia DrawPass
+- `DrawPass` -> `src/draw_pass.ts`
+  - Status: `started`
+  - What exists: prepared pass partitioning for clear and pending draws
+  - Missing: pipeline/state/resource preparation comparable to Skia DrawPass
 - `DawnQueueManager` -> `src/queue_manager.ts`
   - Status: `started`
   - What exists: queue submit, tick, and unfinished work tracking
@@ -135,6 +143,9 @@ stack that fits this repository's TypeScript and WebGPU architecture.
 - `src/command_buffer.ts`
   - Status: `started`
   - Role: command encoder translation
+- `src/draw_pass.ts`
+  - Status: `started`
+  - Role: prepared render-pass partitioning between recording and backend encoding
 - `src/queue_manager.ts`
   - Status: `started`
   - Role: queue submission and completion
@@ -142,8 +153,8 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Status: `started`
   - Role: immutable recorded command package
 - `src/path_renderer.ts`
-  - Status: `pending`
-  - Role: path rendering strategy
+  - Status: `started`
+  - Role: first path rendering preparation strategy
 - `tests/`
   - Status: `started`
   - Role: package-local tests for drawing
@@ -202,8 +213,8 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
   - Missing: executable GPU path
 - `drawPath`
   - Status: `started`
-  - Current state: recordable with paint
-  - Missing: rasterization or tessellation
+  - Current state: recordable, and simple fill polygons can be executed
+  - Missing: general rasterization or tessellation
 - `drawShape`
   - Status: `started`
   - Current state: shape is converted to `Path2D`
@@ -325,23 +336,23 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
   - Status: `started`
   - Shape to path conversion exists
 - Fill/stroke expansion
-  - Status: `pending`
-  - No geometry generation yet
+  - Status: `started`
+  - Triangle-fan fill generation exists for simple polygonal paths
 - Path tessellation
-  - Status: `pending`
-  - No CPU or GPU tessellator
+  - Status: `started`
+  - Minimal CPU tessellation exists for simple polygonal fills
 - Vertex/index generation
-  - Status: `pending`
-  - None
+  - Status: `started`
+  - Vertex generation exists for simple polygonal fills
 - GPU upload
-  - Status: `pending`
-  - Not connected to drawing commands
+  - Status: `started`
+  - Simple per-draw vertex buffer upload exists for polygonal fill paths
 - Render pass setup
   - Status: `started`
-  - Clear-only render pass encoding exists
+  - Recording can be partitioned into prepared draw passes, and clear-only pass encoding exists
 - Pipeline binding
-  - Status: `pending`
-  - None
+  - Status: `started`
+  - A basic solid-fill render pipeline exists for first path draws
 - Draw submission
   - Status: `started`
   - Command buffer submission helper exists for encoded clears
@@ -394,9 +405,10 @@ These decisions directly affect the remaining work and are not settled yet.
 ## Known Gaps
 
 - `Path2D` is still very small compared to Skia `SkPath`
-- recording snapshots exist, but they still do not partition work into backend-executable passes
-- no separation yet between frontend drawing commands and backend executable passes
-- no renderer for fills or strokes
+- recording snapshots can be partitioned into coarse draw passes, but they do not yet carry
+  Skia-like pipeline/state/resource data
+- no Skia-like draw-list or draw-pass preparation layer yet
+- only simple polygonal fill paths render; strokes and curved fills do not
 - no SVG parser or SVG-to-`Path2D` ingestion path yet
 - no clipping, transforms, or retained state model
 - no pipeline or bind group cache

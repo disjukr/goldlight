@@ -4,3 +4,4 @@ examples/assets/sponza
 vendor/sdl2
 packages/desktop/native/target
 packages/drawing/examples/render_tiger_png/tiger.png
+packages/drawing/examples/render_basic_paths/out.png

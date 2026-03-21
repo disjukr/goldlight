@@ -1,0 +1,5 @@
+{
+  "name": "@rieul3d/drawing",
+  "version": "0.0.0",
+  "exports": "./mod.ts"
+}

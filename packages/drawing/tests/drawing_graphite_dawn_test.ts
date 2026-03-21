@@ -653,6 +653,48 @@ Deno.test('drawing prepared recording scales hairline alpha coverage', () => {
   assertEquals(draw?.color, [0.4, 0.6, 0.8, 0.5]);
 });
 
+Deno.test('drawing prepared recording keeps zero-length round-cap strokes visible', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [64, 64] },
+      { kind: 'lineTo', to: [64, 64] },
+    ),
+    { style: 'stroke', strokeWidth: 10, strokeCap: 'round' },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const draw = prepared.passes[0]?.steps[0]?.draw;
+  assertEquals(draw?.kind, 'pathStroke');
+  assertEquals((draw?.triangles.length ?? 0) > 0, true);
+  assertEquals((draw?.fringeVertices?.length ?? 0) > 0, true);
+});
+
+Deno.test('drawing prepared recording keeps zero-length square-cap strokes visible', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [80, 80] },
+      { kind: 'close' },
+    ),
+    { style: 'stroke', strokeWidth: 12, strokeCap: 'square' },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const draw = prepared.passes[0]?.steps[0]?.draw;
+  assertEquals(draw?.kind, 'pathStroke');
+  assertEquals((draw?.triangles.length ?? 0) > 0, true);
+  assertEquals(draw?.bounds.origin, [74, 74]);
+  assertEquals(draw?.bounds.size, { width: 12, height: 12 });
+});
 Deno.test('dawn command buffer encodes fill draws with stencil and cover pipelines', () => {
   const mock = createMockGpuContext();
   const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));

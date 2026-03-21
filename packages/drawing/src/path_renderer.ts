@@ -1203,6 +1203,136 @@ const appendRoundFan = (
   }
 };
 
+const appendCircleFan = (
+  triangles: Point2D[],
+  center: Point2D,
+  radius: number,
+): void => {
+  let previous: Point2D = [center[0] + radius, center[1]];
+  for (let index = 1; index <= roundStrokeSegments; index += 1) {
+    const angle = (Math.PI * 2 * index) / roundStrokeSegments;
+    const next: Point2D = [
+      center[0] + (Math.cos(angle) * radius),
+      center[1] + (Math.sin(angle) * radius),
+    ];
+    appendTriangle(triangles, center, previous, next);
+    previous = next;
+  }
+};
+
+const appendSquare = (
+  triangles: Point2D[],
+  center: Point2D,
+  halfExtent: number,
+): void => {
+  appendQuad(
+    triangles,
+    [center[0] - halfExtent, center[1] - halfExtent],
+    [center[0] + halfExtent, center[1] - halfExtent],
+    [center[0] + halfExtent, center[1] + halfExtent],
+    [center[0] - halfExtent, center[1] + halfExtent],
+  );
+};
+
+const appendCircleFringe = (
+  triangles: DrawingPreparedVertex[],
+  center: Point2D,
+  innerRadius: number,
+  outerRadius: number,
+  color: readonly [number, number, number, number],
+  transparent: readonly [number, number, number, number],
+): void => {
+  let previousInner: Point2D = [center[0] + innerRadius, center[1]];
+  let previousOuter: Point2D = [center[0] + outerRadius, center[1]];
+  for (let index = 1; index <= roundStrokeSegments; index += 1) {
+    const angle = (Math.PI * 2 * index) / roundStrokeSegments;
+    const nextInner: Point2D = [
+      center[0] + (Math.cos(angle) * innerRadius),
+      center[1] + (Math.sin(angle) * innerRadius),
+    ];
+    const nextOuter: Point2D = [
+      center[0] + (Math.cos(angle) * outerRadius),
+      center[1] + (Math.sin(angle) * outerRadius),
+    ];
+    appendColoredQuad(
+      triangles,
+      { point: previousInner, color },
+      { point: nextInner, color },
+      { point: nextOuter, color: transparent },
+      { point: previousOuter, color: transparent },
+    );
+    previousInner = nextInner;
+    previousOuter = nextOuter;
+  }
+};
+
+const appendSquareFringe = (
+  triangles: DrawingPreparedVertex[],
+  center: Point2D,
+  innerHalfExtent: number,
+  outerHalfExtent: number,
+  color: readonly [number, number, number, number],
+  transparent: readonly [number, number, number, number],
+): void => {
+  const inner = [
+    [center[0] - innerHalfExtent, center[1] - innerHalfExtent],
+    [center[0] + innerHalfExtent, center[1] - innerHalfExtent],
+    [center[0] + innerHalfExtent, center[1] + innerHalfExtent],
+    [center[0] - innerHalfExtent, center[1] + innerHalfExtent],
+  ] as const satisfies readonly Point2D[];
+  const outer = [
+    [center[0] - outerHalfExtent, center[1] - outerHalfExtent],
+    [center[0] + outerHalfExtent, center[1] - outerHalfExtent],
+    [center[0] + outerHalfExtent, center[1] + outerHalfExtent],
+    [center[0] - outerHalfExtent, center[1] + outerHalfExtent],
+  ] as const satisfies readonly Point2D[];
+  for (let index = 0; index < inner.length; index += 1) {
+    const next = (index + 1) % inner.length;
+    appendColoredQuad(
+      triangles,
+      { point: inner[index]!, color },
+      { point: inner[next]!, color },
+      { point: outer[next]!, color: transparent },
+      { point: outer[index]!, color: transparent },
+    );
+  }
+};
+
+const appendZeroLengthStrokeCap = (
+  triangles: Point2D[],
+  fringeVertices: DrawingPreparedVertex[],
+  point: Point2D,
+  halfWidth: number,
+  cap: NonNullable<DrawingPaint['strokeCap']>,
+  color: readonly [number, number, number, number],
+  transparent: readonly [number, number, number, number],
+): void => {
+  if (cap === 'butt') {
+    return;
+  }
+  if (cap === 'round') {
+    appendCircleFan(triangles, point, halfWidth);
+    appendCircleFringe(
+      fringeVertices,
+      point,
+      halfWidth,
+      halfWidth + aaFringeWidth,
+      color,
+      transparent,
+    );
+    return;
+  }
+  appendSquare(triangles, point, halfWidth);
+  appendSquareFringe(
+    fringeVertices,
+    point,
+    halfWidth,
+    halfWidth + aaFringeWidth,
+    color,
+    transparent,
+  );
+};
+
 const buildFillFringe = (
   subpaths: readonly FlattenedSubpath[],
   color: readonly [number, number, number, number],
@@ -1322,7 +1452,20 @@ const prepareStrokeTriangles = (
   const transparent: readonly [number, number, number, number] = [color[0], color[1], color[2], 0];
 
   for (const subpath of applyDashPattern(subpaths, paint)) {
-    if (subpath.points.length < 2) continue;
+    if (subpath.points.length < 2) {
+      if (subpath.points.length === 1) {
+        appendZeroLengthStrokeCap(
+          triangles,
+          fringeVertices,
+          subpath.points[0]!,
+          halfWidth,
+          cap,
+          color,
+          transparent,
+        );
+      }
+      continue;
+    }
     const segmentData = [];
     for (let index = 0; index < subpath.points.length - 1; index += 1) {
       const start = subpath.points[index]!;
@@ -1378,7 +1521,18 @@ const prepareStrokeTriangles = (
         });
       }
     }
-    if (segmentData.length === 0) continue;
+    if (segmentData.length === 0) {
+      appendZeroLengthStrokeCap(
+        triangles,
+        fringeVertices,
+        subpath.points[0]!,
+        halfWidth,
+        cap,
+        color,
+        transparent,
+      );
+      continue;
+    }
     if (subpath.closed) {
       for (let index = 0; index < segmentData.length; index += 1) {
         const incoming = segmentData[(index + segmentData.length - 1) % segmentData.length]!;

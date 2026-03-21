@@ -264,6 +264,8 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
 - Fill vs stroke
   - Status: `started`
   - Represented and first execution path exists
+  - Validation: zero-length stroke contours now emit visible round/square caps instead of being
+    dropped, matching Skia Graphite stroke semantics more closely
 - Stroke width
   - Status: `started`
   - Represented, with segment-expansion, hairline alpha scaling, and dash slicing
@@ -452,6 +454,43 @@ These decisions directly affect the remaining work and are not settled yet.
   DrawPass command stream
 - `queue_manager` currently treats `tick()` as coarse completion rather than using explicit GPU
   fences
+- clip stack handling still diverges from Skia Graphite for multiple nested non-convex clip paths;
+  only one complex stencil clip payload is preserved today
+- clip geometry clipping is still incomplete for AA fringe geometry, so coverage edges can diverge
+  from Graphite under complex clips
+- stroke tessellation still uses simplified fixed-count subdivision instead of Wang's-formula-driven
+  segment counts from Graphite tessellation render steps
+
+## Skia Graphite/Dawn Comparison Notes
+
+- `ClipStack.cpp`
+  - Current local gap: Graphite accumulates and simplifies full clip stack state, while local
+    `prepareClipStack()` only keeps convex clips plus one complex stencil clip payload
+  - To match Skia behavior:
+    1. preserve all intersecting clip elements, not just the first complex path
+    2. apply clip semantics to AA fringe/coverage geometry as well as base fill/stroke triangles
+    3. add clip stack simplification rules closer to Graphite's geometric intersection path
+- `DrawPass.cpp`
+  - Current local gap: Graphite prepares reusable pipeline/resource state per draw pass; local code
+    still opens render passes per step and uploads per-draw transient buffers
+  - To match Skia behavior:
+    1. batch multiple prepared steps into a single replayable pass
+    2. separate resource preparation from replay
+    3. reuse transient uploads and pipeline state across pass steps
+- `render/TessellateCurvesRenderStep.cpp`
+  - Current local gap: Graphite patch tessellation derives subdivision from transform-aware Wang's
+    formula on GPU-style patch data; local code still pre-flattens/fixes subdivision on CPU
+  - To match Skia behavior:
+    1. carry transform-aware tessellation inputs instead of only CPU-flattened triangles
+    2. replace fixed subdivision with Wang's-formula-driven patch evaluation
+    3. align winding/even-odd stencil handling with Graphite render-step semantics
+- `render/TessellateStrokesRenderStep.cpp`
+  - Current local change: zero-length stroke contours with `round` or `square` caps now emit
+    visible cap geometry instead of being discarded
+  - Remaining gap:
+    1. align full deferred contour/cap handling with Graphite stroke patch writer
+    2. align cusp/circle emission and transform-aware stroke tessellation counts
+  - Validation: `packages/drawing/tests/drawing_graphite_dawn_test.ts`
 
 ## Recommended Next Steps
 

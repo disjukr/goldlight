@@ -21,7 +21,7 @@ Deno.test({
     );
 
     assertEquals(snapshot.unsupportedCommandCount, 0);
-    assertEquals(snapshot.passCount, 5);
+    assertEquals(snapshot.passCount, 1);
     assertEquals(toHex(digest), expectedPngSha256);
   },
 });

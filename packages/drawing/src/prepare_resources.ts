@@ -512,7 +512,9 @@ const prepareStepResources = (
   const patchVertices = step.draw.usesTessellatedStrokePatches
     ? createStrokePatchInstanceData(step.draw.patches, step.draw.strokeStyle)
     : new Float32Array(0);
-  const fringeVertices = step.draw.fringeVertices
+  const fringeVertices = step.draw.usesTessellatedStrokePatches
+    ? null
+    : step.draw.fringeVertices
     ? createColoredDeviceSpaceVertexData(step.draw.fringeVertices)
     : null;
 

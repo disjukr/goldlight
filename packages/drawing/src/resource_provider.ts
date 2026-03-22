@@ -55,6 +55,18 @@ const floatBytes = Float32Array.BYTES_PER_ELEMENT;
 const floatsPerVertex = 6;
 const stencilFormat = 'depth24plus-stencil8';
 const noColorWrites = 0;
+const srcOverBlend: GPUBlendState = {
+  color: {
+    operation: 'add',
+    srcFactor: 'src-alpha',
+    dstFactor: 'one-minus-src-alpha',
+  },
+  alpha: {
+    operation: 'add',
+    srcFactor: 'one',
+    dstFactor: 'one-minus-src-alpha',
+  },
+};
 const maxPatchResolveLevel = 6;
 const tessellationPrecision = 4;
 const curveFillSegments = 1 << maxPatchResolveLevel;
@@ -1166,6 +1178,7 @@ export const createDawnResourceProvider = (
       entryPoint: 'fs_main',
       targets: [{
         format: backend.target.format,
+        blend: descriptor.colorWriteDisabled ? undefined : srcOverBlend,
         writeMask: descriptor.colorWriteDisabled ? noColorWrites : undefined,
       }],
     },

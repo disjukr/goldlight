@@ -1619,7 +1619,7 @@ Deno.test('dawn command buffer batches consecutive non-stencil draws into one re
 
   assertEquals(commandBuffer.passCount, 1);
   assertEquals(mock.created.renderPasses.length, 1);
-  assertEquals(mock.created.drawCalls.length, 4);
+  assertEquals(mock.created.drawCalls.length, 3);
   assertEquals(mock.created.stencilReferences, []);
 });
 

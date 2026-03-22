@@ -1732,6 +1732,35 @@ Deno.test('drawing prepared stroke patches split quadratic cusps at the Skia mid
   assertEquals(Boolean(cuspSplit), true);
 });
 
+Deno.test('drawing prepared stroke patches split conic cusps at the Skia mid-tangent', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [0, 0] },
+      { kind: 'conicTo', control: [4, 0], to: [1, 0], weight: 0.5 },
+    ),
+    { style: 'stroke', strokeWidth: 8, strokeCap: 'round', strokeJoin: 'round' },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const draw = prepared.passes[0]?.steps[0]?.draw;
+  assertEquals(draw?.kind, 'pathStroke');
+  if (draw?.kind !== 'pathStroke') {
+    throw new Error('expected pathStroke draw');
+  }
+
+  const cuspSplit = draw.patches.find((patch) =>
+    patch.patch.kind === 'line' &&
+    Math.abs(patch.patch.points[1][0] - 1.7370341836426595) < 1e-6 &&
+    Math.abs(patch.patch.points[1][1]) < 1e-6
+  );
+  assertEquals(Boolean(cuspSplit), true);
+});
+
 Deno.test('drawing prepared stroke patches emit cusp circles for turnaround curves', () => {
   const mock = createMockGpuContext();
   const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));

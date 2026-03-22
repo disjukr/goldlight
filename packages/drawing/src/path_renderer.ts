@@ -1463,12 +1463,15 @@ const flattenConic = (
   to: Point2D,
   weight: number,
   out: Point2D[],
+  depth = 0,
 ): void => {
-  const cuspT = findConicCuspT(from, control, to, weight);
+  const cuspT = depth === 0
+    ? findCuspTBySampling((t) => derivativeConic(from, control, to, weight, t))
+    : null;
   if (cuspT !== null) {
     const cuspPoint = evaluateConic(from, control, to, weight, cuspT);
-    flattenConic(from, lerp(from, control, cuspT), cuspPoint, weight, out);
-    flattenConic(cuspPoint, lerp(control, to, cuspT), to, weight, out);
+    flattenConic(from, lerp(from, control, cuspT), cuspPoint, weight, out, depth + 1);
+    flattenConic(cuspPoint, lerp(control, to, cuspT), to, weight, out, depth + 1);
     return;
   }
   const segments = Math.max(

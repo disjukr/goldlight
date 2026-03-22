@@ -1898,7 +1898,10 @@ Deno.test('dawn queue manager tracks explicit submitted-work completion', async 
   assertEquals(queueManager.supportsSubmittedWorkDone, true);
   assertEquals(queueManager.outstandingSubmissions.length, 1);
   assertEquals(queueManager.outstandingSubmissions[0]?.serial, 1);
-  assertEquals(queueManager.outstandingSubmissions[0]?.recorderId, commandBuffer.recording.recorderId);
+  assertEquals(
+    queueManager.outstandingSubmissions[0]?.recorderId,
+    commandBuffer.recording.recorderId,
+  );
 
   mock.created.submissionDoneResolvers.shift()?.();
   await tickDawnQueueManager(queueManager);

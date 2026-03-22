@@ -156,9 +156,9 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Status: `partial`
   - Role: low-level resource creation, cached render pipelines, fill stencil/cover pipeline
     selection, stencil attachment reuse, canonical sampler reuse, and bind-group reuse
-  - Update 2026-03-23: stroke patch vertex replay now follows Skia's
-    `tessellate_stroked_curve()` branch structure more closely for degenerate conic square patches,
-    round/circle patches, and parametric segment selection
+  - Update 2026-03-23: stroke patch vertex replay now follows Skia's `tessellate_stroked_curve()`
+    branch structure more closely for degenerate conic square patches, round/circle patches, and
+    parametric segment selection
 - `src/recorder.ts`
   - Status: `partial`
   - Role: command recording API with transform and clip-stack state
@@ -530,8 +530,8 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
     handling is still a reduced version of Skia's full implementation, and translucent round
     cap/join coverage still needs Graphite-like analytic evaluation instead of flat color fill
 - `QueueManager` submission model is still simplified
-  - Local state: queue submission, ordered outstanding submission ownership, and completion
-    draining exist in `src/queue_manager.ts`
+  - Local state: queue submission, ordered outstanding submission ownership, and completion draining
+    exist in `src/queue_manager.ts`
   - Remaining delta: no Graphite-style finish-proc ownership, command-buffer reuse, or
     resource/fence correlation
 - `Caps` still trails DawnCaps depth

@@ -1,3 +1,4 @@
+import type { Rect } from '@rieul3d/geometry';
 import type { DrawingRecording } from './recording.ts';
 import { type DrawingPreparedDraw, prepareDrawingPathCommand } from './path_renderer.ts';
 import type {
@@ -6,7 +7,6 @@ import type {
   DrawPathCommand,
   DrawShapeCommand,
 } from './types.ts';
-import type { Rect } from '@rieul3d/geometry';
 
 export type DrawingDrawCommand = DrawPathCommand | DrawShapeCommand;
 

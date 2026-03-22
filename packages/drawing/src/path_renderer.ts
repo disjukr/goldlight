@@ -2744,7 +2744,6 @@ const preparePathFill = (
       subpaths[0]!.closed &&
       isConvexPolygon(subpaths[0]!.points);
     const renderer = rendererProvider.getPathFillRenderer({
-    const renderer = rendererProvider.getPathFillRenderer({
       fillRule: command.path.fillRule,
       patchCount: patches.length,
       hasCurves,

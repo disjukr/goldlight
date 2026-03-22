@@ -1514,6 +1514,45 @@ Deno.test('dawn command buffer intersects multiple clip paths through stencil re
   assertEquals(mock.created.renderPasses[0]?.depthStencilAttachment !== undefined, true);
 });
 
+Deno.test('dawn command buffer batches consecutive non-stencil draws into one render pass', () => {
+  const mock = createMockGpuContext();
+  const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
+  const recorder = createDrawingRecorder(sharedContext);
+  const binding = createOffscreenBinding(mock.context);
+
+  recordClear(recorder, [0.1, 0.2, 0.3, 1]);
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [0, 0] },
+      { kind: 'lineTo', to: [32, 0] },
+      { kind: 'lineTo', to: [32, 32] },
+      { kind: 'close' },
+    ),
+    { style: 'fill' },
+  );
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [48, 48] },
+      { kind: 'lineTo', to: [96, 48] },
+      { kind: 'lineTo', to: [96, 96] },
+      { kind: 'close' },
+    ),
+    { style: 'stroke', strokeWidth: 4 },
+  );
+
+  const commandBuffer = encodeDawnCommandBuffer(
+    sharedContext,
+    finishDrawingRecorder(recorder),
+    binding,
+  );
+
+  assertEquals(commandBuffer.passCount, 1);
+  assertEquals(mock.created.renderPasses.length, 1);
+  assertEquals(mock.created.drawCalls.length, 4);
+});
+
 Deno.test('dawn command buffer encodes stroke draws without stencil', () => {
   const mock = createMockGpuContext();
   const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));

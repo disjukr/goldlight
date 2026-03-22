@@ -1,6 +1,6 @@
 # Render Strokes
 
-This example renders only stroked paths to an offscreen WebGPU target and writes `out.png`.
+This example renders only stroked paths to a compact offscreen WebGPU target and writes `out.png`.
 
 What it shows:
 

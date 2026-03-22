@@ -1206,9 +1206,44 @@ Deno.test('drawing prepared stroke patches seed open contours from first tangent
     throw new Error('expected pathStroke draw');
   }
   assertEquals(draw.patches.length > 0, true);
-  assertEquals(draw.patches.at(-1)?.joinControlPoint, [0, 0]);
-  assertEquals(draw.patches.at(-1)?.startCap, 'none');
+  const firstCurvePatch = draw.patches.find((patch) => {
+    const points = patch.patch.points;
+    return points.some((point) => point[0] !== points[0]![0] || point[1] !== points[0]![1]);
+  });
+  assertEquals(firstCurvePatch?.joinControlPoint, [0, 0]);
+  assertEquals(firstCurvePatch?.startCap, 'none');
   assertEquals(draw.usesTessellatedStrokePatches, true);
+});
+
+Deno.test('drawing prepared stroke patches keep open contour joins chained across split curves', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [410, 730] },
+      {
+        kind: 'arcTo',
+        center: [500, 730],
+        radius: 90,
+        startAngle: Math.PI,
+        endAngle: 0,
+      },
+    ),
+    { style: 'stroke', strokeWidth: 18, strokeJoin: 'round', strokeCap: 'round' },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const draw = prepared.passes[0]?.steps[0]?.draw;
+  assertEquals(draw?.kind, 'pathStroke');
+  if (draw?.kind !== 'pathStroke') {
+    throw new Error('expected pathStroke draw');
+  }
+  const conicPatches = draw.patches.filter((patch) => patch.patch.kind === 'conic');
+  assertEquals(conicPatches.length, 2);
+  assertEquals(conicPatches[1]?.joinControlPoint, [410, 820]);
 });
 
 Deno.test('drawing prepared stroke patches rewrite closed contour first join control point', () => {
@@ -1317,6 +1352,32 @@ Deno.test('drawing prepared stroke patches preserve bevel and miter line joins i
   assertEquals(miterKinds.patchCount > 0, true);
 });
 
+Deno.test('drawing prepared stroke patches emit square cap patches for open contours', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [260, 315] },
+      { kind: 'lineTo', to: [380, 315] },
+    ),
+    { style: 'stroke', strokeWidth: 32, strokeJoin: 'round', strokeCap: 'square' },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const draw = prepared.passes[0]?.steps[0]?.draw;
+  assertEquals(draw?.kind, 'pathStroke');
+  if (draw?.kind !== 'pathStroke') {
+    throw new Error('expected pathStroke draw');
+  }
+  assertEquals(draw.patches[0]?.patch.kind, 'conic');
+  assertEquals(draw.patches.at(-1)?.patch.kind, 'conic');
+  assertEquals(draw.patches[0]?.joinControlPoint, [380, 315]);
+  assertEquals(draw.patches.at(-1)?.joinControlPoint, [260, 315]);
+});
+
 Deno.test('drawing prepared stroke patches emit synthetic cap patches for degenerate contours', () => {
   const mock = createMockGpuContext();
   const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
@@ -1375,6 +1436,7 @@ Deno.test('drawing prepared stroke patches emit cusp circles for turnaround curv
   assertEquals(draw.usesTessellatedStrokePatches, true);
   assertEquals(draw.patches.length > 0, true);
 });
+
 
 Deno.test('drawing prepared recording applies dash pattern to strokes', () => {
   const mock = createMockGpuContext();

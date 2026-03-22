@@ -924,11 +924,15 @@ const createPreparedStrokeContourPatches = (
     }
     if (hasPrependedSquareCap && firstTangent) {
       leadingPatches.push({
-        patch: createStrokeLinePatch(add(firstStart, scale(firstTangent, -halfWidth)), firstStart),
-        contourStart: true,
+        patch: createDegenerateSquareStrokePatch(
+          firstStart,
+          getPatchFirstControlPoint(firstPatch),
+        ).patch,
+        contourStart: false,
         contourEnd: false,
         startCap: 'none',
         endCap: 'none',
+        joinControlPoint: getPatchFirstControlPoint(firstPatch),
       });
     }
     const deferredFirstPatch: DrawingStrokeContourEvent = {
@@ -955,11 +959,15 @@ const createPreparedStrokeContourPatches = (
     }
     if (hasAppendedSquareCap && lastTangent) {
       trailingPatches.push({
-        patch: createStrokeLinePatch(lastEnd, add(lastEnd, scale(lastTangent, halfWidth))),
+        patch: createDegenerateSquareStrokePatch(
+          lastEnd,
+          getPatchOutgoingJoinControlPoint(lastPatch),
+        ).patch,
         contourStart: false,
-        contourEnd: true,
+        contourEnd: false,
         startCap: 'none',
         endCap: 'none',
+        joinControlPoint: getPatchOutgoingJoinControlPoint(lastPatch),
       });
     }
     return {
@@ -973,74 +981,28 @@ const createPreparedStrokeContourPatches = (
         : deferredJoinControlPoint,
     };
   })();
-  const iteratorVerbs: readonly DrawingStrokeIteratorVerb[] = (() => {
-    const verbs: DrawingStrokeIteratorVerb[] = [];
-    const usesOpenContourBarrier = !contour.closed;
-    if (usesOpenContourBarrier) {
-      for (const event of iteratorState.bodyPatches) {
-        verbs.push({ kind: 'patch', event });
-      }
-      for (const event of iteratorState.trailingPatches) {
-        verbs.push({ kind: 'patch', event });
-      }
-      if (iteratorState.joinBarrier === 'moveWithinContour') {
-        verbs.push({ kind: 'moveWithinContour' });
-      }
-      for (const event of iteratorState.leadingPatches) {
-        verbs.push({ kind: 'patch', event });
-      }
-      verbs.push({ kind: 'patch', event: iteratorState.deferredFirstPatch });
-    } else {
-      for (const event of iteratorState.leadingPatches) {
-        verbs.push({ kind: 'patch', event });
-      }
-      verbs.push({ kind: 'patch', event: iteratorState.deferredFirstPatch });
-      for (const event of iteratorState.bodyPatches) {
-        verbs.push({ kind: 'patch', event });
-      }
-      for (const event of iteratorState.trailingPatches) {
-        verbs.push({ kind: 'patch', event });
-      }
-      if (iteratorState.joinBarrier === 'moveWithinContour') {
-        verbs.push({ kind: 'moveWithinContour' });
-      }
-    }
-    verbs.push({ kind: 'contourFinished' });
-    return Object.freeze(verbs);
-  })();
-  let previousJoinControlPoint = deferredJoinControlPoint;
-  let deferredFirstConsumed = false;
-  for (const verb of iteratorVerbs) {
-    switch (verb.kind) {
-      case 'patch': {
-        const event = verb.event;
-        const joinControlPoint =
-          event.joinControlPoint ??
-          ((!deferredFirstConsumed && event === iteratorState.deferredFirstPatch)
-            ? iteratorState.joinBarrier === 'join'
-              ? getPatchOutgoingJoinControlPoint(lastPatch)
-              : deferredJoinControlPoint
-            : previousJoinControlPoint);
-        prepared.push({
-          patch: event.patch,
-          prevPoint: joinControlPoint,
-          joinControlPoint,
-          contourStart: event.contourStart,
-          contourEnd: event.contourEnd,
-          startCap: event.startCap,
-          endCap: event.endCap,
-        });
-        previousJoinControlPoint = getPatchOutgoingJoinControlPoint(event.patch);
-        if (event === iteratorState.deferredFirstPatch) {
-          deferredFirstConsumed = true;
-        }
-        break;
-      }
-      case 'moveWithinContour':
-        previousJoinControlPoint = iteratorState.moveWithinContourJoinPoint;
-        break;
-      case 'contourFinished':
-        break;
+  const orderedEvents = [
+    ...iteratorState.leadingPatches,
+    iteratorState.deferredFirstPatch,
+    ...iteratorState.bodyPatches,
+    ...iteratorState.trailingPatches,
+  ];
+  let previousJoinControlPoint = iteratorState.joinBarrier === 'join'
+    ? getPatchOutgoingJoinControlPoint(lastPatch)
+    : deferredJoinControlPoint;
+  for (const event of orderedEvents) {
+    const joinControlPoint = event.joinControlPoint ?? previousJoinControlPoint;
+    prepared.push({
+      patch: event.patch,
+      prevPoint: joinControlPoint,
+      joinControlPoint,
+      contourStart: event.contourStart,
+      contourEnd: event.contourEnd,
+      startCap: event.startCap,
+      endCap: event.endCap,
+    });
+    if (!event.contourEnd || contour.closed) {
+      previousJoinControlPoint = getPatchOutgoingJoinControlPoint(event.patch);
     }
   }
   return Object.freeze(prepared);

@@ -12,7 +12,8 @@ import {
   submitToDawnQueueManager,
 } from '@rieul3d/drawing';
 
-const outputSize = 840;
+const outputWidth = 680;
+const outputHeight = 820;
 const supersampleScale = 2;
 
 const downsampleRgba = (
@@ -66,8 +67,8 @@ export const renderStrokesSnapshot = async (): Promise<
   const drawingContext = await requestDrawingContext({
     target: {
       kind: 'offscreen',
-      width: outputSize * supersampleScale,
-      height: outputSize * supersampleScale,
+      width: outputWidth * supersampleScale,
+      height: outputHeight * supersampleScale,
       format: 'rgba8unorm',
       sampleCount: 4,
     },
@@ -132,8 +133,8 @@ export const renderStrokesSnapshot = async (): Promise<
   recordDrawPath(
     recorder,
     createPath2D(
-      { kind: 'moveTo', to: [90, 360] },
-      { kind: 'lineTo', to: [210, 360] },
+      { kind: 'moveTo', to: [90, 315] },
+      { kind: 'lineTo', to: [210, 315] },
     ),
     {
       style: 'stroke',
@@ -147,8 +148,8 @@ export const renderStrokesSnapshot = async (): Promise<
   recordDrawPath(
     recorder,
     createPath2D(
-      { kind: 'moveTo', to: [260, 360] },
-      { kind: 'lineTo', to: [380, 360] },
+      { kind: 'moveTo', to: [260, 315] },
+      { kind: 'lineTo', to: [380, 315] },
     ),
     {
       style: 'stroke',
@@ -162,8 +163,8 @@ export const renderStrokesSnapshot = async (): Promise<
   recordDrawPath(
     recorder,
     createPath2D(
-      { kind: 'moveTo', to: [430, 360] },
-      { kind: 'lineTo', to: [550, 360] },
+      { kind: 'moveTo', to: [430, 315] },
+      { kind: 'lineTo', to: [550, 315] },
     ),
     {
       style: 'stroke',
@@ -177,8 +178,8 @@ export const renderStrokesSnapshot = async (): Promise<
   recordDrawPath(
     recorder,
     createPath2D(
-      { kind: 'moveTo', to: [88, 470] },
-      { kind: 'lineTo', to: [552, 470] },
+      { kind: 'moveTo', to: [88, 430] },
+      { kind: 'lineTo', to: [552, 430] },
     ),
     {
       style: 'stroke',
@@ -193,18 +194,18 @@ export const renderStrokesSnapshot = async (): Promise<
   recordDrawPath(
     recorder,
     createPath2D(
-      { kind: 'moveTo', to: [80, 580] },
+      { kind: 'moveTo', to: [80, 535] },
       {
         kind: 'cubicTo',
-        control1: [180, 440],
-        control2: [280, 720],
-        to: [380, 580],
+        control1: [180, 395],
+        control2: [280, 675],
+        to: [380, 535],
       },
       {
         kind: 'cubicTo',
-        control1: [450, 490],
-        control2: [540, 490],
-        to: [600, 580],
+        control1: [450, 445],
+        control2: [540, 445],
+        to: [600, 535],
       },
     ),
     {
@@ -219,8 +220,8 @@ export const renderStrokesSnapshot = async (): Promise<
   recordDrawPath(
     recorder,
     createPath2D(
-      { kind: 'moveTo', to: [80, 730] },
-      { kind: 'quadTo', control: [185, 620], to: [300, 730] },
+      { kind: 'moveTo', to: [80, 675] },
+      { kind: 'quadTo', control: [185, 565], to: [300, 675] },
     ),
     {
       style: 'stroke',
@@ -234,10 +235,10 @@ export const renderStrokesSnapshot = async (): Promise<
   recordDrawPath(
     recorder,
     createPath2D(
-      { kind: 'moveTo', to: [410, 730] },
+      { kind: 'moveTo', to: [410, 675] },
       {
         kind: 'arcTo',
-        center: [500, 730],
+        center: [500, 675],
         radius: 90,
         startAngle: Math.PI,
         endAngle: 0,
@@ -278,8 +279,8 @@ export const renderStrokesSnapshot = async (): Promise<
 
   return {
     png: exportPngRgba({
-      width: outputSize,
-      height: outputSize,
+      width: outputWidth,
+      height: outputHeight,
       bytes: downsampled,
     }),
     passCount: commandBuffer.passCount,

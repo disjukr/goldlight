@@ -502,11 +502,14 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
 - `Stroke tessellation` is structurally close but still not 1:1
   - Local state: `src/path_renderer.ts` now has iterator-like contour events, deferred first-patch
     rewrite, open-cap patch emission, Graphite-style replicated line patches, `chopAndWriteCubics`,
-    and `FindCubicConvex180Chops`-style cubic chop detection; `src/resource_provider.ts` now uses
-    triangle-strip stroke patch replay with `edgeID` / `combinedEdgeID`-driven body tessellation
+    `FindCubicConvex180Chops`-style cubic chop detection, and open-contour patch chaining that now
+    keeps split curves connected to their true predecessor join control points;
+    `src/resource_provider.ts` now uses triangle-strip stroke patch replay with `edgeID` /
+    `combinedEdgeID`-driven body tessellation
   - Remaining delta: `tessellate_stroked_curve()` seam math still has local safety branches,
-    `StrokeIterator` is event-driven rather than a verb-for-verb port, and cusp / duplicated-edge
-    handling is still a reduced version of Skia's full implementation
+    `StrokeIterator` is event-driven rather than a verb-for-verb port, cusp / duplicated-edge
+    handling is still a reduced version of Skia's full implementation, and translucent round
+    cap/join coverage still needs Graphite-like analytic evaluation instead of flat color fill
 - `QueueManager` submission model is still simplified
   - Local state: queue submission and completion tracking exist in `src/queue_manager.ts`
   - Remaining delta: no Graphite-style outstanding submission object ownership or resource/fence

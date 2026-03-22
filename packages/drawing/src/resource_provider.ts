@@ -69,10 +69,11 @@ const srcOverBlend: GPUBlendState = {
     dstFactor: 'one-minus-src-alpha',
   },
 };
-const maxPatchResolveLevel = 6;
+const maxPatchResolveLevel = 5;
 const tessellationPrecision = 4;
+const patchPrecision = 4;
 const curveFillSegments = 1 << maxPatchResolveLevel;
-const strokePatchSegments = 1 << maxPatchResolveLevel;
+const strokePatchSegments = (1 << 14) - 1;
 const stepUniformFloats = 28;
 const textureBindingUsage = 0x04;
 
@@ -480,6 +481,63 @@ fn max_scale_factor(affine: mat2x2<f32>) -> f32 {
   return max(length(c0), length(c1));
 }
 
+fn wangs_formula_max_fdiff_p2(
+  p0: vec2<f32>,
+  p1: vec2<f32>,
+  p2: vec2<f32>,
+  p3: vec2<f32>,
+  matrix: mat2x2<f32>,
+) -> f32 {
+  let v1 = matrix * (p0 - (2.0 * p1) + p2);
+  let v2 = matrix * (p1 - (2.0 * p2) + p3);
+  return max(dot(v1, v1), dot(v2, v2));
+}
+
+fn wangs_formula_cubic(
+  p0: vec2<f32>,
+  p1: vec2<f32>,
+  p2: vec2<f32>,
+  p3: vec2<f32>,
+  matrix: mat2x2<f32>,
+) -> f32 {
+  let m = wangs_formula_max_fdiff_p2(p0, p1, p2, p3, matrix);
+  let p4 = max(${patchPrecision * patchPrecision * (81 / 64)}, 1.0) * m;
+  return max(ceil(log2(max(p4, 1.0)) * 0.25), 1.0);
+}
+
+fn wangs_formula_conic_p2(
+  p0: vec2<f32>,
+  p1: vec2<f32>,
+  p2: vec2<f32>,
+  w: f32,
+  matrix: mat2x2<f32>,
+) -> f32 {
+  let tp0 = matrix * p0;
+  let tp1 = matrix * p1;
+  let tp2 = matrix * p2;
+  let center = (min(min(tp0, tp1), tp2) + max(max(tp0, tp1), tp2)) * 0.5;
+  let cp0 = tp0 - center;
+  let cp1 = tp1 - center;
+  let cp2 = tp2 - center;
+  let maxLen = sqrt(max(max(dot(cp0, cp0), dot(cp1, cp1)), dot(cp2, cp2)));
+  let dp = fma(vec2<f32>(-2.0 * w), cp1, cp0) + cp2;
+  let dw = abs(fma(-2.0, w, 2.0));
+  let rpMinus1 = max(0.0, fma(maxLen, ${patchPrecision}, -1.0));
+  let numer = length(dp) * ${patchPrecision} + rpMinus1 * dw;
+  let denom = 4.0 * min(w, 1.0);
+  return numer / max(denom, 1e-5);
+}
+
+fn wangs_formula_conic(
+  p0: vec2<f32>,
+  p1: vec2<f32>,
+  p2: vec2<f32>,
+  w: f32,
+  matrix: mat2x2<f32>,
+) -> f32 {
+  return max(ceil(sqrt(max(wangs_formula_conic_p2(p0, p1, p2, w, matrix), 1.0))), 1.0);
+}
+
 fn eval_patch(
   curveType: f32,
   weight: f32,
@@ -672,7 +730,7 @@ fn vs_main(
     edgeID = -edgeID;
   }
   let segmentIndex = u32(abs(edgeID));
-  var activeSegments = max(1u, 1u << u32(clamp(curveMeta.z, 0.0, MAX_RESOLVE_LEVEL)));
+  let affine = affine_matrix();
   let curveType = curveMeta.x;
   let weight = curveMeta.y;
   let flags = u32(max(curveMeta.w, 0.0));
@@ -687,6 +745,16 @@ fn vs_main(
   var curveP3 = p3;
   var joinType = stroke.y;
   let lastControlPoint = joinControlPoint;
+  let maxScale = max_scale_factor(affine);
+  var numParametricSegments = 1.0;
+  if (curveType < 0.5) {
+    numParametricSegments = 1.0;
+  } else if (curveType < 2.5) {
+    numParametricSegments = wangs_formula_conic(curveP0, curveP1, curveP2, weight, affine);
+  } else {
+    numParametricSegments = wangs_formula_cubic(curveP0, curveP1, curveP2, curveP3, affine);
+  }
+  var activeSegments = max(1u, u32(ceil(numParametricSegments)));
   var prevTan = robust_normalize_diff(curveP0, lastControlPoint);
   var tan0 = patch_start_tangent(curveP0, curveP1, curveP2, curveP3);
   var tan1 = patch_end_tangent(curveP0, curveP1, curveP2, curveP3);
@@ -744,7 +812,6 @@ fn vs_main(
   if (turn < 0.0) {
     rotation = -rotation;
   }
-  var numParametricSegments = f32(activeSegments);
   var numRadialSegments: f32;
   if (combinedEdgeID < 0.0) {
     numRadialSegments = numEdgesInJoin - 2.0;
@@ -760,7 +827,7 @@ fn vs_main(
     }
   } else {
     let maxCombinedSegments = maxEdges - numEdgesInJoin - 1.0;
-    numRadialSegments = max(ceil(abs(rotation) * num_radial_segments_per_radian(stroke.x)), 1.0);
+    numRadialSegments = max(ceil(abs(rotation) * num_radial_segments_per_radian(maxScale * stroke.x)), 1.0);
     numRadialSegments = min(numRadialSegments, maxCombinedSegments);
     numParametricSegments = min(numParametricSegments, maxCombinedSegments - numRadialSegments + 1.0);
   }

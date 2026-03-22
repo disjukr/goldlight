@@ -76,11 +76,11 @@ const stepPayloadFloats = 28;
 const wedgePatchFloats = 14;
 const curvePatchFloats = 12;
 const strokePatchFloats = 16;
-const maxPatchResolveLevel = 6;
+const maxPatchResolveLevel = 5;
 const patchSegmentCount = 1 << maxPatchResolveLevel;
 const wedgePatchVertexCount = patchSegmentCount * 3;
 const curvePatchVertexCount = patchSegmentCount * 3;
-const strokePatchVertexCount = patchSegmentCount * 2;
+const maxStrokeEdges = (1 << 14) - 1;
 
 const createVertexModulationData = (
   triangles: readonly (readonly [number, number])[],
@@ -270,6 +270,141 @@ const quadraticToCubicPoints = (
     p2[1] + ((p1[1] - p2[1]) * (2 / 3)),
   ];
   return [p0, c1, c2, p2];
+};
+
+const transformPoint = (
+  point: Point2D,
+  matrix: readonly [number, number, number, number, number, number],
+): Point2D => [
+  (matrix[0] * point[0]) + (matrix[2] * point[1]) + matrix[4],
+  (matrix[1] * point[0]) + (matrix[3] * point[1]) + matrix[5],
+];
+
+const maxScaleFactor = (
+  matrix: readonly [number, number, number, number, number, number],
+): number => {
+  const a = matrix[0];
+  const b = matrix[1];
+  const c = matrix[2];
+  const d = matrix[3];
+  const sum = (a * a) + (b * b) + (c * c) + (d * d);
+  const det = (a * d) - (b * c);
+  const disc = Math.max((sum * sum) - (4 * det * det), 0);
+  return Math.sqrt(Math.max((sum + Math.sqrt(disc)) * 0.5, 1));
+};
+
+const calcNumRadialSegmentsPerRadian = (approxStrokeRadius: number): number => {
+  const radius = Math.max(approxStrokeRadius, 0.5);
+  const cosTheta = 1 - ((1 / 4) / radius);
+  return 0.5 / Math.acos(Math.max(cosTheta, -1));
+};
+
+const quadraticWangsFormulaP4 = (
+  p0: Point2D,
+  p1: Point2D,
+  p2: Point2D,
+): number => {
+  const vx = p0[0] - (2 * p1[0]) + p2[0];
+  const vy = p0[1] - (2 * p1[1]) + p2[1];
+  return ((vx * vx) + (vy * vy)) * 4;
+};
+
+const cubicWangsFormulaP4 = (
+  p0: Point2D,
+  p1: Point2D,
+  p2: Point2D,
+  p3: Point2D,
+): number => {
+  const v1x = p0[0] - (2 * p1[0]) + p2[0];
+  const v1y = p0[1] - (2 * p1[1]) + p2[1];
+  const v2x = p1[0] - (2 * p2[0]) + p3[0];
+  const v2y = p1[1] - (2 * p2[1]) + p3[1];
+  return Math.max((v1x * v1x) + (v1y * v1y), (v2x * v2x) + (v2y * v2y)) * (4 * (81 / 64));
+};
+
+const conicWangsFormulaP4 = (
+  p0: Point2D,
+  p1: Point2D,
+  p2: Point2D,
+  weight: number,
+): number => {
+  const center: Point2D = [
+    (Math.min(p0[0], p1[0], p2[0]) + Math.max(p0[0], p1[0], p2[0])) * 0.5,
+    (Math.min(p0[1], p1[1], p2[1]) + Math.max(p0[1], p1[1], p2[1])) * 0.5,
+  ];
+  const c0: Point2D = [p0[0] - center[0], p0[1] - center[1]];
+  const c1: Point2D = [p1[0] - center[0], p1[1] - center[1]];
+  const c2: Point2D = [p2[0] - center[0], p2[1] - center[1]];
+  const maxLen = Math.max(
+    Math.hypot(c0[0], c0[1]),
+    Math.hypot(c1[0], c1[1]),
+    Math.hypot(c2[0], c2[1]),
+  );
+  const dp: Point2D = [
+    c0[0] + c2[0] - (2 * weight * c1[0]),
+    c0[1] + c2[1] - (2 * weight * c1[1]),
+  ];
+  const dw = Math.abs(2 - (2 * weight));
+  const rpMinus1 = Math.max(0, (maxLen * 4) - 1);
+  const numer = (Math.hypot(dp[0], dp[1]) * 4) + (rpMinus1 * dw);
+  const denom = 4 * Math.min(weight, 1);
+  const p2Val = denom <= 1e-5 ? Infinity : Math.max(0, numer / denom);
+  return p2Val * p2Val;
+};
+
+const requiredStrokeEdgesForPatch = (
+  patch: DrawingPreparedStrokePatch,
+  transform: readonly [number, number, number, number, number, number],
+  strokeStyle: DrawingStrokeStyle,
+): number => {
+  const sourcePoints = getStrokePatchPoints(patch.patch);
+  const points: readonly [Point2D, Point2D, Point2D, Point2D] = [
+    transformPoint(sourcePoints[0], transform),
+    transformPoint(sourcePoints[1], transform),
+    transformPoint(sourcePoints[2], transform),
+    transformPoint(sourcePoints[3], transform),
+  ];
+  const maxScale = maxScaleFactor(transform);
+  const numRadialSegmentsPerRadian = calcNumRadialSegmentsPerRadian(strokeStyle.halfWidth * maxScale);
+  const maxRadialSegmentsInStroke = Math.max(Math.ceil(numRadialSegmentsPerRadian * Math.PI), 1);
+  let numParametricSegmentsP4 = 1;
+  if (patch.patch.kind === 'conic') {
+    numParametricSegmentsP4 = conicWangsFormulaP4(
+      points[0],
+      points[1],
+      points[2],
+      patch.patch.weight,
+    );
+  } else {
+    numParametricSegmentsP4 = cubicWangsFormulaP4(points[0], points[1], points[2], points[3]);
+  }
+  const maxParametricSegmentsInStroke = Math.max(
+    1,
+    Math.ceil(Math.sqrt(Math.sqrt(Math.max(numParametricSegmentsP4, 1)))),
+  );
+  let edgesInJoins = strokeStyle.joinLimit > 0 ? 4 : 3;
+  if (strokeStyle.joinLimit < 0 && numRadialSegmentsPerRadian > 0) {
+    edgesInJoins += Math.ceil(numRadialSegmentsPerRadian * Math.PI) - 1;
+  }
+  return Math.min(maxStrokeEdges, edgesInJoins + maxRadialSegmentsInStroke + maxParametricSegmentsInStroke);
+};
+
+const requiredStrokeVertexCount = (
+  patches: readonly DrawingPreparedStrokePatch[],
+  transform: readonly [number, number, number, number, number, number],
+  strokeStyle: DrawingStrokeStyle,
+): number => {
+  if (patches.length === 0) {
+    return 0;
+  }
+  let maxEdgesRequired = 1;
+  for (const patch of patches) {
+    maxEdgesRequired = Math.max(
+      maxEdgesRequired,
+      requiredStrokeEdgesForPatch(patch, transform, strokeStyle),
+    );
+  }
+  return Math.min(maxStrokeEdges, maxEdgesRequired) * 2;
 };
 
 
@@ -543,6 +678,9 @@ const prepareStepResources = (
   const patchVertices = step.draw.usesTessellatedStrokePatches
     ? createStrokePatchInstanceData(step.draw.patches, step.draw.strokeStyle)
     : new Float32Array(0);
+  const patchVertexCount = step.draw.usesTessellatedStrokePatches
+    ? requiredStrokeVertexCount(step.draw.patches, step.draw.transform, step.draw.strokeStyle)
+    : 0;
   const fringeVertices = step.draw.usesTessellatedStrokePatches
     ? null
     : step.draw.fringeVertices
@@ -576,7 +714,7 @@ const prepareStepResources = (
       ? createVertexBuffer(sharedContext, patchVertices)
       : null,
     patchInstanceCount: patchVertices.length / strokePatchFloats,
-    patchVertexCount: strokePatchVertexCount,
+    patchVertexCount,
     fringeVertexBuffer: fringeVertices ? createVertexBuffer(sharedContext, fringeVertices) : null,
     fringeVertexCount: fringeVertices ? fringeVertices.length / floatsPerVertex : 0,
     boundsCoverVertexBuffer: null,

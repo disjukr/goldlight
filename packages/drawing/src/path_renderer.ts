@@ -37,6 +37,7 @@ export type DrawingPreparedVertex = Readonly<{
 type DrawingPreparedPatchBase = Readonly<{
   fanPoint?: Point2D;
   resolveLevel: number;
+  wangsFormulaP4: number;
 }>;
 
 export type DrawingPreparedPatch = Readonly<
@@ -186,8 +187,8 @@ const defaultFillColor: readonly [number, number, number, number] = [0, 0, 0, 1]
 const epsilon = 1e-5;
 const maxCurveSubdivisionDepth = 8;
 const curveFlatnessTolerance = 0.75;
-const patchPrecision = 1 / Math.max(curveFlatnessTolerance, epsilon);
-const maxPatchResolveLevel = 6;
+const patchPrecision = 4;
+const maxPatchResolveLevel = 5;
 const hairlineCoverageWidth = 1;
 const aaFringeWidth = 1;
 const cuspDerivativeEpsilon = 0.5;
@@ -313,7 +314,7 @@ const nextLog2 = (value: number): number => {
   return Math.ceil(Math.log2(value));
 };
 
-const quadraticWangsFormulaResolveLevel = (
+const quadraticWangsFormulaP4 = (
   from: Point2D,
   control: Point2D,
   to: Point2D,
@@ -321,14 +322,10 @@ const quadraticWangsFormulaResolveLevel = (
   const vx = from[0] - (2 * control[0]) + to[0];
   const vy = from[1] - (2 * control[1]) + to[1];
   const lengthSquared = (vx * vx) + (vy * vy);
-  const p4 = lengthSquared * patchPrecision * patchPrecision * 0.25;
-  return Math.min(
-    maxPatchResolveLevel,
-    Math.max(0, Math.ceil(Math.log2(Math.sqrt(Math.sqrt(p4))))),
-  );
+  return lengthSquared * patchPrecision * patchPrecision * 0.25;
 };
 
-const cubicWangsFormulaResolveLevel = (
+const cubicWangsFormulaP4 = (
   from: Point2D,
   control1: Point2D,
   control2: Point2D,
@@ -339,14 +336,10 @@ const cubicWangsFormulaResolveLevel = (
   const v2x = control1[0] - (2 * control2[0]) + to[0];
   const v2y = control1[1] - (2 * control2[1]) + to[1];
   const maxLengthSquared = Math.max((v1x * v1x) + (v1y * v1y), (v2x * v2x) + (v2y * v2y));
-  const p4 = maxLengthSquared * patchPrecision * patchPrecision * (81 / 64);
-  return Math.min(
-    maxPatchResolveLevel,
-    Math.max(0, Math.ceil(Math.log2(Math.sqrt(Math.sqrt(p4))))),
-  );
+  return maxLengthSquared * patchPrecision * patchPrecision * (81 / 64);
 };
 
-const conicWangsFormulaResolveLevel = (
+const conicWangsFormulaP2 = (
   from: Point2D,
   control: Point2D,
   to: Point2D,
@@ -372,9 +365,35 @@ const conicWangsFormulaResolveLevel = (
   const numerator = (Math.hypot(dp[0], dp[1]) * patchPrecision) + (rpMinusOne * dw);
   const denominator = 4 * Math.min(weight, 1);
   if (denominator <= epsilon) {
-    return maxPatchResolveLevel;
+    return Infinity;
   }
-  return Math.min(maxPatchResolveLevel, nextLog2(Math.sqrt(Math.max(0, numerator / denominator))));
+  return Math.max(0, numerator / denominator);
+};
+
+const resolveLevelFromWangsFormulaP4 = (p4: number): number => Math.min(
+  maxPatchResolveLevel,
+  Math.max(0, Math.ceil(Math.log2(Math.sqrt(Math.sqrt(Math.max(p4, 1)))))),
+);
+
+const resolveLevelFromWangsFormulaP2 = (p2: number): number => Math.min(
+  maxPatchResolveLevel,
+  Math.max(0, nextLog2(Math.sqrt(Math.max(p2, 1)))),
+);
+
+const patchWangsFormulaP4 = (patch: DrawingPatchDefinition): number => {
+  switch (patch.kind) {
+    case 'line':
+      return 1;
+    case 'quadratic': {
+      return quadraticWangsFormulaP4(patch.points[0], patch.points[1], patch.points[2]);
+    }
+    case 'conic': {
+      const n2 = conicWangsFormulaP2(patch.points[0], patch.points[1], patch.points[2], patch.weight);
+      return n2 * n2;
+    }
+    case 'cubic':
+      return cubicWangsFormulaP4(patch.points[0], patch.points[1], patch.points[2], patch.points[3]);
+  }
 };
 
 const resolvePatchLevel = (patch: DrawingPatchDefinition): number => {
@@ -382,20 +401,16 @@ const resolvePatchLevel = (patch: DrawingPatchDefinition): number => {
     case 'line':
       return 0;
     case 'quadratic':
-      return quadraticWangsFormulaResolveLevel(patch.points[0], patch.points[1], patch.points[2]);
+      return resolveLevelFromWangsFormulaP4(
+        quadraticWangsFormulaP4(patch.points[0], patch.points[1], patch.points[2]),
+      );
     case 'conic':
-      return conicWangsFormulaResolveLevel(
-        patch.points[0],
-        patch.points[1],
-        patch.points[2],
-        patch.weight,
+      return resolveLevelFromWangsFormulaP2(
+        conicWangsFormulaP2(patch.points[0], patch.points[1], patch.points[2], patch.weight),
       );
     case 'cubic':
-      return cubicWangsFormulaResolveLevel(
-        patch.points[0],
-        patch.points[1],
-        patch.points[2],
-        patch.points[3],
+      return resolveLevelFromWangsFormulaP4(
+        cubicWangsFormulaP4(patch.points[0], patch.points[1], patch.points[2], patch.points[3]),
       );
   }
 };
@@ -405,25 +420,38 @@ const finalizePatch = (
   extras: Readonly<{ fanPoint?: Point2D }> = {},
 ): DrawingPreparedPatch => {
   const resolveLevel = resolvePatchLevel(patch);
+  const wangsFormulaP4 = patchWangsFormulaP4(patch);
   switch (patch.kind) {
     case 'line':
-      return { ...patch, ...extras, resolveLevel };
+      return { ...patch, ...extras, resolveLevel, wangsFormulaP4 };
     case 'quadratic':
-      return { ...patch, ...extras, resolveLevel };
+      return { ...patch, ...extras, resolveLevel, wangsFormulaP4 };
     case 'conic':
-      return { ...patch, ...extras, resolveLevel };
+      return { ...patch, ...extras, resolveLevel, wangsFormulaP4 };
     case 'cubic':
-      return { ...patch, ...extras, resolveLevel };
+      return { ...patch, ...extras, resolveLevel, wangsFormulaP4 };
   }
 };
 
 const maxStrokeCubicResolveLevelBeforeChop = 4;
+const maxStrokeConicResolveLevelBeforeChop = 5;
+const maxParametricSegments = 1 << maxPatchResolveLevel;
+const maxParametricSegmentsP4 = maxParametricSegments ** 4;
+const maxSegmentsPerCurve = 1024;
+const maxSegmentsPerCurveP4 = maxSegmentsPerCurve ** 4;
 
-const accountForStrokeCurve = (resolveLevel: number): number => {
-  if (resolveLevel <= maxStrokeCubicResolveLevelBeforeChop) {
+const accountForStrokeCurve = (wangsFormulaP4: number): number => {
+  if (wangsFormulaP4 <= maxParametricSegmentsP4) {
     return 0;
   }
-  return 1 << (resolveLevel - maxStrokeCubicResolveLevelBeforeChop);
+  return Math.ceil(Math.sqrt(Math.sqrt(Math.min(wangsFormulaP4, maxSegmentsPerCurveP4) / maxParametricSegmentsP4)));
+};
+
+const accountForStrokeConic = (wangsFormulaP4: number): number => {
+  if (wangsFormulaP4 <= maxParametricSegmentsP4) {
+    return 0;
+  }
+  return Math.ceil(Math.sqrt(Math.sqrt(Math.min(wangsFormulaP4, maxSegmentsPerCurveP4) / maxParametricSegmentsP4)));
 };
 
 const chopAndWriteStrokeCubics = (
@@ -479,6 +507,61 @@ const chopAndWriteStrokeCubics = (
   return Object.freeze(prepared);
 };
 
+const chopAndWriteStrokeConics = (
+  p0: Point2D,
+  p1: Point2D,
+  p2: Point2D,
+  weight: number,
+  numPatches: number,
+): readonly DrawingPreparedPatch[] => {
+  const prepared: DrawingPreparedPatch[] = [];
+  let h0: [number, number, number, number] = [p0[0], p0[1], 1, 1];
+  let h1: [number, number, number, number] = [p1[0] * weight, p1[1] * weight, weight, weight];
+  const h2: [number, number, number, number] = [p2[0], p2[1], 1, 1];
+
+  for (; numPatches >= 2; numPatches -= 1) {
+    const t = 1 / numPatches;
+    const ab: [number, number, number, number] = [
+      h0[0] + ((h1[0] - h0[0]) * t),
+      h0[1] + ((h1[1] - h0[1]) * t),
+      h0[2] + ((h1[2] - h0[2]) * t),
+      h0[3] + ((h1[3] - h0[3]) * t),
+    ];
+    const bc: [number, number, number, number] = [
+      h1[0] + ((h2[0] - h1[0]) * t),
+      h1[1] + ((h2[1] - h1[1]) * t),
+      h1[2] + ((h2[2] - h1[2]) * t),
+      h1[3] + ((h2[3] - h1[3]) * t),
+    ];
+    const abc: [number, number, number, number] = [
+      ab[0] + ((bc[0] - ab[0]) * t),
+      ab[1] + ((bc[1] - ab[1]) * t),
+      ab[2] + ((bc[2] - ab[2]) * t),
+      ab[3] + ((bc[3] - ab[3]) * t),
+    ];
+    const midpoint: Point2D = [abc[0] / abc[3], abc[1] / abc[3]];
+    const firstControl: Point2D = [ab[0] / ab[3], ab[1] / ab[3]];
+    const firstWeight = ab[3] / Math.sqrt(Math.max(h0[3] * abc[3], epsilon));
+    prepared.push(finalizePatch({
+      kind: 'conic',
+      points: [[h0[0] / h0[3], h0[1] / h0[3]], firstControl, midpoint],
+      weight: firstWeight,
+    }));
+    h0 = abc;
+    h1 = bc;
+  }
+
+  const finalControl: Point2D = [h1[0] / h1[3], h1[1] / h1[3]];
+  const finalWeight = h1[3] / Math.sqrt(Math.max(h0[3], epsilon));
+  prepared.push(finalizePatch({
+    kind: 'conic',
+    points: [[h0[0] / h0[3], h0[1] / h0[3]], finalControl, [h2[0], h2[1]]],
+    weight: finalWeight,
+  }));
+
+  return Object.freeze(prepared);
+};
+
 const subdivideStrokePreparedPatch = (
   patch: DrawingPreparedPatch,
 ): readonly DrawingPreparedPatch[] => {
@@ -494,9 +577,21 @@ const subdivideStrokePreparedPatch = (
     })
     : patch;
   if (normalizedPatch.kind !== 'cubic') {
+    if (normalizedPatch.kind === 'conic') {
+      const numPatches = accountForStrokeConic(normalizedPatch.wangsFormulaP4);
+      return numPatches > 0
+        ? chopAndWriteStrokeConics(
+          normalizedPatch.points[0],
+          normalizedPatch.points[1],
+          normalizedPatch.points[2],
+          normalizedPatch.weight,
+          numPatches,
+        )
+        : Object.freeze([normalizedPatch]);
+    }
     return Object.freeze([normalizedPatch]);
   }
-  const numPatches = accountForStrokeCurve(normalizedPatch.resolveLevel);
+  const numPatches = accountForStrokeCurve(normalizedPatch.wangsFormulaP4);
   return numPatches > 0
     ? chopAndWriteStrokeCubics(
       normalizedPatch.points[0],
@@ -622,6 +717,7 @@ const createDegenerateSquareStrokePatch = (
     points: [center, center, center],
     weight: 1,
     resolveLevel: 0,
+    wangsFormulaP4: 1,
   },
   prevPoint: joinTo,
   joinControlPoint: joinTo,
@@ -639,6 +735,7 @@ const createDegenerateRoundStrokePatch = (
     kind: 'cubic',
     points: [center, center, center, center],
     resolveLevel: Math.min(maxPatchResolveLevel, 4),
+    wangsFormulaP4: 1,
   },
   prevPoint: center,
   joinControlPoint: center,
@@ -656,6 +753,7 @@ const createStrokeLinePatch = (
   kind: 'line',
   points: [from, to],
   resolveLevel: 0,
+  wangsFormulaP4: 1,
 });
 
 const quadraticToCubicPoints = (
@@ -2526,6 +2624,7 @@ const createLinePatchesFromContours = (
         kind: 'line',
         points: [segment.start, segment.end],
         resolveLevel: 0,
+        wangsFormulaP4: 1,
       });
     }
   }

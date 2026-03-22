@@ -396,6 +396,42 @@ const getPatchEndPoint = (patch: DrawingPreparedPatch): Point2D => {
   }
 };
 
+const getPatchPoints4 = (
+  patch: DrawingPreparedPatch,
+): readonly [Point2D, Point2D, Point2D, Point2D] =>
+  patch.kind === 'line'
+    ? [patch.points[0], patch.points[0], patch.points[1], patch.points[1]]
+    : patch.kind === 'quadratic'
+    ? [patch.points[0], patch.points[1], patch.points[2], patch.points[2]]
+    : patch.kind === 'conic'
+    ? [patch.points[0], patch.points[1], patch.points[2], patch.points[2]]
+    : [patch.points[0], patch.points[1], patch.points[2], patch.points[3]];
+
+const resolvePatchTangentControlPoint = (
+  anchor: Point2D,
+  controlA: Point2D,
+  controlB: Point2D,
+  fallback: Point2D,
+): Point2D => {
+  if (!pointsEqual(controlA, anchor)) {
+    return controlA;
+  }
+  if (!pointsEqual(controlB, anchor)) {
+    return controlB;
+  }
+  return fallback;
+};
+
+const getPatchFirstControlPoint = (patch: DrawingPreparedPatch): Point2D => {
+  const [p0, p1, p2, p3] = getPatchPoints4(patch);
+  return resolvePatchTangentControlPoint(p0, p1, p2, p3);
+};
+
+const getPatchOutgoingJoinControlPoint = (patch: DrawingPreparedPatch): Point2D => {
+  const [p0, p1, p2, p3] = getPatchPoints4(patch);
+  return resolvePatchTangentControlPoint(p3, p2, p1, p0);
+};
+
 const createPreparedStrokePatches = (
   contours: readonly DrawingStrokeContourRecord[],
   patches: readonly DrawingPreparedPatch[],
@@ -463,27 +499,40 @@ const createPreparedStrokeContourPatches = (
     return Object.freeze([]);
   }
   const prepared: DrawingPreparedStrokePatch[] = [];
-  let previousEnd = contour.closed
-    ? getPatchEndPoint(contour.patches[contour.patches.length - 1]!)
-    : getPatchStartPoint(contour.patches[0]!);
+  const firstPatch = contour.patches[0]!;
+  const deferredJoinControlPoint = getPatchFirstControlPoint(firstPatch);
+  let previousJoinControlPoint = deferredJoinControlPoint;
   for (let index = 0; index < contour.patches.length; index += 1) {
     const patch = contour.patches[index]!;
-    const start = getPatchStartPoint(patch);
-    const end = getPatchEndPoint(patch);
     const next = index + 1 < contour.patches.length ? contour.patches[index + 1]! : null;
     const contourStart = index === 0;
     const contourEnd = index + 1 === contour.patches.length;
     prepared.push({
       patch,
-      prevPoint: previousEnd,
-      joinControlPoint: previousEnd,
+      prevPoint: previousJoinControlPoint,
+      joinControlPoint: previousJoinControlPoint,
       contourStart,
       contourEnd,
-      startCap: contourStart && !contour.closed ? cap : 'none',
+      startCap: 'none',
       endCap: contourEnd && !contour.closed ? cap : 'none',
     });
-    previousEnd = next ? end : contour.closed ? getPatchStartPoint(contour.patches[0]!) : end;
+    previousJoinControlPoint = next
+      ? getPatchOutgoingJoinControlPoint(patch)
+      : contour.closed
+      ? getPatchOutgoingJoinControlPoint(patch)
+      : deferredJoinControlPoint;
   }
+  const rewrittenFirstPatch = prepared[0]!;
+  prepared[0] = {
+    ...rewrittenFirstPatch,
+    prevPoint: contour.closed
+      ? getPatchOutgoingJoinControlPoint(contour.patches[contour.patches.length - 1]!)
+      : deferredJoinControlPoint,
+    joinControlPoint: contour.closed
+      ? getPatchOutgoingJoinControlPoint(contour.patches[contour.patches.length - 1]!)
+      : deferredJoinControlPoint,
+    startCap: contour.closed ? 'none' : cap,
+  };
   return Object.freeze(prepared);
 };
 

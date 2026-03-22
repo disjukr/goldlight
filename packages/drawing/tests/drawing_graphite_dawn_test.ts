@@ -1161,6 +1161,59 @@ Deno.test('drawing prepared recording expands stroke joins and caps', () => {
   assertEquals((draw?.triangles.length ?? 0) > 18, true);
 });
 
+Deno.test('drawing prepared stroke patches seed open contours from first tangent control point', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [0, 0] },
+      { kind: 'quadTo', control: [20, 30], to: [40, 0] },
+    ),
+    { style: 'stroke', strokeWidth: 8, strokeCap: 'square' },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const draw = prepared.passes[0]?.steps[0]?.draw;
+  assertEquals(draw?.kind, 'pathStroke');
+  if (draw?.kind !== 'pathStroke') {
+    throw new Error('expected pathStroke draw');
+  }
+  assertEquals(draw.patches.length > 0, true);
+  assertEquals(draw.patches[0]?.joinControlPoint, [20, 30]);
+  assertEquals(draw.patches[0]?.startCap, 'square');
+});
+
+Deno.test('drawing prepared stroke patches rewrite closed contour first join control point', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [0, 0] },
+      { kind: 'lineTo', to: [40, 0] },
+      { kind: 'lineTo', to: [40, 30] },
+      { kind: 'close' },
+    ),
+    { style: 'stroke', strokeWidth: 8 },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const draw = prepared.passes[0]?.steps[0]?.draw;
+  assertEquals(draw?.kind, 'pathStroke');
+  if (draw?.kind !== 'pathStroke') {
+    throw new Error('expected pathStroke draw');
+  }
+  assertEquals(draw.patches.length >= 3, true);
+  assertEquals(draw.patches[0]?.joinControlPoint, [40, 30]);
+  assertEquals(draw.patches[0]?.startCap, 'none');
+  assertEquals(draw.patches[0]?.contourStart, true);
+});
+
 Deno.test('drawing prepared recording applies dash pattern to strokes', () => {
   const mock = createMockGpuContext();
   const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));

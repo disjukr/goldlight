@@ -702,13 +702,6 @@ fn restrict_join_stroke_outset(
   return select(max(strokeOutset, 0.0), min(strokeOutset, 0.0), turn < 0.0);
 }
 
-fn stroke_outset_from_vertex_id(vertexIndex: u32, edgeID: f32) -> f32 {
-  if (abs(edgeID) <= 1e-5) {
-    return select(1.0, -1.0, (vertexIndex & 1u) != 0u);
-  }
-  return sign(edgeID);
-}
-
 fn is_exact_start_edge(segmentIndex: u32, activeSegments: u32) -> bool {
   return segmentIndex == 0u;
 }
@@ -739,7 +732,6 @@ fn vs_main(
   let flags = u32(max(curveMeta.w, 0.0));
   let roundStart = (flags & 16u) != 0u;
   let roundEnd = (flags & 32u) != 0u;
-  let contourStart = (flags & 1u) != 0u;
   let contourEnd = (flags & 2u) != 0u;
   var curveP0 = p0;
   var curveP1 = p1;
@@ -785,10 +777,6 @@ fn vs_main(
   }
   let maxEdges = f32(SEGMENTS);
   var numEdgesInJoin = stroke_join_edges(joinType, prevTan, tan0, stroke.x);
-  if (contourStart) {
-    numEdgesInJoin = 0.0;
-    prevTan = tan0;
-  }
   if (joinType < 0.0) {
     numEdgesInJoin = min(numEdgesInJoin, maxEdges - 2.0);
   }
@@ -797,7 +785,7 @@ fn vs_main(
   var joinTan0 = tan0;
   var joinTan1 = tan1;
   var turn = cross_length_2d(tan0, tan1);
-  var strokeOutset = stroke_outset_from_vertex_id(vertexIndex, edgeID);
+  var strokeOutset = sign(edgeID);
   var combinedEdgeID = abs(edgeID) - numEdgesInJoin;
   if (combinedEdgeID < 0.0) {
     joinTan1 = joinTan0;

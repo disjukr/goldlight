@@ -114,6 +114,7 @@ type DrawingStrokeIteratorContourState = Readonly<{
   bodyPatches: readonly DrawingStrokeContourEvent[];
   trailingPatches: readonly DrawingStrokeContourEvent[];
   joinBarrier: 'join' | 'moveWithinContour';
+  moveWithinContourJoinPoint: Point2D;
 }>;
 
 type DrawingStrokeIteratorVerb =
@@ -890,15 +891,15 @@ const createPreparedStrokeContourPatches = (
   }
   const prepared: DrawingPreparedStrokePatch[] = [];
   const firstPatch = contour.patches[0]!;
-  const deferredJoinControlPoint = getPatchFirstControlPoint(firstPatch);
   const lastPatch = contour.patches[contour.patches.length - 1]!;
   const halfWidth = strokeStyle.halfWidth;
   const firstStart = contour.record.firstPoint ?? getPatchStartPoint(firstPatch);
   const lastEnd = contour.record.lastPoint ?? getPatchEndPoint(lastPatch);
+  const deferredJoinControlPoint = firstStart;
   const firstTangent = contour.record.startTangent ?? getPatchIncomingTangent(firstPatch);
   const lastTangent = contour.record.endTangent ?? getPatchOutgoingTangent(lastPatch);
-  const hasPrependedSquareCap = !contour.closed && cap === 'square' && Boolean(firstTangent);
-  const hasAppendedSquareCap = !contour.closed && cap === 'square' && Boolean(lastTangent);
+  const hasPrependedSquareCap = !contour.closed && cap === 'square';
+  const hasAppendedSquareCap = !contour.closed && cap === 'square';
   const iteratorState: DrawingStrokeIteratorContourState = (() => {
     const leadingPatches: DrawingStrokeContourEvent[] = [];
     const bodyPatches: DrawingStrokeContourEvent[] = [];
@@ -906,16 +907,16 @@ const createPreparedStrokeContourPatches = (
     if (!contour.closed && cap === 'round') {
       leadingPatches.push({
         patch: createDegenerateRoundStrokePatch(firstStart).patch,
-        contourStart: false,
-        contourEnd: false,
+        contourStart: true,
+        contourEnd: true,
         startCap: 'round',
         endCap: 'round',
         joinControlPoint: firstStart,
       });
       trailingPatches.push({
         patch: createDegenerateRoundStrokePatch(lastEnd).patch,
-        contourStart: false,
-        contourEnd: false,
+        contourStart: true,
+        contourEnd: true,
         startCap: 'round',
         endCap: 'round',
         joinControlPoint: lastEnd,
@@ -967,12 +968,15 @@ const createPreparedStrokeContourPatches = (
       bodyPatches: Object.freeze(bodyPatches),
       trailingPatches: Object.freeze(trailingPatches),
       joinBarrier: contour.closed ? 'join' : 'moveWithinContour',
+      moveWithinContourJoinPoint: leadingPatches.length > 0
+        ? getPatchStartPoint(leadingPatches[0]!.patch)
+        : deferredJoinControlPoint,
     };
   })();
   const iteratorVerbs: readonly DrawingStrokeIteratorVerb[] = (() => {
     const verbs: DrawingStrokeIteratorVerb[] = [];
-    const usesRoundCapBarrier = !contour.closed && cap === 'round';
-    if (usesRoundCapBarrier) {
+    const usesOpenContourBarrier = !contour.closed;
+    if (usesOpenContourBarrier) {
       for (const event of iteratorState.bodyPatches) {
         verbs.push({ kind: 'patch', event });
       }
@@ -1033,7 +1037,7 @@ const createPreparedStrokeContourPatches = (
         break;
       }
       case 'moveWithinContour':
-        previousJoinControlPoint = deferredJoinControlPoint;
+        previousJoinControlPoint = iteratorState.moveWithinContourJoinPoint;
         break;
       case 'contourFinished':
         break;

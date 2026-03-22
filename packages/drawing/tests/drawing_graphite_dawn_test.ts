@@ -248,14 +248,12 @@ Deno.test('prepareDawnRecording uses the shared-context renderer provider', () =
   const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
   const recorder = createDrawingRecorder(sharedContext);
   const provider = createDrawingRendererProvider(sharedContext.caps);
-  const originalSelectPathFillRenderer = provider.selectPathFillRenderer;
+  const originalGetPathFillRenderer = provider.getPathFillRenderer;
   (provider as {
-    selectPathFillRenderer: typeof provider.selectPathFillRenderer;
-  }).selectPathFillRenderer = (options) => {
-    const selected = originalSelectPathFillRenderer(options);
-    return selected.kind === 'middle-out-fan'
-      ? provider.stencilTessellatedCurves(options.fillRule)
-      : selected;
+    getPathFillRenderer: typeof provider.getPathFillRenderer;
+  }).getPathFillRenderer = (options) => {
+    const selected = originalGetPathFillRenderer(options);
+    return selected === 'middle-out-fan' ? 'stencil-tessellated-curves' : selected;
   };
   (sharedContext as { rendererProvider: typeof provider }).rendererProvider = provider;
 

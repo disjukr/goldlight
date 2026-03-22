@@ -2843,7 +2843,6 @@ const preparePathFill = (
     draw: {
       kind: 'pathStroke',
       renderer: rendererProvider.getPathStrokeRenderer(patches.map((patch) => patch.patch)),
-      renderer: rendererProvider.getPathStrokeRenderer(patches.map((patch) => patch.patch)),
       triangles: strokeTriangles,
       fringeVertices: preparedStroke.fringeVertices,
       patches,

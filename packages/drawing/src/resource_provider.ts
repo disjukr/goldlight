@@ -331,7 +331,11 @@ fn eval_patch(
 ) -> vec2<f32> {
   let oneMinusT = 1.0 - t;
   if (curveType < 0.5) {
-    return mix(p0, p1, t);
+    return
+      (oneMinusT * oneMinusT * oneMinusT * p0) +
+      (3.0 * oneMinusT * oneMinusT * t * p1) +
+      (3.0 * oneMinusT * t * t * p2) +
+      (t * t * t * p3);
   }
   if (curveType < 1.5) {
     return (oneMinusT * oneMinusT * p0) + (2.0 * oneMinusT * t * p1) + (t * t * p2);
@@ -553,7 +557,12 @@ fn eval_patch_tangent(
   t: f32,
 ) -> vec2<f32> {
   if (curveType < 0.5) {
-    return robust_normalize_diff(p1, p0);
+    let oneMinusT = 1.0 - t;
+    let tangent =
+      (3.0 * oneMinusT * oneMinusT * (p1 - p0)) +
+      (6.0 * oneMinusT * t * (p2 - p1)) +
+      (3.0 * t * t * (p3 - p2));
+    return robust_normalize_diff(tangent, vec2<f32>(0.0, 0.0));
   }
   if (curveType < 1.5) {
     let tangent =
@@ -699,191 +708,246 @@ fn vs_main(
   let curveType = curveMeta.x;
   let weight = curveMeta.y;
   let flags = u32(max(curveMeta.w, 0.0));
-  let circlePatch = (flags & 64u) != 0u;
-  let squarePatch = (flags & 128u) != 0u;
-  let bevelPatch = (flags & 256u) != 0u;
-  let miterPatch = (flags & 512u) != 0u;
-  let joinType = stroke.y;
-  let prevTan = robust_normalize_diff(p0, joinControlPoint);
-  let tan0 = patch_start_tangent(p0, p1, p2, p3);
-  let tan1 = patch_end_tangent(p0, p1, p2, p3);
-  if (circlePatch) {
-    activeSegments = max(8u, u32(ceil(6.28318530718 * num_radial_segments_per_radian(stroke.x))));
+  let roundStart = (flags & 16u) != 0u;
+  let roundEnd = (flags & 32u) != 0u;
+  var curveP0 = p0;
+  var curveP1 = p1;
+  var curveP2 = p2;
+  var curveP3 = p3;
+  var joinType = stroke.y;
+  var prevTan = robust_normalize_diff(curveP0, joinControlPoint);
+  var tan0 = patch_start_tangent(curveP0, curveP1, curveP2, curveP3);
+  var tan1 = patch_end_tangent(curveP0, curveP1, curveP2, curveP3);
+  if (length(tan0) <= 1e-5) {
+    joinType = 0.0;
+    if (roundStart && roundEnd) {
+      tan0 = vec2<f32>(1.0, 0.0);
+      tan1 = vec2<f32>(-1.0, 0.0);
+    } else {
+    tan0 = prevTan;
+    tan1 = prevTan;
+    if (length(prevTan) <= 1e-5) {
+      curveP2 = curveP0 + (stroke.x * vec2<f32>(1.0, 0.0));
+      curveP3 = curveP2;
+      curveP0 = curveP0 - (stroke.x * vec2<f32>(1.0, 0.0));
+      curveP1 = curveP0;
+      prevTan = vec2<f32>(1.0, 0.0);
+      tan0 = prevTan;
+      tan1 = prevTan;
+    } else {
+      curveP1 = curveP0;
+      curveP2 = curveP0 + (stroke.x * prevTan);
+      curveP3 = curveP2;
+    }
+    }
   }
-  let numEdgesInJoin = stroke_join_edges(joinType, prevTan, tan0, stroke.x);
   let maxEdges = f32(SEGMENTS);
+  var numEdgesInJoin = stroke_join_edges(joinType, prevTan, tan0, stroke.x);
+  if (joinType < 0.0) {
+    numEdgesInJoin = min(numEdgesInJoin, maxEdges - 2.0);
+  }
   var edgeID = f32(segmentIndex);
   if (stripVertex != 0u) {
     edgeID = -edgeID;
   }
   let t0 = f32(segmentIndex) / f32(activeSegments);
   let t1 = f32(min(segmentIndex + 1u, activeSegments)) / f32(activeSegments);
-  var a = eval_patch(curveType, weight, p0, p1, p2, p3, t0);
-  var b = eval_patch(curveType, weight, p0, p1, p2, p3, t1);
-  var local = p3;
+  var a = eval_patch(curveType, weight, curveP0, curveP1, curveP2, curveP3, t0);
+  var b = eval_patch(curveType, weight, curveP0, curveP1, curveP2, curveP3, t1);
+  var local = curveP3;
   if (segmentIndex < activeSegments) {
-    if (circlePatch) {
-      local = p0;
-    } else if (squarePatch) {
-      local = p0;
-    } else if (bevelPatch) {
-      local = p0;
-    } else if (miterPatch) {
-      local = p0;
+    var delta = b - a;
+    if (length(delta) <= 1e-5) {
+      delta = a - joinControlPoint;
+    }
+    let squareStart = (flags & 4u) != 0u;
+    let squareEnd = (flags & 8u) != 0u;
+    let tangent = robust_normalize_diff(b, a);
+    let turn = cross_length_2d(tan0, tan1);
+    var strokeOutset = stroke_outset_from_edge_id(edgeID);
+    let hasJoinControlPoint = distance(joinControlPoint, curveP0) > 1e-5;
+    if (is_exact_start_edge(segmentIndex, activeSegments) && hasJoinControlPoint) {
+      strokeOutset = restrict_join_stroke_outset(strokeOutset, turn, tan0, tan1);
+    }
+    if (is_exact_start_edge(segmentIndex, activeSegments) && squareStart) {
+      a -= tangent * stroke.x;
+    }
+    if (is_exact_end_edge(segmentIndex, activeSegments) && squareEnd) {
+      b += tangent * stroke.x;
+    }
+    var joinTan0 = tan0;
+    var joinTan1 = tan1;
+    var curveTurn = cross_length_2d(curveP2 - curveP0, curveP3 - curveP1);
+    var combinedEdgeID = abs(edgeID) - numEdgesInJoin;
+    if (combinedEdgeID < 0.0) {
+      joinTan1 = joinTan0;
+      if (hasJoinControlPoint) {
+        joinTan0 = prevTan;
+      }
+      curveTurn = cross_length_2d(joinTan0, joinTan1);
+    }
+    let cosTheta = cosine_between_unit_vectors(joinTan0, joinTan1);
+    var rotation = acos(cosTheta);
+    if (curveTurn < 0.0) {
+      rotation = -rotation;
+    }
+    var numParametricSegments = f32(activeSegments);
+    var numRadialSegments: f32;
+    if (combinedEdgeID < 0.0) {
+      numRadialSegments = numEdgesInJoin - 2.0;
+      numParametricSegments = 1.0;
+      curveP1 = curveP0;
+      curveP2 = curveP0;
+      curveP3 = curveP0;
+      combinedEdgeID += numRadialSegments + 1.0;
+      if (combinedEdgeID < 0.0) {
+        combinedEdgeID = 0.0;
+      } else if (!tangents_nearly_parallel(curveTurn, joinTan0, joinTan1) || dot(joinTan0, joinTan1) < 0.0) {
+        strokeOutset = select(max(strokeOutset, 0.0), min(strokeOutset, 0.0), curveTurn < 0.0);
+      }
     } else {
-      var delta = b - a;
-      if (length(delta) <= 1e-5) {
-        delta = a - joinControlPoint;
-      }
-      let squareStart = (flags & 4u) != 0u;
-      let squareEnd = (flags & 8u) != 0u;
-      let tangent = robust_normalize_diff(b, a);
-      let turn = cross_length_2d(tan0, tan1);
-      var strokeOutset = stroke_outset_from_edge_id(edgeID);
-      let hasJoinControlPoint = distance(joinControlPoint, p0) > 1e-5;
-      if (is_exact_start_edge(segmentIndex, activeSegments) && hasJoinControlPoint) {
-        strokeOutset = restrict_join_stroke_outset(strokeOutset, turn, tan0, tan1);
-      }
-      if (is_exact_start_edge(segmentIndex, activeSegments) && squareStart) {
-        a -= tangent * stroke.x;
-      }
-      if (is_exact_end_edge(segmentIndex, activeSegments) && squareEnd) {
-        b += tangent * stroke.x;
-      }
-      var curveP0 = p0;
-      var curveP1 = p1;
-      var curveP2 = p2;
-      var curveP3 = p3;
-      var joinTan0 = tan0;
-      var joinTan1 = tan1;
-      var curveTurn = cross_length_2d(curveP2 - curveP0, curveP3 - curveP1);
-      var combinedEdgeID = abs(edgeID) - numEdgesInJoin;
-      if (combinedEdgeID < 0.0) {
-        joinTan1 = joinTan0;
-        if (hasJoinControlPoint) {
-          joinTan0 = prevTan;
-        }
-        curveTurn = cross_length_2d(joinTan0, joinTan1);
-      }
-      let cosTheta = cosine_between_unit_vectors(joinTan0, joinTan1);
-      var rotation = acos(cosTheta);
-      if (curveTurn < 0.0) {
-        rotation = -rotation;
-      }
-      var numParametricSegments = f32(activeSegments);
-      var numRadialSegments: f32;
-      if (combinedEdgeID < 0.0) {
-        numRadialSegments = numEdgesInJoin - 2.0;
-        numParametricSegments = 1.0;
-        curveP1 = curveP0;
-        curveP2 = curveP0;
-        curveP3 = curveP0;
-        combinedEdgeID += numRadialSegments + 1.0;
-        if (combinedEdgeID < 0.0) {
-          combinedEdgeID = 0.0;
-        } else if (!tangents_nearly_parallel(curveTurn, joinTan0, joinTan1) || dot(joinTan0, joinTan1) < 0.0) {
-          strokeOutset = select(max(strokeOutset, 0.0), min(strokeOutset, 0.0), curveTurn < 0.0);
-        }
-      } else {
-        let maxCombinedSegments = max(maxEdges - numEdgesInJoin - 1.0, 1.0);
-        numRadialSegments = max(ceil(abs(rotation) * num_radial_segments_per_radian(stroke.x)), 1.0);
-        numRadialSegments = min(numRadialSegments, maxCombinedSegments);
-        numParametricSegments = min(numParametricSegments, maxCombinedSegments - numRadialSegments + 1.0);
-      }
-      let radsPerSegment = rotation / max(numRadialSegments, 1.0);
-      let numCombinedSegments = numParametricSegments + numRadialSegments - 1.0;
-      let isFinalEdge = combinedEdgeID >= numCombinedSegments;
-      if (combinedEdgeID > numCombinedSegments) {
-        strokeOutset = 0.0;
-      }
-      if (abs(edgeID) == 2.0 && joinType > 0.0) {
-        strokeOutset *= miter_extent(cosTheta, joinType);
-      }
-      var strokeCoord: vec2<f32>;
-      var curveTangent: vec2<f32>;
-      if (combinedEdgeID != 0.0 && !isFinalEdge) {
+      let maxCombinedSegments = max(maxEdges - numEdgesInJoin - 1.0, 1.0);
+      numRadialSegments = max(ceil(abs(rotation) * num_radial_segments_per_radian(stroke.x)), 1.0);
+      numRadialSegments = min(numRadialSegments, maxCombinedSegments);
+      numParametricSegments = min(numParametricSegments, maxCombinedSegments - numRadialSegments + 1.0);
+    }
+    let radsPerSegment = rotation / max(numRadialSegments, 1.0);
+    let numCombinedSegments = numParametricSegments + numRadialSegments - 1.0;
+    let isFinalEdge = combinedEdgeID >= numCombinedSegments;
+    if (combinedEdgeID > numCombinedSegments) {
+      strokeOutset = 0.0;
+    }
+    if (abs(edgeID) == 2.0 && joinType > 0.0) {
+      strokeOutset *= miter_extent(cosTheta, joinType);
+    }
+    var strokeCoord: vec2<f32>;
+    var curveTangent: vec2<f32>;
+    if (combinedEdgeID != 0.0 && !isFinalEdge) {
         var parametricT = combinedEdgeID / max(numCombinedSegments, 1.0);
-        if (curveType >= 1.5) {
-          var coeffA: vec2<f32>;
-          var coeffB: vec2<f32>;
-          var coeffC = curveP1 - curveP0;
-          let deltaP = curveP3 - curveP0;
-          if (curveType < 2.5) {
+        var coeffA: vec2<f32>;
+        var coeffB: vec2<f32>;
+        var coeffC = curveP1 - curveP0;
+        let deltaP = curveP3 - curveP0;
+        if (curveType < 2.5) {
+          if (curveType < 1.5) {
+            if (curveType < 0.5) {
+              let edgeP = curveP2 - curveP1;
+              coeffB = edgeP - coeffC;
+              coeffA = (-3.0 * edgeP) + deltaP;
+            } else {
+              coeffA = vec2<f32>(0.0, 0.0);
+              coeffB = (curveP2 - (2.0 * curveP1)) + curveP0;
+              coeffC = curveP1 - curveP0;
+            }
+          } else {
             coeffC *= weight;
             coeffB = (0.5 * deltaP) - coeffC;
             coeffA = (weight - 1.0) * deltaP;
-          } else {
-            let edgeP = curveP2 - curveP1;
-            coeffB = edgeP - coeffC;
-            coeffA = (-3.0 * edgeP) + deltaP;
           }
-          let coeffBScaled = coeffB * (numParametricSegments * 2.0);
-          let coeffCScaled = coeffC * (numParametricSegments * numParametricSegments);
-          var lastParametricEdgeID = 0.0;
-          let maxParametricEdgeID = min(numParametricSegments - 1.0, combinedEdgeID);
-          let negAbsRadsPerSegment = -abs(radsPerSegment);
-          let maxRotation0 = (1.0 + combinedEdgeID) * abs(radsPerSegment);
-          var exp = 32.0;
-          loop {
-            if (exp < 1.0) {
-              break;
-            }
-            let testParametricID = lastParametricEdgeID + exp;
-            if (testParametricID <= maxParametricEdgeID) {
-              var testTan = (coeffA * testParametricID) + coeffBScaled;
-              testTan = (testTan * testParametricID) + coeffCScaled;
-              let testTanLength = length(testTan);
-              if (testTanLength > 1e-5) {
-                let cosRotationAtTest = dot(testTan / testTanLength, joinTan0);
-                let maxRotation = min((testParametricID * negAbsRadsPerSegment) + maxRotation0, 3.14159265359);
-                if (cosRotationAtTest >= cos(maxRotation)) {
-                  lastParametricEdgeID = testParametricID;
-                }
+        } else {
+          let edgeP = curveP2 - curveP1;
+          coeffB = edgeP - coeffC;
+          coeffA = (-3.0 * edgeP) + deltaP;
+        }
+        let coeffBScaled = coeffB * (numParametricSegments * 2.0);
+        let coeffCScaled = coeffC * (numParametricSegments * numParametricSegments);
+        var lastParametricEdgeID = 0.0;
+        let maxParametricEdgeID = min(numParametricSegments - 1.0, combinedEdgeID);
+        let negAbsRadsPerSegment = -abs(radsPerSegment);
+        let maxRotation0 = (1.0 + combinedEdgeID) * abs(radsPerSegment);
+        var exp = 32.0;
+        loop {
+          if (exp < 1.0) {
+            break;
+          }
+          let testParametricID = lastParametricEdgeID + exp;
+          if (testParametricID <= maxParametricEdgeID) {
+            var testTan = (coeffA * testParametricID) + coeffBScaled;
+            testTan = (testTan * testParametricID) + coeffCScaled;
+            let testTanLength = length(testTan);
+            if (testTanLength > 1e-5) {
+              let cosRotationAtTest = dot(testTan / testTanLength, joinTan0);
+              let maxRotation = min((testParametricID * negAbsRadsPerSegment) + maxRotation0, 3.14159265359);
+              if (cosRotationAtTest >= cos(maxRotation)) {
+                lastParametricEdgeID = testParametricID;
               }
             }
-            exp *= 0.5;
           }
-          parametricT = lastParametricEdgeID / max(numParametricSegments, 1.0);
-          let lastRadialEdgeID = combinedEdgeID - lastParametricEdgeID;
-          let angle0 = select(acos(clamp(joinTan0.x, -1.0, 1.0)), -acos(clamp(joinTan0.x, -1.0, 1.0)), joinTan0.y < 0.0);
-          let radialAngle = (lastRadialEdgeID * radsPerSegment) + angle0;
-          let radialTangent = vec2<f32>(cos(radialAngle), sin(radialAngle));
-          let radialNorm = vec2<f32>(-radialTangent.y, radialTangent.x);
-          let quadraticA = dot(radialNorm, coeffA);
-          let quadraticBOver2 = dot(radialNorm, coeffB);
-          let quadraticC = dot(radialNorm, coeffC);
-          let discrOver4 = max((quadraticBOver2 * quadraticBOver2) - (quadraticA * quadraticC), 0.0);
-          var rootQ = sqrt(discrOver4);
-          if (quadraticBOver2 > 0.0) {
-            rootQ = -rootQ;
-          }
-          rootQ -= quadraticBOver2;
-          let rootChoiceA = abs((rootQ * rootQ) + (-0.5 * rootQ * quadraticA));
-          let rootChoiceB = abs((quadraticA * quadraticC) + (-0.5 * rootQ * quadraticA));
-          let rootNumer = select(quadraticC, rootQ, rootChoiceA < rootChoiceB);
-          let rootDenom = select(rootQ, quadraticA, rootChoiceA < rootChoiceB);
-          let radialT = select(0.0, clamp(rootNumer / rootDenom, 0.0, 1.0), lastRadialEdgeID != 0.0 && abs(rootDenom) > 1e-5);
-          let finalT = max(parametricT, radialT);
-          let pointAtT = eval_patch(curveType, weight, curveP0, curveP1, curveP2, curveP3, finalT);
-          var tangentAtT = radialTangent;
-          if (finalT != radialT) {
-            tangentAtT = eval_patch_tangent(curveType, weight, curveP0, curveP1, curveP2, curveP3, finalT);
-          }
-          strokeCoord = pointAtT;
-          curveTangent = tangentAtT;
-        } else {
-          let safeCombinedSegments = max(numCombinedSegments, 1.0);
-          let curveT = clamp(combinedEdgeID / safeCombinedSegments, 0.0, 1.0);
-          strokeCoord = eval_patch(curveType, weight, curveP0, curveP1, curveP2, curveP3, curveT);
-          curveTangent = eval_patch_tangent(curveType, weight, curveP0, curveP1, curveP2, curveP3, curveT);
+          exp *= 0.5;
         }
-      } else {
-        curveTangent = select(joinTan0, joinTan1, isFinalEdge);
-        strokeCoord = select(curveP0, curveP3, isFinalEdge);
-      }
-      let ortho = vec2<f32>(curveTangent.y, -curveTangent.x);
-      local = strokeCoord + (ortho * stroke.x * strokeOutset);
+        parametricT = lastParametricEdgeID / max(numParametricSegments, 1.0);
+        let lastRadialEdgeID = combinedEdgeID - lastParametricEdgeID;
+        let angle0 = select(acos(clamp(joinTan0.x, -1.0, 1.0)), -acos(clamp(joinTan0.x, -1.0, 1.0)), joinTan0.y < 0.0);
+        let radialAngle = (lastRadialEdgeID * radsPerSegment) + angle0;
+        let radialTangent = vec2<f32>(cos(radialAngle), sin(radialAngle));
+        let radialNorm = vec2<f32>(-radialTangent.y, radialTangent.x);
+        let quadraticA = dot(radialNorm, coeffA);
+        let quadraticBOver2 = dot(radialNorm, coeffB);
+        let quadraticC = dot(radialNorm, coeffC);
+        let discrOver4 = max((quadraticBOver2 * quadraticBOver2) - (quadraticA * quadraticC), 0.0);
+        var rootQ = sqrt(discrOver4);
+        if (quadraticBOver2 > 0.0) {
+          rootQ = -rootQ;
+        }
+        rootQ -= quadraticBOver2;
+        let rootChoiceA = abs((rootQ * rootQ) + (-0.5 * rootQ * quadraticA));
+        let rootChoiceB = abs((quadraticA * quadraticC) + (-0.5 * rootQ * quadraticA));
+        let rootNumer = select(quadraticC, rootQ, rootChoiceA < rootChoiceB);
+        let rootDenom = select(rootQ, quadraticA, rootChoiceA < rootChoiceB);
+        let radialT = select(0.0, clamp(rootNumer / rootDenom, 0.0, 1.0), lastRadialEdgeID != 0.0 && abs(rootDenom) > 1e-5);
+        let finalT = max(parametricT, radialT);
+        var tangentAtT = radialTangent;
+        if (curveType < 2.5) {
+          if (curveType < 1.5) {
+            if (curveType < 0.5) {
+              let ab = mix(curveP0, curveP1, finalT);
+              let bc = mix(curveP1, curveP2, finalT);
+              let cd = mix(curveP2, curveP3, finalT);
+              let abc = mix(ab, bc, finalT);
+              let bcd = mix(bc, cd, finalT);
+              strokeCoord = mix(abc, bcd, finalT);
+              if (finalT != radialT) {
+                tangentAtT = robust_normalize_diff(bcd, abc);
+              }
+            } else {
+              let ab = mix(curveP0, curveP1, finalT);
+              let bc = mix(curveP1, curveP2, finalT);
+              strokeCoord = mix(ab, bc, finalT);
+              if (finalT != radialT) {
+                tangentAtT = robust_normalize_diff(bc, ab);
+              }
+            }
+          } else {
+            let weightedP1 = curveP1 * weight;
+            let ab = mix(curveP0, weightedP1, finalT);
+            let bc = mix(weightedP1, curveP2, finalT);
+            let abc = mix(ab, bc, finalT);
+            let u = mix(1.0, weight, finalT);
+            let v = weight + 1.0 - u;
+            let uv = mix(u, v, finalT);
+            strokeCoord = abc / max(uv, 1e-5);
+            if (finalT != radialT) {
+              tangentAtT = robust_normalize_diff(bc * u, ab * v);
+            }
+          }
+        } else {
+          let ab = mix(curveP0, curveP1, finalT);
+          let bc = mix(curveP1, curveP2, finalT);
+          let cd = mix(curveP2, curveP3, finalT);
+          let abc = mix(ab, bc, finalT);
+          let bcd = mix(bc, cd, finalT);
+          strokeCoord = mix(abc, bcd, finalT);
+          if (finalT != radialT) {
+            tangentAtT = robust_normalize_diff(bcd, abc);
+          }
+        }
+        curveTangent = tangentAtT;
+    } else {
+      curveTangent = select(joinTan0, joinTan1, isFinalEdge);
+      strokeCoord = select(curveP0, curveP3, isFinalEdge);
     }
+    let ortho = vec2<f32>(curveTangent.y, -curveTangent.x);
+    local = strokeCoord + (ortho * stroke.x * strokeOutset);
   }
   let devicePosition = local_to_device(local);
   var out: VertexOut;

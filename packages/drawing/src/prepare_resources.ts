@@ -260,7 +260,7 @@ const getPatchPoints = (
   patch: DrawingPreparedPatch,
 ): readonly [Point2D, Point2D, Point2D, Point2D] =>
   patch.kind === 'line'
-    ? [patch.points[0], patch.points[1], patch.points[1], patch.points[1]]
+    ? [patch.points[0], patch.points[0], patch.points[1], patch.points[1]]
     : patch.kind === 'quadratic'
     ? [patch.points[0], patch.points[1], patch.points[2], patch.points[2]]
     : patch.kind === 'conic'
@@ -344,11 +344,7 @@ const createStrokePatchInstanceData = (
       (patch.startCap === 'square' ? 4 : 0) +
       (patch.endCap === 'square' ? 8 : 0) +
       (patch.startCap === 'round' ? 16 : 0) +
-      (patch.endCap === 'round' ? 32 : 0) +
-      (patch.syntheticKind === 'circle' ? 64 : 0) +
-      (patch.syntheticKind === 'square' ? 128 : 0) +
-      (patch.syntheticKind === 'bevel' ? 256 : 0) +
-      (patch.syntheticKind === 'miter' ? 512 : 0);
+      (patch.endCap === 'round' ? 32 : 0);
   }
   return data;
 };

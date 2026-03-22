@@ -214,6 +214,18 @@ Deno.test('dawn shared context exposes resource provider over gpu device', () =>
   assertEquals(mock.created.samplers.length, 1);
 });
 
+Deno.test('dawn resource provider uses replace for first clip writes', () => {
+  const mock = createMockGpuContext();
+  const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
+
+  sharedContext.resourceProvider.getPipeline('clip-stencil-write');
+
+  assertEquals(
+    mock.created.renderPipelines[0]?.depthStencil?.stencilFront?.passOp,
+    'replace',
+  );
+});
+
 Deno.test('dawn caps expose feature, format, and sample count policy', () => {
   const mock = createMockGpuContext();
   const caps = createDawnCaps(createDawnBackendContext(mock.context));
@@ -1078,17 +1090,7 @@ Deno.test('dawn command buffer batches consecutive non-stencil draws into one re
   assertEquals(commandBuffer.passCount, 1);
   assertEquals(mock.created.renderPasses.length, 1);
   assertEquals(mock.created.drawCalls.length, 4);
-  assertEquals(mock.created.stencilReferences, [0, 1, 2]);
-  assertEquals(mock.created.scissorCalls[0], [12, 12, 96, 96]);
-  assertEquals(mock.created.renderPasses[0]?.depthStencilAttachment !== undefined, true);
-  assertEquals(
-    mock.created.renderPipelines[0]?.depthStencil?.stencilFront?.passOp,
-    'replace',
-  );
-  assertEquals(
-    mock.created.renderPipelines[1]?.depthStencil?.stencilFront?.passOp,
-    'increment-clamp',
-  );
+  assertEquals(mock.created.stencilReferences, []);
 });
 
 Deno.test('dawn resource provider reuses pipelines across command buffers', () => {

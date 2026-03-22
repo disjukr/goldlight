@@ -196,6 +196,10 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Update 2026-03-22: fill/stroke patches now carry Skia-style per-patch resolve levels derived
     from Wang-like formulas, and fill patches preserve contour fan points instead of degrading
     curved wedges into line-only triangles
+  - Update 2026-03-23: synthetic round stroke helper patches now preserve Skia
+    `PatchWriter::writeCircle()` semantics instead of reusing the metadata shape of true
+    zero-length round-cap contours, so only genuine degenerate stroked subpaths carry round-cap
+    contour markers
   - Update 2026-03-23: stroke patch preparation now finishes open/closed contours through a
     `StrokeIterator`-like sequence with deferred first-patch replay and explicit `moveWithinContour`
     barriers instead of the previous ad hoc contour flush
@@ -557,6 +561,9 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
     verb-for-verb port, cusp handling is still a reduced version of Skia's full writer path in a few
     places, and translucent round cap/join coverage still needs Graphite-like analytic evaluation
     instead of flat color fill
+  - Update 2026-03-23: synthetic round helper patches are now separated from true degenerate
+    round-cap contours, removing a metadata mismatch that would have conflicted with later analytic
+    round cap/join coverage porting
 - `QueueManager` submission model is still simplified
   - Local state: queue submission, ordered outstanding submission ownership, completion draining, a
     `checkForFinishedWork`-style sync path, submission-owned transient buffer cleanup, and
@@ -585,6 +592,14 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
 
 ## Recent Updates
 
+- 2026-03-23
+  - Files: `src/path_renderer.ts`, `tests/drawing_graphite_dawn_test.ts`
+  - Status transition: synthetic round stroke circles now mirror Skia `PatchWriter::writeCircle()`
+    semantics, while true zero-length stroked subpaths remain the only patches that advertise
+    round-cap contour metadata
+  - Remaining delta: analytic round cap/join coverage and fuller verb-for-verb `StrokeIterator`
+    parity still remain
+  - Validation: `deno test tests/drawing_graphite_dawn_test.ts`
 - 2026-03-23
   - Files: `src/resource_provider.ts`, `tests/drawing_graphite_dawn_test.ts`
   - Status transition: hairline stroke tessellation now follows Graphite's order of operations by

@@ -1471,6 +1471,16 @@ Deno.test('drawing prepared stroke patches emit synthetic circle patches for rou
   }
   assertEquals(draw.usesTessellatedStrokePatches, true);
   assertEquals(draw.patches.length > 0, true);
+  const syntheticCircles = draw.patches.filter((patch) =>
+    patch.patch.kind === 'cubic' &&
+    patch.patch.points.every((point) =>
+      point[0] === patch.patch.points[0]![0] && point[1] === patch.patch.points[0]![1]
+    ) &&
+    patch.startCap === 'none' &&
+    patch.endCap === 'none'
+  );
+  assertEquals(syntheticCircles.length >= 2, true);
+  assertEquals(syntheticCircles.every((patch) => !patch.contourStart && !patch.contourEnd), true);
 });
 
 Deno.test('drawing prepared stroke patches preserve bevel and miter line joins in patch path', () => {
@@ -1730,6 +1740,14 @@ Deno.test('drawing prepared stroke patches split quadratic cusps at the Skia mid
     Math.abs(patch.patch.points[1][1]) < 1e-6
   );
   assertEquals(Boolean(cuspSplit), true);
+  const cuspCircle = draw.patches.find((patch) =>
+    patch.patch.kind === 'cubic' &&
+    patch.patch.points.every((point) =>
+      Math.abs(point[0] - (16 / 7)) < 1e-6 && Math.abs(point[1]) < 1e-6
+    )
+  );
+  assertEquals(cuspCircle?.startCap, 'none');
+  assertEquals(cuspCircle?.endCap, 'none');
 });
 
 Deno.test('drawing prepared stroke patches split conic cusps at the Skia mid-tangent', () => {
@@ -1759,6 +1777,14 @@ Deno.test('drawing prepared stroke patches split conic cusps at the Skia mid-tan
     Math.abs(patch.patch.points[1][1]) < 1e-6
   );
   assertEquals(Boolean(cuspSplit), true);
+  const cuspCircle = draw.patches.find((patch) =>
+    patch.patch.kind === 'cubic' &&
+    patch.patch.points.every((point) =>
+      Math.abs(point[0] - 1.7370341836426595) < 1e-6 && Math.abs(point[1]) < 1e-6
+    )
+  );
+  assertEquals(cuspCircle?.startCap, 'none');
+  assertEquals(cuspCircle?.endCap, 'none');
 });
 
 Deno.test('drawing prepared stroke patches emit cusp circles for turnaround curves', () => {

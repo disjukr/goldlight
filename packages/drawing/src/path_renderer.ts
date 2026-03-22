@@ -686,7 +686,7 @@ const createDegenerateSquareStrokePatch = (
   endCap: 'none',
 });
 
-const createDegenerateRoundStrokePatch = (
+const createSyntheticRoundStrokePatch = (
   center: Point2D,
 ): DrawingPreparedStrokePatch => ({
   patch: {
@@ -697,6 +697,16 @@ const createDegenerateRoundStrokePatch = (
   },
   prevPoint: center,
   joinControlPoint: center,
+  contourStart: false,
+  contourEnd: false,
+  startCap: 'none',
+  endCap: 'none',
+});
+
+const createDegenerateRoundStrokePatch = (
+  center: Point2D,
+): DrawingPreparedStrokePatch => ({
+  ...createSyntheticRoundStrokePatch(center),
   contourStart: true,
   contourEnd: true,
   startCap: 'round',
@@ -931,11 +941,11 @@ const createPreparedStrokePatchesFromPath = (
     if (cap === 'round') {
       sequence.push({
         kind: 'preparedPatch',
-        prepared: createDegenerateRoundStrokePatch(lastPoint),
+        prepared: createSyntheticRoundStrokePatch(lastPoint),
       });
       sequence.push({
         kind: 'preparedPatch',
-        prepared: createDegenerateRoundStrokePatch(firstPoint),
+        prepared: createSyntheticRoundStrokePatch(firstPoint),
       });
     } else if (cap === 'square') {
       const lastJoinControl = lastPatchItem.kind === 'basePatch'
@@ -1064,7 +1074,7 @@ const createPreparedStrokePatchesFromPath = (
         if (cuspT !== null) {
           const [left] = splitQuadraticAt(from, control, to, cuspT);
           const cuspPoint = left[2];
-          appendPreparedSequencePatch(createDegenerateRoundStrokePatch(cuspPoint));
+          appendPreparedSequencePatch(createSyntheticRoundStrokePatch(cuspPoint));
           emitPatchDefinition({ kind: 'line', points: [from, cuspPoint] });
           emitPatchDefinition({ kind: 'line', points: [cuspPoint, to] });
         } else {
@@ -1087,7 +1097,7 @@ const createPreparedStrokePatchesFromPath = (
         const cuspT = findConicCuspT(from, control, to, verb.weight);
         if (cuspT !== null) {
           const cusp = evaluateConic(from, control, to, verb.weight, cuspT);
-          appendPreparedSequencePatch(createDegenerateRoundStrokePatch(cusp));
+          appendPreparedSequencePatch(createSyntheticRoundStrokePatch(cusp));
           emitPatchDefinition({ kind: 'line', points: [from, cusp] });
           emitPatchDefinition({ kind: 'line', points: [cusp, to] });
         } else {
@@ -1121,7 +1131,7 @@ const createPreparedStrokePatchesFromPath = (
           const chopped = splitCubicAtMany(from, control1, control2, to, chops.ts);
           if (chops.areCusps && chopped.length === 2) {
             const cuspPoint = chopped[0]![3];
-            appendPreparedSequencePatch(createDegenerateRoundStrokePatch(cuspPoint));
+            appendPreparedSequencePatch(createSyntheticRoundStrokePatch(cuspPoint));
             emitPatchDefinition({
               kind: 'cubic',
               points: [chopped[0]![0], chopped[0]![1], cuspPoint, cuspPoint],
@@ -1133,8 +1143,8 @@ const createPreparedStrokePatchesFromPath = (
           } else if (chops.areCusps && chopped.length === 3) {
             const cusp0 = chopped[0]![3];
             const cusp1 = chopped[1]![3];
-            appendPreparedSequencePatch(createDegenerateRoundStrokePatch(cusp0));
-            appendPreparedSequencePatch(createDegenerateRoundStrokePatch(cusp1));
+            appendPreparedSequencePatch(createSyntheticRoundStrokePatch(cusp0));
+            appendPreparedSequencePatch(createSyntheticRoundStrokePatch(cusp1));
             emitPatchDefinition({ kind: 'line', points: [chopped[0]![0], cusp0] });
             emitPatchDefinition({ kind: 'line', points: [cusp0, cusp1] });
             emitPatchDefinition({ kind: 'line', points: [cusp1, chopped[2]![3]] });

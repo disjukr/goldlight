@@ -72,6 +72,9 @@ const srcOverBlend: GPUBlendState = {
 const maxPatchResolveLevel = 5;
 const tessellationPrecision = 4;
 const patchPrecision = 4;
+const tessellationPrecisionLiteral = `${tessellationPrecision}.0`;
+const patchPrecisionLiteral = `${patchPrecision}.0`;
+const cubicLengthTermLiteral = `${(patchPrecision * (3 * 2 / 8)).toFixed(1)}`;
 const curveFillSegments = 1 << maxPatchResolveLevel;
 const strokePatchSegments = (1 << 14) - 1;
 const stepUniformFloats = 28;
@@ -369,7 +372,7 @@ fn miter_extent(cosTheta: f32, miterLimit: f32) -> f32 {
 
 fn num_radial_segments_per_radian(approxDevStrokeRadius: f32) -> f32 {
   let radius = max(approxDevStrokeRadius, 0.5);
-  return 0.5 / acos(max(1.0 - (1.0 / ${tessellationPrecision}) / radius, -1.0));
+  return 0.5 / acos(max(1.0 - (1.0 / ${tessellationPrecisionLiteral}) / radius, -1.0));
 }
 
 @vertex
@@ -501,8 +504,8 @@ fn wangs_formula_cubic(
   matrix: mat2x2<f32>,
 ) -> f32 {
   let m = wangs_formula_max_fdiff_p2(p0, p1, p2, p3, matrix);
-  let p4 = max(${patchPrecision * patchPrecision * (81 / 64)}, 1.0) * m;
-  return max(ceil(log2(max(p4, 1.0)) * 0.25), 1.0);
+  let lengthTerm = ${cubicLengthTermLiteral};
+  return max(ceil(sqrt(lengthTerm * sqrt(max(m, 0.0)))), 1.0);
 }
 
 fn wangs_formula_conic_p2(
@@ -522,8 +525,8 @@ fn wangs_formula_conic_p2(
   let maxLen = sqrt(max(max(dot(cp0, cp0), dot(cp1, cp1)), dot(cp2, cp2)));
   let dp = fma(vec2<f32>(-2.0 * w), cp1, cp0) + cp2;
   let dw = abs(fma(-2.0, w, 2.0));
-  let rpMinus1 = max(0.0, fma(maxLen, ${patchPrecision}, -1.0));
-  let numer = length(dp) * ${patchPrecision} + rpMinus1 * dw;
+  let rpMinus1 = max(0.0, fma(maxLen, ${patchPrecisionLiteral}, -1.0));
+  let numer = length(dp) * ${patchPrecisionLiteral} + rpMinus1 * dw;
   let denom = 4.0 * min(w, 1.0);
   return numer / max(denom, 1e-5);
 }
@@ -579,7 +582,7 @@ fn miter_extent(cosTheta: f32, miterLimit: f32) -> f32 {
 
 fn num_radial_segments_per_radian(approxDevStrokeRadius: f32) -> f32 {
   let radius = max(approxDevStrokeRadius, 0.5);
-  return 0.5 / acos(max(1.0 - (1.0 / ${tessellationPrecision}) / radius, -1.0));
+  return 0.5 / acos(max(1.0 - (1.0 / ${tessellationPrecisionLiteral}) / radius, -1.0));
 }
 
 fn robust_normalize_diff(a: vec2<f32>, b: vec2<f32>) -> vec2<f32> {

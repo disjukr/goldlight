@@ -64,8 +64,9 @@ stack that fits this repository's TypeScript and WebGPU architecture.
     `queue.onSubmittedWorkDone()` when available.
   - Current state: command-buffer submission routes through the queue manager, each submit now owns
     an explicit outstanding submission object until completion, callback-based completion now drains
-    submissions through a `checkForFinishedWork`-style path with explicit sync-to-last-submission
-    waits, and coarse fallback still exists when callbacks are unavailable.
+    submissions through a `checkForFinishedWork`-style path, ordinary ticks only retire submissions
+    that have already completed asynchronously, explicit sync-to-last-submission waits exist for the
+    Graphite-like blocking path, and coarse fallback still exists when callbacks are unavailable.
 - Path rendering
   - Status: `partial`
   - Flattened contours can be pushed through direct tessellated fills, convex clip-stack clipping,
@@ -451,7 +452,8 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
 - Async work completion
   - Status: `partial`
   - Tick and in-flight submission tracking exist, and completion now follows submission-owned GPU
-    queue promises when the backend exposes them, including explicit sync-to-last-submission waits
+    queue promises when the backend exposes them, with non-blocking front-of-queue draining on
+    ordinary ticks and explicit sync-to-last-submission waits only on the blocking path
 
 ## Rendering Strategy Decisions
 
@@ -568,6 +570,10 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
     `checkForFinishedWork`-style sync path, submission-owned transient buffer cleanup, and
     Graphite-like finish callback attachment on the latest outstanding work now exist in
     `src/queue_manager.ts`, `src/command_buffer.ts`, and `src/prepare_resources.ts`
+  - Update 2026-03-23: ordinary `tick()` no longer waits for all outstanding submissions to settle;
+    it now mirrors Graphite's non-blocking `checkForFinishedWork(kNo)` shape by draining only the
+    already-finished front of the queue, while the explicit sync path still waits for the newest
+    outstanding submission
   - Remaining delta: no command-buffer reuse, `WaitAny`-style batching, async mapped-resource
     ownership, or resource/fence correlation
 - `Caps` still trails DawnCaps depth
@@ -660,6 +666,14 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
     provider with a fixed path rendering strategy
   - Remaining delta: only the tessellation strategy exists; Graphite's renderer inventory,
     RenderStep ownership, and alternate atlas/compute strategies are still missing
+  - Validation: `deno test tests/drawing_graphite_dawn_test.ts`
+- 2026-03-23
+  - Files: `src/queue_manager.ts`, `tests/drawing_graphite_dawn_test.ts`
+  - Status transition: ordinary queue ticks now keep unfinished submissions pending instead of
+    implicitly awaiting every outstanding completion promise, so `checkForFinishedWork(kNo)` is
+    structurally closer to Skia's non-blocking front-drain behavior
+  - Remaining delta: WebGPU still lacks Graphite's `WaitAny`-backed polling path, command-buffer
+    reuse, and explicit fence/resource correlation
   - Validation: `deno test tests/drawing_graphite_dawn_test.ts`
 - 2026-03-23
   - Files: `src/queue_manager.ts`, `tests/drawing_graphite_dawn_test.ts`

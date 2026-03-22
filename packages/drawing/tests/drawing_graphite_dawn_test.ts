@@ -2267,6 +2267,36 @@ Deno.test('dawn queue manager tracks explicit submitted-work completion', async 
   assertEquals(mock.created.destroyedBuffers.length > 0, true);
 });
 
+Deno.test('dawn queue manager does not sync unfinished submissions during ordinary tick', async () => {
+  const mock = createMockGpuContext();
+  const backend = createDawnBackendContext(mock.context, {
+    tick: () => {
+      mock.ticks.push(1);
+    },
+  });
+  const queueManager = createDawnQueueManager(backend);
+  const sharedContext = createDawnSharedContext(backend);
+  const recorder = createDrawingRecorder(sharedContext);
+  const binding = createOffscreenBinding(mock.context);
+
+  recordClear(recorder, [0, 0, 0, 1]);
+  const commandBuffer = encodeDawnCommandBuffer(
+    sharedContext,
+    finishDrawingRecorder(recorder),
+    binding,
+  );
+  submitToDawnQueueManager(queueManager, commandBuffer);
+
+  await tickDawnQueueManager(queueManager);
+
+  assertEquals(mock.ticks.length, 1);
+  assertEquals(queueManager.completedCount, 0);
+  assertEquals(queueManager.inFlightCount, 1);
+  assertEquals(queueManager.outstandingSubmissions.length, 1);
+  assertEquals(queueManager.outstandingSubmissions[0]?.state, 'pending');
+  assertEquals(mock.created.destroyedBuffers.length, 0);
+});
+
 Deno.test('dawn submission finished callbacks fire when gpu work completes', async () => {
   const mock = createMockGpuContext();
   const backend = createDawnBackendContext(mock.context);

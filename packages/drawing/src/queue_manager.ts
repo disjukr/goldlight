@@ -302,17 +302,6 @@ export const checkForFinishedDawnQueueManager = async (
     }
   }
 
-  if (queueManager.supportsSubmittedWorkDone) {
-    const front = outstanding[0];
-    if (front !== undefined && front.completionPromise !== null) {
-      await Promise.allSettled(
-        outstanding
-          .map((submission) => submission.completionPromise)
-          .filter((completion): completion is Promise<void> => completion !== null),
-      );
-    }
-  }
-
   drainFinishedSubmissions(queueManager);
 };
 

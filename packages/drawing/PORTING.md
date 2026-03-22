@@ -551,7 +551,8 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
     `edgeID` / `combinedEdgeID` sorting, binary-search parametric edge solve, `unchecked_mix`
     duplicated join-edge restriction, and a leaner instance payload that drops unused contour/cap
     flags from the GPU patch layout, CPU-provided `maxScale` stroke tolerances instead of a
-    shader-local approximation, and hairline pre-transforming before tessellation
+    shader-local approximation, hairline pre-transforming before tessellation, and Skia-like
+    quadratic/conic cusp mid-tangent solves instead of midpoint/sampling fallbacks
   - Remaining delta: some `StrokeIterator` semantics are still event-driven rather than a
     verb-for-verb port, cusp handling is still a reduced version of Skia's full writer path in a few
     places, and translucent round cap/join coverage still needs Graphite-like analytic evaluation

@@ -1084,9 +1084,7 @@ const createPreparedStrokePatchesFromPath = (
           currentPoint = to;
           break;
         }
-        const cuspT = findCuspTBySampling((t) =>
-          derivativeConic(from, control, to, verb.weight, t)
-        );
+        const cuspT = findConicCuspT(currentPoint, control, to, verb.weight);
         if (cuspT !== null) {
           const cusp = evaluateConic(from, control, to, verb.weight, cuspT);
           appendPreparedSequencePatch(createDegenerateRoundStrokePatch(cusp));
@@ -1317,14 +1315,62 @@ const findQuadraticCuspT = (
   control: Point2D,
   to: Point2D,
 ): number | null => {
-  const a = subtract(control, from);
-  const b = subtract(to, control);
-  const crossValue = Math.abs((a[0] * b[1]) - (a[1] * b[0]));
-  const dotValue = dot(a, b);
-  if (crossValue <= epsilon && dotValue < 0) {
+  const tan0 = subtract(control, from);
+  const tan1 = subtract(to, control);
+  const crossValue = Math.abs((tan0[0] * tan1[1]) - (tan0[1] * tan1[0]));
+  if (crossValue > epsilon || dot(tan0, tan1) >= 0) {
+    return null;
+  }
+  const normalizedTan0 = normalize(tan0);
+  const normalizedNegTan1 = normalize(scale(tan1, -1));
+  if (!normalizedTan0 || !normalizedNegTan1) {
     return 0.5;
   }
-  return null;
+  let bisector = add(normalizedTan0, normalizedNegTan1);
+  if (Math.hypot(bisector[0], bisector[1]) <= epsilon) {
+    bisector = perpendicular(normalizedTan0);
+  }
+  const denominator = dot(subtract(tan0, tan1), bisector);
+  const t = Math.abs(denominator) <= epsilon ? 0.5 : dot(tan0, bisector) / denominator;
+  return t > epsilon && t < 1 - epsilon ? t : 0.5;
+};
+
+const solveQuadraticMidTangent = (a: number, b: number, c: number): number => {
+  const discriminant = Math.max((b * b) - (4 * a * c), 0);
+  const q = -0.5 * (b + (Math.sign(b || 1) * Math.sqrt(discriminant)));
+  const halfQa = -0.5 * q * a;
+  const t = Math.abs((q * q) + halfQa) < Math.abs((a * c) + halfQa)
+    ? (Math.abs(a) <= epsilon ? Number.NaN : q / a)
+    : (Math.abs(q) <= epsilon ? Number.NaN : c / q);
+  return t > epsilon && t < 1 - epsilon ? t : 0.5;
+};
+
+const findConicCuspT = (
+  from: Point2D,
+  control: Point2D,
+  to: Point2D,
+  weight: number,
+): number | null => {
+  const tan0 = subtract(control, from);
+  const tan1 = subtract(to, control);
+  const crossValue = Math.abs((tan0[0] * tan1[1]) - (tan0[1] * tan1[0]));
+  if (crossValue > epsilon || dot(tan0, tan1) >= 0) {
+    return null;
+  }
+  const normalizedTan0 = normalize(tan0);
+  const normalizedNegTan1 = normalize(scale(tan1, -1));
+  if (!normalizedTan0 || !normalizedNegTan1) {
+    return 0.5;
+  }
+  let bisector = add(normalizedTan0, normalizedNegTan1);
+  if (Math.hypot(bisector[0], bisector[1]) <= epsilon) {
+    bisector = perpendicular(normalizedTan0);
+  }
+  const delta = subtract(to, from);
+  const coeffA = scale(delta, weight - 1);
+  const coeffB = subtract(delta, scale(tan0, 2 * weight));
+  const coeffC = scale(tan0, weight);
+  return solveQuadraticMidTangent(dot(bisector, coeffA), dot(bisector, coeffB), dot(bisector, coeffC));
 };
 
 const findCuspTBySampling = (
@@ -1418,7 +1464,7 @@ const flattenConic = (
   weight: number,
   out: Point2D[],
 ): void => {
-  const cuspT = findCuspTBySampling((t) => derivativeConic(from, control, to, weight, t));
+  const cuspT = findConicCuspT(from, control, to, weight);
   if (cuspT !== null) {
     const cuspPoint = evaluateConic(from, control, to, weight, cuspT);
     flattenConic(from, lerp(from, control, cuspT), cuspPoint, weight, out);
@@ -2077,9 +2123,7 @@ const preparePatches = (
         const from = currentPoint!;
         const control = transformPoint2D(verb.control, transform);
         const to = transformPoint2D(verb.to, transform);
-        const cuspT = findCuspTBySampling((t) =>
-          derivativeConic(from, control, to, verb.weight, t)
-        );
+        const cuspT = findConicCuspT(currentPoint, control, to, verb.weight);
         if (cuspT !== null) {
           const cusp = evaluateConic(from, control, to, verb.weight, cuspT);
           pushPatch({ kind: 'line', points: [from, cusp] });

@@ -459,6 +459,17 @@ These decisions directly affect the remaining work and are not settled yet.
 
 ## Known Gaps
 
+- Skia Graphite/Dawn behavior deltas that still matter most
+  - arbitrary clip-path stacks are not composited into the same stencil domain as fill stenciling,
+    so multi-path clip behavior can still diverge from Graphite
+  - tessellated wedge/curve/stroke patches still use fixed WGSL subdivision instead of
+    Wang's-formula-driven resolve levels and patch attributes
+  - transforms are still baked into CPU-prepared geometry instead of using Skia-like per-draw
+    uniform replay
+  - paint is still packed into vertex/instance payloads instead of being separated into paint
+    uniforms and bind groups
+  - convex clip handling is now correct through direct-geometry fallback, but it is still a fallback
+    rather than native clip-aware patch replay
 - `Path2D` is still very small compared to Skia `SkPath`
 - recording snapshots can be partitioned into coarse draw passes, but they do not yet carry
   Skia-like pipeline/state/resource data

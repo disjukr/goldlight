@@ -1588,6 +1588,60 @@ Deno.test('drawing prepared stroke patches emit synthetic cap patches for degene
   assertEquals(square.patchCount > 0, true);
 });
 
+Deno.test('drawing prepared stroke patches treat empty closed contours as zero-length round caps', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [144, 96] },
+      { kind: 'close' },
+    ),
+    { style: 'stroke', strokeWidth: 12, strokeCap: 'round', strokeJoin: 'round' },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const draw = prepared.passes[0]?.steps[0]?.draw;
+  assertEquals(draw?.kind, 'pathStroke');
+  if (draw?.kind !== 'pathStroke') {
+    throw new Error('expected pathStroke draw');
+  }
+  assertEquals(draw.usesTessellatedStrokePatches, true);
+  assertEquals(draw.patches.length, 1);
+  assertEquals(draw.patches[0]?.patch.kind, 'cubic');
+  assertEquals(draw.patches[0]?.joinControlPoint, [144, 96]);
+  assertEquals(draw.patches[0]?.startCap, 'round');
+  assertEquals(draw.patches[0]?.endCap, 'round');
+});
+
+Deno.test('drawing prepared stroke patches treat empty closed contours as zero-length square caps', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [200, 140] },
+      { kind: 'close' },
+    ),
+    { style: 'stroke', strokeWidth: 12, strokeCap: 'square', strokeJoin: 'round' },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const draw = prepared.passes[0]?.steps[0]?.draw;
+  assertEquals(draw?.kind, 'pathStroke');
+  if (draw?.kind !== 'pathStroke') {
+    throw new Error('expected pathStroke draw');
+  }
+  assertEquals(draw.usesTessellatedStrokePatches, true);
+  assertEquals(draw.patches.length, 1);
+  assertEquals(draw.patches[0]?.patch.kind, 'conic');
+  assertEquals(draw.patches[0]?.joinControlPoint, [200, 140]);
+});
+
 Deno.test('dawn prepared stroke payload stores cpu-derived maxScale for tessellation', () => {
   const mock = createMockGpuContext();
   const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));

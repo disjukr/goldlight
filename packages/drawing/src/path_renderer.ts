@@ -1281,6 +1281,11 @@ const createPreparedStrokePatchesFromPath = (
       }
       case 'close': {
         if (!currentPoint || !contourStart) break;
+        if (contourUnits.length === 0 && lastDegeneratePoint === null) {
+          // Match Skia StrokeIterator: an explicit close on an otherwise empty contour
+          // is treated as a zero-length stroked subpath, so round/square caps still materialize.
+          lastDegeneratePoint = contourStart;
+        }
         if (!pointsEqual(currentPoint, contourStart)) {
           emitPatchDefinition({ kind: 'line', points: [currentPoint, contourStart] });
         }

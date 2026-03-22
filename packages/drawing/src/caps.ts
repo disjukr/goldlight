@@ -61,6 +61,17 @@ export type DrawingResourceBindingRequirements = Readonly<{
   gradientBufferBinding: number;
 }>;
 
+export type DrawingRuntimeCapabilities = Readonly<{
+  drawBufferCanBeMapped: boolean;
+  computeSupport: boolean;
+  clampToBorderSupport: boolean;
+  bufferMapsAreAsync: boolean;
+  allowCpuSync: boolean;
+  useAsyncPipelineCreation: boolean;
+  allowScopedErrorChecks: boolean;
+  fullCompressedUploadSizeMustAlignToBlockDims: boolean;
+}>;
+
 export type DawnCaps = Readonly<{
   backend: 'graphite-dawn';
   adapterFeatures: DrawingFeatureSet;
@@ -68,6 +79,7 @@ export type DawnCaps = Readonly<{
   limits: DrawingLimits;
   preferredCanvasFormat: GPUTextureFormat;
   resourceBindingRequirements: DrawingResourceBindingRequirements;
+  runtimeCapabilities: DrawingRuntimeCapabilities;
   supportsTimestampQuery: boolean;
   supportsCommandBufferTimestamps: boolean;
   supportsShaderF16: boolean;
@@ -79,6 +91,9 @@ export type DawnCaps = Readonly<{
   supportsLoadResolveTexture: boolean;
   differentResolveAttachmentSizeSupport: boolean;
   emulateLoadStoreResolve: boolean;
+  supportsCompressedBC: boolean;
+  supportsCompressedETC2: boolean;
+  supportsExternalTextures: boolean;
   requiresStorageBufferWorkaround: boolean;
   requiredTransferBufferAlignment: number;
   requiredBytesPerRowAlignment: number;
@@ -121,6 +136,13 @@ const knownFormats: readonly GPUTextureFormat[] = [
   'r32float',
   'depth24plus',
   'depth24plus-stencil8',
+  'bc1-rgba-unorm' as GPUTextureFormat,
+  'bc1-rgba-unorm-srgb' as GPUTextureFormat,
+  'etc2-rgb8unorm' as GPUTextureFormat,
+  'etc2-rgb8unorm-srgb' as GPUTextureFormat,
+  'etc2-rgba8unorm' as GPUTextureFormat,
+  'etc2-rgba8unorm-srgb' as GPUTextureFormat,
+  'external' as GPUTextureFormat,
 ];
 
 const readFeatureSet = (
@@ -255,6 +277,9 @@ const createFormatTable = (
   const maxSampleCount = chooseMaxSampleCount(backend, limits);
   const bgra8Storage = adapterFeatures.has('bgra8unorm-storage');
   const textureFormatsTier1 = deviceFeatures.has('texture-formats-tier1');
+  const supportsCompressedBC = deviceFeatures.has('texture-compression-bc');
+  const supportsCompressedETC2 = deviceFeatures.has('texture-compression-etc2');
+  const supportsExternalTextures = deviceFeatures.has('external-texture');
 
   const finalize = (
     format: GPUTextureFormat,
@@ -456,6 +481,96 @@ const createFormatTable = (
     finalize('depth24plus-stencil8', info);
   }
 
+  if (supportsCompressedBC) {
+    const info = createEmptyFormatCapabilities();
+    info.texturable = true;
+    info.renderable = false;
+    info.multisample = false;
+    info.resolve = false;
+    info.storage = false;
+    info.copySrc = false;
+    info.copyDst = true;
+    addColorType(info, {
+      colorType: 'RGBA_8888',
+      transferColorType: 'RGBA_8888',
+      uploadable: true,
+      renderable: false,
+    });
+    finalize('bc1-rgba-unorm' as GPUTextureFormat, info);
+    finalize('bc1-rgba-unorm-srgb' as GPUTextureFormat, {
+      ...info,
+      colorTypes: [{
+        colorType: 'SRGBA_8888',
+        transferColorType: 'SRGBA_8888',
+        uploadable: true,
+        renderable: false,
+      }],
+    });
+  }
+
+  if (supportsCompressedETC2) {
+    const rgbInfo = createEmptyFormatCapabilities();
+    rgbInfo.texturable = true;
+    rgbInfo.copyDst = true;
+    addColorType(rgbInfo, {
+      colorType: 'RGB_888x',
+      transferColorType: 'RGB_888x',
+      uploadable: true,
+      renderable: false,
+    });
+    finalize('etc2-rgb8unorm' as GPUTextureFormat, rgbInfo);
+    finalize('etc2-rgb8unorm-srgb' as GPUTextureFormat, {
+      ...rgbInfo,
+      colorTypes: [{
+        colorType: 'SRGBA_8888',
+        transferColorType: 'SRGBA_8888',
+        uploadable: true,
+        renderable: false,
+      }],
+    });
+
+    const rgbaInfo = createEmptyFormatCapabilities();
+    rgbaInfo.texturable = true;
+    rgbaInfo.copyDst = true;
+    addColorType(rgbaInfo, {
+      colorType: 'RGBA_8888',
+      transferColorType: 'RGBA_8888',
+      uploadable: true,
+      renderable: false,
+    });
+    finalize('etc2-rgba8unorm' as GPUTextureFormat, rgbaInfo);
+    finalize('etc2-rgba8unorm-srgb' as GPUTextureFormat, {
+      ...rgbaInfo,
+      colorTypes: [{
+        colorType: 'SRGBA_8888',
+        transferColorType: 'SRGBA_8888',
+        uploadable: true,
+        renderable: false,
+      }],
+    });
+  }
+
+  if (supportsExternalTextures) {
+    const info = createEmptyFormatCapabilities();
+    info.texturable = true;
+    info.copySrc = false;
+    info.copyDst = false;
+    addColorType(info, {
+      colorType: 'RGBA_8888',
+      transferColorType: 'RGBA_8888',
+      uploadable: false,
+      renderable: false,
+    });
+    addColorType(info, {
+      colorType: 'RGB_888x',
+      transferColorType: 'RGB_888x',
+      uploadable: false,
+      renderable: false,
+      readSwizzle: 'rgb1',
+    });
+    finalize('external' as GPUTextureFormat, info);
+  }
+
   return formatTable;
 };
 
@@ -466,19 +581,17 @@ export const createDawnCaps = (
   const deviceFeatures = readFeatureSet(backend.device);
   const limits = readLimits(backend.device);
   const supportsTimestampQuery = deviceFeatures.has('timestamp-query');
-  const supportsCommandBufferTimestamps = supportsTimestampQuery &&
-    !deviceFeatures.has('metal-command-buffer-timestamps-disabled');
+  const supportsCommandBufferTimestamps = supportsTimestampQuery;
   const supportsShaderF16 = deviceFeatures.has('shader-f16');
   const supportsTransientAttachments = deviceFeatures.has('transient-attachments');
   const supportsMSAARenderToSingleSampled = deviceFeatures.has('msaa-render-to-single-sampled');
   const supportsLoadResolveTexture = deviceFeatures.has('dawn-load-resolve-texture');
   const supportsPartialLoadResolve = deviceFeatures.has('dawn-partial-load-resolve-texture');
   const supportsRenderPassRenderArea = deviceFeatures.has('render-pass-render-area');
-  const requiresStorageBufferWorkaround =
-    deviceFeatures.has('disable-storage-buffers') ||
-    deviceFeatures.has('backend-vulkan') ||
-    deviceFeatures.has('backend-opengl') ||
-    deviceFeatures.has('backend-opengles');
+  const supportsCompressedBC = deviceFeatures.has('texture-compression-bc');
+  const supportsCompressedETC2 = deviceFeatures.has('texture-compression-etc2');
+  const supportsExternalTextures = deviceFeatures.has('external-texture');
+  const requiresStorageBufferWorkaround = deviceFeatures.has('disable-storage-buffers');
   const supportsStorageBuffers = !requiresStorageBufferWorkaround &&
     limits.maxStorageBuffersPerShaderStage >= 4;
   const requiredTransferBufferAlignment = 4;
@@ -513,6 +626,16 @@ export const createDawnCaps = (
     combinedUniformBufferBinding: 1,
     gradientBufferBinding: 2,
   };
+  const runtimeCapabilities: DrawingRuntimeCapabilities = {
+    drawBufferCanBeMapped: deviceFeatures.has('buffer-map-extended-usages'),
+    computeSupport: true,
+    clampToBorderSupport: false,
+    bufferMapsAreAsync: true,
+    allowCpuSync: Boolean(backend.tick),
+    useAsyncPipelineCreation: Boolean(backend.tick),
+    allowScopedErrorChecks: Boolean(backend.tick),
+    fullCompressedUploadSizeMustAlignToBlockDims: true,
+  };
 
   return {
     backend: 'graphite-dawn',
@@ -521,6 +644,7 @@ export const createDawnCaps = (
     limits,
     preferredCanvasFormat: choosePreferredCanvasFormat(backend),
     resourceBindingRequirements,
+    runtimeCapabilities,
     supportsTimestampQuery,
     supportsCommandBufferTimestamps,
     supportsShaderF16,
@@ -532,6 +656,9 @@ export const createDawnCaps = (
     supportsLoadResolveTexture,
     differentResolveAttachmentSizeSupport,
     emulateLoadStoreResolve,
+    supportsCompressedBC,
+    supportsCompressedETC2,
+    supportsExternalTextures,
     requiresStorageBufferWorkaround,
     requiredTransferBufferAlignment,
     requiredBytesPerRowAlignment,

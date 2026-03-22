@@ -502,8 +502,8 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
   - Local state: `src/caps.ts` now owns a richer format table, color-type metadata,
     resolve/transient/MSRTSS policy, resource-binding requirements, and provider-facing usage
     checks
-  - Remaining delta: no full Dawn backend workaround matrix, multiplanar/external format coverage,
-    or shader/resource binding requirement model
+  - Remaining delta: no multiplanar view/aspect model; native-Dawn backend-type workarounds are
+    intentionally out of scope for the WebGPU-only target
 
 ## Work Order
 

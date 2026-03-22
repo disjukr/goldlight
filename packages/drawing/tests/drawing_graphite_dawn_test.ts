@@ -316,6 +316,57 @@ Deno.test('dawn caps track transient and load-resolve features separately', () =
   assertEquals(caps.getSupportedTextureUsages('rgba8unorm').has('transient'), true);
 });
 
+Deno.test('dawn caps apply observable storage-buffer workaround policy', () => {
+  const mock = createMockGpuContext();
+  const backend = createDawnBackendContext({
+    ...mock.context,
+    device: {
+      ...mock.context.device,
+      features: new Set(['timestamp-query', 'disable-storage-buffers']),
+    } as unknown as GPUDevice,
+  });
+  const caps = createDawnCaps(backend);
+
+  assertEquals(caps.requiresStorageBufferWorkaround, true);
+  assertEquals(caps.supportsStorageBuffers, false);
+  assertEquals(caps.runtimeCapabilities.drawBufferCanBeMapped, false);
+  assertEquals(caps.runtimeCapabilities.bufferMapsAreAsync, true);
+});
+
+Deno.test('dawn caps keep command-buffer timestamps feature-based in webgpu mode', () => {
+  const mock = createMockGpuContext();
+  const backend = createDawnBackendContext(mock.context);
+  const caps = createDawnCaps(backend);
+
+  assertEquals(caps.supportsTimestampQuery, true);
+  assertEquals(caps.supportsCommandBufferTimestamps, true);
+});
+
+Deno.test('dawn caps expose compressed and external format policy when features are enabled', () => {
+  const mock = createMockGpuContext();
+  const backend = createDawnBackendContext({
+    ...mock.context,
+    device: {
+      ...mock.context.device,
+      features: new Set([
+        'timestamp-query',
+        'texture-compression-bc',
+        'texture-compression-etc2',
+        'external-texture',
+      ]),
+    } as unknown as GPUDevice,
+  });
+  const caps = createDawnCaps(backend);
+
+  assertEquals(caps.supportsCompressedBC, true);
+  assertEquals(caps.supportsCompressedETC2, true);
+  assertEquals(caps.supportsExternalTextures, true);
+  assertEquals(caps.getSupportedTextureUsages('bc1-rgba-unorm' as GPUTextureFormat).has('sample'), true);
+  assertEquals(caps.getSupportedTextureUsages('bc1-rgba-unorm' as GPUTextureFormat).has('copyDst'), true);
+  assertEquals(caps.getSupportedTextureUsages('external' as GPUTextureFormat).has('sample'), true);
+  assertEquals(caps.getSupportedTextureUsages('external' as GPUTextureFormat).has('copyDst'), false);
+});
+
 Deno.test('dawn resource provider validates caps-based texture usages', () => {
   const mock = createMockGpuContext();
   const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));

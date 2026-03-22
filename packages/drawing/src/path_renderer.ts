@@ -2110,33 +2110,6 @@ const tessellateFillFromPatches = (
   return sawWedge ? Object.freeze(triangles) : null;
 };
 
-const middleOutFanTriangulate = (
-  points: readonly Point2D[],
-): readonly Point2D[] | null => {
-  if (points.length < 3 || !isConvexPolygon(points)) {
-    return null;
-  }
-  const triangles: Point2D[] = [];
-  let left = 1;
-  let right = points.length - 1;
-  let anchor = 0;
-  while (left < right) {
-    appendTriangle(triangles, points[anchor]!, points[left]!, points[right]!);
-    anchor = left;
-    left += 1;
-    if (left >= right) {
-      break;
-    }
-    appendTriangle(triangles, points[anchor]!, points[right]!, points[left]!);
-    anchor = right;
-    right -= 1;
-  }
-  if (triangles.length === 0) {
-    return triangulatePolygon(points);
-  }
-  return Object.freeze(triangles);
-};
-
 const lineIntersection = (
   p0: Point2D,
   d0: Point2D,
@@ -2753,9 +2726,7 @@ const preparePathFill = (
 
     let baseTriangles: readonly Point2D[] = [];
     switch (renderer) {
-      case 'middle-out-fan':
-        baseTriangles = middleOutFanTriangulate(subpaths[0]!.points) ?? [];
-        break;
+      case 'convex-tessellated-wedges':
       case 'stencil-tessellated-wedges':
         baseTriangles = tessellateFillFromPatches(patches) ??
           prepareFillTriangles(subpaths, command.path.fillRule) ?? [];

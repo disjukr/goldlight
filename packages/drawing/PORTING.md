@@ -499,9 +499,10 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
     metadata instead of full clip task objects, and the atlas path is a minimal clip-atlas manager
 - `RendererProvider` is still a small selector
   - Local state: `src/renderer_provider.ts` now creates a context-owned provider with a fixed
-    tessellation strategy and a stable renderer set, and `src/shared_context.ts` /
-    `src/recording.ts` thread that provider through recording and draw preparation instead of doing
-    free functions at callsites
+    tessellation strategy and a stable renderer set, `src/shared_context.ts` / `src/recording.ts`
+    thread that provider through recording and draw preparation instead of doing free functions at
+    callsites, and convex fills now map to a dedicated `convex-tessellated-wedges` renderer instead
+    of exposing `middle-out-fan` as a standalone renderer kind
   - Remaining delta: still only the tessellation family is modeled; there is no atlas/compute
     strategy selection, shared RenderStep graph, or renderer-wide precompile iteration comparable to
     Graphite
@@ -546,6 +547,14 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
 
 ## Recent Updates
 
+- 2026-03-23
+  - Files: `src/renderer_provider.ts`, `src/draw_pass.ts`, `src/path_renderer.ts`,
+    `src/prepare_resources.ts`, `src/command_buffer.ts`, `tests/drawing_graphite_dawn_test.ts`
+  - Status transition: convex fill renderer selection now matches Graphite's
+    `convexTessellatedWedges()` shape instead of using `middle-out-fan` as a top-level renderer
+  - Remaining delta: the tessellation strategy still lacks Graphite's shared `RenderStep` ownership
+    model and the atlas/compute strategy families
+  - Validation: `deno test tests/drawing_graphite_dawn_test.ts`
 - 2026-03-23
   - Files: `src/renderer_provider.ts`, `src/shared_context.ts`, `src/recording.ts`,
     `src/draw_pass.ts`, `src/path_renderer.ts`, `tests/drawing_graphite_dawn_test.ts`

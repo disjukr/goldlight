@@ -253,7 +253,7 @@ Deno.test('prepareDawnRecording uses the shared-context renderer provider', () =
     getPathFillRenderer: typeof provider.getPathFillRenderer;
   }).getPathFillRenderer = (options) => {
     const selected = originalGetPathFillRenderer(options);
-    return selected === 'middle-out-fan' ? 'stencil-tessellated-curves' : selected;
+    return selected === 'convex-tessellated-wedges' ? 'stencil-tessellated-curves' : selected;
   };
   (sharedContext as { rendererProvider: typeof provider }).rendererProvider = provider;
 
@@ -643,7 +643,7 @@ Deno.test('drawing prepared recording groups clear and prepared steps into passe
   assertEquals(prepared.passes[0]?.loadOp, 'clear');
   assertEquals(prepared.passes[0]?.steps.length, 1);
   assertEquals(prepared.passes[0]?.steps[0]?.pipelineDescs.map((pipeline) => pipeline.label), [
-    'drawing-path-fill-cover',
+    'drawing-path-fill-patch-cover',
   ]);
   assertEquals(prepared.passes[0]?.steps[0]?.usesStencil, false);
   assertEquals(prepared.passes[1]?.loadOp, 'clear');
@@ -686,7 +686,7 @@ Deno.test('dawn preparation separates recording, draw-pass preparation, and reso
   assertEquals(commandBuffer.prepared, preparedWork.prepared);
 });
 
-Deno.test('drawing prepared recording selects middle-out fan for simple convex fills', () => {
+Deno.test('drawing prepared recording selects convex tessellated wedges for simple convex fills', () => {
   const mock = createMockGpuContext();
   const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
   const recorder = drawingContext.createRecorder();
@@ -708,7 +708,7 @@ Deno.test('drawing prepared recording selects middle-out fan for simple convex f
   const draw = prepared.passes[0]?.steps[0]?.draw;
 
   assertEquals(draw?.kind, 'pathFill');
-  assertEquals(draw?.renderer, 'middle-out-fan');
+  assertEquals(draw?.renderer, 'convex-tessellated-wedges');
   assertEquals((draw?.triangles.length ?? 0) > 0, true);
 });
 
@@ -735,14 +735,13 @@ Deno.test('drawing prepared recording flattens quadratic and cubic paths for fil
   if (draw?.kind !== 'pathFill') {
     throw new Error('expected pathFill draw');
   }
-  assertEquals(draw.renderer, 'stencil-tessellated-wedges');
+  assertEquals(draw.renderer, 'convex-tessellated-wedges');
   assertEquals(draw.triangles.length > 6, true);
   assertEquals(draw.bounds.origin[0], 24);
   assertEquals(draw.patches.length > 0, true);
   assertEquals(draw.patches.some((patch) => patch.fanPoint !== undefined), true);
   assertEquals(prepared.passes[0]?.steps[0]?.pipelineDescs.map((pipeline) => pipeline.label), [
-    'drawing-path-fill-patch-stencil-nonzero',
-    'drawing-path-fill-stencil-cover',
+    'drawing-path-fill-patch-cover',
   ]);
 });
 
@@ -905,7 +904,7 @@ Deno.test('drawing prepared recording derives clip bounds from clip path', () =>
   const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
   assertEquals(prepared.passes[0]?.steps[0]?.clipRect, createRect(32, 40, 64, 48));
   assertEquals(prepared.passes[0]?.steps[0]?.pipelineDescs.map((pipeline) => pipeline.label), [
-    'drawing-path-fill-clip-cover',
+    'drawing-path-fill-patch-clip-cover',
   ]);
 });
 
@@ -943,7 +942,7 @@ Deno.test('drawing prepared recording preserves patch fill when convex clips are
   if (draw?.kind !== 'pathFill') {
     throw new Error('expected pathFill draw');
   }
-  assertEquals(draw.renderer, 'stencil-tessellated-wedges');
+  assertEquals(draw.renderer, 'convex-tessellated-wedges');
   assertEquals(draw.patches.length > 0, true);
   assertEquals((draw.fringeVertices?.length ?? 0) > 0, true);
   assertEquals(step?.clipRect, createRect(32, 32, 80, 80));
@@ -1557,7 +1556,7 @@ Deno.test('dawn command buffer encodes fill draws with stencil and cover pipelin
   assertEquals(commandBuffer.passCount, 1);
   assertEquals(commandBuffer.unsupportedCommands.length, 0);
   assertEquals(mock.created.renderPasses.length, 1);
-  assertEquals(mock.created.renderPipelines.length, 2);
+  assertEquals(mock.created.renderPipelines.length, 3);
   assertEquals(mock.created.bindGroupLayouts.length > 0, true);
   assertEquals(mock.created.pipelineLayouts.length > 0, true);
   assertEquals(mock.created.bindGroups.length > 0, true);
@@ -1591,8 +1590,8 @@ Deno.test('dawn command buffer uses stencil-cover fill path for patch-rendered n
   encodeDawnCommandBuffer(sharedContext, finishDrawingRecorder(recorder), binding);
 
   assertEquals(mock.created.renderPasses.length, 1);
-  assertEquals(mock.created.renderPasses[0]?.depthStencilAttachment !== undefined, true);
-  assertEquals(mock.created.drawCalls.length, 3);
+  assertEquals(mock.created.renderPasses[0]?.depthStencilAttachment !== undefined, false);
+  assertEquals(mock.created.drawCalls.length, 2);
   assertEquals(mock.created.renderPipelines.length, 2);
 });
 
@@ -1794,8 +1793,8 @@ Deno.test('dawn resource provider reuses pipelines across command buffers', () =
   encodeDawnCommandBuffer(sharedContext, createRecording('stroke'), binding);
   encodeDawnCommandBuffer(sharedContext, createRecording('stroke'), binding);
 
-  assertEquals(mock.created.renderPipelines.length, 2);
-  assertEquals(mock.created.shaderModules.length, 3);
+  assertEquals(mock.created.renderPipelines.length, 3);
+  assertEquals(mock.created.shaderModules.length, 4);
   assertEquals(mock.created.bindGroupLayouts.length > 0, true);
   assertEquals(mock.created.pipelineLayouts.length > 0, true);
 });

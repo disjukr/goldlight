@@ -3,6 +3,7 @@ import {
   acquireColorResolveView,
   type RenderContextBinding,
 } from '@rieul3d/gpu';
+import { isDrawingPatchFillRenderer } from './renderer_provider.ts';
 import type { DrawingPreparedRecording } from './draw_pass.ts';
 import {
   type DawnPreparedWork,
@@ -165,7 +166,7 @@ const encodePreparedFillStep = (
     return;
   }
 
-  const usesPatchFill = step.draw.renderer !== 'middle-out-fan';
+  const usesPatchFill = isDrawingPatchFillRenderer(step.draw.renderer);
   const usesFillStencil = step.usesFillStencil;
   applyStepClip(pass, step, target);
   if (usesFillStencil) {

@@ -1,6 +1,7 @@
 import type { Rect } from '@rieul3d/geometry';
 import type { DrawingRecording } from './recording.ts';
 import { type DrawingPreparedDraw, prepareDrawingPathCommand } from './path_renderer.ts';
+import { isDrawingStencilFillRenderer } from './renderer_provider.ts';
 import type {
   DrawingClipRect,
   DrawingCommand,
@@ -149,7 +150,7 @@ const getPipelineDescsForDraw = (
           true,
         );
 
-      if (!usesStencilClip && draw.renderer !== 'middle-out-fan') {
+      if (!usesStencilClip && isDrawingStencilFillRenderer(draw.renderer)) {
         return [
           fillStencilDesc,
           createPipelineDesc(
@@ -159,16 +160,6 @@ const getPipelineDescsForDraw = (
             'fill-stencil-cover',
           ),
         ];
-      }
-      if (draw.renderer === 'middle-out-fan') {
-        return usesStencilClip
-          ? [createPipelineDesc(
-            'drawing-path-fill-clip-cover',
-            'path',
-            'device-vertex',
-            'clip-cover',
-          )]
-          : [createPipelineDesc('drawing-path-fill-cover', 'path', 'device-vertex')];
       }
       if (draw.renderer === 'stencil-tessellated-curves') {
         return usesStencilClip
@@ -186,19 +177,33 @@ const getPipelineDescsForDraw = (
             ),
           ];
       }
-      if (usesStencilClip) {
-        return [
-          createPipelineDesc(
+      if (
+        draw.renderer === 'convex-tessellated-wedges' ||
+        draw.renderer === 'stencil-tessellated-wedges'
+      ) {
+        return usesStencilClip
+          ? [createPipelineDesc(
             'drawing-path-fill-patch-clip-cover',
             'wedge-patch',
             'wedge-patch-instance',
             'clip-cover',
-          ),
-        ];
+          )]
+          : [
+            createPipelineDesc(
+              'drawing-path-fill-patch-cover',
+              'wedge-patch',
+              'wedge-patch-instance',
+            ),
+          ];
       }
-      return [
-        createPipelineDesc('drawing-path-fill-patch-cover', 'wedge-patch', 'wedge-patch-instance'),
-      ];
+      return usesStencilClip
+        ? [createPipelineDesc(
+          'drawing-path-fill-clip-cover',
+          'path',
+          'device-vertex',
+          'clip-cover',
+        )]
+        : [createPipelineDesc('drawing-path-fill-cover', 'path', 'device-vertex')];
     }
     case 'pathStroke':
       if (!draw.usesTessellatedStrokePatches || draw.patches.length === 0) {
@@ -330,7 +335,7 @@ export const prepareDrawingRecording = (
           clipBounds: prepared.draw.clip?.bounds,
           usesStencil: prepared.draw.usesStencil,
           usesFillStencil: prepared.draw.kind === 'pathFill' &&
-            prepared.draw.renderer !== 'middle-out-fan' &&
+            isDrawingStencilFillRenderer(prepared.draw.renderer) &&
             !prepared.draw.clip?.elements?.length,
           usesDepth: prepared.draw.kind === 'pathStroke' &&
             prepared.draw.usesTessellatedStrokePatches &&

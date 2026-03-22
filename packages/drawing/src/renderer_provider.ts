@@ -5,7 +5,7 @@ import type { DrawingPreparedPatch } from './path_renderer.ts';
 export type DrawingPathRendererStrategy = 'tessellation';
 
 export type DrawingRendererKind =
-  | 'middle-out-fan'
+  | 'convex-tessellated-wedges'
   | 'stencil-tessellated-wedges'
   | 'stencil-tessellated-curves'
   | 'tessellated-strokes';
@@ -27,12 +27,24 @@ export type DrawingRendererProvider = Readonly<{
 
 const kTessellationRenderers = Object.freeze(
   [
-    'middle-out-fan',
+    'convex-tessellated-wedges',
     'stencil-tessellated-wedges',
     'stencil-tessellated-curves',
     'tessellated-strokes',
   ] as const satisfies readonly DrawingRendererKind[],
 );
+
+export const isDrawingPatchFillRenderer = (
+  renderer: DrawingRendererKind,
+): boolean =>
+  renderer === 'convex-tessellated-wedges' ||
+  renderer === 'stencil-tessellated-wedges' ||
+  renderer === 'stencil-tessellated-curves';
+
+export const isDrawingStencilFillRenderer = (
+  renderer: DrawingRendererKind,
+): boolean =>
+  renderer === 'stencil-tessellated-wedges' || renderer === 'stencil-tessellated-curves';
 
 export const isDrawingRendererProviderStrategySupported = (
   strategy: DrawingPathRendererStrategy,
@@ -51,8 +63,8 @@ export const createDrawingRendererProvider = (
     pathRendererStrategy,
     renderers: kTessellationRenderers,
     getPathFillRenderer: (options) => {
-      if (options.isSingleConvexContour && options.fillRule === 'nonzero' && !options.hasCurves) {
-        return 'middle-out-fan';
+      if (options.isSingleConvexContour && options.patchCount > 0) {
+        return 'convex-tessellated-wedges';
       }
       if (options.hasWedges && options.patchCount > 0) {
         return 'stencil-tessellated-wedges';

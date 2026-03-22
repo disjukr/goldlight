@@ -2,7 +2,7 @@ import { assertEquals } from 'jsr:@std/assert@^1.0.14';
 import { canUseWebGPU } from '@rieul3d/gpu';
 import { renderBasicPathsSnapshot } from '../examples/render_basic_paths/render.ts';
 
-const expectedPngSha256 = '90fabc0728ab9ecbdbb73a87946a0d5825c3f1b86e4df189dc65617c46a5d59d';
+const expectedPngSha256 = '18af2fbfdbeb9b2b574c1340428981bbf917361cc0f0832cdbeebbf0dfcb8b64';
 
 const toHex = (bytes: Uint8Array): string =>
   [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
@@ -22,7 +22,7 @@ Deno.test({
     );
 
     assertEquals(snapshot.unsupportedCommandCount, 0);
-    assertEquals(snapshot.passCount, 4);
+    assertEquals(snapshot.passCount, 3);
     assertEquals(toHex(digest), expectedPngSha256);
   },
 });

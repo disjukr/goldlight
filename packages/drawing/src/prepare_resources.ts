@@ -8,6 +8,7 @@ import type {
   DrawingPreparedVertex,
 } from './path_renderer.ts';
 import type { DrawingGraphicsPipelineHandle } from './resource_provider.ts';
+import { isDrawingPatchFillRenderer } from './renderer_provider.ts';
 import type { DawnSharedContext } from './shared_context.ts';
 import { createDrawingTaskList, type DrawingTaskList } from './task.ts';
 import type { DrawingStrokeStyle } from './types.ts';
@@ -594,11 +595,12 @@ const prepareStepResources = (
   const stepBindGroup = sharedContext.resourceProvider.createStepBindGroup(stepPayloadBuffer);
 
   if (step.draw.kind === 'pathFill') {
-    const usesPatchFill = step.draw.renderer !== 'middle-out-fan';
+    const usesPatchFill = isDrawingPatchFillRenderer(step.draw.renderer);
     const fillVertices = usesPatchFill
       ? null
       : createVertexModulationData(step.draw.triangles, [1, 1, 1, 1]);
-    const patchVertices = step.draw.renderer === 'stencil-tessellated-wedges'
+    const patchVertices = step.draw.renderer === 'convex-tessellated-wedges' ||
+        step.draw.renderer === 'stencil-tessellated-wedges'
       ? createWedgePatchInstanceData(step.draw.patches)
       : step.draw.renderer === 'stencil-tessellated-curves'
       ? createCurvePatchInstanceData(step.draw.patches)
@@ -646,11 +648,13 @@ const prepareStepResources = (
         : null,
       patchInstanceCount: patchVertices
         ? patchVertices.length /
-          (step.draw.renderer === 'stencil-tessellated-wedges'
+          (step.draw.renderer === 'convex-tessellated-wedges' ||
+              step.draw.renderer === 'stencil-tessellated-wedges'
             ? wedgePatchFloats
             : curvePatchFloats)
         : 0,
-      patchVertexCount: step.draw.renderer === 'stencil-tessellated-wedges'
+      patchVertexCount: step.draw.renderer === 'convex-tessellated-wedges' ||
+          step.draw.renderer === 'stencil-tessellated-wedges'
         ? wedgePatchVertexCount
         : curvePatchVertexCount,
       fringeVertexBuffer: fringeVertices ? createVertexBuffer(sharedContext, fringeVertices) : null,

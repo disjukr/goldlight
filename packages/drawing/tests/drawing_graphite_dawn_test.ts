@@ -1,4 +1,4 @@
-import { assertEquals } from 'jsr:@std/assert@^1.0.14';
+import { assertEquals, assertThrows } from 'jsr:@std/assert@^1.0.14';
 import { createOffscreenBinding } from '@rieul3d/gpu';
 import {
   createPath2D,
@@ -262,16 +262,75 @@ Deno.test('dawn caps expose feature, format, and sample count policy', () => {
   const caps = createDawnCaps(createDawnBackendContext(mock.context));
 
   assertEquals(caps.preferredCanvasFormat, 'rgba8unorm');
+  assertEquals(caps.resourceBindingRequirements.backendApi, 'dawn');
+  assertEquals(caps.resourceBindingRequirements.uniformBufferLayout, 'std140');
+  assertEquals(caps.resourceBindingRequirements.separateTextureAndSamplerBinding, true);
   assertEquals(caps.supportsTimestampQuery, true);
+  assertEquals(caps.supportsCommandBufferTimestamps, true);
   assertEquals(caps.supportsShaderF16, false);
   assertEquals(caps.limits.maxTextureDimension2D, 8192);
   assertEquals(caps.limits.maxStorageBuffersPerShaderStage, 8);
   assertEquals(caps.supportsStorageBuffers, true);
   assertEquals(caps.isFormatRenderable('rgba8unorm'), true);
+  assertEquals(caps.canUseAsResolveTarget('rgba8unorm'), true);
+  assertEquals(caps.isFormatStorageCompatible('bgra8unorm'), true);
   assertEquals(caps.getFormatCapabilities('depth24plus').texturable, true);
+  assertEquals(caps.getFormatCapabilities('depth24plus').renderable, false);
+  assertEquals(caps.getSupportedTextureUsages('rgba8unorm').has('copyDst'), true);
+  assertEquals(caps.getSupportedTextureUsages('rgba8unorm').has('resolve'), true);
+  assertEquals(caps.getSupportedSampleCounts('rgba8unorm'), [1, 4]);
+  assertEquals(caps.getColorTypeInfos('r8unorm')[0]?.writeSwizzle, 'a000');
+  assertEquals(caps.emulateLoadStoreResolve, true);
+  assertEquals(caps.differentResolveAttachmentSizeSupport, true);
   assertEquals(caps.supportsSampleCount(1), true);
   assertEquals(caps.supportsSampleCount(4), true);
   assertEquals(caps.supportsSampleCount(8), false);
+});
+
+Deno.test('dawn caps track transient and load-resolve features separately', () => {
+  const mock = createMockGpuContext();
+  const backend = createDawnBackendContext({
+    ...mock.context,
+    device: {
+      ...mock.context.device,
+      features: new Set([
+        'timestamp-query',
+        'transient-attachments',
+        'msaa-render-to-single-sampled',
+        'dawn-load-resolve-texture',
+        'dawn-partial-load-resolve-texture',
+        'render-pass-render-area',
+      ]),
+    } as unknown as GPUDevice,
+  });
+  const caps = createDawnCaps(backend);
+
+  assertEquals(caps.supportsTransientAttachments, true);
+  assertEquals(caps.supportsMSAARenderToSingleSampled, true);
+  assertEquals(caps.supportsLoadResolveTexture, true);
+  assertEquals(caps.supportsPartialLoadResolve, true);
+  assertEquals(caps.supportsRenderPassRenderArea, true);
+  assertEquals(caps.resourceBindingRequirements.usePushConstantsForIntrinsicConstants, false);
+  assertEquals(caps.emulateLoadStoreResolve, false);
+  assertEquals(caps.getSupportedTextureUsages('rgba8unorm').has('msaaRenderToSingleSampled'), true);
+  assertEquals(caps.getSupportedTextureUsages('rgba8unorm').has('transient'), true);
+});
+
+Deno.test('dawn resource provider validates caps-based texture usages', () => {
+  const mock = createMockGpuContext();
+  const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
+
+  assertThrows(
+    () =>
+      sharedContext.resourceProvider.createTexture({
+        label: 'invalid-depth-render-target',
+        size: { width: 8, height: 8, depthOrArrayLayers: 1 },
+        format: 'depth24plus',
+        usage: 0x10,
+      }),
+    Error,
+    'does not support render attachment usage',
+  );
 });
 
 Deno.test('drawing recorder records transform and clip state into draw commands', () => {

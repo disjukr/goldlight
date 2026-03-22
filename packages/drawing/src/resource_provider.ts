@@ -1,4 +1,5 @@
 import type { DawnBackendContext } from './dawn_backend_context.ts';
+import type { DawnCaps } from './caps.ts';
 import type { DrawingGraphicsPipelineDesc } from './draw_pass.ts';
 
 export type DrawingBufferDescriptor = Readonly<{
@@ -590,9 +591,11 @@ const createSamplerCacheKey = (
 export const createDawnResourceProvider = (
   backend: DawnBackendContext,
   options: Readonly<{
+    caps?: DawnCaps;
     resourceBudget?: number;
   }> = {},
 ): DawnResourceProvider => {
+  const caps = options.caps;
   let viewportBindGroupLayout: GPUBindGroupLayout | null = null;
   let stepBindGroupLayout: GPUBindGroupLayout | null = null;
   let clipTextureBindGroupLayout: GPUBindGroupLayout | null = null;
@@ -664,7 +667,12 @@ export const createDawnResourceProvider = (
     ],
   });
 
-  const sampleCount = backend.target.kind === 'offscreen' ? backend.target.sampleCount : 1;
+  const sampleCount = caps?.supportsSampleCount(
+      backend.target.kind === 'offscreen' ? backend.target.sampleCount : 1,
+      backend.target.format,
+    )
+    ? backend.target.kind === 'offscreen' ? backend.target.sampleCount : 1
+    : caps?.defaultSampleCount ?? 1;
 
   const getViewportBindGroupLayout = (): GPUBindGroupLayout => {
     if (viewportBindGroupLayout) {
@@ -905,7 +913,27 @@ export const createDawnResourceProvider = (
     backend,
     resourceBudget: options.resourceBudget ?? Number.POSITIVE_INFINITY,
     createBuffer: (descriptor) => backend.device.createBuffer(descriptor),
-    createTexture: (descriptor) => backend.device.createTexture(descriptor),
+    createTexture: (descriptor) => {
+      const normalizedSampleCount = descriptor.sampleCount &&
+          caps?.supportsSampleCount(descriptor.sampleCount, descriptor.format) === false
+        ? 1
+        : descriptor.sampleCount;
+      const supportedUsage = caps?.getSupportedTextureUsages(descriptor.format);
+      const needsTextureBinding = (descriptor.usage & textureBindingUsage) !== 0;
+      const needsRenderAttachment = (descriptor.usage & renderAttachmentUsage) !== 0;
+      if (supportedUsage) {
+        if (needsTextureBinding && !supportedUsage.has('sample')) {
+          throw new Error(`Format ${descriptor.format} does not support texture binding`);
+        }
+        if (needsRenderAttachment && !supportedUsage.has('render')) {
+          throw new Error(`Format ${descriptor.format} does not support render attachment usage`);
+        }
+      }
+      return backend.device.createTexture({
+        ...descriptor,
+        sampleCount: normalizedSampleCount,
+      });
+    },
     createViewportBindGroup: (buffer) =>
       backend.device.createBindGroup({
         label: 'drawing-viewport-bind-group',
@@ -982,7 +1010,12 @@ export const createDawnResourceProvider = (
       return provider.resolveGraphicsPipelineHandle(provider.createGraphicsPipelineHandle(descriptor));
     },
     getStencilAttachmentView: () => {
-      const sampleCount = backend.target.kind === 'offscreen' ? backend.target.sampleCount : 1;
+      const sampleCount = caps?.supportsSampleCount(
+          backend.target.kind === 'offscreen' ? backend.target.sampleCount : 1,
+          stencilFormat,
+        )
+        ? backend.target.kind === 'offscreen' ? backend.target.sampleCount : 1
+        : 1;
       if (
         stencilAttachment &&
         stencilAttachment.width === backend.target.width &&

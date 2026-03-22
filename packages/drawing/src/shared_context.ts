@@ -99,6 +99,7 @@ export const createDawnSharedContext = (
 ): DawnSharedContext => {
   const caps = createDawnCaps(backend);
   const resourceProvider = createDawnResourceProvider(backend, {
+    caps,
     resourceBudget: options.resourceBudget,
   });
   const clipAtlasManager = createDawnClipAtlasManager(backend, resourceProvider);

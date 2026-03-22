@@ -469,8 +469,8 @@ These decisions directly affect the remaining work and are not settled yet.
   - Status: `started`
   - PNG hash regression exists for `examples/render_basic_paths`
 - Backend capability tests
-  - Status: `started`
-  - Basic caps tests exist
+  - Status: `partial`
+  - Caps tests now cover format tables, resolve/transient policy, and provider-side usage validation
 
 ## Current Structural Delta
 
@@ -499,8 +499,11 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
   - Remaining delta: no Graphite-style outstanding submission object ownership or resource/fence
     correlation
 - `Caps` still trails DawnCaps depth
-  - Local state: feature and limit probing exist in `src/caps.ts`
-  - Remaining delta: no richer format table, resolve policy, or backend workaround layer
+  - Local state: `src/caps.ts` now owns a richer format table, color-type metadata,
+    resolve/transient/MSRTSS policy, resource-binding requirements, and provider-facing usage
+    checks
+  - Remaining delta: no full Dawn backend workaround matrix, multiplanar/external format coverage,
+    or shader/resource binding requirement model
 
 ## Work Order
 
@@ -511,8 +514,9 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
    - Introduce explicit outstanding submissions and tighter command-buffer/resource completion
      ownership
    - Target files: `src/queue_manager.ts`, `src/command_buffer.ts`, `src/shared_context.ts`
-3. `P2` Deepen `Caps`
-   - Port more of `DawnCaps` format policy, sample policy, and workaround logic
+3. `P2` Finish `Caps`
+   - Port remaining DawnCaps workaround logic, multiplanar/external format coverage, and binding
+     requirement policy
    - Target files: `src/caps.ts`, `src/resource_provider.ts`
 
 ## Update Rules

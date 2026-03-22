@@ -341,6 +341,35 @@ Deno.test('dawn resource provider uses replace for first clip writes', () => {
   );
 });
 
+Deno.test('dawn stroke shader keeps graphite duplicated-edge seam handling', () => {
+  const mock = createMockGpuContext();
+  const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
+  const binding = createOffscreenBinding(mock.context);
+  const recorder = createDrawingRecorder(sharedContext);
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [24, 24] },
+      { kind: 'lineTo', to: [96, 24] },
+      { kind: 'lineTo', to: [96, 96] },
+    ),
+    { style: 'stroke', strokeWidth: 12, strokeJoin: 'round' },
+  );
+
+  encodeDawnCommandBuffer(sharedContext, finishDrawingRecorder(recorder), binding);
+
+  const strokeShaderCode = mock.created.shaderModules
+    .map((descriptor) => descriptor.code)
+    .find((code) =>
+      typeof code === 'string' &&
+      code.includes('combinedEdgeID = max(combinedEdgeID, 0.0);') &&
+      code.includes('if (lastRadialEdgeID == 0.0) {'),
+    );
+
+  assertEquals(typeof strokeShaderCode, 'string');
+});
+
 Deno.test('dawn caps expose feature, format, and sample count policy', () => {
   const mock = createMockGpuContext();
   const caps = createDawnCaps(createDawnBackendContext(mock.context));

@@ -809,11 +809,12 @@ fn vs_main(
     curveP2 = curveP0;
     curveP3 = curveP0;
     combinedEdgeID += numRadialSegments + 1.0;
-    if (combinedEdgeID < 0.0) {
-      combinedEdgeID = 0.0;
-    } else if (!tangents_nearly_parallel(turn, joinTan0, joinTan1) || dot(joinTan0, joinTan1) < 0.0) {
-      strokeOutset = select(max(strokeOutset, 0.0), min(strokeOutset, 0.0), turn < 0.0);
+    if (!tangents_nearly_parallel(turn, joinTan0, joinTan1) || dot(joinTan0, joinTan1) < 0.0) {
+      if (combinedEdgeID >= 0.0) {
+        strokeOutset = select(max(strokeOutset, 0.0), min(strokeOutset, 0.0), turn < 0.0);
+      }
     }
+    combinedEdgeID = max(combinedEdgeID, 0.0);
   } else {
     let maxCombinedSegments = maxEdges - numEdgesInJoin - 1.0;
     numRadialSegments = max(ceil(abs(rotation) * numRadialSegmentsPerRadian), 1.0);
@@ -900,7 +901,10 @@ fn vs_main(
         let rootChoiceB = abs((quadraticA * quadraticC) + (-0.5 * rootQ * quadraticA));
         let rootNumer = select(quadraticC, rootQ, rootChoiceA < rootChoiceB);
         let rootDenom = select(rootQ, quadraticA, rootChoiceA < rootChoiceB);
-        let radialT = select(0.0, clamp(rootNumer / rootDenom, 0.0, 1.0), lastRadialEdgeID != 0.0 && rootDenom != 0.0);
+        var radialT = select(0.0, clamp(rootNumer / rootDenom, 0.0, 1.0), rootDenom != 0.0);
+        if (lastRadialEdgeID == 0.0) {
+          radialT = 0.0;
+        }
         let finalT = max(parametricT, radialT);
         var tangentAtT = radialTangent;
         if (curveType < 2.5) {

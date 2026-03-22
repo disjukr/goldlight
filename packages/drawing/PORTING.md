@@ -160,6 +160,9 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Update 2026-03-23: stroke patch vertex replay now follows Skia's `tessellate_stroked_curve()`
     branch structure more closely for degenerate conic square patches, round/circle patches, and
     parametric segment selection
+  - Update 2026-03-23: duplicated-edge join seaming and `lastRadialEdgeID == 0` stabilization now
+    follow Skia's stroke tessellation shader more literally, reducing local seam-specific drift in
+    the WGSL vertex path
 - `src/recorder.ts`
   - Status: `partial`
   - Role: command recording API with transform and clip-stack state
@@ -536,7 +539,8 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
     connected to their true predecessor join control points; `src/resource_provider.ts` now uses
     triangle-strip stroke patch replay with `edgeID` / `combinedEdgeID`-driven body tessellation,
     and its WGSL branch structure now more directly mirrors Skia's `tessellate_stroked_curve()` for
-    degenerate square/circle patches and segment counting
+    degenerate square/circle patches, duplicated-edge join seaming, `lastRadialEdgeID == 0`
+    stabilization, and segment counting
   - Remaining delta: `tessellate_stroked_curve()` seam math still has local safety branches,
     duplicated-edge handling is still a reduced version of Skia's full implementation, and
     translucent round cap/join coverage still needs Graphite-like analytic evaluation instead of
@@ -604,6 +608,13 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
     semantics
   - Remaining delta: completion is still promise/tick based in WebGPU terms, without Graphite's
     `WaitAny` path, finish-proc/resource ownership, fence correlation, or command-buffer recycling
+  - Validation: `deno test tests/drawing_graphite_dawn_test.ts`
+- 2026-03-23
+  - Files: `src/resource_provider.ts`, `tests/drawing_graphite_dawn_test.ts`
+  - Status transition: stroke tessellation shader now matches Skia more closely for duplicated-edge
+    join seaming and the `lastRadialEdgeID == 0` radial-root stabilization path
+  - Remaining delta: translucent round cap/join coverage is still flat-color, and some
+    `tessellate_stroked_curve()` safety branches remain less literal than Skia
   - Validation: `deno test tests/drawing_graphite_dawn_test.ts`
 
 ## Update Rules

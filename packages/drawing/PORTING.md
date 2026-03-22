@@ -471,157 +471,58 @@ These decisions directly affect the remaining work and are not settled yet.
   - Status: `started`
   - Basic caps tests exist
 
-## Known Gaps
+## Current Structural Delta
 
-- Skia Graphite/Dawn behavior deltas that still matter most
-  - arbitrary clip-path stacks are not composited into the same stencil domain as fill stenciling,
-    so multi-path clip behavior can still diverge from Graphite
-  - tessellated wedge/curve/stroke patches still use fixed WGSL subdivision instead of
-    Wang's-formula-driven resolve levels and patch attributes
-  - transforms are still baked into CPU-prepared geometry instead of using Skia-like per-draw
-    uniform replay
-  - paint is still packed into vertex/instance payloads instead of being separated into paint
-    uniforms and bind groups
-  - convex clip handling is now correct through direct-geometry fallback, but it is still a fallback
-    rather than native clip-aware patch replay
-- `Path2D` is still very small compared to Skia `SkPath`
-- recording snapshots can be partitioned into coarse draw passes, but they do not yet carry
-  Skia-like pipeline/state/resource data
-- no Skia-like draw-list or draw-pass preparation layer yet
-- broader advanced curve/path features are still missing
-- curve patch preparation is closer to Skia Graphite terminology now, but it is still CPU-generated
-  geometry instead of true GPU patch tessellation
-- patch-instance replay now exists for wedges, curves, and strokes, and patch fills now shade
-  through a first stencil-then-cover path and now carry per-patch Wang-style resolve levels, but
-  they still use a bounded fixed-count WGSL topology instead of Skia's static vertex/index buffers
-  plus full Graphite patch writer behavior
-- evenodd/nonzero fills now rely on prepared geometry plus scanline fallback rather than Skia-style
-  path renderers, and coverage is still not Skia-grade
-- fill stenciling and complex clip-path stenciling still cannot be composed like Skia's clip stack,
-  so multiple arbitrary clip paths can still diverge
-- convex clips now force exact direct-geometry fallbacks for patch-rendered fills and strokes, but
-  this is still a correctness fallback rather than Skia's native clip-aware patch rendering
-- convex clip fallbacks currently disable fringe AA instead of clipping it analytically, so clipped
-  edges remain correct but can look harsher than Skia
-- convex stroke fallbacks now also switch back to direct-cover pipelines so the Dawn vertex layout
-  matches the emitted geometry, but this is still separate from true clip-aware patch stroking
-- convex clips now force exact direct-geometry fallbacks for patch-rendered fills and strokes, but
-  this is still a correctness fallback rather than Skia's native clip-aware patch rendering
-- no SVG parser or SVG-to-`Path2D` ingestion path yet
-- no retained scene model
-- bind group layouts exist now, but there is still no bind group cache
-- `command_buffer` still does per-draw render pass replay for stencil clears instead of a richer
-  DrawPass command stream
-- non-stencil steps can now batch, but stencil-heavy recordings still fragment replay more than Skia
-  Graphite
-- draw-pass preparation still does not batch or pre-resolve resource/pipeline state like Skia
-  `DrawPass::prepareResources()`
-- `queue_manager` still lacks Skia-style outstanding submission objects and explicit error scopes,
-  even though it now follows `queue.onSubmittedWorkDone()` when available
+The remaining work should be judged against Skia Graphite/Dawn structure, not just current output.
 
-## Skia Parity Review (2026-03-22)
+- `TaskList` / `RenderPassTask` layer is still missing
+  - Local state: `recording.ts`, `draw_pass.ts`, and `prepare_resources.ts` form a simplified
+    `Recording -> DrawPass -> prepareResources -> CommandBuffer` flow
+  - Remaining delta: no child-task graph, upload-task ownership, or render-pass task objects
+- `DrawPass::prepareResources()` is still narrower than Skia
+  - Local state: pipeline descriptors and pre-encode resource preparation exist
+  - Remaining delta: passes do not yet own Skia-like sampled textures, pipeline handles, or richer
+    pass-local payload families
+- `ClipStack` is structurally closer but still incomplete
+  - Local state: save records, deferred save materialization, oldest-valid tracking, and
+    rect-intersect invalidation/restore exist in `src/clip_stack.ts`
+  - Remaining delta: no clip shaders, deferred clip draws, analytic clip, or clip atlas path
+- `RendererProvider` is still a small selector
+  - Local state: `src/renderer_provider.ts` chooses fill/stroke renderer variants
+  - Remaining delta: no context-wide renderer set comparable to Graphite's provider
+- `QueueManager` submission model is still simplified
+  - Local state: queue submission and completion tracking exist in `src/queue_manager.ts`
+  - Remaining delta: no Graphite-style outstanding submission object ownership or resource/fence
+    correlation
+- `Caps` still trails DawnCaps depth
+  - Local state: feature and limit probing exist in `src/caps.ts`
+  - Remaining delta: no richer format table, resolve policy, or backend workaround layer
 
-Compared with Skia Graphite/Dawn `TessellateWedgesRenderStep`, `TessellateCurvesRenderStep`, and
-`TessellateStrokesRenderStep`, the main remaining behavior differences are:
+## Work Order
 
-1. Patch topology and static buffers
-   - Status: `partial`
-   - Current state: instance data now carries fan points, curve type, and Wang-style resolve level
-   - Missing: Graphite-style shared static vertex/index buffers and exact patch-writer attribute
-     layout
-2. Transform handling
-   - Status: `partial`
-   - Current state: resolve levels are computed from already-transformed control points
-   - Missing: uniform-driven transform replay and shader-side vector-xform parity with Skia
-3. Stroke patch semantics
-   - Status: `partial`
-   - Current state: strokes now use per-patch resolve levels
-   - Missing: deferred stroke patch closure, join control point tracking, and Skia's exact cap/join
-     patch emission rules
-4. Fill/stencil semantics
-   - Status: `partial`
-   - Current state: wedge/curve patches now preserve curved boundaries better
-   - Missing: Skia-like winding/even-odd stencil passes and richer draw-pass ordering
-5. Resource/pipeline plumbing
-   - Status: `started`
-   - Current state: cached WebGPU pipelines exist for the current patch formats
-   - Missing: bind groups, static buffers, and DrawPass-owned pipeline/resource preparation
-
-## Latest Work Log
-
-- 2026-03-22
-  - Files changed: `src/command_buffer.ts`, `src/resource_provider.ts`,
-    `tests/drawing_graphite_dawn_test.ts`
-  - Status transition: pipeline binding `started` -> `partial`, pipelines `started` -> `partial`,
-    and GPU replay `partial` -> `partial` with viewport-uniform-driven device-to-NDC mapping
-  - Remaining gaps: draw preparation still bakes `localToDevice` into CPU geometry, and paint or
-    sampled-resource bind groups are still missing
-  - Validation: `deno test packages/drawing/tests/drawing_graphite_dawn_test.ts`;
-    `deno test packages/drawing/tests/render_basic_paths_snapshot_test.ts`
-- 2026-03-22
-  - Files changed: `src/path_renderer.ts`, `src/command_buffer.ts`, `src/resource_provider.ts`,
-    `tests/drawing_graphite_dawn_test.ts`
-  - Status transition: patch-instance tessellation `partial` -> `partial` with Wang-style resolve
-    metadata and curved wedge preservation
-  - Validation: `deno check packages/drawing/mod.ts`,
-    `deno test packages/drawing/tests/drawing_graphite_dawn_test.ts`
-- 2026-03-22
-  - Files changed: `tests/render_basic_paths_snapshot_test.ts`
-  - Status transition: snapshot baseline updated to match Wang-style patch replay output
-  - Validation: `deno test packages/drawing/tests/render_basic_paths_snapshot_test.ts`
-
-## Recommended Next Steps
-
-1. Move from viewport-only uniforms to Skia-like local-space replay
-   - Keep draw geometry in local space through preparation and apply `localToDevice` in uniforms
-   - Separate transform and paint payloads from transient vertex uploads
-2. Compose fill and clip stenciling
-   - Allow arbitrary clip-path stacks to intersect with the new patch-fill stencil path
-   - Stop falling back to correctness-only paths for convex and multi-path clips
-3. Improve patch tessellation fidelity
-   - Replace fixed-count WGSL subdivision with Wang's-formula-like resolve levels
-   - Move more patch metadata toward Skia's instance layout
-4. Port draw-pass style replay closer to Skia
-   - Batch multiple prepared steps into fewer render passes
-   - Separate clip, pipeline, and geometry state preparation from command encoding
-5. Add pipeline/resource caching
-   - Extend reuse toward transient buffers and richer pipeline keys
-6. Deepen `src/caps.ts`
-   - Replace static format assumptions with richer backend policy
-   - Add feature-gated fallbacks
-
-## Current Porting Delta Vs Skia Graphite/Dawn
-
-To align behavior more closely with Skia Graphite/Dawn, the package still needs:
-
-1. Real graphics-pipeline objects and keys separate from `resource_provider`
-   - Skia keys pipelines from render-pass and pipeline descriptors, while the local code still
-     hardcodes a small switch over draw-step keys.
-2. Bind-group allocation and cache in real draw execution
-   - Skia owns uniform/texture bind group layouts and caches bind groups in the resource provider;
-     this package now has the layouts and viewport bind groups, but draw encoding still uploads
-     per-draw geometry and lacks paint/resource bind-group reuse.
-3. Uniform/storage-buffer driven transform and paint replay
-   - Skia does not bake draw transforms into prepared geometry; this package only moved the
-     device-to-NDC step into uniforms and still needs real `localToDevice` replay.
-4. Richer format table and backend workaround policy in `caps`
-   - Skia probes texture usage, resolve policy, and backend quirks much more deeply.
-5. Command-buffer owned completion objects in `queue_manager`
-   - The queue manager now tracks real submission completion promises, but it still lacks Skia-style
-     outstanding submission objects, error scopes, and batching semantics.
-
-## Latest Work
-
-- 2026-03-22
-  - Updated `src/caps.ts`, `src/shared_context.ts`, `src/resource_provider.ts`,
-    `src/queue_manager.ts`, and `tests/drawing_graphite_dawn_test.ts`
-  - Status transitions:
-    - `Shared context`: `started` -> `partial`
-    - `Resource allocation`: `started` -> `partial`
-    - `Capability probing`: `started` -> `partial`
-    - `Queue submission`: `started` -> `partial`
-  - Validation:
-    - `deno test packages/drawing/tests/drawing_graphite_dawn_test.ts`
+1. `P0` Build a real `TaskList / RenderPassTask` layer
+   - Add task objects between `Recording` and `CommandBuffer`
+   - Move render-pass grouping and child-task ownership out of direct draw-pass iteration
+   - Target files: `src/recording.ts`, `src/draw_pass.ts`, `src/prepare_resources.ts`,
+     `src/command_buffer.ts`
+2. `P0` Expand `DrawPass::prepareResources()` ownership
+   - Make prepared passes own pipeline handles, resolved pipelines, sampled textures, and richer
+     pass-local payload objects before encode
+   - Target files: `src/draw_pass.ts`, `src/prepare_resources.ts`, `src/resource_provider.ts`
+3. `P0` Finish `ClipStack` semantics
+   - Add deferred clip draws, clip-shader plumbing, and analytic/atlas clip paths on top of the
+     current save-record structure
+   - Target files: `src/clip_stack.ts`, `src/path_renderer.ts`, `src/command_buffer.ts`
+4. `P1` Widen `RendererProvider`
+   - Replace per-draw heuristics with a more Graphite-like context-wide renderer strategy
+   - Target files: `src/renderer_provider.ts`, `src/path_renderer.ts`, `src/shared_context.ts`
+5. `P1` Raise `QueueManager` to Graphite submission semantics
+   - Introduce explicit outstanding submissions and tighter command-buffer/resource completion
+     ownership
+   - Target files: `src/queue_manager.ts`, `src/command_buffer.ts`, `src/shared_context.ts`
+6. `P2` Deepen `Caps`
+   - Port more of `DawnCaps` format policy, sample policy, and workaround logic
+   - Target files: `src/caps.ts`, `src/resource_provider.ts`
 
 ## Update Rules
 
@@ -631,136 +532,3 @@ When work is added in this package, update this document with:
 - the status transition
 - the missing pieces that remain
 - the test or check used to validate the change
-
-## Skia Graphite/Dawn Delta Checklist
-
-## High-Priority Structural Gaps
-
-- `P0` Port `ClipStack` semantics instead of intersect-only clipping
-  - Why high priority: clip behavior is still one of the largest remaining correctness and
-    architecture deltas
-  - Current progress: `src/clip_stack.ts` now owns clip-stack visitation, draw commands carry clip
-    stack snapshots with save records, save records now track `oldestValidIndex` and
-    `deferredSaveCount`, rect-intersect simplification invalidates superseded elements, and the
-    Dawn path replays stencil clips with separate `write`, `intersect`, and `difference` stencil
-    states
-  - To match Skia better: continue from this state toward deferred clip draws, clip shaders,
-    atlas/analytic clip handling, and richer save-record simplification across non-rect elements
-- `P1` Introduce a closer `Recorder -> Recording -> prepareResources -> CommandBuffer` flow
-  - Why high priority: recording/task preparation boundaries are still much simpler than Skia's
-    pipeline
-  - Current progress: `src/prepare_resources.ts` now makes resource preparation an explicit stage
-    between immutable recordings and backend command encoding
-  - To match Skia better: continue from this state toward task lists / child-task preparation and
-    richer command-buffer resource ownership, instead of the current direct draw-pass iteration
-
-- `Recorder` / recording lifecycle
-  - Current delta: no ordered-recording policy, no task graph, no upload or device flush model
-  - To match Skia better: introduce recording ordering/flush rules and explicit per-recording
-    resource preparation boundaries
-- `DrawPass` resource preparation
-  - Current delta: prepared steps only carry pipeline keys and bounds; they do not pre-resolve
-    resource handles or pass-local state
-  - To match Skia better: prepare pipeline/resource references before encode and keep replay closer
-    to a pass command stream
-- `CommandBuffer` replay
-  - Current delta: one draw step still maps closely to one render pass
-  - To match Skia better: batch compatible draws into fewer passes and support richer replay state
-- Clip stack semantics
-  - Current delta: intersect-only clip accumulation is implemented; non-intersect clip ops and full
-    ordering semantics are still absent
-  - To match Skia better: carry full clip op/state through preparation and replay
-- Transform/pipeline data
-  - Current delta: transforms are baked into CPU-generated geometry and paint is still vertex-local
-  - To match Skia better: move to uniform/bind-group driven replay and broader pipeline metadata
-- Queue completion
-  - Current delta: submitted-work completion now uses WebGPU queue callbacks when available, but it
-    still lacks Graphite-style fence/resource correlation
-  - To match Skia better: add completion callbacks/fences comparable to Graphite queue tracking
-
-## Recent Updates
-
-- 2026-03-22
-  - Files changed: `src/clip_stack.ts`, `src/recorder.ts`, `src/types.ts`,
-    `tests/drawing_graphite_dawn_test.ts`
-  - Status transition: clip-stack structure `partial` -> `partial` with save-record-owned
-    `deferredSaveCount`, `oldestValidIndex`, element invalidation/restore, and direct tests for
-    deferred save materialization and rect-intersect simplification
-  - Remaining gaps: clip shaders, deferred clip draws, atlas/analytic clip handling, and broader
-    non-rect simplification still do not match Skia Graphite
-  - Validation: `deno check packages/drawing/mod.ts`;
-    `deno test packages/drawing/tests/drawing_graphite_dawn_test.ts`
-
-- 2026-03-22
-  - Files changed: `src/draw_pass.ts`, `src/resource_provider.ts`, `src/command_buffer.ts`,
-    `src/shared_context.ts`, `tests/drawing_graphite_dawn_test.ts`
-  - Status transition: draw-pass/pipeline preparation `partial` -> `partial` with descriptor-shaped
-    pipeline metadata and pre-encode resource preparation
-  - Remaining gaps: pipeline creation is still backed by the legacy local switch table, and
-    prepared passes still do not own Skia-like sampled-resource or uniform payload objects
-  - Validation: `deno check packages/drawing/mod.ts`;
-    `deno test packages/drawing/tests/drawing_graphite_dawn_test.ts`
-- 2026-03-22
-  - Files changed: `src/path_renderer.ts`, `src/draw_pass.ts`, `src/command_buffer.ts`,
-    `src/resource_provider.ts`, `src/queue_manager.ts`, `tests/drawing_graphite_dawn_test.ts`,
-    `tests/render_basic_paths_snapshot_test.ts`
-  - Status transition: clip path replay from `single complex stencil clip` to
-    `stacked complex
-    stencil clips`, non-stencil replay from `per-step render pass` to
-    `batched render pass`, and queue completion from `tick-only coarse completion` to
-    `submitted-work callback with fallback`, with command-buffer submit now routed through queue
-    tracking and rejected callbacks cleaned up
-  - Remaining gaps: clip ops are still intersect-only, and stencil-heavy replay is still more
-    granular than Skia Graphite
-  - Validation: `deno test packages/drawing/tests/drawing_graphite_dawn_test.ts`;
-    `deno test
-    packages/drawing/tests/render_basic_paths_snapshot_test.ts`
-
-## 2026-03-22 Skia Delta Audit
-
-Compared against Skia Graphite/Dawn in `~/github/google/skia`, the highest-signal remaining deltas
-inside `packages/drawing` are:
-
-1. Shared context still stops at layouts and a resource provider
-   - Local status: `src/shared_context.ts` creates the noop shader, bind-group layouts, and a
-     single resource provider, but it does not own a thread-safe resource-provider split or real
-     graphics-pipeline factory entry points.
-   - Skia reference: `src/gpu/graphite/dawn/DawnSharedContext.cpp`,
-     `src/gpu/graphite/dawn/DawnGraphicsPipeline.cpp`
-2. Pipeline selection is still string-keyed instead of descriptor/key driven
-   - Local status: `src/draw_pass.ts` hardcodes a small `DrawingPipelineKey` enum and chooses
-     pipelines with `getPipelineKeysForDraw()`.
-   - Skia reference: `src/gpu/graphite/DrawPass.cpp`, `src/gpu/graphite/dawn/DawnCaps.cpp`,
-     `src/gpu/graphite/dawn/DawnGraphicsPipeline.cpp`
-3. Command encoding still allocates transient geometry/bindings during replay
-   - Local status: `src/command_buffer.ts` creates viewport buffers, vertex buffers, and viewport
-     bind groups while encoding, so prepared passes do not yet own resolved GPU resources.
-   - Skia reference: `src/gpu/graphite/DrawPass.cpp`,
-     `src/gpu/graphite/dawn/DawnCommandBuffer.cpp`,
-     `src/gpu/graphite/dawn/DawnResourceProvider.cpp`
-4. Clip semantics are still intersect-only and use correctness fallbacks
-   - Local status: `src/types.ts` has no clip op, `src/path_renderer.ts` only intersects clip
-     bounds, and convex clips force patch paths back to direct geometry with AA fringe disabled.
-   - Skia reference: `src/gpu/graphite/ClipStack.cpp`,
-     `src/gpu/graphite/ClipAtlasManager.cpp`
-5. Path rendering strategy is a small heuristic, not a context-wide renderer strategy
-   - Local status: `src/renderer_provider.ts` only switches between middle-out fan, wedge patches,
-     curve patches, and stroke tessellation per draw.
-   - Skia reference: `src/gpu/graphite/RendererProvider.h`,
-     `src/gpu/graphite/RendererProvider.cpp`
-6. Cap probing is still a compact static table
-   - Local status: `src/caps.ts` recognizes a small fixed set of formats, assumes simple 1x/4x
-     MSAA policy, and does not carry Dawn backend-specific storage-buffer or resolve workarounds.
-   - Skia reference: `src/gpu/graphite/dawn/DawnCaps.cpp`
-7. Queue completion tracking is simpler than Graphite's submission model
-   - Local status: `src/queue_manager.ts` tracks serial counts and `queue.onSubmittedWorkDone()`
-     promises, but it has no submission object ownership, wait-any behavior, or resource/fence
-     correlation.
-   - Skia reference: `src/gpu/graphite/dawn/DawnQueueManager.cpp`,
-     `src/gpu/graphite/QueueManager.h`
-
-These deltas suggest the next implementation priority order remains:
-
-1. Move `DrawPass` and `ResourceProvider` toward pre-resolved pipeline/resource state
-2. Port clip-stack semantics before expanding more path-renderer variants
-3. Replace viewport-only uniform replay with local-to-device/painter-data bindings

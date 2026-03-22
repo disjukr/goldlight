@@ -549,8 +549,9 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
     points; dashed and line-only stroke patches now route through the same synthetic-path writer
     flow; `src/resource_provider.ts` now uses triangle-strip stroke patch replay with Skia-like
     `edgeID` / `combinedEdgeID` sorting, binary-search parametric edge solve, `unchecked_mix`
-    evaluation, duplicated join-edge restriction, CPU-provided `maxScale` stroke tolerances instead
-    of a shader-local approximation, and hairline pre-transforming before tessellation
+    duplicated join-edge restriction, and a leaner instance payload that drops unused contour/cap
+    flags from the GPU patch layout, CPU-provided `maxScale` stroke tolerances instead of a
+    shader-local approximation, and hairline pre-transforming before tessellation
   - Remaining delta: some `StrokeIterator` semantics are still event-driven rather than a
     verb-for-verb port, cusp handling is still a reduced version of Skia's full writer path in a
     few places, and translucent round cap/join coverage still needs Graphite-like analytic

@@ -700,7 +700,7 @@ fn vs_main(
   @location(3) p3: vec2<f32>,
   @location(4) joinControlPoint: vec2<f32>,
   @location(5) stroke: vec2<f32>,
-  @location(6) curveMeta: vec4<f32>,
+  @location(6) curveMeta: vec2<f32>,
 ) -> VertexOut {
   var edgeID = f32(vertexIndex >> 1u);
   if ((vertexIndex & 1u) != 0u) {
@@ -1148,7 +1148,7 @@ export const createDawnResourceProvider = (
   });
 
   const createStrokePatchLayout = (): GPUVertexBufferLayout => ({
-    arrayStride: floatBytes * 16,
+    arrayStride: floatBytes * 14,
     stepMode: 'instance',
     attributes: [
       { shaderLocation: 0, offset: floatBytes * 0, format: 'float32x2' },
@@ -1157,7 +1157,7 @@ export const createDawnResourceProvider = (
       { shaderLocation: 3, offset: floatBytes * 6, format: 'float32x2' },
       { shaderLocation: 4, offset: floatBytes * 8, format: 'float32x2' },
       { shaderLocation: 5, offset: floatBytes * 10, format: 'float32x2' },
-      { shaderLocation: 6, offset: floatBytes * 12, format: 'float32x4' },
+      { shaderLocation: 6, offset: floatBytes * 12, format: 'float32x2' },
     ],
   });
 

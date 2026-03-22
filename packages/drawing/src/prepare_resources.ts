@@ -77,7 +77,7 @@ const floatsPerVertex = 6;
 const stepPayloadFloats = 28;
 const wedgePatchFloats = 14;
 const curvePatchFloats = 12;
-const strokePatchFloats = 16;
+const strokePatchFloats = 14;
 const maxPatchResolveLevel = 5;
 const patchSegmentCount = 1 << maxPatchResolveLevel;
 const wedgePatchVertexCount = patchSegmentCount * 3;
@@ -496,13 +496,6 @@ const createStrokePatchInstanceData = (
     data[offset++] = strokeStyle.joinLimit;
     data[offset++] = toStrokeCurveType(patch.patch);
     data[offset++] = patch.patch.kind === 'conic' ? patch.patch.weight : 1;
-    data[offset++] = Math.min(maxPatchResolveLevel, Math.max(0, patch.patch.resolveLevel));
-    data[offset++] = (patch.contourStart ? 1 : 0) +
-      (patch.contourEnd ? 2 : 0) +
-      (patch.startCap === 'square' ? 4 : 0) +
-      (patch.endCap === 'square' ? 8 : 0) +
-      (patch.startCap === 'round' ? 16 : 0) +
-      (patch.endCap === 'round' ? 32 : 0);
   }
   return data;
 };

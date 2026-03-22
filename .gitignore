@@ -7,3 +7,4 @@ packages/drawing/examples/render_tiger_png/tiger.png
 packages/drawing/examples/render_basic_paths/out.png
 packages/drawing/examples/render_basic_paths/ckout.png
 packages/drawing/examples/render_strokes/out.png
+packages/drawing/examples/render_strokes/ckout.png

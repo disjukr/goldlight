@@ -2028,7 +2028,7 @@ const prepareStrokeTriangles = (
   return triangles.length > 0
     ? {
       triangles: Object.freeze(triangles),
-      fringeVertices: fringeVertices.length > 0 ? Object.freeze(fringeVertices) : undefined,
+      fringeVertices: undefined,
     }
     : null;
 };
@@ -2190,6 +2190,9 @@ const canUseTessellatedStrokePatches = (
 ): boolean => {
   const cap = paint.strokeCap ?? 'butt';
   const join = paint.strokeJoin ?? 'miter';
+  if (join === 'bevel' || join === 'miter' || cap === 'square') {
+    return false;
+  }
   if (join === 'round') {
     return subpaths.every((subpath) => subpath.points.length >= 2 || subpath.points.length === 1);
   }
@@ -2198,11 +2201,6 @@ const canUseTessellatedStrokePatches = (
   );
   if (lineOnlyPatches) {
     return subpaths.every((subpath) => subpath.points.length >= 2 || subpath.points.length === 1);
-  }
-  if (cap === 'square') {
-    return subpaths.every((subpath) =>
-      !subpath.closed && (subpath.points.length === 2 || subpath.points.length === 1)
-    );
   }
   return cap === 'butt' &&
     subpaths.every((subpath) => !subpath.closed && subpath.points.length === 2);

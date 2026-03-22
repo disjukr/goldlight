@@ -994,7 +994,7 @@ Deno.test('drawing prepared recording preserves stroke patches when convex clips
   }
   assertEquals(draw.patches.length > 0, true);
   assertEquals(draw.usesTessellatedStrokePatches, false);
-  assertEquals((draw.fringeVertices?.length ?? 0) > 0, true);
+  assertEquals((draw.fringeVertices?.length ?? 0) > 0, false);
   assertEquals(prepared.passes[0]?.steps[0]?.pipelineDescs.map((pipeline) => pipeline.label), [
     'drawing-path-stroke-clip-cover',
   ]);
@@ -1282,7 +1282,7 @@ Deno.test('drawing prepared stroke patches emit synthetic join patches for bevel
   if (bevelDraw?.kind !== 'pathStroke') {
     throw new Error('expected pathStroke draw');
   }
-  assertEquals(bevelDraw.usesTessellatedStrokePatches, true);
+  assertEquals(bevelDraw.usesTessellatedStrokePatches, false);
 
   assertEquals(prepareJoinKinds('miter').includes('miter'), true);
 });
@@ -1318,7 +1318,7 @@ Deno.test('drawing prepared stroke patches emit synthetic cap patches for degene
   assertEquals(round.syntheticKinds.includes('circle'), true);
 
   const square = prepareCapKinds('square');
-  assertEquals(square.usesTessellatedStrokePatches, true);
+  assertEquals(square.usesTessellatedStrokePatches, false);
   assertEquals(square.syntheticKinds.includes('square'), true);
 });
 
@@ -1368,7 +1368,7 @@ Deno.test('drawing prepared recording applies dash pattern to strokes', () => {
   if (draw?.kind !== 'pathStroke') {
     throw new Error('expected pathStroke draw');
   }
-  assertEquals(draw.usesTessellatedStrokePatches, true);
+  assertEquals(draw.usesTessellatedStrokePatches, false);
 });
 
 Deno.test('drawing prepared recording scales hairline alpha coverage', () => {
@@ -1579,7 +1579,7 @@ Deno.test('dawn command buffer encodes stroke draws without stencil', () => {
   assertEquals(commandBuffer.unsupportedCommands.length, 0);
   assertEquals(mock.created.renderPasses.length, 1);
   assertEquals(mock.created.renderPipelines.length, 1);
-  assertEquals(mock.created.drawCalls.length, 2);
+  assertEquals(mock.created.drawCalls.length, 1);
 });
 
 Deno.test('dawn command buffer batches consecutive non-stencil draws into one render pass', () => {
@@ -1651,8 +1651,8 @@ Deno.test('dawn resource provider reuses pipelines across command buffers', () =
   encodeDawnCommandBuffer(sharedContext, createRecording('stroke'), binding);
   encodeDawnCommandBuffer(sharedContext, createRecording('stroke'), binding);
 
-  assertEquals(mock.created.renderPipelines.length, 3);
-  assertEquals(mock.created.shaderModules.length, 3);
+  assertEquals(mock.created.renderPipelines.length, 2);
+  assertEquals(mock.created.shaderModules.length, 2);
   assertEquals(mock.created.bindGroupLayouts.length > 0, true);
   assertEquals(mock.created.pipelineLayouts.length > 0, true);
 });

@@ -59,10 +59,12 @@ stack that fits this repository's TypeScript and WebGPU architecture.
     viewport-uniform-driven device-to-NDC replay, and first stroke command buffer translation exist.
 - Queue submission
   - Status: `partial`
-  - Queue manager can submit encoded command buffers, track in-flight work counts, and follow
-    submission completion through `queue.onSubmittedWorkDone()` when available.
-  - Current state: command-buffer submission routes through the queue manager, with callback-based
-    completion when available and coarse fallback when it is not.
+  - Queue manager can submit encoded command buffers, track in-flight work counts, keep
+    submission-scoped outstanding work objects, and follow submission completion through
+    `queue.onSubmittedWorkDone()` when available.
+  - Current state: command-buffer submission routes through the queue manager, each submit now owns
+    an explicit outstanding submission object until completion, callback-based completion drains
+    submissions in order, and coarse fallback still exists when callbacks are unavailable.
 - Path rendering
   - Status: `partial`
   - Flattened contours can be pushed through direct tessellated fills, convex clip-stack clipping,
@@ -126,10 +128,11 @@ stack that fits this repository's TypeScript and WebGPU architecture.
 - `DawnQueueManager` -> `src/queue_manager.ts`
   - Status: `partial`
   - What exists: queue submit, tick, unfinished work tracking, explicit outstanding submission
-    objects, submission-scoped completion via `queue.onSubmittedWorkDone()`, coarse fallback when
-    callbacks are unavailable, and cleanup when callbacks reject
-  - Missing: richer GPU fence/error handling, wait-any style batching, and per-resource completion
-    tracking
+    ownership for each submitted command buffer, submission-scoped completion via
+    `queue.onSubmittedWorkDone()`, coarse fallback when callbacks are unavailable, and cleanup when
+    callbacks reject
+  - Missing: richer GPU fence/error handling, `WaitAny`-style batching, finish-proc ownership, and
+    per-resource completion tracking
 - `GraphicsPipeline` / caches -> `src/pipeline*.ts`
   - Status: `pending`
   - Missing: pipeline creation and reuse
@@ -173,7 +176,7 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Role: prepared render-pass partitioning between recording and backend encoding
 - `src/queue_manager.ts`
   - Status: `partial`
-  - Role: queue submission and submission-scoped completion tracking
+  - Role: queue submission and submission-scoped outstanding-work tracking
 - `src/recording.ts`
   - Status: `started`
   - Role: immutable recorded command package
@@ -520,11 +523,10 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
     handling is still a reduced version of Skia's full implementation, and translucent round
     cap/join coverage still needs Graphite-like analytic evaluation instead of flat color fill
 - `QueueManager` submission model is still simplified
-  - Local state: queue submission and completion tracking exist in `src/queue_manager.ts`, and
-    explicit outstanding submission objects now own command-buffer completion state until tick
-    drains them in order
-  - Remaining delta: no Graphite-style `waitAny`/future integration, resource/fence correlation, or
-    command-buffer reuse ownership
+  - Local state: queue submission, ordered outstanding submission ownership, and completion
+    draining exist in `src/queue_manager.ts`
+  - Remaining delta: no Graphite-style finish-proc ownership, command-buffer reuse, or
+    resource/fence correlation
 - `Caps` still trails DawnCaps depth
   - Local state: `src/caps.ts` now owns a richer format table, color-type metadata,
     resolve/transient/MSRTSS policy, resource-binding requirements, and provider-facing usage checks
@@ -538,11 +540,7 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
      `StrokeIterator` verb semantics so the current stroke implementation is no longer a reduced
      Graphite variant
    - Target files: `src/path_renderer.ts`, `src/resource_provider.ts`
-2. `P1` Raise `QueueManager` to Graphite submission semantics
-   - Introduce explicit outstanding submissions and tighter command-buffer/resource completion
-     ownership
-   - Target files: `src/queue_manager.ts`, `src/command_buffer.ts`, `src/shared_context.ts`
-3. `P2` Finish `Caps`
+2. `P2` Finish `Caps`
    - Port remaining DawnCaps workaround logic, multiplanar/external format coverage, and binding
      requirement policy
    - Target files: `src/caps.ts`, `src/resource_provider.ts`

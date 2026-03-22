@@ -112,10 +112,12 @@ export const submitToDawnQueueManager = (
   queueManager: DawnQueueManager,
   commandBuffer: DawnCommandBuffer,
 ): DawnOutstandingSubmission => {
+  const mutable = asMutableQueueManager(queueManager);
+  const submissionSerial = mutable.submittedCount + 1;
+
   queueManager.backend.queue.submit([commandBuffer.commandBuffer]);
 
-  const mutable = asMutableQueueManager(queueManager);
-  mutable.submittedCount += 1;
+  mutable.submittedCount = submissionSerial;
   mutable.inFlightCount += 1;
   mutable.lastSubmittedRecorderId = commandBuffer.recording.recorderId;
 

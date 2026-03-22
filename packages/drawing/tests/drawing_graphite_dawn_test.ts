@@ -1898,6 +1898,7 @@ Deno.test('dawn queue manager tracks explicit submitted-work completion', async 
   assertEquals(queueManager.supportsSubmittedWorkDone, true);
   assertEquals(queueManager.outstandingSubmissions.length, 1);
   assertEquals(queueManager.outstandingSubmissions[0]?.serial, 1);
+  assertEquals(queueManager.outstandingSubmissions[0]?.recorderId, commandBuffer.recording.recorderId);
 
   mock.created.submissionDoneResolvers.shift()?.();
   await tickDawnQueueManager(queueManager);
@@ -1969,6 +1970,7 @@ Deno.test('dawn queue manager falls back to coarse tick completion without submi
   assertEquals(queueManager.inFlightCount, 0);
   assertEquals(queueManager.outstandingSubmissions.length, 0);
   assertEquals(queueManager.lastCompletedRecorderId, commandBuffer.recording.recorderId);
+  assertEquals(queueManager.outstandingSubmissions.length, 0);
 });
 
 Deno.test('dawn queue manager clears pending completion when submitted-work callback rejects', async () => {
@@ -1999,6 +2001,7 @@ Deno.test('dawn queue manager clears pending completion when submitted-work call
   assertEquals(queueManager.inFlightCount, 0);
   assertEquals(queueManager.outstandingSubmissions.length, 0);
   assertEquals(queueManager.pendingCompletions.length, 0);
+  assertEquals(queueManager.outstandingSubmissions.length, 0);
 });
 
 Deno.test('drawing context increments recorder ids through shared context', () => {

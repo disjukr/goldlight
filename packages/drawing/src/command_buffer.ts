@@ -3,6 +3,7 @@ import {
   acquireColorResolveView,
   type RenderContextBinding,
 } from '@rieul3d/gpu';
+import type { Point2D } from '@rieul3d/geometry';
 import { type DrawingPreparedRecording, prepareDrawingRecording } from './draw_pass.ts';
 import { submitToDawnQueueManager } from './queue_manager.ts';
 import type { DrawingRecording } from './recording.ts';
@@ -21,11 +22,14 @@ export type DawnCommandBuffer = Readonly<{
 
 const vertexBufferUsage = 0x0020;
 const floatsPerVertex = 6;
-const wedgePatchFloats = 10;
-const curvePatchFloats = 14;
-const strokePatchFloats = 16;
-const curvePatchVertexCount = 16 * 3;
-const strokePatchVertexCount = 16 * 6;
+const wedgePatchFloats = 18;
+const curvePatchFloats = 16;
+const strokePatchFloats = 18;
+const maxPatchResolveLevel = 6;
+const patchSegmentCount = 1 << maxPatchResolveLevel;
+const wedgePatchVertexCount = patchSegmentCount * 3;
+const curvePatchVertexCount = patchSegmentCount * 3;
+const strokePatchVertexCount = patchSegmentCount * 6;
 
 const toGpuColor = (color: readonly [number, number, number, number]): GPUColor => ({
   r: color[0],
@@ -108,28 +112,46 @@ const toCurveType = (patch: DrawingPreparedPatch): number => {
       return 2;
     case 'cubic':
       return 3;
-    case 'wedge':
-      return -1;
   }
 };
+
+const getPatchPoints = (
+  patch: DrawingPreparedPatch,
+): readonly [Point2D, Point2D, Point2D, Point2D] =>
+  patch.kind === 'line'
+    ? [patch.points[0], patch.points[1], patch.points[1], patch.points[1]]
+    : patch.kind === 'quadratic'
+    ? [patch.points[0], patch.points[1], patch.points[2], patch.points[2]]
+    : patch.kind === 'conic'
+    ? [patch.points[0], patch.points[1], patch.points[2], patch.points[2]]
+    : [patch.points[0], patch.points[1], patch.points[2], patch.points[3]];
 
 const createWedgePatchInstanceData = (
   patches: readonly DrawingPreparedPatch[],
   color: readonly [number, number, number, number],
   target: Readonly<{ width: number; height: number }>,
 ): Float32Array => {
-  const wedgePatches = patches.filter((patch) => patch.kind === 'wedge');
+  const wedgePatches = patches.filter((patch) => patch.fanPoint !== undefined);
   const data = new Float32Array(wedgePatches.length * wedgePatchFloats);
   const toClipX = (value: number) => (value / target.width) * 2 - 1;
   const toClipY = (value: number) => 1 - (value / target.height) * 2;
   let offset = 0;
   for (const patch of wedgePatches) {
-    data[offset++] = toClipX(patch.fanPoint[0]);
-    data[offset++] = toClipY(patch.fanPoint[1]);
-    data[offset++] = toClipX(patch.points[0][0]);
-    data[offset++] = toClipY(patch.points[0][1]);
-    data[offset++] = toClipX(patch.points[1][0]);
-    data[offset++] = toClipY(patch.points[1][1]);
+    const points = getPatchPoints(patch);
+    data[offset++] = toClipX(points[0][0]);
+    data[offset++] = toClipY(points[0][1]);
+    data[offset++] = toClipX(points[1][0]);
+    data[offset++] = toClipY(points[1][1]);
+    data[offset++] = toClipX(points[2][0]);
+    data[offset++] = toClipY(points[2][1]);
+    data[offset++] = toClipX(points[3][0]);
+    data[offset++] = toClipY(points[3][1]);
+    data[offset++] = toCurveType(patch);
+    data[offset++] = patch.kind === 'conic' ? patch.weight : 1;
+    data[offset++] = Math.min(maxPatchResolveLevel, Math.max(0, patch.resolveLevel));
+    data[offset++] = 0;
+    data[offset++] = toClipX(patch.fanPoint![0]);
+    data[offset++] = toClipY(patch.fanPoint![1]);
     data[offset++] = color[0];
     data[offset++] = color[1];
     data[offset++] = color[2];
@@ -143,19 +165,13 @@ const createCurvePatchInstanceData = (
   color: readonly [number, number, number, number],
   target: Readonly<{ width: number; height: number }>,
 ): Float32Array => {
-  const curvePatches = patches.filter((patch) => patch.kind !== 'wedge');
+  const curvePatches = patches;
   const data = new Float32Array(curvePatches.length * curvePatchFloats);
   const toClipX = (value: number) => (value / target.width) * 2 - 1;
   const toClipY = (value: number) => 1 - (value / target.height) * 2;
   let offset = 0;
   for (const patch of curvePatches) {
-    const points = patch.kind === 'line'
-      ? [patch.points[0], patch.points[1], patch.points[1], patch.points[1]]
-      : patch.kind === 'quadratic'
-      ? [patch.points[0], patch.points[1], patch.points[2], patch.points[2]]
-      : patch.kind === 'conic'
-      ? [patch.points[0], patch.points[1], patch.points[2], patch.points[2]]
-      : [patch.points[0], patch.points[1], patch.points[2], patch.points[3]];
+    const points = getPatchPoints(patch);
     data[offset++] = toClipX(points[0]![0]);
     data[offset++] = toClipY(points[0]![1]);
     data[offset++] = toClipX(points[1]![0]);
@@ -166,6 +182,8 @@ const createCurvePatchInstanceData = (
     data[offset++] = toClipY(points[3]![1]);
     data[offset++] = toCurveType(patch);
     data[offset++] = patch.kind === 'conic' ? patch.weight : 1;
+    data[offset++] = Math.min(maxPatchResolveLevel, Math.max(0, patch.resolveLevel));
+    data[offset++] = 0;
     data[offset++] = color[0];
     data[offset++] = color[1];
     data[offset++] = color[2];
@@ -180,7 +198,7 @@ const createStrokePatchInstanceData = (
   halfWidth: number,
   target: Readonly<{ width: number; height: number }>,
 ): Float32Array => {
-  const curvePatches = patches.filter((patch) => patch.kind !== 'wedge');
+  const curvePatches = patches;
   const data = new Float32Array(curvePatches.length * strokePatchFloats);
   const toClipX = (value: number) => (value / target.width) * 2 - 1;
   const toClipY = (value: number) => 1 - (value / target.height) * 2;
@@ -190,13 +208,7 @@ const createStrokePatchInstanceData = (
     1 / Math.max(target.height, 1),
   ) * halfWidth * 2;
   for (const patch of curvePatches) {
-    const points = patch.kind === 'line'
-      ? [patch.points[0], patch.points[1], patch.points[1], patch.points[1]]
-      : patch.kind === 'quadratic'
-      ? [patch.points[0], patch.points[1], patch.points[2], patch.points[2]]
-      : patch.kind === 'conic'
-      ? [patch.points[0], patch.points[1], patch.points[2], patch.points[2]]
-      : [patch.points[0], patch.points[1], patch.points[2], patch.points[3]];
+    const points = getPatchPoints(patch);
     data[offset++] = toClipX(points[0]![0]);
     data[offset++] = toClipY(points[0]![1]);
     data[offset++] = toClipX(points[1]![0]);
@@ -207,6 +219,8 @@ const createStrokePatchInstanceData = (
     data[offset++] = toClipY(points[3]![1]);
     data[offset++] = toCurveType(patch);
     data[offset++] = patch.kind === 'conic' ? patch.weight : 1;
+    data[offset++] = Math.min(maxPatchResolveLevel, Math.max(0, patch.resolveLevel));
+    data[offset++] = 0;
     data[offset++] = clipHalfWidth;
     data[offset++] = 0;
     data[offset++] = color[0];

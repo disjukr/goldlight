@@ -166,6 +166,9 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Role: adaptive curve flattening, conic/arc flattening, cusp splitting, patch preparation,
     triangulation, scanline fallback, convex clip-stack clipping, clip preparation, and stroke
     expansion strategy
+  - Update 2026-03-22: fill/stroke patches now carry Skia-style per-patch resolve levels derived
+    from Wang-like formulas, and fill patches preserve contour fan points instead of degrading
+    curved wedges into line-only triangles
 - `src/renderer_provider.ts`
   - Status: `started`
   - Role: first renderer selection layer for middle-out fan, tessellated wedges, tessellated curves,
@@ -405,6 +408,8 @@ These decisions directly affect the remaining work and are not settled yet.
   - Status: `started`
   - First implementation triangulates simple contours directly, carries curve/wedge patch metadata,
     and falls back to scanline tessellation for problematic contours
+  - Update 2026-03-22: wedge and curve patch metadata now preserve enough control-point data for
+    GPU-side curve evaluation with per-patch resolve levels, closer to Skia
 - First stroke strategy
   - Status: `started`
   - First implementation now includes miter/bevel/round joins, butt/square/round caps, dash slicing,
@@ -451,8 +456,9 @@ These decisions directly affect the remaining work and are not settled yet.
 - broader advanced curve/path features are still missing
 - curve patch preparation is closer to Skia Graphite terminology now, but it is still CPU-generated
   geometry instead of true GPU patch tessellation
-- patch-instance replay now exists for wedges, curves, and strokes, but it still uses simplified
-  fixed-count WGSL subdivision instead of Skia-style Wang's-formula tessellation
+- patch-instance replay now exists for wedges, curves, and strokes, and now carries per-patch
+  Wang-style resolve levels, but it still uses a bounded fixed-count WGSL topology instead of
+  Skia's static vertex/index buffers plus full Graphite patch writer behavior
 - evenodd/nonzero fills now rely on prepared geometry plus scanline fallback rather than Skia-style
   path renderers, and coverage is still not Skia-grade
 - no SVG parser or SVG-to-`Path2D` ingestion path yet
@@ -466,6 +472,44 @@ These decisions directly affect the remaining work and are not settled yet.
   `DrawPass::prepareResources()`
 - `queue_manager` currently treats `tick()` as coarse completion rather than using explicit GPU
   fences
+
+## Skia Parity Review (2026-03-22)
+
+Compared with Skia Graphite/Dawn `TessellateWedgesRenderStep`, `TessellateCurvesRenderStep`, and
+`TessellateStrokesRenderStep`, the main remaining behavior differences are:
+
+1. Patch topology and static buffers
+   - Status: `partial`
+   - Current state: instance data now carries fan points, curve type, and Wang-style resolve level
+   - Missing: Graphite-style shared static vertex/index buffers and exact patch-writer attribute
+     layout
+2. Transform handling
+   - Status: `partial`
+   - Current state: resolve levels are computed from already-transformed control points
+   - Missing: uniform-driven transform replay and shader-side vector-xform parity with Skia
+3. Stroke patch semantics
+   - Status: `partial`
+   - Current state: strokes now use per-patch resolve levels
+   - Missing: deferred stroke patch closure, join control point tracking, and Skia's exact cap/join
+     patch emission rules
+4. Fill/stencil semantics
+   - Status: `partial`
+   - Current state: wedge/curve patches now preserve curved boundaries better
+   - Missing: Skia-like winding/even-odd stencil passes and richer draw-pass ordering
+5. Resource/pipeline plumbing
+   - Status: `started`
+   - Current state: cached WebGPU pipelines exist for the current patch formats
+   - Missing: bind groups, static buffers, and DrawPass-owned pipeline/resource preparation
+
+## Latest Work Log
+
+- 2026-03-22
+  - Files changed: `src/path_renderer.ts`, `src/command_buffer.ts`, `src/resource_provider.ts`,
+    `tests/drawing_graphite_dawn_test.ts`
+  - Status transition: patch-instance tessellation `partial` -> `partial` with Wang-style resolve
+    metadata and curved wedge preservation
+  - Validation: `deno check packages/drawing/mod.ts`,
+    `deno test packages/drawing/tests/drawing_graphite_dawn_test.ts`
 
 ## Recommended Next Steps
 

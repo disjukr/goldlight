@@ -392,6 +392,7 @@ Deno.test('drawing prepared recording flattens quadratic and cubic paths for fil
   assertEquals((draw?.triangles.length ?? 0) > 6, true);
   assertEquals(draw?.bounds.origin[0], 24);
   assertEquals((draw?.patches.length ?? 0) > 0, true);
+  assertEquals(draw?.patches.some((patch) => patch.fanPoint !== undefined), true);
 });
 
 Deno.test('drawing prepared recording flattens conic and arc verbs', () => {
@@ -448,6 +449,36 @@ Deno.test('drawing prepared recording splits cusp-like cubic patches', () => {
     (draw?.patches.filter((patch) => patch.kind === 'cubic').length ?? 0) >= 1,
     true,
   );
+});
+
+Deno.test('drawing prepared recording computes Wang-style resolve levels for patches', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const createResolveLevel = (transform = identityMatrix2D) => {
+    const recorder = drawingContext.createRecorder();
+    concatDrawingRecorderTransform(recorder, transform);
+    recordDrawPath(
+      recorder,
+      createPath2D(
+        { kind: 'moveTo', to: [16, 96] },
+        { kind: 'cubicTo', control1: [96, 0], control2: [160, 192], to: [240, 96] },
+        { kind: 'close' },
+      ),
+      { style: 'fill' },
+    );
+
+    const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+    const draw = prepared.passes[0]?.steps[0]?.draw;
+    const cubicPatch = draw?.kind === 'pathFill'
+      ? draw.patches.find((patch) => patch.kind === 'cubic')
+      : undefined;
+    return cubicPatch?.resolveLevel ?? 0;
+  };
+
+  const baseResolveLevel = createResolveLevel();
+  const scaledResolveLevel = createResolveLevel(createScaleMatrix2D(4, 4));
+
+  assertEquals(scaledResolveLevel >= baseResolveLevel, true);
 });
 
 Deno.test('drawing prepared recording preserves evenodd fill rule through draw step metadata', () => {

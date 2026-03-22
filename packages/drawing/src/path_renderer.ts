@@ -28,30 +28,53 @@ export type DrawingPreparedClip = Readonly<{
   triangleRuns?: readonly (readonly Point2D[])[];
 }>;
 
+type DrawingPreparedPatchBase = Readonly<{
+  fanPoint?: Point2D;
+  resolveLevel: number;
+}>;
+
 export type DrawingPreparedPatch = Readonly<
-  | {
+  | (DrawingPreparedPatchBase & {
     kind: 'line';
     points: readonly [Point2D, Point2D];
-  }
-  | {
+  })
+  | (DrawingPreparedPatchBase & {
     kind: 'quadratic';
     points: readonly [Point2D, Point2D, Point2D];
-  }
-  | {
+  })
+  | (DrawingPreparedPatchBase & {
     kind: 'conic';
     points: readonly [Point2D, Point2D, Point2D];
     weight: number;
-  }
-  | {
+  })
+  | (DrawingPreparedPatchBase & {
     kind: 'cubic';
     points: readonly [Point2D, Point2D, Point2D, Point2D];
-  }
-  | {
-    kind: 'wedge';
-    fanPoint: Point2D;
-    points: readonly [Point2D, Point2D];
-  }
+  })
 >;
+
+type DrawingPatchDefinition =
+  | Readonly<{
+    kind: 'line';
+    points: readonly [Point2D, Point2D];
+    fanPoint?: Point2D;
+  }>
+  | Readonly<{
+    kind: 'quadratic';
+    points: readonly [Point2D, Point2D, Point2D];
+    fanPoint?: Point2D;
+  }>
+  | Readonly<{
+    kind: 'conic';
+    points: readonly [Point2D, Point2D, Point2D];
+    weight: number;
+    fanPoint?: Point2D;
+  }>
+  | Readonly<{
+    kind: 'cubic';
+    points: readonly [Point2D, Point2D, Point2D, Point2D];
+    fanPoint?: Point2D;
+  }>;
 
 export type DrawingPreparedPathFill = Readonly<{
   kind: 'pathFill';
@@ -92,6 +115,8 @@ const defaultFillColor: readonly [number, number, number, number] = [0, 0, 0, 1]
 const epsilon = 1e-5;
 const maxCurveSubdivisionDepth = 8;
 const curveFlatnessTolerance = 0.75;
+const patchPrecision = 1 / Math.max(curveFlatnessTolerance, epsilon);
+const maxPatchResolveLevel = 6;
 const roundStrokeSegments = 12;
 const hairlineCoverageWidth = 1;
 const aaFringeWidth = 1;
@@ -191,6 +216,117 @@ const approximateCubicSegments = (
       Math.ceil(Math.sqrt(curvature / Math.max(curveFlatnessTolerance * 0.75, epsilon))),
     ),
   );
+};
+
+const nextLog2 = (value: number): number => {
+  if (!Number.isFinite(value) || value <= 1) {
+    return 0;
+  }
+  return Math.ceil(Math.log2(value));
+};
+
+const quadraticWangsFormulaResolveLevel = (
+  from: Point2D,
+  control: Point2D,
+  to: Point2D,
+): number => {
+  const vx = from[0] - (2 * control[0]) + to[0];
+  const vy = from[1] - (2 * control[1]) + to[1];
+  const lengthSquared = (vx * vx) + (vy * vy);
+  const p4 = lengthSquared * patchPrecision * patchPrecision * 0.25;
+  return Math.min(
+    maxPatchResolveLevel,
+    Math.max(0, Math.ceil(Math.log2(Math.sqrt(Math.sqrt(p4))))),
+  );
+};
+
+const cubicWangsFormulaResolveLevel = (
+  from: Point2D,
+  control1: Point2D,
+  control2: Point2D,
+  to: Point2D,
+): number => {
+  const v1x = from[0] - (2 * control1[0]) + control2[0];
+  const v1y = from[1] - (2 * control1[1]) + control2[1];
+  const v2x = control1[0] - (2 * control2[0]) + to[0];
+  const v2y = control1[1] - (2 * control2[1]) + to[1];
+  const maxLengthSquared = Math.max((v1x * v1x) + (v1y * v1y), (v2x * v2x) + (v2y * v2y));
+  const p4 = maxLengthSquared * patchPrecision * patchPrecision * (81 / 64);
+  return Math.min(
+    maxPatchResolveLevel,
+    Math.max(0, Math.ceil(Math.log2(Math.sqrt(Math.sqrt(p4))))),
+  );
+};
+
+const conicWangsFormulaResolveLevel = (
+  from: Point2D,
+  control: Point2D,
+  to: Point2D,
+  weight: number,
+): number => {
+  const center: Point2D = [
+    (Math.min(from[0], control[0], to[0]) + Math.max(from[0], control[0], to[0])) * 0.5,
+    (Math.min(from[1], control[1], to[1]) + Math.max(from[1], control[1], to[1])) * 0.5,
+  ];
+  const centered: readonly [Point2D, Point2D, Point2D] = [
+    subtract(from, center),
+    subtract(control, center),
+    subtract(to, center),
+  ];
+  const maxLength = Math.max(
+    Math.hypot(centered[0][0], centered[0][1]),
+    Math.hypot(centered[1][0], centered[1][1]),
+    Math.hypot(centered[2][0], centered[2][1]),
+  );
+  const dp = subtract(add(centered[0], centered[2]), scale(centered[1], 2 * weight));
+  const dw = Math.abs(2 - (2 * weight));
+  const rpMinusOne = Math.max(0, (maxLength * patchPrecision) - 1);
+  const numerator = (Math.hypot(dp[0], dp[1]) * patchPrecision) + (rpMinusOne * dw);
+  const denominator = 4 * Math.min(weight, 1);
+  if (denominator <= epsilon) {
+    return maxPatchResolveLevel;
+  }
+  return Math.min(maxPatchResolveLevel, nextLog2(Math.sqrt(Math.max(0, numerator / denominator))));
+};
+
+const resolvePatchLevel = (patch: DrawingPatchDefinition): number => {
+  switch (patch.kind) {
+    case 'line':
+      return 0;
+    case 'quadratic':
+      return quadraticWangsFormulaResolveLevel(patch.points[0], patch.points[1], patch.points[2]);
+    case 'conic':
+      return conicWangsFormulaResolveLevel(
+        patch.points[0],
+        patch.points[1],
+        patch.points[2],
+        patch.weight,
+      );
+    case 'cubic':
+      return cubicWangsFormulaResolveLevel(
+        patch.points[0],
+        patch.points[1],
+        patch.points[2],
+        patch.points[3],
+      );
+  }
+};
+
+const finalizePatch = (
+  patch: DrawingPatchDefinition,
+  extras: Readonly<{ fanPoint?: Point2D }> = {},
+): DrawingPreparedPatch => {
+  const resolveLevel = resolvePatchLevel(patch);
+  switch (patch.kind) {
+    case 'line':
+      return { ...patch, ...extras, resolveLevel };
+    case 'quadratic':
+      return { ...patch, ...extras, resolveLevel };
+    case 'conic':
+      return { ...patch, ...extras, resolveLevel };
+    case 'cubic':
+      return { ...patch, ...extras, resolveLevel };
+  }
 };
 
 const evaluateConic = (
@@ -946,29 +1082,40 @@ const flattenSubpaths = (
 const preparePatches = (
   path: DrawingPath2D,
   transform: readonly [number, number, number, number, number, number],
+  includeFanPoint: boolean,
 ): readonly DrawingPreparedPatch[] => {
   const patches: DrawingPreparedPatch[] = [];
   let currentPoint: Point2D | null = null;
   let contourStart: Point2D | null = null;
   let contourPoints: Point2D[] = [];
+  let contourPatches: DrawingPatchDefinition[] = [];
+
+  const pushPatch = (patch: DrawingPatchDefinition): void => {
+    if (includeFanPoint) {
+      contourPatches.push(patch);
+      return;
+    }
+    patches.push(finalizePatch(patch));
+  };
 
   const flushWedges = (): void => {
-    if (contourPoints.length < 3) {
+    if (!includeFanPoint) {
+      contourPatches = [];
+      contourPoints = [];
+      contourStart = null;
+      return;
+    }
+    if (contourPoints.length < 3 || contourPatches.length === 0) {
+      contourPatches = [];
       contourPoints = [];
       contourStart = null;
       return;
     }
     const fanPoint = computeContourMidpoint(contourPoints);
-    for (let index = 0; index < contourPoints.length; index += 1) {
-      patches.push({
-        kind: 'wedge',
-        fanPoint,
-        points: [
-          contourPoints[index]!,
-          contourPoints[(index + 1) % contourPoints.length]!,
-        ],
-      });
+    for (const patch of contourPatches) {
+      patches.push(finalizePatch(patch, { fanPoint }));
     }
+    contourPatches = [];
     contourPoints = [];
     contourStart = null;
   };
@@ -986,7 +1133,7 @@ const preparePatches = (
       case 'lineTo': {
         if (!currentPoint) break;
         const to = transformPoint2D(verb.to, transform);
-        patches.push({ kind: 'line', points: [currentPoint, to] });
+        pushPatch({ kind: 'line', points: [currentPoint, to] });
         contourPoints.push(to);
         currentPoint = to;
         break;
@@ -998,10 +1145,10 @@ const preparePatches = (
         const cuspT = findQuadraticCuspT(currentPoint, control, to);
         if (cuspT !== null) {
           const [left, right] = splitQuadraticAt(currentPoint, control, to, cuspT);
-          patches.push({ kind: 'quadratic', points: left });
-          patches.push({ kind: 'quadratic', points: right });
+          pushPatch({ kind: 'quadratic', points: left });
+          pushPatch({ kind: 'quadratic', points: right });
         } else {
-          patches.push({ kind: 'quadratic', points: [currentPoint, control, to] });
+          pushPatch({ kind: 'quadratic', points: [currentPoint, control, to] });
         }
         contourPoints.push(to);
         currentPoint = to;
@@ -1016,10 +1163,14 @@ const preparePatches = (
         );
         if (cuspT !== null) {
           const cusp = evaluateConic(currentPoint, control, to, verb.weight, cuspT);
-          patches.push({ kind: 'line', points: [currentPoint, cusp] });
-          patches.push({ kind: 'line', points: [cusp, to] });
+          pushPatch({ kind: 'line', points: [currentPoint, cusp] });
+          pushPatch({ kind: 'line', points: [cusp, to] });
         } else {
-          patches.push({ kind: 'conic', points: [currentPoint, control, to], weight: verb.weight });
+          pushPatch({
+            kind: 'conic',
+            points: [currentPoint, control, to],
+            weight: verb.weight,
+          });
         }
         contourPoints.push(to);
         currentPoint = to;
@@ -1035,10 +1186,10 @@ const preparePatches = (
         );
         if (cuspT !== null) {
           const [left, right] = splitCubicAt(currentPoint, control1, control2, to, cuspT);
-          patches.push({ kind: 'cubic', points: left });
-          patches.push({ kind: 'cubic', points: right });
+          pushPatch({ kind: 'cubic', points: left });
+          pushPatch({ kind: 'cubic', points: right });
         } else {
-          patches.push({ kind: 'cubic', points: [currentPoint, control1, control2, to] });
+          pushPatch({ kind: 'cubic', points: [currentPoint, control1, control2, to] });
         }
         contourPoints.push(to);
         currentPoint = to;
@@ -1057,7 +1208,7 @@ const preparePatches = (
           points,
         );
         for (let index = 1; index < points.length; index += 1) {
-          patches.push({ kind: 'line', points: [points[index - 1]!, points[index]!] });
+          pushPatch({ kind: 'line', points: [points[index - 1]!, points[index]!] });
           contourPoints.push(points[index]!);
         }
         currentPoint = points[points.length - 1] ?? currentPoint;
@@ -1065,7 +1216,7 @@ const preparePatches = (
       }
       case 'close':
         if (currentPoint && contourStart && !pointsEqual(currentPoint, contourStart)) {
-          patches.push({ kind: 'line', points: [currentPoint, contourStart] });
+          pushPatch({ kind: 'line', points: [currentPoint, contourStart] });
         }
         flushWedges();
         currentPoint = contourStart;
@@ -1110,11 +1261,14 @@ const tessellateFillFromPatches = (
   const triangles: Point2D[] = [];
   let sawWedge = false;
   for (const patch of patches) {
-    if (patch.kind !== 'wedge') {
+    if (!patch.fanPoint) {
       continue;
     }
     sawWedge = true;
-    triangles.push(patch.fanPoint, patch.points[0], patch.points[1]);
+    const endPoint = patch.kind === 'cubic'
+      ? patch.points[3]
+      : patch.points[patch.points.length - 1];
+    triangles.push(patch.fanPoint, patch.points[0], endPoint);
   }
   return sawWedge ? Object.freeze(triangles) : null;
 };
@@ -1673,11 +1827,11 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
   const preparedClipStack = prepareClipStack(command.clips);
   const style = command.paint.style ?? 'fill';
   if (style === 'fill') {
-    const patches = preparePatches(command.path, command.transform);
+    const patches = preparePatches(command.path, command.transform, true);
     const hasCurves = patches.some((patch) =>
       patch.kind === 'quadratic' || patch.kind === 'conic' || patch.kind === 'cubic'
     );
-    const hasWedges = patches.some((patch) => patch.kind === 'wedge');
+    const hasWedges = patches.some((patch) => patch.fanPoint !== undefined);
     const isSingleConvexContour = subpaths.length === 1 &&
       subpaths[0]!.closed &&
       isConvexPolygon(subpaths[0]!.points);
@@ -1731,7 +1885,7 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
     };
   }
 
-  const patches = preparePatches(command.path, command.transform);
+  const patches = preparePatches(command.path, command.transform, false);
   const preparedStroke = prepareStrokeTriangles(subpaths, command.paint);
   const strokeTriangles = applyConvexClipStack(
     preparedStroke?.triangles ?? [],

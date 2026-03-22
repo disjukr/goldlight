@@ -1556,11 +1556,13 @@ Deno.test('drawing prepared stroke patches emit square cap patches for open cont
   if (draw?.kind !== 'pathStroke') {
     throw new Error('expected pathStroke draw');
   }
-  assertEquals(draw.patches[0]?.patch.kind, 'conic');
-  assertEquals(draw.patches[1]?.patch.kind, 'conic');
+  assertEquals(draw.patches[0]?.patch.kind, 'line');
+  assertEquals(draw.patches[1]?.patch.kind, 'line');
   assertEquals(draw.patches.at(-1)?.patch.kind, 'line');
   assertEquals(draw.patches[0]?.joinControlPoint, [260, 315]);
-  assertEquals(draw.patches[1]?.joinControlPoint, [380, 315]);
+  assertEquals(draw.patches[1]?.joinControlPoint, [276, 315]);
+  assertEquals(draw.patches[0]?.patch.points, [[380, 315], [396, 315]]);
+  assertEquals(draw.patches[1]?.patch.points, [[276, 315], [260, 315]]);
 });
 
 Deno.test('drawing prepared stroke patches emit synthetic cap patches for degenerate contours', () => {
@@ -1601,6 +1603,11 @@ Deno.test('drawing prepared stroke patches emit synthetic cap patches for degene
   const square = prepareCapKinds('square');
   assertEquals(square.usesTessellatedStrokePatches, true);
   assertEquals(square.patchCount > 0, true);
+  assertEquals(square.firstPatch?.patch.kind, 'line');
+  assertEquals(square.firstPatch?.startCap, 'square');
+  assertEquals(square.firstPatch?.endCap, 'square');
+  assertEquals(square.firstPatch?.contourStart, true);
+  assertEquals(square.firstPatch?.contourEnd, true);
 });
 
 Deno.test('drawing prepared stroke patches treat empty closed contours as zero-length round caps', () => {
@@ -1653,8 +1660,11 @@ Deno.test('drawing prepared stroke patches treat empty closed contours as zero-l
   }
   assertEquals(draw.usesTessellatedStrokePatches, true);
   assertEquals(draw.patches.length, 1);
-  assertEquals(draw.patches[0]?.patch.kind, 'conic');
-  assertEquals(draw.patches[0]?.joinControlPoint, [200, 140]);
+  assertEquals(draw.patches[0]?.patch.kind, 'line');
+  assertEquals(draw.patches[0]?.patch.points, [[194, 140], [206, 140]]);
+  assertEquals(draw.patches[0]?.joinControlPoint, [194, 140]);
+  assertEquals(draw.patches[0]?.startCap, 'square');
+  assertEquals(draw.patches[0]?.endCap, 'square');
 });
 
 Deno.test('drawing prepared recording reopens contours from the closed start point', () => {

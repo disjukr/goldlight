@@ -565,6 +565,9 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
   - Update 2026-03-23: synthetic round helper patches are now separated from true degenerate
     round-cap contours, removing a metadata mismatch that would have conflicted with later analytic
     round cap/join coverage porting
+  - Update 2026-03-23: square caps now materialize as explicit line patches in the contour
+    sequence, closer to Skia `StrokeIterator` / `fillSquareCapPoints()` and avoiding the old
+    degenerate-conic placeholder path
 - `QueueManager` submission model is still simplified
   - Local state: queue submission, ordered outstanding submission ownership, completion draining, a
     `checkForFinishedWork`-style sync path, submission-owned transient buffer cleanup, and
@@ -597,6 +600,15 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
 
 ## Recent Updates
 
+- 2026-03-23
+  - Files: `src/path_renderer.ts`, `tests/drawing_graphite_dawn_test.ts`
+  - Status transition: square stroke caps and zero-length square-cap contours now expand into
+    explicit line patches like Skia `StrokeIterator` / `fillSquareCapPoints()` instead of reduced
+    degenerate conic placeholders
+  - Remaining delta: hairline square caps still use the WebGPU-oriented local half-width fallback
+    instead of Skia's exact device-space inverse-view-matrix path, and round cap/join coverage is
+    still not analytic
+  - Validation: `deno test tests/drawing_graphite_dawn_test.ts`
 - 2026-03-23
   - Files: `src/path_renderer.ts`, `tests/drawing_graphite_dawn_test.ts`
   - Status transition: synthetic round stroke circles now mirror Skia `PatchWriter::writeCircle()`

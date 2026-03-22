@@ -667,24 +667,50 @@ const getPatchOutgoingJoinControlPoint = (patch: DrawingPreparedPatch): Point2D 
   return resolvePatchTangentControlPoint(p3, p2, p1, p0);
 };
 
+const resolveSquareCapOffset = (
+  anchor: Point2D,
+  tangentControlPoint: Point2D,
+  halfWidth: number,
+): Point2D => {
+  const tangent = normalize(subtract(anchor, tangentControlPoint)) ?? [1, 0];
+  return scale(tangent, halfWidth);
+};
+
+const createSquareCapStartPatch = (
+  anchor: Point2D,
+  tangentControlPoint: Point2D,
+  halfWidth: number,
+): DrawingPreparedPatch => {
+  const offset = resolveSquareCapOffset(anchor, tangentControlPoint, halfWidth);
+  return finalizePatch({
+    kind: 'line',
+    points: [subtract(anchor, offset), anchor],
+  });
+};
+
+const createSquareCapEndPatch = (
+  anchor: Point2D,
+  tangentControlPoint: Point2D,
+  halfWidth: number,
+): DrawingPreparedPatch => {
+  const offset = resolveSquareCapOffset(anchor, tangentControlPoint, halfWidth);
+  return finalizePatch({
+    kind: 'line',
+    points: [anchor, add(anchor, offset)],
+  });
+};
+
 const createDegenerateSquareStrokePatch = (
   center: Point2D,
-  joinTo: Point2D,
-): DrawingPreparedStrokePatch => ({
-  patch: {
-    kind: 'conic',
-    points: [center, center, center],
-    weight: 1,
-    resolveLevel: 0,
-    wangsFormulaP4: 1,
-  },
-  prevPoint: joinTo,
-  joinControlPoint: joinTo,
-  contourStart: false,
-  contourEnd: false,
-  startCap: 'none',
-  endCap: 'none',
-});
+  halfWidth: number,
+): DrawingPreparedPatch =>
+  finalizePatch({
+    kind: 'line',
+    points: [
+      [center[0] - halfWidth, center[1]],
+      [center[0] + halfWidth, center[1]],
+    ],
+  });
 
 const createSyntheticRoundStrokePatch = (
   center: Point2D,
@@ -917,7 +943,31 @@ const createPreparedStrokePatchesFromPath = (
     if (cap === 'round') {
       prepared.push(createDegenerateRoundStrokePatch(lastDegeneratePoint));
     } else if (cap === 'square') {
-      prepared.push(createDegenerateSquareStrokePatch(lastDegeneratePoint, lastDegeneratePoint));
+      const squarePatch = createDegenerateSquareStrokePatch(
+        lastDegeneratePoint,
+        strokeStyle.halfWidth,
+      );
+      emitContourSequence([
+        {
+          kind: 'basePatch',
+          patch: squarePatch,
+        },
+        {
+          kind: 'moveWithinContour',
+          anchor: getPatchStartPoint(squarePatch),
+        },
+        {
+          kind: 'basePatch',
+          patch: squarePatch,
+          contourStart: true,
+          contourEnd: true,
+          startCap: 'square',
+          endCap: 'square',
+        },
+        {
+          kind: 'contourFinished',
+        },
+      ]);
     }
   };
 
@@ -955,16 +1005,19 @@ const createPreparedStrokePatchesFromPath = (
         ? getPatchFirstControlPoint(firstPatchItem.patch)
         : firstPatchItem.prepared.joinControlPoint;
       sequence.push({
-        kind: 'preparedPatch',
-        prepared: createDegenerateSquareStrokePatch(lastPoint, lastJoinControl),
+        kind: 'basePatch',
+        patch: createSquareCapEndPatch(lastPoint, lastJoinControl, strokeStyle.halfWidth),
       });
       sequence.push({
         kind: 'moveWithinContour',
-        anchor: firstPoint,
+        anchor: subtract(
+          firstPoint,
+          resolveSquareCapOffset(firstPoint, firstJoinControl, strokeStyle.halfWidth),
+        ),
       });
       sequence.push({
-        kind: 'preparedPatch',
-        prepared: createDegenerateSquareStrokePatch(firstPoint, firstJoinControl),
+        kind: 'basePatch',
+        patch: createSquareCapStartPatch(firstPoint, firstJoinControl, strokeStyle.halfWidth),
       });
     } else {
       sequence.push({

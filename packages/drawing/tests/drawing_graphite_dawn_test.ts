@@ -1437,7 +1437,6 @@ Deno.test('drawing prepared stroke patches emit cusp circles for turnaround curv
   assertEquals(draw.patches.length > 0, true);
 });
 
-
 Deno.test('drawing prepared recording applies dash pattern to strokes', () => {
   const mock = createMockGpuContext();
   const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));

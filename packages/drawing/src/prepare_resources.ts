@@ -1,5 +1,5 @@
 import type { DrawingPreparedClipElement } from './clip_stack.ts';
-import type { Point2D, Rect } from '@rieul3d/geometry';
+import type { Point2D } from '@rieul3d/geometry';
 import { type DrawingPreparedRecording, prepareDrawingRecording } from './draw_pass.ts';
 import type { DrawingRecording } from './recording.ts';
 import type {
@@ -299,16 +299,6 @@ const calcNumRadialSegmentsPerRadian = (approxStrokeRadius: number): number => {
   return 0.5 / Math.acos(Math.max(cosTheta, -1));
 };
 
-const quadraticWangsFormulaP4 = (
-  p0: Point2D,
-  p1: Point2D,
-  p2: Point2D,
-): number => {
-  const vx = p0[0] - (2 * p1[0]) + p2[0];
-  const vy = p0[1] - (2 * p1[1]) + p2[1];
-  return ((vx * vx) + (vy * vy)) * 4;
-};
-
 const cubicWangsFormulaP4 = (
   p0: Point2D,
   p1: Point2D,
@@ -365,7 +355,9 @@ const requiredStrokeEdgesForPatch = (
     transformPoint(sourcePoints[3], transform),
   ];
   const maxScale = maxScaleFactor(transform);
-  const numRadialSegmentsPerRadian = calcNumRadialSegmentsPerRadian(strokeStyle.halfWidth * maxScale);
+  const numRadialSegmentsPerRadian = calcNumRadialSegmentsPerRadian(
+    strokeStyle.halfWidth * maxScale,
+  );
   const maxRadialSegmentsInStroke = Math.max(Math.ceil(numRadialSegmentsPerRadian * Math.PI), 1);
   let numParametricSegmentsP4 = 1;
   if (patch.patch.kind === 'conic') {
@@ -386,7 +378,10 @@ const requiredStrokeEdgesForPatch = (
   if (strokeStyle.joinLimit < 0 && numRadialSegmentsPerRadian > 0) {
     edgesInJoins += Math.ceil(numRadialSegmentsPerRadian * Math.PI) - 1;
   }
-  return Math.min(maxStrokeEdges, edgesInJoins + maxRadialSegmentsInStroke + maxParametricSegmentsInStroke);
+  return Math.min(
+    maxStrokeEdges,
+    edgesInJoins + maxRadialSegmentsInStroke + maxParametricSegmentsInStroke,
+  );
 };
 
 const requiredStrokeVertexCount = (
@@ -406,7 +401,6 @@ const requiredStrokeVertexCount = (
   }
   return Math.min(maxStrokeEdges, maxEdgesRequired) * 2;
 };
-
 
 const getPatchPoints = (
   patch: DrawingPreparedPatch,

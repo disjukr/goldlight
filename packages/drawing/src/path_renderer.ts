@@ -5,11 +5,7 @@ import {
   type Rect,
   transformPoint2D,
 } from '@rieul3d/geometry';
-import {
-  type DrawingPreparedClip,
-  type DrawingPreparedClipElement,
-  visitDrawingClipStackForDraw,
-} from './clip_stack.ts';
+import { type DrawingPreparedClip, visitDrawingClipStackForDraw } from './clip_stack.ts';
 import type {
   DrawingClipRect,
   DrawingPaint,
@@ -116,11 +112,6 @@ type DrawingStrokeIteratorContourState = Readonly<{
   joinBarrier: 'join' | 'moveWithinContour';
   moveWithinContourJoinPoint: Point2D;
 }>;
-
-type DrawingStrokeIteratorVerb =
-  | Readonly<{ kind: 'patch'; event: DrawingStrokeContourEvent }>
-  | Readonly<{ kind: 'moveWithinContour' }>
-  | Readonly<{ kind: 'contourFinished' }>;
 
 type DrawingStrokeContourRecord = Readonly<{
   points: readonly Point2D[];
@@ -369,15 +360,17 @@ const conicWangsFormulaP2 = (
   return Math.max(0, numerator / denominator);
 };
 
-const resolveLevelFromWangsFormulaP4 = (p4: number): number => Math.min(
-  maxPatchResolveLevel,
-  Math.max(0, Math.ceil(Math.log2(Math.sqrt(Math.sqrt(Math.max(p4, 1)))))),
-);
+const resolveLevelFromWangsFormulaP4 = (p4: number): number =>
+  Math.min(
+    maxPatchResolveLevel,
+    Math.max(0, Math.ceil(Math.log2(Math.sqrt(Math.sqrt(Math.max(p4, 1)))))),
+  );
 
-const resolveLevelFromWangsFormulaP2 = (p2: number): number => Math.min(
-  maxPatchResolveLevel,
-  Math.max(0, nextLog2(Math.sqrt(Math.max(p2, 1)))),
-);
+const resolveLevelFromWangsFormulaP2 = (p2: number): number =>
+  Math.min(
+    maxPatchResolveLevel,
+    Math.max(0, nextLog2(Math.sqrt(Math.max(p2, 1)))),
+  );
 
 const patchWangsFormulaP4 = (patch: DrawingPatchDefinition): number => {
   switch (patch.kind) {
@@ -387,11 +380,21 @@ const patchWangsFormulaP4 = (patch: DrawingPatchDefinition): number => {
       return quadraticWangsFormulaP4(patch.points[0], patch.points[1], patch.points[2]);
     }
     case 'conic': {
-      const n2 = conicWangsFormulaP2(patch.points[0], patch.points[1], patch.points[2], patch.weight);
+      const n2 = conicWangsFormulaP2(
+        patch.points[0],
+        patch.points[1],
+        patch.points[2],
+        patch.weight,
+      );
       return n2 * n2;
     }
     case 'cubic':
-      return cubicWangsFormulaP4(patch.points[0], patch.points[1], patch.points[2], patch.points[3]);
+      return cubicWangsFormulaP4(
+        patch.points[0],
+        patch.points[1],
+        patch.points[2],
+        patch.points[3],
+      );
   }
 };
 
@@ -432,8 +435,6 @@ const finalizePatch = (
   }
 };
 
-const maxStrokeCubicResolveLevelBeforeChop = 4;
-const maxStrokeConicResolveLevelBeforeChop = 5;
 const maxParametricSegments = 1 << maxPatchResolveLevel;
 const maxParametricSegmentsP4 = maxParametricSegments ** 4;
 const maxSegmentsPerCurve = 1024;
@@ -443,14 +444,18 @@ const accountForStrokeCurve = (wangsFormulaP4: number): number => {
   if (wangsFormulaP4 <= maxParametricSegmentsP4) {
     return 0;
   }
-  return Math.ceil(Math.sqrt(Math.sqrt(Math.min(wangsFormulaP4, maxSegmentsPerCurveP4) / maxParametricSegmentsP4)));
+  return Math.ceil(
+    Math.sqrt(Math.sqrt(Math.min(wangsFormulaP4, maxSegmentsPerCurveP4) / maxParametricSegmentsP4)),
+  );
 };
 
 const accountForStrokeConic = (wangsFormulaP4: number): number => {
   if (wangsFormulaP4 <= maxParametricSegmentsP4) {
     return 0;
   }
-  return Math.ceil(Math.sqrt(Math.sqrt(Math.min(wangsFormulaP4, maxSegmentsPerCurveP4) / maxParametricSegmentsP4)));
+  return Math.ceil(
+    Math.sqrt(Math.sqrt(Math.min(wangsFormulaP4, maxSegmentsPerCurveP4) / maxParametricSegmentsP4)),
+  );
 };
 
 const chopAndWriteStrokeCubics = (
@@ -464,7 +469,7 @@ const chopAndWriteStrokeCubics = (
   let currentP0 = p0;
   let currentP1 = p1;
   let currentP2 = p2;
-  let currentP3 = p3;
+  const currentP3 = p3;
 
   for (; numPatches >= 3; numPatches -= 2) {
     const t0 = 1 / numPatches;
@@ -681,19 +686,6 @@ const getPatchOutgoingTangent = (patch: DrawingPreparedPatch): Point2D | null =>
   normalize(subtract(getPatchEndPoint(patch), getPatchOutgoingJoinControlPoint(patch))) ??
     normalize(subtract(getPatchEndPoint(patch), getPatchStartPoint(patch)));
 
-const isCuspLikeStrokeTurn = (
-  previousPatch: DrawingPreparedPatch,
-  currentPatch: DrawingPreparedPatch,
-): boolean => {
-  const outgoing = getPatchOutgoingTangent(previousPatch);
-  const incoming = getPatchIncomingTangent(currentPatch);
-  if (!outgoing || !incoming) {
-    return false;
-  }
-  const cosine = (outgoing[0] * incoming[0]) + (outgoing[1] * incoming[1]);
-  return cosine < -0.95;
-};
-
 const createDegenerateSquareStrokePatch = (
   center: Point2D,
   joinTo: Point2D,
@@ -728,16 +720,6 @@ const createDegenerateRoundStrokePatch = (
   contourEnd: true,
   startCap: 'round',
   endCap: 'round',
-});
-
-const createStrokeLinePatch = (
-  from: Point2D,
-  to: Point2D,
-): DrawingPreparedPatch => ({
-  kind: 'line',
-  points: [from, to],
-  resolveLevel: 0,
-  wangsFormulaP4: 1,
 });
 
 const quadraticToCubicPoints = (
@@ -810,7 +792,6 @@ const createPreparedStrokePatches = (
   contours: readonly DrawingStrokeContourRecord[],
   patches: readonly DrawingPreparedPatch[],
   cap: NonNullable<DrawingPaint['strokeCap']>,
-  strokeStyle: DrawingStrokeStyle,
 ): readonly DrawingPreparedStrokePatch[] => {
   const prepared: DrawingPreparedStrokePatch[] = [];
   for (const contour of contours) {
@@ -832,7 +813,7 @@ const createPreparedStrokePatches = (
   }
   const groupedContours = groupStrokePatchContours(contours, patches);
   for (const contour of groupedContours) {
-    prepared.push(...createPreparedStrokeContourPatches(contour, cap, strokeStyle));
+    prepared.push(...createPreparedStrokeContourPatches(contour, cap));
   }
   return Object.freeze(prepared);
 };
@@ -884,7 +865,6 @@ const groupStrokePatchContours = (
 const createPreparedStrokeContourPatches = (
   contour: DrawingStrokePatchContour,
   cap: NonNullable<DrawingPaint['strokeCap']>,
-  strokeStyle: DrawingStrokeStyle,
 ): readonly DrawingPreparedStrokePatch[] => {
   if (contour.patches.length === 0) {
     return Object.freeze([]);
@@ -892,7 +872,6 @@ const createPreparedStrokeContourPatches = (
   const prepared: DrawingPreparedStrokePatch[] = [];
   const firstPatch = contour.patches[0]!;
   const lastPatch = contour.patches[contour.patches.length - 1]!;
-  const halfWidth = strokeStyle.halfWidth;
   const firstStart = contour.record.firstPoint ?? getPatchStartPoint(firstPatch);
   const lastEnd = contour.record.lastPoint ?? getPatchEndPoint(lastPatch);
   const deferredJoinControlPoint = firstStart;
@@ -1189,7 +1168,7 @@ const findCubicConvex180Chops = (
       : { ts: Object.freeze([]), areCusps: false };
   }
 
-  let areCusps = discrOver4 <= cuspThreshold;
+  const areCusps = discrOver4 <= cuspThreshold;
   if (areCusps) {
     if (qa !== 0 || qbOverMinus2 !== 0 || qc !== 0) {
       const root = qa !== 0 ? qbOverMinus2 / qa : Number.NaN;
@@ -1455,85 +1434,6 @@ const triangulatePolygon = (points: readonly Point2D[]): readonly Point2D[] | nu
     triangles.push(...(winding > 0 ? [a, b, c] : [a, c, b]));
   }
   return Object.freeze(triangles);
-};
-
-const lineSegmentIntersection = (
-  start: Point2D,
-  end: Point2D,
-  clipStart: Point2D,
-  clipEnd: Point2D,
-): Point2D => {
-  const direction = subtract(end, start);
-  const clipDirection = subtract(clipEnd, clipStart);
-  const denominator = (direction[0] * clipDirection[1]) - (direction[1] * clipDirection[0]);
-  if (Math.abs(denominator) <= epsilon) {
-    return end;
-  }
-  const delta = subtract(clipStart, start);
-  const t = ((delta[0] * clipDirection[1]) - (delta[1] * clipDirection[0])) / denominator;
-  return add(start, scale(direction, t));
-};
-
-const ensureCounterClockwise = (points: readonly Point2D[]): readonly Point2D[] =>
-  polygonArea(points) >= 0 ? points : Object.freeze([...points].reverse());
-
-const clipPolygonAgainstEdge = (
-  polygon: readonly Point2D[],
-  clipStart: Point2D,
-  clipEnd: Point2D,
-): readonly Point2D[] => {
-  if (polygon.length === 0) return polygon;
-  const output: Point2D[] = [];
-  const isInside = (point: Point2D): boolean => cross(clipStart, clipEnd, point) >= -epsilon;
-
-  let previous = polygon[polygon.length - 1]!;
-  let previousInside = isInside(previous);
-  for (const current of polygon) {
-    const currentInside = isInside(current);
-    if (currentInside) {
-      if (!previousInside) {
-        output.push(lineSegmentIntersection(previous, current, clipStart, clipEnd));
-      }
-      output.push(current);
-    } else if (previousInside) {
-      output.push(lineSegmentIntersection(previous, current, clipStart, clipEnd));
-    }
-    previous = current;
-    previousInside = currentInside;
-  }
-
-  return Object.freeze(output);
-};
-
-const clipTrianglesAgainstConvexPolygon = (
-  triangles: readonly Point2D[],
-  clipPolygon: readonly Point2D[],
-): readonly Point2D[] => {
-  const clip = ensureCounterClockwise(clipPolygon);
-  const clipped: Point2D[] = [];
-
-  for (let index = 0; index + 2 < triangles.length; index += 3) {
-    let polygon: readonly Point2D[] = [
-      triangles[index]!,
-      triangles[index + 1]!,
-      triangles[index + 2]!,
-    ];
-    for (let clipIndex = 0; clipIndex < clip.length; clipIndex += 1) {
-      polygon = clipPolygonAgainstEdge(
-        polygon,
-        clip[clipIndex]!,
-        clip[(clipIndex + 1) % clip.length]!,
-      );
-      if (polygon.length === 0) break;
-    }
-    if (polygon.length >= 3) {
-      for (let polygonIndex = 1; polygonIndex + 1 < polygon.length; polygonIndex += 1) {
-        clipped.push(polygon[0]!, polygon[polygonIndex]!, polygon[polygonIndex + 1]!);
-      }
-    }
-  }
-
-  return Object.freeze(clipped);
 };
 
 type ScanEdge = Readonly<{
@@ -2595,14 +2495,14 @@ const computeStrokeBounds = (
 const canUseTessellatedStrokePatches = (
   patches: readonly DrawingPreparedStrokePatch[],
   subpaths: readonly FlattenedSubpath[],
-  paint: DrawingPaint,
+  _paint: DrawingPaint,
 ): boolean => {
   return patches.length > 0 &&
     subpaths.length > 0 &&
     subpaths.every((subpath) => subpath.points.length >= 1);
 };
 
-const shouldPrepareStrokePatches = (paint: DrawingPaint): boolean => {
+const shouldPrepareStrokePatches = (_paint: DrawingPaint): boolean => {
   return true;
 };
 
@@ -2757,7 +2657,6 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
         ? createLinePatchesFromContours(strokeContours)
         : prepareStrokePatches(command.path),
       strokeStyle.cap,
-      strokeStyle,
     )
     : Object.freeze([] as DrawingPreparedStrokePatch[]);
   const usesTessellatedStrokePatches = canUseTessellatedStrokePatches(

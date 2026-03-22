@@ -1,10 +1,74 @@
-import CanvasKitModule from 'npm:canvaskit-wasm';
+import CanvasKitModule from 'npm:canvaskit-wasm@^0.40.0';
 import { createPath2D } from '@rieul3d/geometry';
 
 const outputWidth = 680;
 const outputHeight = 820;
-type CanvasKitFactory = (options?: unknown) => Promise<any>;
-type CanvasKit = Awaited<ReturnType<CanvasKitFactory>>;
+type CanvasKitPath = {
+  moveTo: (x: number, y: number) => void;
+  lineTo: (x: number, y: number) => void;
+  quadTo: (cx: number, cy: number, x: number, y: number) => void;
+  cubicTo: (
+    c1x: number,
+    c1y: number,
+    c2x: number,
+    c2y: number,
+    x: number,
+    y: number,
+  ) => void;
+  close: () => void;
+  arcToOval?: (
+    oval: unknown,
+    startDegrees: number,
+    sweepDegrees: number,
+    forceMoveTo: boolean,
+  ) => void;
+  addArc?: (oval: unknown, startDegrees: number, sweepDegrees: number) => void;
+  arcTo?: (oval: unknown, startDegrees: number, sweepDegrees: number, forceMoveTo: boolean) => void;
+  delete: () => void;
+};
+
+type CanvasKitPaint = {
+  setAntiAlias: (enabled: boolean) => void;
+  setStyle: (style: unknown) => void;
+  setStrokeWidth: (width: number) => void;
+  setStrokeJoin: (join: unknown) => void;
+  setStrokeCap: (cap: unknown) => void;
+  setColor: (color: unknown) => void;
+  setPathEffect: (effect: unknown) => void;
+};
+
+type CanvasKitCanvas = {
+  clear: (color: unknown) => void;
+  drawPath: (path: CanvasKitPath, paint: CanvasKitPaint) => void;
+};
+
+type CanvasKitPathEffect = {
+  delete: () => void;
+};
+
+type CanvasKitSurface = {
+  getCanvas: () => CanvasKitCanvas;
+  flush: () => void;
+  makeImageSnapshot: () => {
+    encodeToBytes: () => Uint8Array | null;
+  };
+};
+
+type CanvasKit = {
+  Color4f: (r: number, g: number, b: number, a: number) => unknown;
+  LTRBRect: (l: number, t: number, r: number, b: number) => unknown;
+  Path: new () => CanvasKitPath;
+  Paint: new () => CanvasKitPaint;
+  MakeSurface: (width: number, height: number) => CanvasKitSurface | null;
+  PaintStyle: { Stroke: unknown };
+  StrokeJoin: { Bevel: unknown; Round: unknown; Miter: unknown };
+  StrokeCap: { Square: unknown; Round: unknown; Butt: unknown };
+  PathEffect: {
+    MakeDash: (intervals: Float32Array, phase: number) => CanvasKitPathEffect;
+  };
+};
+
+type CanvasKitFactory = (options?: unknown) => Promise<CanvasKit>;
 
 const CanvasKitInit = CanvasKitModule as unknown as CanvasKitFactory;
 
@@ -35,7 +99,7 @@ const normalizeSweep = (
 };
 
 const appendArcFallback = (
-  skPath: any,
+  skPath: CanvasKitPath,
   center: readonly [number, number],
   radius: number,
   startAngle: number,
@@ -56,7 +120,7 @@ const appendArcFallback = (
 
 const appendArc = (
   CanvasKit: CanvasKit,
-  skPath: any,
+  skPath: CanvasKitPath,
   center: readonly [number, number],
   radius: number,
   startAngle: number,
@@ -137,8 +201,8 @@ const createCanvasKitPath = (
 
 const drawStroke = (
   CanvasKit: CanvasKit,
-  canvas: any,
-  paint: any,
+  canvas: CanvasKitCanvas,
+  paint: CanvasKitPaint,
   path: ReturnType<typeof createPath2D>,
   options: Readonly<{
     strokeWidth: number;
@@ -167,7 +231,7 @@ const drawStroke = (
   );
   paint.setColor(toColor(CanvasKit, options.color));
 
-  let effect: any | undefined;
+  let effect: CanvasKitPathEffect | undefined;
   if (options.dashArray) {
     effect = CanvasKit.PathEffect.MakeDash(
       Float32Array.from(options.dashArray),

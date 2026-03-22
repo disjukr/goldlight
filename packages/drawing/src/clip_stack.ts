@@ -283,7 +283,7 @@ export const popDrawingClipStackSave = (
   return createDrawingClipStackSnapshot(restoredElements, restoredSaveRecords);
 };
 
-const getActiveElements = (
+const _getActiveElements = (
   clipStack: DrawingClipStackSnapshot,
 ): readonly DrawingClipStackElement[] => {
   const saveRecord = getCurrentDrawingClipSaveRecord(clipStack);
@@ -418,7 +418,6 @@ export const appendDrawingClipStackElement = (
     return writableClipStack;
   }
 
-  const newElementIndex = writableClipStack.elements.length;
   const invalidatedSet = new Set(simplification.invalidatedIndices);
   const updatedElements = writableClipStack.elements.map((element, index) =>
     invalidatedSet.has(index)

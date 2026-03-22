@@ -77,7 +77,6 @@ const patchPrecisionLiteral = `${patchPrecision}.0`;
 const cubicLengthTermLiteral = `${(patchPrecision * (3 * 2 / 8)).toFixed(1)}`;
 const curveFillSegments = 1 << maxPatchResolveLevel;
 const strokePatchSegments = (1 << 14) - 1;
-const stepUniformFloats = 28;
 const textureBindingUsage = 0x04;
 
 const fillPathShaderSource = `

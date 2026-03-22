@@ -217,7 +217,7 @@ const addColorType = (
 };
 
 const finalizeFormatCapabilities = (
-  format: GPUTextureFormat,
+  _format: GPUTextureFormat,
   capabilities: MutableFormatCapabilities,
   caps: Pick<
     DawnCaps,

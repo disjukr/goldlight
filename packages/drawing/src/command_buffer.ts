@@ -396,7 +396,9 @@ const encodePreparedFillStep = (
   if (usesPatchFill && patchVertexBuffer && patchVertices) {
     pass.setVertexBuffer(0, patchVertexBuffer);
     pass.draw(
-      step.draw.renderer === 'stencil-tessellated-wedges' ? 3 : curvePatchVertexCount,
+      step.draw.renderer === 'stencil-tessellated-wedges'
+        ? wedgePatchVertexCount
+        : curvePatchVertexCount,
       patchVertices.length /
         (step.draw.renderer === 'stencil-tessellated-wedges' ? wedgePatchFloats : curvePatchFloats),
     );

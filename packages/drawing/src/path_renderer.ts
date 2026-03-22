@@ -91,6 +91,12 @@ type DrawingStrokePatchContour = Readonly<{
   closed: boolean;
 }>;
 
+type DrawingStrokeContourRecord = Readonly<{
+  points: readonly Point2D[];
+  closed: boolean;
+  degeneratePoint?: Point2D;
+}>;
+
 export type DrawingPreparedPathFill = Readonly<{
   kind: 'pathFill';
   renderer: DrawingRendererKind;
@@ -391,53 +397,62 @@ const getPatchEndPoint = (patch: DrawingPreparedPatch): Point2D => {
 };
 
 const createPreparedStrokePatches = (
+  contours: readonly DrawingStrokeContourRecord[],
   patches: readonly DrawingPreparedPatch[],
   cap: NonNullable<DrawingPaint['strokeCap']>,
 ): readonly DrawingPreparedStrokePatch[] => {
   if (patches.length === 0) {
     return Object.freeze([]);
   }
-  const contours = groupStrokePatchContours(patches);
+  const groupedContours = groupStrokePatchContours(contours, patches);
   const prepared: DrawingPreparedStrokePatch[] = [];
-  for (const contour of contours) {
+  for (const contour of groupedContours) {
     prepared.push(...createPreparedStrokeContourPatches(contour, cap));
   }
   return Object.freeze(prepared);
 };
 
 const groupStrokePatchContours = (
+  contours: readonly DrawingStrokeContourRecord[],
   patches: readonly DrawingPreparedPatch[],
 ): readonly DrawingStrokePatchContour[] => {
-  if (patches.length === 0) {
+  if (patches.length === 0 || contours.length === 0) {
     return Object.freeze([]);
   }
-  const contours: DrawingStrokePatchContour[] = [];
-  let current: DrawingPreparedPatch[] = [];
-  for (let index = 0; index < patches.length; index += 1) {
-    const patch = patches[index]!;
-    if (
-      current.length > 0 &&
-      !pointsEqual(getPatchEndPoint(current[current.length - 1]!), getPatchStartPoint(patch))
-    ) {
-      const first = current[0]!;
-      const last = current[current.length - 1]!;
-      contours.push({
-        patches: Object.freeze(current),
-        closed: pointsEqual(getPatchEndPoint(last), getPatchStartPoint(first)),
-      });
-      current = [];
+  const grouped: DrawingStrokePatchContour[] = [];
+  let patchIndex = 0;
+  for (const contour of contours) {
+    const contourPatches: DrawingPreparedPatch[] = [];
+    if (contour.points.length < 2) {
+      continue;
     }
-    current.push(patch);
+    const contourStart = contour.points[0]!;
+    let expectedStart = contourStart;
+    while (patchIndex < patches.length) {
+      const patch = patches[patchIndex]!;
+      const patchStart = getPatchStartPoint(patch);
+      if (!pointsEqual(patchStart, expectedStart)) {
+        break;
+      }
+      contourPatches.push(patch);
+      patchIndex += 1;
+      expectedStart = getPatchEndPoint(patch);
+      if (contour.closed) {
+        if (pointsEqual(expectedStart, contourStart)) {
+          break;
+        }
+      } else if (pointsEqual(expectedStart, contour.points[contour.points.length - 1]!)) {
+        break;
+      }
+    }
+    if (contourPatches.length > 0) {
+      grouped.push({
+        patches: Object.freeze(contourPatches),
+        closed: contour.closed,
+      });
+    }
   }
-  if (current.length > 0) {
-    const first = current[0]!;
-    const last = current[current.length - 1]!;
-    contours.push({
-      patches: Object.freeze(current),
-      closed: pointsEqual(getPatchEndPoint(last), getPatchStartPoint(first)),
-    });
-  }
-  return Object.freeze(contours);
+  return Object.freeze(grouped);
 };
 
 const createPreparedStrokeContourPatches = (
@@ -1557,6 +1572,34 @@ const appendStrokeCap = (
   appendRoundFan(triangles, point, start, end, halfWidth);
 };
 
+const appendDegenerateStrokeCap = (
+  triangles: Point2D[],
+  point: Point2D,
+  halfWidth: number,
+  cap: NonNullable<DrawingPaint['strokeCap']>,
+): void => {
+  if (cap === 'butt') {
+    return;
+  }
+  if (cap === 'square') {
+    appendQuad(
+      triangles,
+      [point[0] - halfWidth, point[1] - halfWidth],
+      [point[0] + halfWidth, point[1] - halfWidth],
+      [point[0] + halfWidth, point[1] + halfWidth],
+      [point[0] - halfWidth, point[1] + halfWidth],
+    );
+    return;
+  }
+  appendRoundFan(
+    triangles,
+    point,
+    [point[0] + halfWidth, point[1]],
+    [point[0] + halfWidth, point[1]],
+    halfWidth,
+  );
+};
+
 const appendStrokeJoin = (
   triangles: Point2D[],
   point: Point2D,
@@ -1601,7 +1644,7 @@ const appendStrokeJoin = (
 };
 
 const prepareStrokeTriangles = (
-  subpaths: readonly FlattenedSubpath[],
+  contours: readonly DrawingStrokeContourRecord[],
   paint: DrawingPaint,
 ): 
   | Readonly<{
@@ -1619,8 +1662,33 @@ const prepareStrokeTriangles = (
   const color = resolveStrokeColor(paint);
   const transparent: readonly [number, number, number, number] = [color[0], color[1], color[2], 0];
 
-  for (const subpath of applyDashPattern(subpaths, paint)) {
-    if (subpath.points.length < 2) continue;
+  const dashedContours = applyDashPattern(
+    contours.map((contour) => ({ points: contour.points, closed: contour.closed })),
+    paint,
+  );
+  const normalizedContours: DrawingStrokeContourRecord[] = dashedContours.map((contour) => ({
+    points: contour.points,
+    closed: contour.closed,
+  }));
+  if (!paint.dashArray || paint.dashArray.length === 0) {
+    for (const contour of contours) {
+      if ((contour.points.length < 2) && contour.degeneratePoint) {
+        normalizedContours.push({
+          points: contour.points,
+          closed: contour.closed,
+          degeneratePoint: contour.degeneratePoint,
+        });
+      }
+    }
+  }
+
+  for (const subpath of normalizedContours) {
+    if (subpath.points.length < 2) {
+      if (subpath.degeneratePoint) {
+        appendDegenerateStrokeCap(triangles, subpath.degeneratePoint, halfWidth, cap);
+      }
+      continue;
+    }
     const segmentData = [];
     for (let index = 0; index < subpath.points.length - 1; index += 1) {
       const start = subpath.points[index]!;
@@ -1831,6 +1899,15 @@ const applyDashPattern = (
   return Object.freeze(dashed);
 };
 
+const createStrokeContourRecords = (
+  subpaths: readonly FlattenedSubpath[],
+): readonly DrawingStrokeContourRecord[] =>
+  Object.freeze(subpaths.map((subpath) => ({
+    points: subpath.points,
+    closed: subpath.closed,
+    degeneratePoint: subpath.points.length === 1 ? subpath.points[0] : undefined,
+  })));
+
 const computeStrokeBounds = (
   subpaths: readonly FlattenedSubpath[],
   halfWidth: number,
@@ -2001,13 +2078,18 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
   }
 
   const strokeStyle = resolveStrokeStyle(command.paint);
+  const strokeContours = createStrokeContourRecords(subpaths);
   const patches = createPreparedStrokePatches(
+    strokeContours,
     preparePatches(command.path, identityMatrix2D, false),
     strokeStyle.cap,
   );
   const usesTessellatedStrokePatches = canUseTessellatedStrokePatches(subpaths, command.paint);
-  const preparedStroke = prepareStrokeTriangles(subpaths, command.paint);
-  const strokedBounds = computeStrokeBounds(applyDashPattern(subpaths, command.paint), strokeStyle.halfWidth);
+  const preparedStroke = prepareStrokeTriangles(strokeContours, command.paint);
+  const strokedBounds = computeStrokeBounds(
+    applyDashPattern(subpaths, command.paint),
+    strokeStyle.halfWidth,
+  );
   const strokeTriangles = preparedStroke?.triangles ?? [];
   if (!preparedStroke) {
     return { supported: false, reason: 'path stroke expansion failed' };

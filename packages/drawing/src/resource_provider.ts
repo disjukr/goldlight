@@ -711,6 +711,7 @@ fn vs_main(
     activeSegments = max(8u, u32(ceil(6.28318530718 * num_radial_segments_per_radian(stroke.x))));
   }
   let numEdgesInJoin = stroke_join_edges(joinType, prevTan, tan0, stroke.x);
+  let maxEdges = f32(SEGMENTS);
   var edgeID = f32(segmentIndex);
   if (stripVertex != 0u) {
     edgeID = -edgeID;
@@ -784,7 +785,7 @@ fn vs_main(
           strokeOutset = select(max(strokeOutset, 0.0), min(strokeOutset, 0.0), curveTurn < 0.0);
         }
       } else {
-        let maxCombinedSegments = max(f32(activeSegments) - numEdgesInJoin - 1.0, 1.0);
+        let maxCombinedSegments = max(maxEdges - numEdgesInJoin - 1.0, 1.0);
         numRadialSegments = max(ceil(abs(rotation) * num_radial_segments_per_radian(stroke.x)), 1.0);
         numRadialSegments = min(numRadialSegments, maxCombinedSegments);
         numParametricSegments = min(numParametricSegments, maxCombinedSegments - numRadialSegments + 1.0);

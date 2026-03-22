@@ -53,6 +53,13 @@ export type DrawingPreparedPatch = Readonly<
   })
 >;
 
+export type DrawingPreparedStrokePatch = Readonly<{
+  patch: DrawingPreparedPatch;
+  prevPoint: Point2D;
+  contourStart: boolean;
+  contourEnd: boolean;
+}>;
+
 type DrawingPatchDefinition =
   | Readonly<{
     kind: 'line';
@@ -96,7 +103,7 @@ export type DrawingPreparedPathStroke = Readonly<{
   renderer: DrawingRendererKind;
   triangles: readonly Point2D[];
   fringeVertices?: readonly DrawingPreparedVertex[];
-  patches: readonly DrawingPreparedPatch[];
+  patches: readonly DrawingPreparedStrokePatch[];
   usesTessellatedStrokePatches: boolean;
   color: readonly [number, number, number, number];
   strokeStyle: DrawingStrokeStyle;
@@ -341,6 +348,58 @@ const finalizePatch = (
     case 'cubic':
       return { ...patch, ...extras, resolveLevel };
   }
+};
+
+const getPatchStartPoint = (patch: DrawingPreparedPatch): Point2D => {
+  switch (patch.kind) {
+    case 'line':
+      return patch.points[0];
+    case 'quadratic':
+      return patch.points[0];
+    case 'conic':
+      return patch.points[0];
+    case 'cubic':
+      return patch.points[0];
+  }
+};
+
+const getPatchEndPoint = (patch: DrawingPreparedPatch): Point2D => {
+  switch (patch.kind) {
+    case 'line':
+      return patch.points[1];
+    case 'quadratic':
+      return patch.points[2];
+    case 'conic':
+      return patch.points[2];
+    case 'cubic':
+      return patch.points[3];
+  }
+};
+
+const createPreparedStrokePatches = (
+  patches: readonly DrawingPreparedPatch[],
+): readonly DrawingPreparedStrokePatch[] => {
+  if (patches.length === 0) {
+    return Object.freeze([]);
+  }
+  const prepared: DrawingPreparedStrokePatch[] = [];
+  let previousEnd = getPatchStartPoint(patches[0]!);
+  for (let index = 0; index < patches.length; index += 1) {
+    const patch = patches[index]!;
+    const start = getPatchStartPoint(patch);
+    const end = getPatchEndPoint(patch);
+    const next = index + 1 < patches.length ? patches[index + 1]! : null;
+    const contourStart = index === 0 || !pointsEqual(start, previousEnd);
+    const contourEnd = !next || !pointsEqual(end, getPatchStartPoint(next));
+    prepared.push({
+      patch,
+      prevPoint: contourStart ? start : previousEnd,
+      contourStart,
+      contourEnd,
+    });
+    previousEnd = end;
+  }
+  return Object.freeze(prepared);
 };
 
 const evaluateConic = (
@@ -1871,7 +1930,7 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
   }
 
   const strokeStyle = resolveStrokeStyle(command.paint);
-  const patches = preparePatches(command.path, identityMatrix2D, false);
+  const patches = createPreparedStrokePatches(preparePatches(command.path, identityMatrix2D, false));
   const usesTessellatedStrokePatches = canUseTessellatedStrokePatches(subpaths, command.paint);
   const preparedStroke = prepareStrokeTriangles(subpaths, command.paint);
   const strokedBounds = computeStrokeBounds(applyDashPattern(subpaths, command.paint), strokeStyle.halfWidth);
@@ -1883,7 +1942,7 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
     supported: true,
     draw: {
       kind: 'pathStroke',
-      renderer: selectPathStrokeRenderer(patches),
+      renderer: selectPathStrokeRenderer(patches.map((patch) => patch.patch)),
       triangles: strokeTriangles,
       fringeVertices: preparedStroke.fringeVertices,
       patches,

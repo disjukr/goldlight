@@ -2,7 +2,11 @@ import type { DrawingPreparedClipElement } from './clip_stack.ts';
 import type { Point2D, Rect } from '@rieul3d/geometry';
 import { type DrawingPreparedRecording, prepareDrawingRecording } from './draw_pass.ts';
 import type { DrawingRecording } from './recording.ts';
-import type { DrawingPreparedPatch, DrawingPreparedVertex } from './path_renderer.ts';
+import type {
+  DrawingPreparedPatch,
+  DrawingPreparedStrokePatch,
+  DrawingPreparedVertex,
+} from './path_renderer.ts';
 import type { DrawingGraphicsPipelineHandle } from './resource_provider.ts';
 import type { DawnSharedContext } from './shared_context.ts';
 import { createDrawingTaskList, type DrawingTaskList } from './task.ts';
@@ -71,7 +75,7 @@ const floatsPerVertex = 6;
 const stepPayloadFloats = 28;
 const wedgePatchFloats = 14;
 const curvePatchFloats = 12;
-const strokePatchFloats = 12;
+const strokePatchFloats = 16;
 const maxPatchResolveLevel = 6;
 const patchSegmentCount = 1 << maxPatchResolveLevel;
 const wedgePatchVertexCount = patchSegmentCount * 3;
@@ -313,12 +317,13 @@ const createCurvePatchInstanceData = (
 };
 
 const createStrokePatchInstanceData = (
-  patches: readonly DrawingPreparedPatch[],
+  patches: readonly DrawingPreparedStrokePatch[],
+  strokeStyle: DrawingStrokeStyle,
 ): Float32Array => {
   const data = new Float32Array(patches.length * strokePatchFloats);
   let offset = 0;
   for (const patch of patches) {
-    const points = getPatchPoints(patch);
+    const points = getPatchPoints(patch.patch);
     data[offset++] = points[0]![0];
     data[offset++] = points[0]![1];
     data[offset++] = points[1]![0];
@@ -327,9 +332,13 @@ const createStrokePatchInstanceData = (
     data[offset++] = points[2]![1];
     data[offset++] = points[3]![0];
     data[offset++] = points[3]![1];
-    data[offset++] = toCurveType(patch);
-    data[offset++] = patch.kind === 'conic' ? patch.weight : 1;
-    data[offset++] = Math.min(maxPatchResolveLevel, Math.max(0, patch.resolveLevel));
+    data[offset++] = patch.prevPoint[0];
+    data[offset++] = patch.prevPoint[1];
+    data[offset++] = strokeStyle.halfWidth;
+    data[offset++] = strokeStyle.joinLimit;
+    data[offset++] = toCurveType(patch.patch);
+    data[offset++] = patch.patch.kind === 'conic' ? patch.patch.weight : 1;
+    data[offset++] = Math.min(maxPatchResolveLevel, Math.max(0, patch.patch.resolveLevel));
     data[offset++] = 0;
   }
   return data;
@@ -492,7 +501,7 @@ const prepareStepResources = (
 
   const strokeVertices = createVertexModulationData(step.draw.triangles, [1, 1, 1, 1]);
   const patchVertices = step.draw.usesTessellatedStrokePatches
-    ? createStrokePatchInstanceData(step.draw.patches)
+    ? createStrokePatchInstanceData(step.draw.patches, step.draw.strokeStyle)
     : new Float32Array(0);
   const fringeVertices = step.draw.fringeVertices
     ? createColoredDeviceSpaceVertexData(step.draw.fringeVertices)

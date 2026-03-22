@@ -464,20 +464,27 @@ fn vs_main(
   @location(1) p1: vec2<f32>,
   @location(2) p2: vec2<f32>,
   @location(3) p3: vec2<f32>,
-  @location(4) curveMeta: vec4<f32>,
+  @location(4) prevPoint: vec2<f32>,
+  @location(5) stroke: vec2<f32>,
+  @location(6) curveMeta: vec4<f32>,
 ) -> VertexOut {
   let quadVertex = vertexIndex % 6u;
   let segmentIndex = vertexIndex / 6u;
   let activeSegments = max(1u, 1u << u32(clamp(curveMeta.z, 0.0, MAX_RESOLVE_LEVEL)));
   let t0 = f32(segmentIndex) / f32(activeSegments);
   let t1 = f32(min(segmentIndex + 1u, activeSegments)) / f32(activeSegments);
-  let a = eval_patch(curveMeta.x, curveMeta.y, p0, p1, p2, p3, t0);
-  let b = eval_patch(curveMeta.x, curveMeta.y, p0, p1, p2, p3, t1);
+  let curveType = curveMeta.x;
+  let weight = curveMeta.y;
+  let a = eval_patch(curveType, weight, p0, p1, p2, p3, t0);
+  let b = eval_patch(curveType, weight, p0, p1, p2, p3, t1);
   var local = p3;
   if (segmentIndex < activeSegments) {
-    let delta = b - a;
+    var delta = b - a;
+    if (length(delta) <= 1e-5) {
+      delta = a - prevPoint;
+    }
     let deltaLength = max(length(delta), 1e-5);
-    let normal = vec2<f32>(-delta.y / deltaLength, delta.x / deltaLength) * step.params.x;
+    let normal = vec2<f32>(-delta.y / deltaLength, delta.x / deltaLength) * stroke.x;
     let corners = array<vec2<f32>, 4>(a + normal, b + normal, b - normal, a - normal);
     let indices = array<u32, 6>(0u, 1u, 2u, 0u, 2u, 3u);
     local = corners[indices[quadVertex]];
@@ -661,14 +668,16 @@ export const createDawnResourceProvider = (
   });
 
   const createStrokePatchLayout = (): GPUVertexBufferLayout => ({
-    arrayStride: floatBytes * 12,
+    arrayStride: floatBytes * 16,
     stepMode: 'instance',
     attributes: [
       { shaderLocation: 0, offset: floatBytes * 0, format: 'float32x2' },
       { shaderLocation: 1, offset: floatBytes * 2, format: 'float32x2' },
       { shaderLocation: 2, offset: floatBytes * 4, format: 'float32x2' },
       { shaderLocation: 3, offset: floatBytes * 6, format: 'float32x2' },
-      { shaderLocation: 4, offset: floatBytes * 8, format: 'float32x4' },
+      { shaderLocation: 4, offset: floatBytes * 8, format: 'float32x2' },
+      { shaderLocation: 5, offset: floatBytes * 10, format: 'float32x2' },
+      { shaderLocation: 6, offset: floatBytes * 12, format: 'float32x4' },
     ],
   });
 

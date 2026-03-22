@@ -677,11 +677,14 @@ Deno.test('drawing prepared recording flattens quadratic and cubic paths for fil
   const draw = prepared.passes[0]?.steps[0]?.draw;
 
   assertEquals(draw?.kind, 'pathFill');
-  assertEquals(draw?.renderer, 'stencil-tessellated-wedges');
-  assertEquals((draw?.triangles.length ?? 0) > 6, true);
-  assertEquals(draw?.bounds.origin[0], 24);
-  assertEquals((draw?.patches.length ?? 0) > 0, true);
-  assertEquals(draw?.patches.some((patch) => patch.fanPoint !== undefined), true);
+  if (draw?.kind !== 'pathFill') {
+    throw new Error('expected pathFill draw');
+  }
+  assertEquals(draw.renderer, 'stencil-tessellated-wedges');
+  assertEquals(draw.triangles.length > 6, true);
+  assertEquals(draw.bounds.origin[0], 24);
+  assertEquals(draw.patches.length > 0, true);
+  assertEquals(draw.patches.some((patch) => patch.fanPoint !== undefined), true);
   assertEquals(prepared.passes[0]?.steps[0]?.pipelineDescs.map((pipeline) => pipeline.label), [
     'drawing-path-fill-patch-stencil-nonzero',
     'drawing-path-fill-stencil-cover',
@@ -713,11 +716,11 @@ Deno.test('drawing prepared recording flattens conic and arc verbs', () => {
   const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
   const draw = prepared.passes[0]?.steps[0]?.draw;
   assertEquals(draw?.kind, 'pathFill');
-  assertEquals((draw?.triangles.length ?? 0) > 6, true);
-  assertEquals(
-    draw?.patches.some((patch) => patch.kind === 'conic'),
-    true,
-  );
+  if (draw?.kind !== 'pathFill') {
+    throw new Error('expected pathFill draw');
+  }
+  assertEquals(draw.triangles.length > 6, true);
+  assertEquals(draw.patches.some((patch) => patch.kind === 'conic'), true);
 });
 
 Deno.test('drawing prepared recording splits cusp-like cubic patches', () => {
@@ -739,7 +742,9 @@ Deno.test('drawing prepared recording splits cusp-like cubic patches', () => {
   const draw = prepared.passes[0]?.steps[0]?.draw;
   assertEquals(draw?.kind, 'pathStroke');
   assertEquals(
-    (draw?.patches.filter((patch) => patch.kind === 'cubic').length ?? 0) >= 1,
+    (draw?.kind === 'pathStroke'
+      ? draw.patches.filter((patch) => patch.patch.kind === 'cubic').length
+      : 0) >= 1,
     true,
   );
 });

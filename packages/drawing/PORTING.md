@@ -547,13 +547,16 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
     flat color fill
 - `QueueManager` submission model is still simplified
   - Local state: queue submission, ordered outstanding submission ownership, completion draining, a
-    `checkForFinishedWork`-style sync path, and submission-owned transient buffer cleanup now exist
-    in `src/queue_manager.ts`, `src/command_buffer.ts`, and `src/prepare_resources.ts`
-  - Remaining delta: no Graphite-style finish-proc ownership, command-buffer reuse, `WaitAny`-style
-    batching, or resource/fence correlation
+    `checkForFinishedWork`-style sync path, submission-owned transient buffer cleanup, and
+    Graphite-like finish callback attachment on the latest outstanding work now exist in
+    `src/queue_manager.ts`, `src/command_buffer.ts`, and `src/prepare_resources.ts`
+  - Remaining delta: no command-buffer reuse, `WaitAny`-style batching, async mapped-resource
+    ownership, or resource/fence correlation
 - `Caps` still trails DawnCaps depth
   - Local state: `src/caps.ts` now owns a richer format table, color-type metadata,
-    resolve/transient/MSRTSS policy, resource-binding requirements, and provider-facing usage checks
+    resolve/transient/MSRTSS policy, resource-binding requirements, provider-facing usage checks,
+    and runtime policy that now follows actual queue/device capability surface instead of only the
+    presence of a backend tick hook
   - Remaining delta: no multiplanar view/aspect model; native-Dawn backend-type workarounds are
     intentionally out of scope for the WebGPU-only target
 
@@ -616,8 +619,24 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
   - Status transition: per-recording viewport, payload, geometry, and clip buffers are now owned by
     the encoded Dawn submission and released when the submission finishes or submit fails, bringing
     WebGPU transient resource lifetime closer to Graphite's submission-owned cleanup model
-  - Remaining delta: finish-proc ownership, command-buffer reuse, async mapped-resource ownership,
-    and `WaitAny`-style completion batching are still missing
+  - Remaining delta: command-buffer reuse, async mapped-resource ownership, and `WaitAny`-style
+    completion batching are still missing
+  - Validation: `deno test tests/drawing_graphite_dawn_test.ts`
+- 2026-03-23
+  - Files: `src/queue_manager.ts`, `tests/drawing_graphite_dawn_test.ts`
+  - Status transition: `QueueManager` now exposes Graphite-like finish callback attachment on
+    outstanding submissions and the queue manager itself, with completion, failure, and idle-queue
+    delivery paths
+  - Remaining delta: command-buffer reuse, async mapped-resource ownership, `WaitAny`-style
+    batching, and explicit resource/fence correlation are still missing
+  - Validation: `deno test tests/drawing_graphite_dawn_test.ts`
+- 2026-03-23
+  - Files: `src/caps.ts`, `tests/drawing_graphite_dawn_test.ts`
+  - Status transition: runtime capability policy now derives CPU sync, async pipeline creation,
+    scoped error checks, and compute support from actual WebGPU queue/device methods instead of the
+    presence of a backend tick callback alone
+  - Remaining delta: multiplanar/external-format backend nuance and native-Dawn workaround policy
+    are still intentionally reduced for the WebGPU-only target
   - Validation: `deno test tests/drawing_graphite_dawn_test.ts`
 - 2026-03-23
   - Files: `src/resource_provider.ts`, `tests/drawing_graphite_dawn_test.ts`

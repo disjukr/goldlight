@@ -10,6 +10,8 @@ import {
   withPath2DFillRule,
 } from '@rieul3d/geometry';
 import {
+  addFinishedCallbackToDawnQueueManager,
+  addFinishedCallbackToDawnSubmission,
   appendDrawingClipStackElement,
   checkForFinishedDawnQueueManager,
   clipDrawingRecorderPath,
@@ -449,6 +451,25 @@ Deno.test('dawn caps apply observable storage-buffer workaround policy', () => {
   assertEquals(caps.supportsStorageBuffers, false);
   assertEquals(caps.runtimeCapabilities.drawBufferCanBeMapped, false);
   assertEquals(caps.runtimeCapabilities.bufferMapsAreAsync, true);
+});
+
+Deno.test('dawn caps derive runtime policy from actual queue and device capabilities', () => {
+  const mock = createMockGpuContext();
+  const caps = createDawnCaps(createDawnBackendContext({
+    ...mock.context,
+    device: {
+      ...mock.context.device,
+      createComputePipeline: () => ({}) as GPUComputePipeline,
+      createRenderPipelineAsync: () => Promise.resolve(({}) as GPURenderPipeline),
+      pushErrorScope: () => undefined,
+      popErrorScope: () => Promise.resolve(null),
+    } as unknown as GPUDevice,
+  }));
+
+  assertEquals(caps.runtimeCapabilities.computeSupport, true);
+  assertEquals(caps.runtimeCapabilities.allowCpuSync, true);
+  assertEquals(caps.runtimeCapabilities.useAsyncPipelineCreation, true);
+  assertEquals(caps.runtimeCapabilities.allowScopedErrorChecks, true);
 });
 
 Deno.test('dawn caps keep command-buffer timestamps feature-based in webgpu mode', () => {
@@ -1979,6 +2000,42 @@ Deno.test('dawn queue manager tracks explicit submitted-work completion', async 
   assertEquals(mock.created.destroyedBuffers.length > 0, true);
 });
 
+Deno.test('dawn submission finished callbacks fire when gpu work completes', async () => {
+  const mock = createMockGpuContext();
+  const backend = createDawnBackendContext(mock.context);
+  const queueManager = createDawnQueueManager(backend);
+  const sharedContext = createDawnSharedContext(backend);
+  const recorder = createDrawingRecorder(sharedContext);
+  const binding = createOffscreenBinding(mock.context);
+  const finished: Array<{
+    success: boolean;
+    serial: number;
+    recorderId: number | null;
+    error: string | null;
+  }> = [];
+
+  recordClear(recorder, [0, 0, 0, 1]);
+  const commandBuffer = encodeDawnCommandBuffer(
+    sharedContext,
+    finishDrawingRecorder(recorder),
+    binding,
+  );
+  const submission = submitToDawnQueueManager(queueManager, commandBuffer);
+  addFinishedCallbackToDawnSubmission(submission, (result) => {
+    finished.push(result);
+  });
+
+  mock.created.submissionDoneResolvers.shift()?.();
+  await tickDawnQueueManager(queueManager);
+
+  assertEquals(finished, [{
+    success: true,
+    serial: 1,
+    recorderId: commandBuffer.recording.recorderId,
+    error: null,
+  }]);
+});
+
 Deno.test('submitDawnCommandBuffer routes submissions through queue manager tracking', () => {
   const mock = createMockGpuContext();
   const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
@@ -2002,6 +2059,41 @@ Deno.test('submitDawnCommandBuffer routes submissions through queue manager trac
     sharedContext.queueManager.lastSubmittedRecorderId,
     commandBuffer.recording.recorderId,
   );
+});
+
+Deno.test('dawn queue manager attaches finish callbacks to the newest outstanding submission', async () => {
+  const mock = createMockGpuContext();
+  const backend = createDawnBackendContext(mock.context);
+  const queueManager = createDawnQueueManager(backend);
+  const sharedContext = createDawnSharedContext(backend);
+  const binding = createOffscreenBinding(mock.context);
+  const finished: Array<{
+    success: boolean;
+    serial: number;
+    recorderId: number | null;
+    error: string | null;
+  }> = [];
+
+  for (let index = 0; index < 2; index += 1) {
+    const recorder = createDrawingRecorder(sharedContext);
+    recordClear(recorder, [0, 0, 0, 1]);
+    submitToDawnQueueManager(
+      queueManager,
+      encodeDawnCommandBuffer(sharedContext, finishDrawingRecorder(recorder), binding),
+    );
+  }
+
+  addFinishedCallbackToDawnQueueManager(queueManager, (result) => {
+    finished.push(result);
+  });
+
+  mock.created.submissionDoneResolvers.shift()?.();
+  mock.created.submissionDoneResolvers.shift()?.();
+  await tickDawnQueueManager(queueManager);
+
+  assertEquals(finished.length, 1);
+  assertEquals(finished[0]?.serial, 2);
+  assertEquals(finished[0]?.success, true);
 });
 
 Deno.test('dawn queue manager falls back to coarse tick completion without submitted-work callback', async () => {
@@ -2144,6 +2236,28 @@ Deno.test('dawn queue manager records submit failures without enqueuing work', (
   assertEquals(queueManager.outstandingSubmissions.length, 0);
   assertEquals(queueManager.lastError, 'submit failed');
   assertEquals(mock.created.destroyedBuffers.length > 0, true);
+});
+
+Deno.test('dawn queue manager fires idle finish callbacks immediately', () => {
+  const mock = createMockGpuContext();
+  const queueManager = createDawnQueueManager(createDawnBackendContext(mock.context));
+  const finished: Array<{
+    success: boolean;
+    serial: number;
+    recorderId: number | null;
+    error: string | null;
+  }> = [];
+
+  addFinishedCallbackToDawnQueueManager(queueManager, (result) => {
+    finished.push(result);
+  });
+
+  assertEquals(finished, [{
+    success: true,
+    serial: 0,
+    recorderId: null,
+    error: null,
+  }]);
 });
 
 Deno.test('drawing context increments recorder ids through shared context', () => {

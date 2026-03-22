@@ -175,6 +175,39 @@ const choosePreferredCanvasFormat = (
   backend: DawnBackendContext,
 ): GPUTextureFormat => backend.target.format;
 
+const supportsSubmittedWorkDone = (
+  backend: DawnBackendContext,
+): boolean => typeof backend.queue.onSubmittedWorkDone === 'function';
+
+const supportsAsyncPipelineCreation = (
+  backend: DawnBackendContext,
+): boolean =>
+  typeof (backend.device as GPUDevice & {
+    createRenderPipelineAsync?: unknown;
+  }).createRenderPipelineAsync === 'function';
+
+const supportsScopedErrorChecks = (
+  backend: DawnBackendContext,
+): boolean => {
+  const device = backend.device as GPUDevice & {
+    pushErrorScope?: unknown;
+    popErrorScope?: unknown;
+  };
+  return typeof device.pushErrorScope === 'function' &&
+    typeof device.popErrorScope === 'function';
+};
+
+const supportsComputePipelines = (
+  backend: DawnBackendContext,
+): boolean => {
+  const device = backend.device as GPUDevice & {
+    createComputePipeline?: unknown;
+    createComputePipelineAsync?: unknown;
+  };
+  return typeof device.createComputePipeline === 'function' ||
+    typeof device.createComputePipelineAsync === 'function';
+};
+
 const chooseMaxSampleCount = (
   backend: DawnBackendContext,
   limits: DrawingLimits,
@@ -629,12 +662,12 @@ export const createDawnCaps = (
   };
   const runtimeCapabilities: DrawingRuntimeCapabilities = {
     drawBufferCanBeMapped: deviceFeatures.has('buffer-map-extended-usages'),
-    computeSupport: true,
+    computeSupport: supportsComputePipelines(backend),
     clampToBorderSupport: false,
     bufferMapsAreAsync: true,
-    allowCpuSync: Boolean(backend.tick),
-    useAsyncPipelineCreation: Boolean(backend.tick),
-    allowScopedErrorChecks: Boolean(backend.tick),
+    allowCpuSync: Boolean(backend.tick) || supportsSubmittedWorkDone(backend),
+    useAsyncPipelineCreation: supportsAsyncPipelineCreation(backend),
+    allowScopedErrorChecks: supportsScopedErrorChecks(backend),
     fullCompressedUploadSizeMustAlignToBlockDims: true,
   };
 

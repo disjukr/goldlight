@@ -7,6 +7,15 @@ export type DawnSubmissionState =
   | 'finished'
   | 'failed';
 
+export type DawnSubmissionResult = Readonly<{
+  success: boolean;
+  serial: number;
+  recorderId: number | null;
+  error: string | null;
+}>;
+
+export type DawnFinishedCallback = (result: DawnSubmissionResult) => void;
+
 export type DawnOutstandingSubmission = Readonly<{
   backend: 'graphite-dawn';
   serial: number;
@@ -16,6 +25,8 @@ export type DawnOutstandingSubmission = Readonly<{
   completionPromise: Promise<void> | null;
   error: string | null;
   resourcesReleased: boolean;
+  finishedCallbacks: readonly DawnFinishedCallback[];
+  finishCallbacksNotified: boolean;
 }>;
 
 export type DawnQueueManager = Readonly<{
@@ -36,6 +47,8 @@ type MutableDawnOutstandingSubmission = {
   completionPromise: Promise<void> | null;
   error: string | null;
   resourcesReleased: boolean;
+  finishedCallbacks: DawnFinishedCallback[];
+  finishCallbacksNotified: boolean;
 };
 
 type MutableDawnQueueManager = {
@@ -87,11 +100,32 @@ const createOutstandingSubmission = (
   completionPromise: null,
   error: null,
   resourcesReleased: false,
+  finishedCallbacks: [],
+  finishCallbacksNotified: false,
 });
 
 const isSubmissionFinished = (
   submission: DawnOutstandingSubmission,
 ): boolean => submission.state !== 'pending';
+
+const notifyFinishedCallbacks = (
+  submission: DawnOutstandingSubmission,
+): void => {
+  const mutable = asMutableSubmission(submission);
+  if (mutable.finishCallbacksNotified) {
+    return;
+  }
+  mutable.finishCallbacksNotified = true;
+  const result: DawnSubmissionResult = {
+    success: submission.error === null,
+    serial: submission.serial,
+    recorderId: submission.recorderId,
+    error: submission.error,
+  };
+  for (const callback of submission.finishedCallbacks) {
+    callback(result);
+  }
+};
 
 const releaseSubmissionResources = (
   submission: DawnOutstandingSubmission,
@@ -113,6 +147,7 @@ const markSubmissionFinished = (
   const mutable = asMutableSubmission(submission);
   mutable.state = submission.error === null ? 'finished' : 'failed';
   releaseSubmissionResources(submission);
+  notifyFinishedCallbacks(submission);
   completeSubmittedWork(queueManager, submission.serial, submission.recorderId);
 };
 
@@ -196,6 +231,7 @@ export const submitToDawnQueueManager = (
     mutableSubmission.state = 'failed';
     mutable.lastError = message;
     releaseSubmissionResources(submission);
+    notifyFinishedCallbacks(submission);
     return submission;
   }
 
@@ -205,6 +241,41 @@ export const submitToDawnQueueManager = (
   mutable.outstandingSubmissions = [...mutable.outstandingSubmissions, submission];
   void settleSubmissionCompletion(queueManager, submission);
   return submission;
+};
+
+export const addFinishedCallbackToDawnSubmission = (
+  submission: DawnOutstandingSubmission,
+  callback: DawnFinishedCallback,
+): void => {
+  const mutable = asMutableSubmission(submission);
+  if (submission.state === 'pending') {
+    mutable.finishedCallbacks = [...mutable.finishedCallbacks, callback];
+    return;
+  }
+  callback({
+    success: submission.error === null,
+    serial: submission.serial,
+    recorderId: submission.recorderId,
+    error: submission.error,
+  });
+};
+
+export const addFinishedCallbackToDawnQueueManager = (
+  queueManager: DawnQueueManager,
+  callback: DawnFinishedCallback,
+): void => {
+  const outstanding = queueManager.outstandingSubmissions;
+  const latest = outstanding[outstanding.length - 1];
+  if (latest !== undefined) {
+    addFinishedCallbackToDawnSubmission(latest, callback);
+    return;
+  }
+  callback({
+    success: queueManager.lastError === null,
+    serial: queueManager.lastCompletedSerial,
+    recorderId: queueManager.lastCompletedRecorderId,
+    error: queueManager.lastError,
+  });
 };
 
 export const checkForFinishedDawnQueueManager = async (

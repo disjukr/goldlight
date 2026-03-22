@@ -553,9 +553,7 @@ const createPreparedStrokePatches = (
     if (contour.points.length >= 2 || !contour.degeneratePoint) {
       continue;
     }
-    if (cap === 'round') {
-      prepared.push(createSyntheticCircleStrokePatch(contour.degeneratePoint));
-    } else if (cap === 'square') {
+    if (cap === 'square') {
       prepared.push(createSyntheticSquareStrokePatch(contour.degeneratePoint, contour.degeneratePoint));
     }
   }
@@ -656,13 +654,8 @@ const createPreparedStrokeContourPatches = (
       : deferredJoinControlPoint,
     startCap: 'none',
   };
-  if (strokeStyle.joinLimit < 0 || (!contour.closed && (cap === 'round' || cap === 'square'))) {
-    const circlePatches: DrawingPreparedStrokePatch[] = [];
+  if (strokeStyle.joinLimit < 0 || (!contour.closed && cap === 'square')) {
     const squarePatches: DrawingPreparedStrokePatch[] = [];
-    if (!contour.closed && cap === 'round') {
-      circlePatches.push(createSyntheticCircleStrokePatch(getPatchStartPoint(firstPatch)));
-      circlePatches.push(createSyntheticCircleStrokePatch(getPatchEndPoint(lastPatch)));
-    }
     if (!contour.closed && cap === 'square') {
       squarePatches.push(
         createSyntheticSquareStrokePatch(getPatchStartPoint(firstPatch), deferredJoinControlPoint),
@@ -674,16 +667,6 @@ const createPreparedStrokeContourPatches = (
         ),
       );
     }
-    if (contour.closed) {
-      for (const patch of contour.patches) {
-        circlePatches.push(createSyntheticCircleStrokePatch(getPatchStartPoint(patch)));
-      }
-    } else {
-      for (let index = 1; index < contour.patches.length; index += 1) {
-        circlePatches.push(createSyntheticCircleStrokePatch(getPatchStartPoint(contour.patches[index]!)));
-      }
-    }
-    prepared.push(...circlePatches);
     prepared.push(...squarePatches);
   }
   if (strokeStyle.joinLimit >= 0) {
@@ -721,22 +704,6 @@ const createPreparedStrokeContourPatches = (
     }
     prepared.push(...joinPatches);
   }
-  const cuspCirclePatches: DrawingPreparedStrokePatch[] = [];
-  for (let index = 1; index < contour.patches.length; index += 1) {
-    const previousPatch = contour.patches[index - 1]!;
-    const currentPatch = contour.patches[index]!;
-    if (isCuspLikeStrokeTurn(previousPatch, currentPatch)) {
-      cuspCirclePatches.push(createSyntheticCircleStrokePatch(getPatchStartPoint(currentPatch)));
-    }
-  }
-  if (contour.closed && contour.patches.length > 1) {
-    const previousPatch = contour.patches[contour.patches.length - 1]!;
-    const currentPatch = contour.patches[0]!;
-    if (isCuspLikeStrokeTurn(previousPatch, currentPatch)) {
-      cuspCirclePatches.push(createSyntheticCircleStrokePatch(getPatchStartPoint(currentPatch)));
-    }
-  }
-  prepared.push(...cuspCirclePatches);
   return Object.freeze(prepared);
 };
 

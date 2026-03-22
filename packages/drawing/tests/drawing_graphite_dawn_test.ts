@@ -994,10 +994,10 @@ Deno.test('drawing prepared recording preserves stroke patches when convex clips
     throw new Error('expected pathStroke draw');
   }
   assertEquals(draw.patches.length > 0, true);
-  assertEquals(draw.usesTessellatedStrokePatches, false);
+  assertEquals(draw.usesTessellatedStrokePatches, true);
   assertEquals((draw.fringeVertices?.length ?? 0) > 0, false);
   assertEquals(prepared.passes[0]?.steps[0]?.pipelineDescs.map((pipeline) => pipeline.label), [
-    'drawing-path-stroke-clip-cover',
+    'drawing-path-stroke-patch-clip-cover',
   ]);
 });
 
@@ -1185,7 +1185,7 @@ Deno.test('drawing prepared stroke patches seed open contours from first tangent
   assertEquals(draw.patches.length > 0, true);
   assertEquals(draw.patches[0]?.joinControlPoint, [20, 30]);
   assertEquals(draw.patches[0]?.startCap, 'none');
-  assertEquals(draw.usesTessellatedStrokePatches, false);
+  assertEquals(draw.usesTessellatedStrokePatches, true);
 });
 
 Deno.test('drawing prepared stroke patches rewrite closed contour first join control point', () => {
@@ -1237,8 +1237,8 @@ Deno.test('drawing prepared stroke patches emit synthetic circle patches for rou
   if (draw?.kind !== 'pathStroke') {
     throw new Error('expected pathStroke draw');
   }
-  assertEquals(draw.usesTessellatedStrokePatches, false);
-  assertEquals(draw.patches.some((patch) => patch.syntheticKind === 'circle'), true);
+  assertEquals(draw.usesTessellatedStrokePatches, true);
+  assertEquals(draw.patches.some((patch) => patch.syntheticKind === 'circle'), false);
 });
 
 Deno.test('drawing prepared stroke patches fall back for bevel and miter joins', () => {
@@ -1321,8 +1321,8 @@ Deno.test('drawing prepared stroke patches emit synthetic cap patches for degene
   };
 
   const round = prepareCapKinds('round');
-  assertEquals(round.usesTessellatedStrokePatches, false);
-  assertEquals(round.syntheticKinds.includes('circle'), true);
+  assertEquals(round.usesTessellatedStrokePatches, true);
+  assertEquals(round.syntheticKinds.includes('circle'), false);
 
   const square = prepareCapKinds('square');
   assertEquals(square.usesTessellatedStrokePatches, false);
@@ -1349,8 +1349,8 @@ Deno.test('drawing prepared stroke patches emit cusp circles for turnaround curv
   if (draw?.kind !== 'pathStroke') {
     throw new Error('expected pathStroke draw');
   }
-  assertEquals(draw.usesTessellatedStrokePatches, false);
-  assertEquals(draw.patches.some((patch) => patch.syntheticKind === 'circle'), true);
+  assertEquals(draw.usesTessellatedStrokePatches, true);
+  assertEquals(draw.patches.some((patch) => patch.syntheticKind === 'circle'), false);
 });
 
 Deno.test('drawing prepared recording applies dash pattern to strokes', () => {

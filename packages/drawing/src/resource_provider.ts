@@ -562,6 +562,24 @@ fn strip_edge_outset(edgeIndex: u32) -> f32 {
   return strip_signed_edge(edgeIndex);
 }
 
+fn stroke_join_edges(joinType: f32, prevTan: vec2<f32>, tan0: vec2<f32>, strokeRadius: f32) -> f32 {
+  if (joinType >= 0.0) {
+    return sign(joinType) + 3.0;
+  }
+  let joinRads = acos(cosine_between_unit_vectors(prevTan, tan0));
+  let numRadialSegmentsInJoin = max(ceil(joinRads * num_radial_segments_per_radian(strokeRadius)), 1.0);
+  return numRadialSegmentsInJoin + 2.0;
+}
+
+fn combined_edge_index(segmentIndex: u32, activeSegments: u32, quadVertex: u32) -> f32 {
+  var edgeIndex = f32(segmentIndex);
+  let edgeSign = strip_signed_edge(strip_edge_index(quadVertex));
+  if (segmentIndex + 1u >= activeSegments) {
+    edgeIndex = f32(max(activeSegments, 1u) - 1u);
+  }
+  return edgeIndex * edgeSign;
+}
+
 @vertex
 fn vs_main(
   @builtin(vertex_index) vertexIndex: u32,
@@ -592,6 +610,8 @@ fn vs_main(
   if (circlePatch) {
     activeSegments = max(8u, u32(ceil(6.28318530718 * num_radial_segments_per_radian(stroke.x))));
   }
+  let numEdgesInJoin = stroke_join_edges(joinType, prevTan, tan0, stroke.x);
+  let combinedEdge = combined_edge_index(segmentIndex, activeSegments, quadVertex);
   let t0 = f32(segmentIndex) / f32(activeSegments);
   let t1 = f32(min(segmentIndex + 1u, activeSegments)) / f32(activeSegments);
   var a = eval_patch(curveType, weight, p0, p1, p2, p3, t0);
@@ -664,7 +684,8 @@ fn vs_main(
       let deltaLength = max(length(b - a), 1e-5);
       let normal = vec2<f32>(-(b.y - a.y) / deltaLength, (b.x - a.x) / deltaLength) * stroke.x;
       let edgePoint = strip_edge_point(a, b, stripEdgeIndex);
-      local = edgePoint + (normal * signedEdge);
+      let joinBias = select(0.0, min(numEdgesInJoin, 4.0) / 4.0, abs(combinedEdge) < numEdgesInJoin);
+      local = edgePoint + (normal * signedEdge * (1.0 - (0.5 * joinBias)));
     }
   }
   let devicePosition = local_to_device(local);

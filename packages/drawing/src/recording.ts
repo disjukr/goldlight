@@ -38,13 +38,11 @@ const cloneCommand = (command: DrawingCommand): DrawingCommand => {
                 size: { ...clip.rect.size },
               },
               transform: [...clip.transform] as typeof clip.transform,
-              op: clip.op,
             }
             : {
               kind: 'path',
               path: clonePath(clip.path)!,
               transform: [...clip.transform] as typeof clip.transform,
-              op: clip.op,
             }
         ),
       };
@@ -64,13 +62,11 @@ const cloneCommand = (command: DrawingCommand): DrawingCommand => {
                 size: { ...clip.rect.size },
               },
               transform: [...clip.transform] as typeof clip.transform,
-              op: clip.op,
             }
             : {
               kind: 'path',
               path: clonePath(clip.path)!,
               transform: [...clip.transform] as typeof clip.transform,
-              op: clip.op,
             }
         ),
       };

@@ -12,7 +12,6 @@ import { type DawnSharedContext, registerDawnRecorder } from './shared_context.t
 import type {
   ClearCommand,
   DrawingClip,
-  DrawingClipOp,
   DrawingCommand,
   DrawingPaint,
   DrawingPath2D,
@@ -52,7 +51,6 @@ const cloneState = (state: DrawingRecorderState): DrawingRecorderState => ({
           size: { ...clip.rect.size },
         },
         transform: [...clip.transform] as typeof clip.transform,
-        op: clip.op,
       }
       : {
         kind: 'path',
@@ -61,7 +59,6 @@ const cloneState = (state: DrawingRecorderState): DrawingRecorderState => ({
           fillRule: clip.path.fillRule,
         },
         transform: [...clip.transform] as typeof clip.transform,
-        op: clip.op,
       }
   ),
 });
@@ -163,7 +160,6 @@ export const scaleDrawingRecorder = (
 export const clipDrawingRecorderRect = (
   recorder: DrawingRecorder,
   clipRect: Rect,
-  op: DrawingClipOp = 'intersect',
 ): void => {
   (recorder as MutableDrawingRecorder).state = {
     ...recorder.state,
@@ -173,7 +169,6 @@ export const clipDrawingRecorderRect = (
         kind: 'rect',
         rect: clipRect,
         transform: recorder.state.transform,
-        op,
       },
     ],
   };
@@ -182,7 +177,6 @@ export const clipDrawingRecorderRect = (
 export const clipDrawingRecorderPath = (
   recorder: DrawingRecorder,
   clipPath: Path2D,
-  op: DrawingClipOp = 'intersect',
 ): void => {
   (recorder as MutableDrawingRecorder).state = {
     ...recorder.state,
@@ -192,7 +186,6 @@ export const clipDrawingRecorderPath = (
         kind: 'path',
         path: clipPath as DrawingPath2D,
         transform: recorder.state.transform,
-        op,
       },
     ],
   };

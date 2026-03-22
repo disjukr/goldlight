@@ -29,6 +29,7 @@ import {
   restoreDrawingRecorder,
   saveDrawingRecorder,
   scaleDrawingRecorder,
+  submitDawnCommandBuffer,
   submitDrawingRecorder,
   submitToDawnQueueManager,
   tickDawnQueueManager,
@@ -44,19 +45,13 @@ const createMockGpuContext = () => {
   const finishedCommandBuffers: GPUCommandBuffer[] = [];
   const shaderModules: GPUShaderModuleDescriptor[] = [];
   const renderPipelines: GPURenderPipelineDescriptor[] = [];
-  const bindGroupLayouts: GPUBindGroupLayoutDescriptor[] = [];
-  const pipelineLayouts: GPUPipelineLayoutDescriptor[] = [];
-  const bindGroups: GPUBindGroupDescriptor[] = [];
   const drawCalls: number[] = [];
   const scissorCalls: Array<readonly [number, number, number, number]> = [];
   const stencilReferences: number[] = [];
-  const bindGroupCalls: number[] = [];
-  const workDoneCalls: number[] = [];
+  const submissionDoneResolvers: Array<() => void> = [];
   const mappedBuffers: ArrayBuffer[] = [];
-  const submittedWorkRejecters: Array<(reason?: unknown) => void> = [];
   const offscreenView = { label: 'offscreen-view' } as unknown as GPUTextureView;
   const ticks: number[] = [];
-  const workDoneResolvers: Array<() => void> = [];
 
   return {
     created: {
@@ -68,19 +63,12 @@ const createMockGpuContext = () => {
       finishedCommandBuffers,
       shaderModules,
       renderPipelines,
-      bindGroupLayouts,
-      pipelineLayouts,
-      bindGroups,
       drawCalls,
       scissorCalls,
       stencilReferences,
-      bindGroupCalls,
-      workDoneCalls,
+      submissionDoneResolvers,
       mappedBuffers,
     },
-    ticks,
-    workDoneResolvers,
-    submittedWorkRejecters,
     context: {
       adapter: {
         features: new Set(['bgra8unorm-storage']),
@@ -91,8 +79,6 @@ const createMockGpuContext = () => {
           maxTextureDimension2D: 8192,
           maxColorAttachments: 8,
           maxBufferSize: 1024 * 1024,
-          maxStorageBuffersPerShaderStage: 8,
-          maxStorageBufferBindingSize: 1024 * 1024,
           minUniformBufferOffsetAlignment: 256,
           minStorageBufferOffsetAlignment: 256,
         },
@@ -121,18 +107,6 @@ const createMockGpuContext = () => {
           shaderModules.push(descriptor);
           return { descriptor } as unknown as GPUShaderModule;
         },
-        createBindGroupLayout: (descriptor: GPUBindGroupLayoutDescriptor) => {
-          bindGroupLayouts.push(descriptor);
-          return { descriptor } as unknown as GPUBindGroupLayout;
-        },
-        createPipelineLayout: (descriptor: GPUPipelineLayoutDescriptor) => {
-          pipelineLayouts.push(descriptor);
-          return { descriptor } as unknown as GPUPipelineLayout;
-        },
-        createBindGroup: (descriptor: GPUBindGroupDescriptor) => {
-          bindGroups.push(descriptor);
-          return { descriptor } as unknown as GPUBindGroup;
-        },
         createRenderPipeline: (descriptor: GPURenderPipelineDescriptor) => {
           renderPipelines.push(descriptor);
           return { descriptor } as unknown as GPURenderPipeline;
@@ -146,9 +120,6 @@ const createMockGpuContext = () => {
                 setVertexBuffer: () => undefined,
                 setScissorRect: (x: number, y: number, width: number, height: number) => {
                   scissorCalls.push([x, y, width, height]);
-                },
-                setBindGroup: (index: number) => {
-                  bindGroupCalls.push(index);
                 },
                 setStencilReference: (reference: number) => {
                   stencilReferences.push(reference);
@@ -173,9 +144,8 @@ const createMockGpuContext = () => {
           submitted.push([...commandBuffers]);
         },
         onSubmittedWorkDone: () =>
-          new Promise<void>((resolve, reject) => {
-            workDoneResolvers.push(resolve);
-            submittedWorkRejecters.push(reject);
+          new Promise<void>((resolve) => {
+            submissionDoneResolvers.push(resolve);
           }),
       } as unknown as GPUQueue,
       target: {
@@ -186,6 +156,7 @@ const createMockGpuContext = () => {
         sampleCount: 1,
       } as const,
     },
+    ticks,
   };
 };
 
@@ -228,153 +199,18 @@ Deno.test('dawn shared context exposes resource provider over gpu device', () =>
   assertEquals(mock.created.samplers.length, 1);
 });
 
-Deno.test('dawn shared context owns reusable bind group layouts', () => {
-  const mock = createMockGpuContext();
-  const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
-
-  const firstIntrinsic = sharedContext.getIntrinsicBindGroupLayout();
-  const secondIntrinsic = sharedContext.getIntrinsicBindGroupLayout();
-  const firstTextureSampler = sharedContext.getSingleTextureSamplerBindGroupLayout();
-  const secondTextureSampler = sharedContext.getSingleTextureSamplerBindGroupLayout();
-  const firstPipelineLayout = sharedContext.getPathPipelineLayout();
-  const secondPipelineLayout = sharedContext.getPathPipelineLayout();
-
-  assertEquals(firstIntrinsic === secondIntrinsic, true);
-  assertEquals(firstTextureSampler === secondTextureSampler, true);
-  assertEquals(firstPipelineLayout === secondPipelineLayout, true);
-  assertEquals(mock.created.bindGroupLayouts.length, 2);
-  assertEquals(mock.created.pipelineLayouts.length, 1);
-});
-
-Deno.test('dawn resource provider refreshes intrinsic bind group after target resize', () => {
-  const mock = createMockGpuContext();
-  const backend = createDawnBackendContext(mock.context);
-  const sharedContext = createDawnSharedContext(backend, { resourceBudget: 1024 });
-
-  sharedContext.resourceProvider.getIntrinsicBindGroup();
-  (backend.target as { width: number; height: number }).width = 512;
-  (backend.target as { width: number; height: number }).height = 384;
-  sharedContext.resourceProvider.getIntrinsicBindGroup();
-
-  assertEquals(mock.created.bindGroups.length, 2);
-  assertEquals(
-    [...new Float32Array(mock.created.mappedBuffers[1]!)],
-    [512, 384, 0, 0],
-  );
-});
-
-Deno.test('dawn resource provider caches single texture sampler bind groups', () => {
-  const mock = createMockGpuContext();
-  const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
-  const sampler = sharedContext.resourceProvider.createSampler({ label: 'linear' });
-  const texture = sharedContext.resourceProvider.createTexture({
-    label: 'sampled',
-    size: { width: 16, height: 16, depthOrArrayLayers: 1 },
-    format: 'rgba8unorm',
-    usage: 0x10,
-  });
-  const textureView = texture.createView();
-
-  const firstBindGroup = sharedContext.resourceProvider.getSingleTextureSamplerBindGroup(
-    sampler,
-    textureView,
-  );
-  const secondBindGroup = sharedContext.resourceProvider.getSingleTextureSamplerBindGroup(
-    sampler,
-    textureView,
-  );
-
-  assertEquals(firstBindGroup === secondBindGroup, true);
-  assertEquals(mock.created.bindGroups.length, 1);
-  assertEquals(mock.created.bindGroupLayouts.length, 1);
-});
-
-Deno.test('dawn resource provider reuses canonical samplers', () => {
-  const mock = createMockGpuContext();
-  const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
-
-  const first = sharedContext.resourceProvider.createSampler({
-    magFilter: 'linear',
-    minFilter: 'linear',
-  });
-  const second = sharedContext.resourceProvider.createSampler({
-    minFilter: 'linear',
-    magFilter: 'linear',
-    addressModeU: 'clamp-to-edge',
-    addressModeV: 'clamp-to-edge',
-    addressModeW: 'clamp-to-edge',
-    mipmapFilter: 'nearest',
-  });
-
-  assertEquals(first, second);
-  assertEquals(mock.created.samplers.length, 1);
-});
-
 Deno.test('dawn caps expose feature, format, and sample count policy', () => {
   const mock = createMockGpuContext();
   const caps = createDawnCaps(createDawnBackendContext(mock.context));
 
   assertEquals(caps.preferredCanvasFormat, 'rgba8unorm');
   assertEquals(caps.supportsTimestampQuery, true);
-  assertEquals(caps.supportsStorageBuffers, true);
-  assertEquals(caps.defaultSampleCount, 1);
   assertEquals(caps.limits.maxTextureDimension2D, 8192);
   assertEquals(caps.isFormatRenderable('rgba8unorm'), true);
   assertEquals(caps.getFormatCapabilities('depth24plus').texturable, true);
-  assertEquals(caps.getFormatCapabilities('depth24plus-stencil8').renderable, true);
-  assertEquals(caps.getFormatCapabilities('bgra8unorm').storage, true);
   assertEquals(caps.supportsSampleCount(1), true);
   assertEquals(caps.supportsSampleCount(4), true);
   assertEquals(caps.supportsSampleCount(8), false);
-});
-
-Deno.test('dawn caps gate bgra storage support on enabled device features', () => {
-  const mock = createMockGpuContext();
-  const bgraContext = {
-    ...mock.context,
-    adapter: {
-      features: new Set<string>(),
-    } as unknown as GPUAdapter,
-    target: {
-      ...mock.context.target,
-      format: 'bgra8unorm',
-    } as const,
-    device: {
-      ...mock.context.device,
-      features: new Set(['timestamp-query']),
-    } as unknown as GPUDevice,
-  };
-
-  const caps = createDawnCaps(createDawnBackendContext(bgraContext));
-
-  assertEquals(caps.getFormatCapabilities('bgra8unorm').storage, false);
-  assertEquals(caps.supportsStorageBuffers, true);
-});
-
-Deno.test('dawn caps keep storage support conservative when limits are missing', () => {
-  const mock = createMockGpuContext();
-  const backend = createDawnBackendContext({
-    ...mock.context,
-    adapter: {
-      features: new Set<string>(),
-    } as unknown as GPUAdapter,
-    device: {
-      ...mock.context.device,
-      features: new Set<string>(),
-      limits: {
-        maxTextureDimension2D: 4096,
-        maxColorAttachments: 8,
-        maxBufferSize: 1024 * 1024,
-        minUniformBufferOffsetAlignment: 256,
-        minStorageBufferOffsetAlignment: 256,
-      },
-    } as unknown as GPUDevice,
-  });
-  const caps = createDawnCaps(backend);
-
-  assertEquals(caps.supportsStorageBuffers, false);
-  assertEquals(caps.getFormatCapabilities('rgba8unorm').storage, false);
-  assertEquals(caps.getFormatCapabilities('bgra8unorm').storage, false);
 });
 
 Deno.test('drawing recorder records transform and clip state into draw commands', () => {
@@ -423,39 +259,9 @@ Deno.test('drawing recorder records transform and clip state into draw commands'
     throw new Error('expected rect clip');
   }
   assertEquals(first.clips[0].rect, createRect(20, 30, 40, 50));
-  assertEquals(first.clips[0].op, 'intersect');
   assertEquals(second.transform, identityMatrix2D);
   assertEquals(second.clips.length, 0);
   assertEquals(first.path.verbs[0], { kind: 'moveTo', to: [1, 1] });
-});
-
-Deno.test('drawing recorder stores difference clip operations in recorded commands', () => {
-  const mock = createMockGpuContext();
-  const recorder = createDrawingRecorder(
-    createDawnSharedContext(createDawnBackendContext(mock.context)),
-  );
-
-  clipDrawingRecorderRect(recorder, createRect(0, 0, 120, 120), 'intersect');
-  clipDrawingRecorderRect(recorder, createRect(0, 0, 24, 120), 'difference');
-  recordDrawPath(
-    recorder,
-    createPath2D(
-      { kind: 'moveTo', to: [0, 0] },
-      { kind: 'lineTo', to: [120, 0] },
-      { kind: 'lineTo', to: [120, 120] },
-      { kind: 'lineTo', to: [0, 120] },
-      { kind: 'close' },
-    ),
-    { style: 'fill' },
-  );
-
-  const recording = finishDrawingRecorder(recorder);
-  const command = recording.commands[0];
-  assertEquals(command?.kind, 'drawPath');
-  if (command?.kind !== 'drawPath') {
-    throw new Error('expected drawPath');
-  }
-  assertEquals(command.clips.map((clip) => clip.op), ['intersect', 'difference']);
 });
 
 Deno.test('drawing recorder supports explicit transform concatenation', () => {
@@ -588,37 +394,6 @@ Deno.test('drawing prepared recording flattens quadratic and cubic paths for fil
   assertEquals((draw?.patches.length ?? 0) > 0, true);
 });
 
-Deno.test('drawing prepared recording annotates fill wedges with curve metadata and resolve level', () => {
-  const mock = createMockGpuContext();
-  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
-  const recorder = drawingContext.createRecorder();
-
-  recordDrawPath(
-    recorder,
-    createPath2D(
-      { kind: 'moveTo', to: [24, 96] },
-      { kind: 'quadTo', control: [96, 24], to: [168, 96] },
-      { kind: 'lineTo', to: [24, 144] },
-      { kind: 'close' },
-    ),
-    { style: 'fill' },
-  );
-
-  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
-  const draw = prepared.passes[0]?.steps[0]?.draw;
-  const wedge = draw?.kind === 'pathFill'
-    ? draw.patches.find((patch) => patch.kind === 'wedge' && patch.curveKind === 'quadratic')
-    : undefined;
-
-  assertEquals(draw?.kind, 'pathFill');
-  assertEquals(Boolean(wedge), true);
-  if (!wedge || wedge.kind !== 'wedge') {
-    throw new Error('expected quadratic wedge patch');
-  }
-  assertEquals(wedge.resolveLevel > 0, true);
-  assertEquals(wedge.points[2], wedge.points[3]);
-});
-
 Deno.test('drawing prepared recording flattens conic and arc verbs', () => {
   const mock = createMockGpuContext();
   const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
@@ -673,66 +448,6 @@ Deno.test('drawing prepared recording splits cusp-like cubic patches', () => {
     (draw?.patches.filter((patch) => patch.kind === 'cubic').length ?? 0) >= 1,
     true,
   );
-});
-
-Deno.test('drawing prepared recording scales curve resolve level with curve size', () => {
-  const mock = createMockGpuContext();
-  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
-
-  const resolveLevelFor = (
-    control1: readonly [number, number],
-    control2: readonly [number, number],
-  ) => {
-    const recorder = drawingContext.createRecorder();
-    recordDrawPath(
-      recorder,
-      createPath2D(
-        { kind: 'moveTo', to: [0, 0] },
-        { kind: 'cubicTo', control1, control2, to: [128, 0] },
-      ),
-      { style: 'stroke', strokeWidth: 6 },
-    );
-    const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
-    const draw = prepared.passes[0]?.steps[0]?.draw;
-    if (draw?.kind !== 'pathStroke') {
-      throw new Error('expected pathStroke draw');
-    }
-    const cubic = draw.patches.find((patch) => patch.kind === 'cubic');
-    if (!cubic || cubic.kind !== 'cubic') {
-      throw new Error('expected cubic patch');
-    }
-    return cubic.resolveLevel;
-  };
-
-  const low = resolveLevelFor([32, 4], [96, -4]);
-  const high = resolveLevelFor([32, 96], [96, -96]);
-
-  assertEquals(high > low, true);
-});
-
-Deno.test('drawing prepared recording pre-chops large cubic patches to stay within resolve limit', () => {
-  const mock = createMockGpuContext();
-  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
-  const recorder = drawingContext.createRecorder();
-
-  recordDrawPath(
-    recorder,
-    createPath2D(
-      { kind: 'moveTo', to: [0, 0] },
-      { kind: 'cubicTo', control1: [0, 1024], control2: [1024, -1024], to: [1024, 0] },
-    ),
-    { style: 'stroke', strokeWidth: 10 },
-  );
-
-  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
-  const draw = prepared.passes[0]?.steps[0]?.draw;
-  if (draw?.kind !== 'pathStroke') {
-    throw new Error('expected pathStroke draw');
-  }
-
-  const cubics = draw.patches.filter((patch) => patch.kind === 'cubic');
-  assertEquals(cubics.length > 1, true);
-  assertEquals(cubics.every((patch) => patch.kind === 'cubic' && patch.resolveLevel <= 5), true);
 });
 
 Deno.test('drawing prepared recording preserves evenodd fill rule through draw step metadata', () => {
@@ -837,38 +552,7 @@ Deno.test('drawing prepared recording accumulates clip stack intersections', () 
   assertEquals(prepared.passes[0]?.steps[0]?.clipRect, createRect(32, 32, 48, 40));
 });
 
-Deno.test('drawing prepared recording subtracts convex difference clips from geometry and scissor', () => {
-  const mock = createMockGpuContext();
-  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
-  const recorder = drawingContext.createRecorder();
-
-  clipDrawingRecorderRect(recorder, createRect(0, 0, 120, 120));
-  clipDrawingRecorderRect(recorder, createRect(0, 0, 24, 120), 'difference');
-  recordDrawPath(
-    recorder,
-    createPath2D(
-      { kind: 'moveTo', to: [0, 0] },
-      { kind: 'lineTo', to: [120, 0] },
-      { kind: 'lineTo', to: [120, 120] },
-      { kind: 'lineTo', to: [0, 120] },
-      { kind: 'close' },
-    ),
-    { style: 'fill' },
-  );
-
-  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
-  const draw = prepared.passes[0]?.steps[0]?.draw;
-
-  assertEquals(prepared.passes[0]?.steps[0]?.clipRect, createRect(24, 0, 96, 120));
-  assertEquals(draw?.kind, 'pathFill');
-  if (draw?.kind !== 'pathFill') {
-    throw new Error('expected pathFill');
-  }
-  assertEquals(draw.triangles.every((point) => point[0] >= 24 - 1e-5), true);
-  assertEquals(draw.fringeVertices?.every((vertex) => vertex.point[0] >= 24 - 1e-5), true);
-});
-
-Deno.test('drawing prepared recording rejects non-convex difference clip paths for now', () => {
+Deno.test('drawing prepared recording preserves multiple complex path clips for stencil replay', () => {
   const mock = createMockGpuContext();
   const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
   const recorder = drawingContext.createRecorder();
@@ -877,128 +561,30 @@ Deno.test('drawing prepared recording rejects non-convex difference clip paths f
     recorder,
     createPath2D(
       { kind: 'moveTo', to: [16, 16] },
-      { kind: 'lineTo', to: [64, 64] },
-      { kind: 'lineTo', to: [16, 64] },
-      { kind: 'lineTo', to: [64, 16] },
-      { kind: 'close' },
-    ),
-    'difference',
-  );
-  recordDrawPath(
-    recorder,
-    createPath2D(
-      { kind: 'moveTo', to: [0, 0] },
-      { kind: 'lineTo', to: [96, 0] },
+      { kind: 'lineTo', to: [96, 16] },
       { kind: 'lineTo', to: [96, 96] },
-      { kind: 'lineTo', to: [0, 96] },
+      { kind: 'lineTo', to: [16, 96] },
+      { kind: 'close' },
+      { kind: 'moveTo', to: [32, 32] },
+      { kind: 'lineTo', to: [80, 32] },
+      { kind: 'lineTo', to: [80, 80] },
+      { kind: 'lineTo', to: [32, 80] },
       { kind: 'close' },
     ),
-    { style: 'fill' },
   );
-
-  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
-  assertEquals(prepared.passes[0]?.steps.length, 0);
-  assertEquals(prepared.unsupportedCommands.length, 1);
-});
-
-Deno.test('drawing prepared recording preserves multiple complex clip paths in stencil order', () => {
-  const mock = createMockGpuContext();
-  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
-  const recorder = drawingContext.createRecorder();
-
-  clipDrawingRecorderPath(
-    recorder,
-    withPath2DFillRule(
-      createPath2D(
-        { kind: 'moveTo', to: [16, 16] },
-        { kind: 'lineTo', to: [112, 16] },
-        { kind: 'lineTo', to: [112, 112] },
-        { kind: 'lineTo', to: [16, 112] },
-        { kind: 'close' },
-        { kind: 'moveTo', to: [40, 40] },
-        { kind: 'lineTo', to: [88, 40] },
-        { kind: 'lineTo', to: [88, 88] },
-        { kind: 'lineTo', to: [40, 88] },
-        { kind: 'close' },
-      ),
-      'evenodd',
-    ),
-  );
-  clipDrawingRecorderPath(
-    recorder,
-    withPath2DFillRule(
-      createPath2D(
-        { kind: 'moveTo', to: [32, 24] },
-        { kind: 'lineTo', to: [120, 24] },
-        { kind: 'lineTo', to: [120, 120] },
-        { kind: 'lineTo', to: [32, 120] },
-        { kind: 'close' },
-        { kind: 'moveTo', to: [56, 48] },
-        { kind: 'lineTo', to: [104, 48] },
-        { kind: 'lineTo', to: [104, 96] },
-        { kind: 'lineTo', to: [56, 96] },
-        { kind: 'close' },
-      ),
-      'evenodd',
-    ),
-  );
-  recordDrawPath(
-    recorder,
-    createPath2D(
-      { kind: 'moveTo', to: [0, 0] },
-      { kind: 'lineTo', to: [128, 0] },
-      { kind: 'lineTo', to: [128, 128] },
-      { kind: 'lineTo', to: [0, 128] },
-      { kind: 'close' },
-    ),
-    { style: 'fill' },
-  );
-
-  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
-  const draw = prepared.passes[0]?.steps[0]?.draw;
-  assertEquals(draw?.kind, 'pathFill');
-  if (draw?.kind !== 'pathFill') {
-    throw new Error('expected pathFill draw');
-  }
-  assertEquals(draw.usesStencil, true);
-  assertEquals(draw.clips?.length, 2);
-  assertEquals(prepared.passes[0]?.steps[0]?.pipelineKeys, [
-    'clip-stencil-write',
-    'path-fill-clip-cover',
-  ]);
-  assertEquals(prepared.passes[0]?.steps[0]?.clipRect, createRect(32, 24, 80, 88));
-});
-
-Deno.test('drawing prepared recording clips complex stencil clip by prior convex clips', () => {
-  const mock = createMockGpuContext();
-  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
-  const recorder = drawingContext.createRecorder();
-
   clipDrawingRecorderPath(
     recorder,
     createPath2D(
-      { kind: 'moveTo', to: [32, 24] },
-      { kind: 'lineTo', to: [80, 48] },
-      { kind: 'lineTo', to: [32, 72] },
+      { kind: 'moveTo', to: [40, 8] },
+      { kind: 'lineTo', to: [104, 56] },
+      { kind: 'lineTo', to: [40, 104] },
+      { kind: 'lineTo', to: [8, 56] },
       { kind: 'close' },
-    ),
-  );
-  clipDrawingRecorderPath(
-    recorder,
-    withPath2DFillRule(
-      createPath2D(
-        { kind: 'moveTo', to: [16, 16] },
-        { kind: 'lineTo', to: [96, 16] },
-        { kind: 'lineTo', to: [96, 80] },
-        { kind: 'lineTo', to: [16, 80] },
-        { kind: 'close' },
-        { kind: 'moveTo', to: [40, 32] },
-        { kind: 'lineTo', to: [72, 32] },
-        { kind: 'lineTo', to: [72, 64] },
-        { kind: 'lineTo', to: [40, 64] },
-        { kind: 'close' },
-      ),
-      'evenodd',
+      { kind: 'moveTo', to: [40, 32] },
+      { kind: 'lineTo', to: [72, 56] },
+      { kind: 'lineTo', to: [40, 80] },
+      { kind: 'lineTo', to: [24, 56] },
+      { kind: 'close' },
     ),
   );
   recordDrawPath(
@@ -1015,167 +601,15 @@ Deno.test('drawing prepared recording clips complex stencil clip by prior convex
 
   const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
   const draw = prepared.passes[0]?.steps[0]?.draw;
+
   assertEquals(draw?.kind, 'pathFill');
   if (draw?.kind !== 'pathFill') {
     throw new Error('expected pathFill draw');
   }
   assertEquals(draw.usesStencil, true);
-  assertEquals(
-    draw.clips?.[0]?.triangles.every((point) =>
-      point[0] >= 32 && point[0] <= 80 && point[1] >= 24 && point[1] <= 72
-    ),
-    true,
-  );
-});
-
-Deno.test('drawing prepared recording clips fill AA fringe against convex clip stack', () => {
-  const mock = createMockGpuContext();
-  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
-  const recorder = drawingContext.createRecorder();
-
-  clipDrawingRecorderRect(recorder, createRect(60, 24, 20, 48));
-  recordDrawPath(
-    recorder,
-    createPath2D(
-      { kind: 'moveTo', to: [24, 24] },
-      { kind: 'lineTo', to: [72, 24] },
-      { kind: 'lineTo', to: [72, 72] },
-      { kind: 'lineTo', to: [24, 72] },
-      { kind: 'close' },
-    ),
-    { style: 'fill' },
-  );
-
-  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
-  const draw = prepared.passes[0]?.steps[0]?.draw;
-  assertEquals(draw?.kind, 'pathFill');
-  if (draw?.kind !== 'pathFill') {
-    throw new Error('expected pathFill draw');
-  }
-  assertEquals((draw.fringeVertices?.length ?? 0) > 0, true);
-  assertEquals(
-    draw.fringeVertices?.every((vertex) =>
-      vertex.point[0] >= 60 && vertex.point[0] <= 80 && vertex.point[1] >= 24 &&
-      vertex.point[1] <= 72
-    ),
-    true,
-  );
-});
-
-Deno.test('drawing prepared recording clips stroke AA fringe to convex clip bounds', () => {
-  const mock = createMockGpuContext();
-  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
-  const recorder = drawingContext.createRecorder();
-
-  clipDrawingRecorderRect(recorder, createRect(40, 40, 40, 40));
-  recordDrawPath(
-    recorder,
-    createPath2D(
-      { kind: 'moveTo', to: [16, 60] },
-      { kind: 'lineTo', to: [112, 60] },
-    ),
-    { style: 'stroke', strokeWidth: 10 },
-  );
-
-  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
-  const draw = prepared.passes[0]?.steps[0]?.draw;
-  assertEquals(draw?.kind, 'pathStroke');
-  assertEquals(
-    draw?.fringeVertices?.every((vertex) =>
-      vertex.point[0] >= 40 && vertex.point[0] <= 80 && vertex.point[1] >= 40 &&
-      vertex.point[1] <= 80
-    ),
-    true,
-  );
-});
-
-Deno.test('drawing prepared recording falls back to direct fill geometry under convex clip stacks', () => {
-  const mock = createMockGpuContext();
-  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
-  const recorder = drawingContext.createRecorder();
-
-  clipDrawingRecorderPath(
-    recorder,
-    createPath2D(
-      { kind: 'moveTo', to: [32, 32] },
-      { kind: 'lineTo', to: [96, 32] },
-      { kind: 'lineTo', to: [96, 96] },
-      { kind: 'lineTo', to: [32, 96] },
-      { kind: 'close' },
-    ),
-  );
-  recordDrawPath(
-    recorder,
-    createPath2D(
-      { kind: 'moveTo', to: [24, 96] },
-      { kind: 'quadTo', control: [96, 24], to: [168, 96] },
-      { kind: 'cubicTo', control1: [192, 120], control2: [96, 180], to: [24, 144] },
-      { kind: 'close' },
-    ),
-    { style: 'fill' },
-  );
-
-  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
-  const draw = prepared.passes[0]?.steps[0]?.draw;
-  const step = prepared.passes[0]?.steps[0];
-  assertEquals(draw?.kind, 'pathFill');
-  assertEquals(draw?.renderer, 'direct-triangles');
-  assertEquals(step?.pipelineKeys, ['path-fill-cover']);
-});
-
-Deno.test('drawing prepared recording tightens fill bounds after convex clip application', () => {
-  const mock = createMockGpuContext();
-  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
-  const recorder = drawingContext.createRecorder();
-
-  clipDrawingRecorderRect(recorder, createRect(32, 32, 48, 48));
-  recordDrawPath(
-    recorder,
-    createPath2D(
-      { kind: 'moveTo', to: [0, 0] },
-      { kind: 'lineTo', to: [128, 0] },
-      { kind: 'lineTo', to: [128, 128] },
-      { kind: 'lineTo', to: [0, 128] },
-      { kind: 'close' },
-    ),
-    { style: 'fill' },
-  );
-
-  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
-  const draw = prepared.passes[0]?.steps[0]?.draw;
-  assertEquals(draw?.bounds, createRect(32, 32, 48, 48));
-});
-
-Deno.test('drawing prepared recording falls back to direct stroke geometry under convex clip stacks', () => {
-  const mock = createMockGpuContext();
-  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
-  const recorder = drawingContext.createRecorder();
-
-  clipDrawingRecorderPath(
-    recorder,
-    createPath2D(
-      { kind: 'moveTo', to: [32, 32] },
-      { kind: 'lineTo', to: [96, 32] },
-      { kind: 'lineTo', to: [96, 96] },
-      { kind: 'lineTo', to: [32, 96] },
-      { kind: 'close' },
-    ),
-  );
-  recordDrawPath(
-    recorder,
-    createPath2D(
-      { kind: 'moveTo', to: [32, 96] },
-      { kind: 'cubicTo', control1: [48, 16], control2: [144, 16], to: [160, 96] },
-    ),
-    { style: 'stroke', strokeWidth: 8 },
-  );
-
-  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
-  const draw = prepared.passes[0]?.steps[0]?.draw;
-  const step = prepared.passes[0]?.steps[0];
-  assertEquals(draw?.kind, 'pathStroke');
-  assertEquals(draw?.patches.length, 0);
-  assertEquals(step?.pipelineKeys, ['path-stroke-cover']);
+  assertEquals(draw.clip?.triangleRuns?.length, 2);
+  assertEquals((draw.clip?.triangleRuns?.[0]?.length ?? 0) > 0, true);
+  assertEquals((draw.clip?.triangleRuns?.[1]?.length ?? 0) > 0, true);
 });
 
 Deno.test('drawing prepared recording falls back for self-intersecting fill paths', () => {
@@ -1286,48 +720,6 @@ Deno.test('drawing prepared recording scales hairline alpha coverage', () => {
   assertEquals(draw?.color, [0.4, 0.6, 0.8, 0.5]);
 });
 
-Deno.test('drawing prepared recording keeps zero-length round-cap strokes visible', () => {
-  const mock = createMockGpuContext();
-  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
-  const recorder = drawingContext.createRecorder();
-
-  recordDrawPath(
-    recorder,
-    createPath2D(
-      { kind: 'moveTo', to: [64, 64] },
-      { kind: 'lineTo', to: [64, 64] },
-    ),
-    { style: 'stroke', strokeWidth: 10, strokeCap: 'round' },
-  );
-
-  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
-  const draw = prepared.passes[0]?.steps[0]?.draw;
-  assertEquals(draw?.kind, 'pathStroke');
-  assertEquals((draw?.triangles.length ?? 0) > 0, true);
-  assertEquals((draw?.fringeVertices?.length ?? 0) > 0, true);
-});
-
-Deno.test('drawing prepared recording keeps zero-length square-cap strokes visible', () => {
-  const mock = createMockGpuContext();
-  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
-  const recorder = drawingContext.createRecorder();
-
-  recordDrawPath(
-    recorder,
-    createPath2D(
-      { kind: 'moveTo', to: [80, 80] },
-      { kind: 'close' },
-    ),
-    { style: 'stroke', strokeWidth: 12, strokeCap: 'square' },
-  );
-
-  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
-  const draw = prepared.passes[0]?.steps[0]?.draw;
-  assertEquals(draw?.kind, 'pathStroke');
-  assertEquals((draw?.triangles.length ?? 0) > 0, true);
-  assertEquals(draw?.bounds.origin, [74, 74]);
-  assertEquals(draw?.bounds.size, { width: 12, height: 12 });
-});
 Deno.test('dawn command buffer encodes fill draws with stencil and cover pipelines', () => {
   const mock = createMockGpuContext();
   const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
@@ -1361,16 +753,14 @@ Deno.test('dawn command buffer encodes fill draws with stencil and cover pipelin
   assertEquals(mock.created.renderPipelines.length, 1);
   assertEquals(mock.created.drawCalls.length, 2);
   assertEquals(mock.created.renderPasses[0]?.depthStencilAttachment, undefined);
-  assertEquals(mock.created.scissorCalls[0], [4, 6, 36, 34]);
-  assertEquals(mock.created.bindGroupCalls, [0]);
-  assertEquals(mock.created.bindGroups.length, 1);
+  assertEquals(mock.created.scissorCalls[0], [4, 6, 40, 50]);
   assertEquals(
     mock.created.renderPasses[0]?.colorAttachments[0]?.clearValue,
     { r: 0.25, g: 0.5, b: 0.75, a: 1 },
   );
 });
 
-Deno.test('dawn command buffer clips convex clip paths directly before replay', () => {
+Deno.test('dawn command buffer clips via clip path bounds fallback', () => {
   const mock = createMockGpuContext();
   const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
   const recorder = createDrawingRecorder(sharedContext);
@@ -1400,40 +790,45 @@ Deno.test('dawn command buffer clips convex clip paths directly before replay', 
 
   encodeDawnCommandBuffer(sharedContext, finishDrawingRecorder(recorder), binding);
   assertEquals(mock.created.scissorCalls[0], [24, 30, 48, 48]);
-  assertEquals(mock.created.drawCalls.length, 1);
+  assertEquals(mock.created.drawCalls.length, 2);
 });
 
-Deno.test('dawn command buffer intersects scissor with draw bounds', () => {
+Deno.test('dawn command buffer accumulates multiple stencil clip paths before color draw', () => {
   const mock = createMockGpuContext();
   const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
   const recorder = createDrawingRecorder(sharedContext);
   const binding = createOffscreenBinding(mock.context);
 
-  clipDrawingRecorderRect(recorder, createRect(0, 0, 96, 96));
-  recordDrawPath(
+  clipDrawingRecorderPath(
     recorder,
     createPath2D(
-      { kind: 'moveTo', to: [40, 40] },
-      { kind: 'lineTo', to: [64, 40] },
-      { kind: 'lineTo', to: [64, 64] },
-      { kind: 'lineTo', to: [40, 64] },
+      { kind: 'moveTo', to: [16, 16] },
+      { kind: 'lineTo', to: [96, 16] },
+      { kind: 'lineTo', to: [96, 96] },
+      { kind: 'lineTo', to: [16, 96] },
+      { kind: 'close' },
+      { kind: 'moveTo', to: [32, 32] },
+      { kind: 'lineTo', to: [80, 32] },
+      { kind: 'lineTo', to: [80, 80] },
+      { kind: 'lineTo', to: [32, 80] },
       { kind: 'close' },
     ),
-    { style: 'fill' },
   );
-
-  encodeDawnCommandBuffer(sharedContext, finishDrawingRecorder(recorder), binding);
-  assertEquals(mock.created.scissorCalls[0], [40, 40, 24, 24]);
-});
-
-Deno.test('dawn command buffer tightens scissor after exact difference subtraction', () => {
-  const mock = createMockGpuContext();
-  const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
-  const recorder = createDrawingRecorder(sharedContext);
-  const binding = createOffscreenBinding(mock.context);
-
-  clipDrawingRecorderRect(recorder, createRect(0, 0, 120, 120));
-  clipDrawingRecorderRect(recorder, createRect(0, 0, 24, 120), 'difference');
+  clipDrawingRecorderPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [40, 8] },
+      { kind: 'lineTo', to: [104, 56] },
+      { kind: 'lineTo', to: [40, 104] },
+      { kind: 'lineTo', to: [8, 56] },
+      { kind: 'close' },
+      { kind: 'moveTo', to: [40, 32] },
+      { kind: 'lineTo', to: [72, 56] },
+      { kind: 'lineTo', to: [40, 80] },
+      { kind: 'lineTo', to: [24, 56] },
+      { kind: 'close' },
+    ),
+  );
   recordDrawPath(
     recorder,
     createPath2D(
@@ -1446,111 +841,16 @@ Deno.test('dawn command buffer tightens scissor after exact difference subtracti
     { style: 'fill' },
   );
 
-  encodeDawnCommandBuffer(sharedContext, finishDrawingRecorder(recorder), binding);
-  assertEquals(mock.created.scissorCalls[0], [24, 0, 96, 120]);
-});
-
-Deno.test('dawn command buffer intersects multiple clip paths through stencil references', () => {
-  const mock = createMockGpuContext();
-  const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
-  const recorder = createDrawingRecorder(sharedContext);
-  const binding = createOffscreenBinding(mock.context);
-
-  clipDrawingRecorderPath(
-    recorder,
-    withPath2DFillRule(
-      createPath2D(
-        { kind: 'moveTo', to: [16, 16] },
-        { kind: 'lineTo', to: [112, 16] },
-        { kind: 'lineTo', to: [112, 112] },
-        { kind: 'lineTo', to: [16, 112] },
-        { kind: 'close' },
-        { kind: 'moveTo', to: [40, 40] },
-        { kind: 'lineTo', to: [88, 40] },
-        { kind: 'lineTo', to: [88, 88] },
-        { kind: 'lineTo', to: [40, 88] },
-        { kind: 'close' },
-      ),
-      'evenodd',
-    ),
-  );
-  clipDrawingRecorderPath(
-    recorder,
-    withPath2DFillRule(
-      createPath2D(
-        { kind: 'moveTo', to: [32, 24] },
-        { kind: 'lineTo', to: [120, 24] },
-        { kind: 'lineTo', to: [120, 120] },
-        { kind: 'lineTo', to: [32, 120] },
-        { kind: 'close' },
-        { kind: 'moveTo', to: [56, 48] },
-        { kind: 'lineTo', to: [104, 48] },
-        { kind: 'lineTo', to: [104, 96] },
-        { kind: 'lineTo', to: [56, 96] },
-        { kind: 'close' },
-      ),
-      'evenodd',
-    ),
-  );
-  recordDrawPath(
-    recorder,
-    createPath2D(
-      { kind: 'moveTo', to: [0, 0] },
-      { kind: 'lineTo', to: [128, 0] },
-      { kind: 'lineTo', to: [128, 128] },
-      { kind: 'lineTo', to: [0, 128] },
-      { kind: 'close' },
-    ),
-    { style: 'fill' },
-  );
-
-  encodeDawnCommandBuffer(sharedContext, finishDrawingRecorder(recorder), binding);
-
-  assertEquals(mock.created.renderPasses.length, 1);
-  assertEquals(mock.created.renderPipelines.length, 3);
-  assertEquals(mock.created.drawCalls.length, 4);
-  assertEquals(mock.created.stencilReferences, [1, 2, 2]);
-  assertEquals(mock.created.scissorCalls[0], [32, 24, 80, 88]);
-  assertEquals(mock.created.renderPasses[0]?.depthStencilAttachment !== undefined, true);
-});
-
-Deno.test('dawn command buffer batches consecutive non-stencil draws into one render pass', () => {
-  const mock = createMockGpuContext();
-  const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
-  const recorder = createDrawingRecorder(sharedContext);
-  const binding = createOffscreenBinding(mock.context);
-
-  recordClear(recorder, [0.1, 0.2, 0.3, 1]);
-  recordDrawPath(
-    recorder,
-    createPath2D(
-      { kind: 'moveTo', to: [0, 0] },
-      { kind: 'lineTo', to: [32, 0] },
-      { kind: 'lineTo', to: [32, 32] },
-      { kind: 'close' },
-    ),
-    { style: 'fill' },
-  );
-  recordDrawPath(
-    recorder,
-    createPath2D(
-      { kind: 'moveTo', to: [48, 48] },
-      { kind: 'lineTo', to: [96, 48] },
-      { kind: 'lineTo', to: [96, 96] },
-      { kind: 'close' },
-    ),
-    { style: 'stroke', strokeWidth: 4 },
-  );
-
   const commandBuffer = encodeDawnCommandBuffer(
     sharedContext,
     finishDrawingRecorder(recorder),
     binding,
   );
 
-  assertEquals(commandBuffer.passCount, 1);
+  assertEquals(commandBuffer.unsupportedCommands.length, 0);
   assertEquals(mock.created.renderPasses.length, 1);
   assertEquals(mock.created.drawCalls.length, 4);
+  assertEquals(mock.created.stencilReferences, [0, 2]);
 });
 
 Deno.test('dawn command buffer encodes stroke draws without stencil', () => {
@@ -1581,7 +881,7 @@ Deno.test('dawn command buffer encodes stroke draws without stencil', () => {
   assertEquals(mock.created.drawCalls.length, 2);
 });
 
-Deno.test('dawn command buffer batches consecutive non-stencil draws into one pass', () => {
+Deno.test('dawn command buffer batches consecutive non-stencil draws into one render pass', () => {
   const mock = createMockGpuContext();
   const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
   const recorder = createDrawingRecorder(sharedContext);
@@ -1593,19 +893,21 @@ Deno.test('dawn command buffer batches consecutive non-stencil draws into one pa
       { kind: 'moveTo', to: [16, 16] },
       { kind: 'lineTo', to: [64, 16] },
       { kind: 'lineTo', to: [64, 64] },
+      { kind: 'lineTo', to: [16, 64] },
       { kind: 'close' },
     ),
-    { style: 'fill', color: [1, 0, 0, 1] },
+    { style: 'fill' },
   );
   recordDrawPath(
     recorder,
     createPath2D(
-      { kind: 'moveTo', to: [96, 96] },
-      { kind: 'lineTo', to: [144, 96] },
-      { kind: 'lineTo', to: [144, 144] },
+      { kind: 'moveTo', to: [96, 16] },
+      { kind: 'lineTo', to: [160, 16] },
+      { kind: 'lineTo', to: [160, 80] },
+      { kind: 'lineTo', to: [96, 80] },
       { kind: 'close' },
     ),
-    { style: 'fill', color: [0, 0, 1, 1] },
+    { style: 'stroke', strokeWidth: 6 },
   );
 
   const commandBuffer = encodeDawnCommandBuffer(
@@ -1616,82 +918,7 @@ Deno.test('dawn command buffer batches consecutive non-stencil draws into one pa
 
   assertEquals(commandBuffer.passCount, 1);
   assertEquals(mock.created.renderPasses.length, 1);
-  assertEquals(mock.created.bindGroupCalls, [0]);
   assertEquals(mock.created.drawCalls.length, 4);
-});
-
-Deno.test('dawn command buffer resets scissor between batched non-stencil steps', () => {
-  const mock = createMockGpuContext();
-  const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
-  const recorder = createDrawingRecorder(sharedContext);
-  const binding = createOffscreenBinding(mock.context);
-
-  saveDrawingRecorder(recorder);
-  clipDrawingRecorderRect(recorder, createRect(8, 10, 24, 28));
-  recordDrawPath(
-    recorder,
-    createPath2D(
-      { kind: 'moveTo', to: [0, 0] },
-      { kind: 'lineTo', to: [32, 0] },
-      { kind: 'lineTo', to: [32, 32] },
-      { kind: 'lineTo', to: [0, 32] },
-      { kind: 'close' },
-    ),
-    { style: 'fill' },
-  );
-  restoreDrawingRecorder(recorder);
-  recordDrawPath(
-    recorder,
-    createPath2D(
-      { kind: 'moveTo', to: [40, 40] },
-      { kind: 'lineTo', to: [72, 40] },
-      { kind: 'lineTo', to: [72, 72] },
-      { kind: 'lineTo', to: [40, 72] },
-      { kind: 'close' },
-    ),
-    { style: 'fill' },
-  );
-
-  const commandBuffer = encodeDawnCommandBuffer(
-    sharedContext,
-    finishDrawingRecorder(recorder),
-    binding,
-  );
-
-  assertEquals(commandBuffer.passCount, 1);
-  assertEquals(mock.created.renderPasses.length, 1);
-  assertEquals(mock.created.scissorCalls[0], [8, 10, 24, 22]);
-  assertEquals(mock.created.scissorCalls[1], [0, 0, 256, 256]);
-  assertEquals(mock.created.drawCalls.length, 4);
-});
-
-Deno.test('dawn command buffer sizes patch draws from max resolve level in the batch', () => {
-  const createStrokeDrawCount = (
-    control1: readonly [number, number],
-    control2: readonly [number, number],
-  ) => {
-    const mock = createMockGpuContext();
-    const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
-    const recorder = createDrawingRecorder(sharedContext);
-    const binding = createOffscreenBinding(mock.context);
-
-    recordDrawPath(
-      recorder,
-      createPath2D(
-        { kind: 'moveTo', to: [32, 96] },
-        { kind: 'cubicTo', control1, control2, to: [160, 96] },
-      ),
-      { style: 'stroke', strokeWidth: 8, color: [0.2, 0.4, 0.8, 1] },
-    );
-
-    encodeDawnCommandBuffer(sharedContext, finishDrawingRecorder(recorder), binding);
-    return mock.created.drawCalls[0] ?? 0;
-  };
-
-  const small = createStrokeDrawCount([48, 88], [144, 88]);
-  const large = createStrokeDrawCount([48, 0], [144, 192]);
-
-  assertEquals(large > small, true);
 });
 
 Deno.test('dawn resource provider reuses pipelines across command buffers', () => {
@@ -1755,44 +982,8 @@ Deno.test('dawn pipelines honor target sample count for MSAA', () => {
   assertEquals(mock.created.renderPipelines[0]?.multisample?.count, 4);
 });
 
-Deno.test('dawn command buffer uses intrinsic uniform bind group for viewport transforms', () => {
+Deno.test('dawn queue manager tracks explicit submitted-work completion', async () => {
   const mock = createMockGpuContext();
-  const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
-  const recorder = createDrawingRecorder(sharedContext);
-  const binding = createOffscreenBinding(mock.context);
-
-  recordDrawPath(
-    recorder,
-    createPath2D(
-      { kind: 'moveTo', to: [16, 24] },
-      { kind: 'lineTo', to: [48, 24] },
-      { kind: 'lineTo', to: [48, 56] },
-      { kind: 'close' },
-    ),
-    { style: 'fill', color: [1, 0, 0, 1] },
-  );
-
-  encodeDawnCommandBuffer(sharedContext, finishDrawingRecorder(recorder), binding);
-
-  assertEquals(mock.created.bindGroupLayouts.length, 1);
-  assertEquals(mock.created.pipelineLayouts.length, 1);
-  assertEquals(mock.created.bindGroups.length, 1);
-  assertEquals(
-    [...new Float32Array(mock.created.mappedBuffers[0]!)],
-    [256, 256, 0, 0],
-  );
-  assertEquals(
-    [...new Float32Array(mock.created.mappedBuffers[1]!).slice(0, 6)],
-    [16, 24, 1, 0, 0, 1],
-  );
-});
-
-Deno.test('dawn queue manager tracks submit and tick completion', async () => {
-  const mock = createMockGpuContext();
-  mock.context.queue.onSubmittedWorkDone = () => {
-    mock.created.workDoneCalls.push(1);
-    return Promise.resolve(undefined);
-  };
   const backend = createDawnBackendContext(mock.context, {
     tick: () => {
       mock.ticks.push(1);
@@ -1813,25 +1004,45 @@ Deno.test('dawn queue manager tracks submit and tick completion', async () => {
 
   assertEquals(queueManager.submittedCount, 1);
   assertEquals(queueManager.completedCount, 0);
-  assertEquals(queueManager.failedCount, 0);
   assertEquals(queueManager.inFlightCount, 1);
-  assertEquals(queueManager.pendingSubmissions[0]?.recorderId, commandBuffer.recording.recorderId);
-  assertEquals(queueManager.pendingSubmissions[0]?.completionMode, 'queue-work-done');
+  assertEquals(queueManager.supportsSubmittedWorkDone, true);
 
+  mock.created.submissionDoneResolvers.shift()?.();
   await tickDawnQueueManager(queueManager);
 
   assertEquals(mock.ticks.length, 1);
-  assertEquals(mock.created.workDoneCalls.length, 1);
   assertEquals(queueManager.completedCount, 1);
-  assertEquals(queueManager.failedCount, 0);
   assertEquals(queueManager.inFlightCount, 0);
-  assertEquals(queueManager.lastCompletedSubmissionId, 1);
-  assertEquals(queueManager.lastCompletedRecorderId, commandBuffer.recording.recorderId);
 });
 
-Deno.test('dawn queue manager keeps unresolved submissions in flight until queue completion', async () => {
+Deno.test('submitDawnCommandBuffer routes submissions through queue manager tracking', () => {
   const mock = createMockGpuContext();
-  const backend = createDawnBackendContext(mock.context, {
+  const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
+  const recorder = createDrawingRecorder(sharedContext);
+  const binding = createOffscreenBinding(mock.context);
+
+  recordClear(recorder, [0, 0, 0, 1]);
+  const commandBuffer = encodeDawnCommandBuffer(
+    sharedContext,
+    finishDrawingRecorder(recorder),
+    binding,
+  );
+
+  submitDawnCommandBuffer(sharedContext, commandBuffer);
+
+  assertEquals(sharedContext.queueManager.submittedCount, 1);
+  assertEquals(sharedContext.queueManager.inFlightCount, 1);
+  assertEquals(sharedContext.queueManager.lastSubmittedRecorderId, commandBuffer.recording.recorderId);
+});
+
+Deno.test('dawn queue manager falls back to coarse tick completion without submitted-work callback', async () => {
+  const mock = createMockGpuContext();
+  const backend = createDawnBackendContext({
+    ...mock.context,
+    queue: {
+      submit: mock.context.queue.submit.bind(mock.context.queue),
+    } as GPUQueue,
+  }, {
     tick: () => {
       mock.ticks.push(1);
     },
@@ -1849,28 +1060,26 @@ Deno.test('dawn queue manager keeps unresolved submissions in flight until queue
   );
   submitToDawnQueueManager(queueManager, commandBuffer);
 
+  assertEquals(queueManager.supportsSubmittedWorkDone, false);
+  assertEquals(queueManager.completedCount, 0);
+  assertEquals(queueManager.inFlightCount, 1);
+
   await tickDawnQueueManager(queueManager);
 
   assertEquals(mock.ticks.length, 1);
-  assertEquals(queueManager.completedCount, 0);
-  assertEquals(queueManager.inFlightCount, 1);
-  assertEquals(queueManager.pendingSubmissions[0]?.settled, false);
-
-  for (const resolve of mock.workDoneResolvers.splice(0)) {
-    resolve();
-  }
-  await Promise.resolve();
-  await tickDawnQueueManager(queueManager);
-
   assertEquals(queueManager.completedCount, 1);
   assertEquals(queueManager.inFlightCount, 0);
-  assertEquals(queueManager.lastCompletedSubmissionId, 1);
-  assertEquals(queueManager.lastCompletedRecorderId, commandBuffer.recording.recorderId);
 });
 
-Deno.test('dawn queue manager records submission failures', async () => {
+Deno.test('dawn queue manager clears pending completion when submitted-work callback rejects', async () => {
   const mock = createMockGpuContext();
-  const backend = createDawnBackendContext(mock.context);
+  const backend = createDawnBackendContext({
+    ...mock.context,
+    queue: {
+      submit: mock.context.queue.submit.bind(mock.context.queue),
+      onSubmittedWorkDone: () => Promise.reject(new Error('device lost')),
+    } as GPUQueue,
+  });
   const queueManager = createDawnQueueManager(backend);
   const sharedContext = createDawnSharedContext(backend);
   const recorder = createDrawingRecorder(sharedContext);
@@ -1884,58 +1093,11 @@ Deno.test('dawn queue manager records submission failures', async () => {
   );
   submitToDawnQueueManager(queueManager, commandBuffer);
 
-  const error = new Error('queue submission failed');
-  mock.submittedWorkRejecters[0]?.(error);
-  await Promise.resolve();
-  await tickDawnQueueManager(queueManager);
-
-  assertEquals(queueManager.completedCount, 1);
-  assertEquals(queueManager.failedCount, 1);
-  assertEquals(queueManager.lastError, error);
-  assertEquals(queueManager.inFlightCount, 0);
-});
-
-Deno.test('dawn queue manager tracks fallback submissions explicitly when queue completion is unavailable', async () => {
-  const mock = createMockGpuContext();
-  const queue = {
-    ...mock.context.queue,
-  } as unknown as {
-    submit: GPUQueue['submit'];
-    onSubmittedWorkDone?: () => Promise<void>;
-  };
-  queue.onSubmittedWorkDone = undefined;
-  const backend = createDawnBackendContext({
-    ...mock.context,
-    queue: queue as GPUQueue,
-  });
-  const queueManager = createDawnQueueManager(backend);
-  const sharedContext = createDawnSharedContext(backend);
-  const recorder = createDrawingRecorder(sharedContext);
-  const binding = createOffscreenBinding({
-    ...mock.context,
-    device: backend.device,
-    target: backend.target,
-  });
-
-  recordClear(recorder, [0, 0, 0, 1]);
-  const commandBuffer = encodeDawnCommandBuffer(
-    sharedContext,
-    finishDrawingRecorder(recorder),
-    binding,
-  );
-  submitToDawnQueueManager(queueManager, commandBuffer);
-
-  assertEquals(queueManager.pendingSubmissions.length, 1);
-  assertEquals(queueManager.pendingSubmissions[0]?.completionMode, 'tick-fallback');
-  assertEquals(queueManager.completedCount, 0);
-
   await tickDawnQueueManager(queueManager);
 
   assertEquals(queueManager.completedCount, 1);
   assertEquals(queueManager.inFlightCount, 0);
-  assertEquals(queueManager.lastCompletedSubmissionId, 1);
-  assertEquals(queueManager.lastCompletedRecorderId, commandBuffer.recording.recorderId);
-  assertEquals(queueManager.pendingSubmissions.length, 0);
+  assertEquals(queueManager.pendingCompletions.length, 0);
 });
 
 Deno.test('drawing context increments recorder ids through shared context', () => {

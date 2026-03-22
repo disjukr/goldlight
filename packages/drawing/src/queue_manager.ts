@@ -6,61 +6,29 @@ export type DawnQueueManager = Readonly<{
   backend: DawnBackendContext;
   submittedCount: number;
   completedCount: number;
-  failedCount: number;
   inFlightCount: number;
   lastSubmittedRecorderId: number | null;
-  lastCompletedRecorderId: number | null;
-  lastCompletedSubmissionId: number | null;
-  lastError: unknown | null;
-  nextSubmissionId: number;
-  pendingSubmissions: readonly DawnPendingSubmission[];
+  supportsSubmittedWorkDone: boolean;
+  pendingCompletions: readonly Promise<void>[];
 }>;
-
-export type DawnPendingSubmission = Readonly<{
-  id: number;
-  recorderId: number;
-  settled: boolean;
-  failed: boolean;
-  error: unknown | null;
-  completion: Promise<void>;
-  completionMode: 'queue-work-done' | 'tick-fallback';
-}>;
-
-type PendingSubmission = {
-  id: number;
-  recorderId: number;
-  settled: boolean;
-  failed: boolean;
-  error: unknown | null;
-  completion: Promise<void>;
-  completionMode: 'queue-work-done' | 'tick-fallback';
-};
 
 const asMutableQueueManager = (
   queueManager: DawnQueueManager,
 ): {
   submittedCount: number;
   completedCount: number;
-  failedCount: number;
   inFlightCount: number;
   lastSubmittedRecorderId: number | null;
-  lastCompletedRecorderId: number | null;
-  lastCompletedSubmissionId: number | null;
-  lastError: unknown | null;
-  nextSubmissionId: number;
-  pendingSubmissions: PendingSubmission[];
-} =>
+  supportsSubmittedWorkDone: boolean;
+  pendingCompletions: Promise<void>[];
+  } =>
   queueManager as unknown as {
     submittedCount: number;
     completedCount: number;
-    failedCount: number;
     inFlightCount: number;
     lastSubmittedRecorderId: number | null;
-    lastCompletedRecorderId: number | null;
-    lastCompletedSubmissionId: number | null;
-    lastError: unknown | null;
-    nextSubmissionId: number;
-    pendingSubmissions: PendingSubmission[];
+    supportsSubmittedWorkDone: boolean;
+    pendingCompletions: Promise<void>[];
   };
 
 export const createDawnQueueManager = (
@@ -69,14 +37,10 @@ export const createDawnQueueManager = (
   backend,
   submittedCount: 0,
   completedCount: 0,
-  failedCount: 0,
   inFlightCount: 0,
   lastSubmittedRecorderId: null,
-  lastCompletedRecorderId: null,
-  lastCompletedSubmissionId: null,
-  lastError: null,
-  nextSubmissionId: 1,
-  pendingSubmissions: [],
+  supportsSubmittedWorkDone: typeof backend.queue.onSubmittedWorkDone === 'function',
+  pendingCompletions: [],
 });
 
 export const submitToDawnQueueManager = (
@@ -90,75 +54,39 @@ export const submitToDawnQueueManager = (
   mutable.inFlightCount += 1;
   mutable.lastSubmittedRecorderId = commandBuffer.recording.recorderId;
 
-  const queueWithCompletion = queueManager.backend.queue as GPUQueue & {
-    onSubmittedWorkDone?: () => Promise<void>;
-  };
-  if (typeof queueWithCompletion.onSubmittedWorkDone === 'function') {
-    const pendingSubmission = {
-      id: mutable.nextSubmissionId,
-      recorderId: commandBuffer.recording.recorderId,
-      settled: false,
-      failed: false,
-      error: null,
-      completionMode: 'queue-work-done' as const,
-      completion: Promise.resolve(queueWithCompletion.onSubmittedWorkDone()).then(
-        () => {
-          pendingSubmission.settled = true;
-        },
-        (error) => {
-          pendingSubmission.settled = true;
-          pendingSubmission.failed = true;
-          pendingSubmission.error = error;
-        },
-      ),
-    };
-    mutable.pendingSubmissions.push(pendingSubmission);
-    mutable.nextSubmissionId += 1;
+  if (!mutable.supportsSubmittedWorkDone) {
     return;
   }
 
-  mutable.pendingSubmissions.push({
-    id: mutable.nextSubmissionId,
-    recorderId: commandBuffer.recording.recorderId,
-    settled: false,
-    failed: false,
-    error: null,
-    completionMode: 'tick-fallback',
-    completion: Promise.resolve(),
-  });
-  mutable.nextSubmissionId += 1;
+  const completion = queueManager.backend.queue.onSubmittedWorkDone!()
+    .then(
+      () => undefined,
+      () => undefined,
+    )
+    .then(() => {
+      mutable.completedCount += 1;
+      mutable.inFlightCount = Math.max(0, mutable.inFlightCount - 1);
+    })
+    .finally(() => {
+      mutable.pendingCompletions = mutable.pendingCompletions.filter((pending) => pending !== completion);
+    });
+  mutable.pendingCompletions = [...mutable.pendingCompletions, completion];
 };
 
 export const tickDawnQueueManager = async (
   queueManager: DawnQueueManager,
 ): Promise<void> => {
   await tickDawnBackendContext(queueManager.backend);
-  await Promise.resolve();
 
   const mutable = asMutableQueueManager(queueManager);
-  let completedThisTick = 0;
-  let failedThisTick = 0;
-  let lastCompletedRecorderId = mutable.lastCompletedRecorderId;
-  let lastCompletedSubmissionId = mutable.lastCompletedSubmissionId;
-  mutable.pendingSubmissions = mutable.pendingSubmissions.filter((submission) => {
-    if (submission.completionMode === 'tick-fallback') {
-      submission.settled = true;
+  if (mutable.supportsSubmittedWorkDone) {
+    const pending = [...mutable.pendingCompletions];
+    if (pending.length > 0) {
+      await Promise.allSettled(pending);
     }
-    if (!submission.settled) {
-      return true;
-    }
-    completedThisTick += 1;
-    lastCompletedRecorderId = submission.recorderId;
-    lastCompletedSubmissionId = submission.id;
-    if (submission.failed) {
-      failedThisTick += 1;
-      mutable.lastError = submission.error;
-    }
-    return false;
-  });
-  mutable.completedCount += completedThisTick;
-  mutable.failedCount += failedThisTick;
-  mutable.inFlightCount = Math.max(0, mutable.inFlightCount - completedThisTick);
-  mutable.lastCompletedRecorderId = lastCompletedRecorderId;
-  mutable.lastCompletedSubmissionId = lastCompletedSubmissionId;
+    return;
+  }
+
+  mutable.completedCount += mutable.inFlightCount;
+  mutable.inFlightCount = 0;
 };

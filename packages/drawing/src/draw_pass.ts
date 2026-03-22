@@ -12,7 +12,6 @@ export type DrawingDrawCommand = DrawPathCommand | DrawShapeCommand;
 
 export type DrawingPipelineKey =
   | 'clip-stencil-write'
-  | 'clip-stencil-intersect'
   | 'path-fill-cover'
   | 'path-fill-patch-cover'
   | 'path-fill-curve-patch-cover'
@@ -56,57 +55,29 @@ const isDrawCommand = (command: DrawingCommand): command is DrawingDrawCommand =
   command.kind === 'drawPath' || command.kind === 'drawShape';
 
 const getPipelineKeysForDraw = (draw: DrawingPreparedDraw): readonly DrawingPipelineKey[] => {
+  const usesStencilClip = Boolean(draw.clip?.triangleRuns?.length);
   switch (draw.kind) {
     case 'pathFill':
-      if (draw.renderer === 'middle-out-fan' || draw.renderer === 'direct-triangles') {
-        return draw.clips?.length
+      if (draw.renderer === 'middle-out-fan') {
+        return usesStencilClip
           ? ['clip-stencil-write', 'path-fill-clip-cover']
           : ['path-fill-cover'];
       }
       if (draw.renderer === 'stencil-tessellated-curves') {
-        return draw.clips?.length
+        return usesStencilClip
           ? ['clip-stencil-write', 'path-fill-curve-patch-clip-cover']
           : ['path-fill-curve-patch-cover'];
       }
-      if (draw.clips?.length) {
+      if (usesStencilClip) {
         return ['clip-stencil-write', 'path-fill-patch-clip-cover'];
       }
       return ['path-fill-patch-cover'];
     case 'pathStroke':
-      if (draw.patches.length === 0) {
-        return draw.clips?.length
-          ? ['clip-stencil-write', 'path-stroke-clip-cover']
-          : ['path-stroke-cover'];
-      }
-      return draw.clips?.length
+      return usesStencilClip
         ? ['clip-stencil-write', 'path-stroke-patch-clip-cover']
         : ['path-stroke-patch-cover'];
   }
 };
-
-const unionClipBounds = (clips: readonly { bounds?: Rect }[] | undefined): Rect | undefined =>
-  clips
-    ?.map((clip) => clip.bounds)
-    .filter((bounds): bounds is Rect => Boolean(bounds))
-    .reduce<Rect | undefined>((combined, bounds) =>
-      combined
-        ? {
-          origin: [
-            Math.min(combined.origin[0], bounds.origin[0]),
-            Math.min(combined.origin[1], bounds.origin[1]),
-          ],
-          size: {
-            width: Math.max(
-              combined.origin[0] + combined.size.width,
-              bounds.origin[0] + bounds.size.width,
-            ) - Math.min(combined.origin[0], bounds.origin[0]),
-            height: Math.max(
-              combined.origin[1] + combined.size.height,
-              bounds.origin[1] + bounds.size.height,
-            ) - Math.min(combined.origin[1], bounds.origin[1]),
-          },
-        }
-        : bounds, undefined);
 
 export const prepareDrawingRecording = (
   recording: DrawingRecording,
@@ -159,7 +130,7 @@ export const prepareDrawingRecording = (
           pipelineKeys: getPipelineKeysForDraw(prepared.draw),
           clipRect: prepared.draw.clipRect,
           drawBounds: prepared.draw.bounds,
-          clipBounds: unionClipBounds(prepared.draw.clips) ?? prepared.draw.clipRect,
+          clipBounds: prepared.draw.clip?.bounds,
           usesStencil: prepared.draw.usesStencil,
         });
       } else {

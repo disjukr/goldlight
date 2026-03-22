@@ -6,19 +6,16 @@ export type DrawingPath2D = Path2D;
 export type DrawingShapeDescriptor = Shape2D;
 export type DrawingMatrix2D = Matrix2D;
 export type DrawingClipRect = Rect;
-export type DrawingClipOp = 'intersect' | 'difference';
 export type DrawingClip = Readonly<
   | {
     kind: 'rect';
     rect: DrawingClipRect;
     transform: DrawingMatrix2D;
-    op: DrawingClipOp;
   }
   | {
     kind: 'path';
     path: DrawingPath2D;
     transform: DrawingMatrix2D;
-    op: DrawingClipOp;
   }
 >;
 

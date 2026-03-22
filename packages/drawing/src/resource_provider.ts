@@ -1,5 +1,5 @@
+import type { DawnBackendContext } from './dawn_backend_context.ts';
 import type { DrawingPipelineKey } from './draw_pass.ts';
-import type { DawnSharedContext } from './shared_context.ts';
 
 export type DrawingBufferDescriptor = Readonly<{
   label?: string;
@@ -29,17 +29,12 @@ export type DrawingSamplerDescriptor = Readonly<{
 }>;
 
 export type DawnResourceProvider = Readonly<{
-  backend: DawnSharedContext['backend'];
+  backend: DawnBackendContext;
   resourceBudget: number;
   createBuffer: (descriptor: DrawingBufferDescriptor) => GPUBuffer;
   createTexture: (descriptor: DrawingTextureDescriptor) => GPUTexture;
   createSampler: (descriptor?: DrawingSamplerDescriptor) => GPUSampler;
   getPipeline: (key: DrawingPipelineKey) => GPURenderPipeline;
-  getIntrinsicBindGroup: () => GPUBindGroup;
-  getSingleTextureSamplerBindGroup: (
-    sampler: GPUSampler,
-    textureView: GPUTextureView,
-  ) => GPUBindGroup;
   getStencilAttachmentView: () => GPUTextureView;
 }>;
 
@@ -48,31 +43,10 @@ const floatBytes = Float32Array.BYTES_PER_ELEMENT;
 const floatsPerVertex = 6;
 const stencilFormat = 'depth24plus-stencil8';
 const noColorWrites = 0;
-const curveFillSegments = 32;
-const strokePatchSegments = 32;
-const intrinsicUniformBytes = Float32Array.BYTES_PER_ELEMENT * 4;
-const uniformBufferUsage = 0x0040;
-
-const intrinsicUniformsShaderBlock = `
-struct Intrinsics {
-  targetSize: vec2<f32>,
-  _padding: vec2<f32>,
-};
-
-@group(0) @binding(0) var<uniform> intrinsics: Intrinsics;
-
-fn to_clip_space(position: vec2<f32>) -> vec4<f32> {
-  let clip = vec2<f32>(
-    (position.x / intrinsics.targetSize.x) * 2.0 - 1.0,
-    1.0 - ((position.y / intrinsics.targetSize.y) * 2.0),
-  );
-  return vec4<f32>(clip, 0.0, 1.0);
-}
-`;
+const curveFillSegments = 16;
+const strokePatchSegments = 16;
 
 const fillPathShaderSource = `
-${intrinsicUniformsShaderBlock}
-
 struct VertexOut {
   @builtin(position) position: vec4<f32>,
   @location(0) color: vec4<f32>,
@@ -84,7 +58,7 @@ fn vs_main(
   @location(1) color: vec4<f32>,
 ) -> VertexOut {
   var out: VertexOut;
-  out.position = to_clip_space(position);
+  out.position = vec4<f32>(position, 0.0, 1.0);
   out.color = color;
   return out;
 }
@@ -96,40 +70,10 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
 `;
 
 const wedgePatchShaderSource = `
-${intrinsicUniformsShaderBlock}
-const SEGMENTS: u32 = ${curveFillSegments}u;
-
 struct VertexOut {
   @builtin(position) position: vec4<f32>,
   @location(0) color: vec4<f32>,
 };
-
-fn eval_patch(
-  curveType: f32,
-  weight: f32,
-  p0: vec2<f32>,
-  p1: vec2<f32>,
-  p2: vec2<f32>,
-  p3: vec2<f32>,
-  t: f32,
-) -> vec2<f32> {
-  let oneMinusT = 1.0 - t;
-  if (curveType < 0.5) {
-    return mix(p0, p1, t);
-  }
-  if (curveType < 1.5) {
-    return (oneMinusT * oneMinusT * p0) + (2.0 * oneMinusT * t * p1) + (t * t * p2);
-  }
-  if (curveType < 2.5) {
-    let denom = (oneMinusT * oneMinusT) + (2.0 * weight * oneMinusT * t) + (t * t);
-    return ((oneMinusT * oneMinusT * p0) + (2.0 * weight * oneMinusT * t * p1) + (t * t * p2)) / max(denom, 1e-5);
-  }
-  return
-    (oneMinusT * oneMinusT * oneMinusT * p0) +
-    (3.0 * oneMinusT * oneMinusT * t * p1) +
-    (3.0 * oneMinusT * t * t * p2) +
-    (t * t * t * p3);
-}
 
 @vertex
 fn vs_main(
@@ -137,29 +81,22 @@ fn vs_main(
   @location(0) fanPoint: vec2<f32>,
   @location(1) p0: vec2<f32>,
   @location(2) p1: vec2<f32>,
-  @location(3) p2: vec2<f32>,
-  @location(4) p3: vec2<f32>,
-  @location(5) curveMeta: vec4<f32>,
-  @location(6) color: vec4<f32>,
+  @location(3) color: vec4<f32>,
 ) -> VertexOut {
-  let triVertex = vertexIndex % 3u;
-  let segmentIndex = vertexIndex / 3u;
-  let actualSegments = min(1u << u32(clamp(curveMeta.z, 0.0, 5.0)), SEGMENTS);
-  let clampedSegment = min(segmentIndex, actualSegments);
-  let t0 = f32(clampedSegment) / f32(actualSegments);
-  let t1 = f32(min(clampedSegment + 1u, actualSegments)) / f32(actualSegments);
   var local: vec2<f32>;
-  if (segmentIndex >= actualSegments) {
-    local = eval_patch(curveMeta.x, curveMeta.y, p0, p1, p2, p3, 1.0);
-  } else if (triVertex == 0u) {
-    local = fanPoint;
-  } else if (triVertex == 1u) {
-    local = eval_patch(curveMeta.x, curveMeta.y, p0, p1, p2, p3, t0);
-  } else {
-    local = eval_patch(curveMeta.x, curveMeta.y, p0, p1, p2, p3, t1);
+  switch (vertexIndex) {
+    case 0u: {
+      local = fanPoint;
+    }
+    case 1u: {
+      local = p0;
+    }
+    default: {
+      local = p1;
+    }
   }
   var out: VertexOut;
-  out.position = to_clip_space(local);
+  out.position = vec4<f32>(local, 0.0, 1.0);
   out.color = color;
   return out;
 }
@@ -172,7 +109,6 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
 
 const curvePatchShaderSource = `
 const SEGMENTS: u32 = ${curveFillSegments}u;
-${intrinsicUniformsShaderBlock}
 
 struct VertexOut {
   @builtin(position) position: vec4<f32>,
@@ -213,19 +149,15 @@ fn vs_main(
   @location(1) p1: vec2<f32>,
   @location(2) p2: vec2<f32>,
   @location(3) p3: vec2<f32>,
-  @location(4) curveMeta: vec4<f32>,
+  @location(4) curveMeta: vec2<f32>,
   @location(5) color: vec4<f32>,
 ) -> VertexOut {
   let triVertex = vertexIndex % 3u;
   let segmentIndex = vertexIndex / 3u;
-  let actualSegments = min(1u << u32(clamp(curveMeta.z, 0.0, 5.0)), SEGMENTS);
-  let clampedSegment = min(segmentIndex, actualSegments);
-  let t0 = f32(clampedSegment) / f32(actualSegments);
-  let t1 = f32(min(clampedSegment + 1u, actualSegments)) / f32(actualSegments);
+  let t0 = f32(segmentIndex) / f32(SEGMENTS);
+  let t1 = f32(min(segmentIndex + 1u, SEGMENTS)) / f32(SEGMENTS);
   var local: vec2<f32>;
-  if (segmentIndex >= actualSegments) {
-    local = eval_patch(curveMeta.x, curveMeta.y, p0, p1, p2, p3, 1.0);
-  } else if (triVertex == 0u) {
+  if (triVertex == 0u) {
     local = p0;
   } else if (triVertex == 1u) {
     local = eval_patch(curveMeta.x, curveMeta.y, p0, p1, p2, p3, t0);
@@ -233,7 +165,7 @@ fn vs_main(
     local = eval_patch(curveMeta.x, curveMeta.y, p0, p1, p2, p3, t1);
   }
   var out: VertexOut;
-  out.position = to_clip_space(local);
+  out.position = vec4<f32>(local, 0.0, 1.0);
   out.color = color;
   return out;
 }
@@ -246,7 +178,6 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
 
 const strokePatchShaderSource = `
 const SEGMENTS: u32 = ${strokePatchSegments}u;
-${intrinsicUniformsShaderBlock}
 
 struct VertexOut {
   @builtin(position) position: vec4<f32>,
@@ -287,21 +218,16 @@ fn vs_main(
   @location(1) p1: vec2<f32>,
   @location(2) p2: vec2<f32>,
   @location(3) p3: vec2<f32>,
-  @location(4) curveMeta: vec4<f32>,
+  @location(4) curveMeta: vec2<f32>,
   @location(5) strokeMeta: vec2<f32>,
   @location(6) color: vec4<f32>,
 ) -> VertexOut {
   let quadVertex = vertexIndex % 6u;
   let segmentIndex = vertexIndex / 6u;
-  let actualSegments = min(1u << u32(clamp(curveMeta.z, 0.0, 5.0)), SEGMENTS);
-  let clampedSegment = min(segmentIndex, actualSegments);
-  let t0 = f32(clampedSegment) / f32(actualSegments);
-  let t1 = f32(min(clampedSegment + 1u, actualSegments)) / f32(actualSegments);
+  let t0 = f32(segmentIndex) / f32(SEGMENTS);
+  let t1 = f32(min(segmentIndex + 1u, SEGMENTS)) / f32(SEGMENTS);
   let a = eval_patch(curveMeta.x, curveMeta.y, p0, p1, p2, p3, t0);
-  var b = eval_patch(curveMeta.x, curveMeta.y, p0, p1, p2, p3, t1);
-  if (segmentIndex >= actualSegments) {
-    b = a;
-  }
+  let b = eval_patch(curveMeta.x, curveMeta.y, p0, p1, p2, p3, t1);
   let delta = b - a;
   let deltaLength = max(length(delta), 1e-5);
   let normal = vec2<f32>(-delta.y / deltaLength, delta.x / deltaLength) * strokeMeta.x;
@@ -309,7 +235,7 @@ fn vs_main(
   let indices = array<u32, 6>(0u, 1u, 2u, 0u, 2u, 3u);
   let local = corners[indices[quadVertex]];
   var out: VertexOut;
-  out.position = to_clip_space(local);
+  out.position = vec4<f32>(local, 0.0, 1.0);
   out.color = color;
   return out;
 }
@@ -330,63 +256,37 @@ const createStencilFaceState = (
   passOp,
 });
 
-const createPathShaderModule = (backend: DawnSharedContext['backend']): GPUShaderModule =>
+const createPathShaderModule = (backend: DawnBackendContext): GPUShaderModule =>
   backend.device.createShaderModule({
     label: 'drawing-path-shader',
     code: fillPathShaderSource,
   });
 
-const createWedgePatchShaderModule = (backend: DawnSharedContext['backend']): GPUShaderModule =>
+const createWedgePatchShaderModule = (backend: DawnBackendContext): GPUShaderModule =>
   backend.device.createShaderModule({
     label: 'drawing-wedge-patch-shader',
     code: wedgePatchShaderSource,
   });
 
-const createCurvePatchShaderModule = (backend: DawnSharedContext['backend']): GPUShaderModule =>
+const createCurvePatchShaderModule = (backend: DawnBackendContext): GPUShaderModule =>
   backend.device.createShaderModule({
     label: 'drawing-curve-patch-shader',
     code: curvePatchShaderSource,
   });
 
-const createStrokePatchShaderModule = (backend: DawnSharedContext['backend']): GPUShaderModule =>
+const createStrokePatchShaderModule = (backend: DawnBackendContext): GPUShaderModule =>
   backend.device.createShaderModule({
     label: 'drawing-stroke-patch-shader',
     code: strokePatchShaderSource,
   });
 
-const canonicalizeSamplerDescriptor = (
-  descriptor: DrawingSamplerDescriptor = {},
-): GPUSamplerDescriptor => ({
-  label: descriptor.label,
-  magFilter: descriptor.magFilter ?? 'nearest',
-  minFilter: descriptor.minFilter ?? 'nearest',
-  mipmapFilter: descriptor.mipmapFilter ?? 'nearest',
-  addressModeU: descriptor.addressModeU ?? 'clamp-to-edge',
-  addressModeV: descriptor.addressModeV ?? 'clamp-to-edge',
-  addressModeW: descriptor.addressModeW ?? 'clamp-to-edge',
-});
-
-const createSamplerKey = (
-  descriptor: GPUSamplerDescriptor,
-): string =>
-  JSON.stringify({
-    magFilter: descriptor.magFilter,
-    minFilter: descriptor.minFilter,
-    mipmapFilter: descriptor.mipmapFilter,
-    addressModeU: descriptor.addressModeU,
-    addressModeV: descriptor.addressModeV,
-    addressModeW: descriptor.addressModeW,
-  });
-
 export const createDawnResourceProvider = (
-  sharedContext: DawnSharedContext,
+  backend: DawnBackendContext,
   options: Readonly<{
     resourceBudget?: number;
   }> = {},
 ): DawnResourceProvider => {
-  const backend = sharedContext.backend;
   let clipStencilWritePipeline: GPURenderPipeline | null = null;
-  let clipStencilIntersectPipeline: GPURenderPipeline | null = null;
   let pathFillCoverPipeline: GPURenderPipeline | null = null;
   let pathFillPatchCoverPipeline: GPURenderPipeline | null = null;
   let pathFillCurvePatchCoverPipeline: GPURenderPipeline | null = null;
@@ -406,21 +306,6 @@ export const createDawnResourceProvider = (
       view: GPUTextureView;
     }>
     | null = null;
-  let intrinsicBindGroup:
-    | Readonly<{
-      width: number;
-      height: number;
-      bindGroup: GPUBindGroup;
-    }>
-    | null = null;
-  const samplers = new Map<string, GPUSampler>();
-  const singleTextureSamplerBindGroups: Array<
-    Readonly<{
-      sampler: GPUSampler;
-      textureView: GPUTextureView;
-      bindGroup: GPUBindGroup;
-    }>
-  > = [];
 
   const createVertexLayout = (): GPUVertexBufferLayout => ({
     arrayStride: floatBytes * floatsPerVertex,
@@ -439,7 +324,18 @@ export const createDawnResourceProvider = (
   });
 
   const createWedgePatchLayout = (): GPUVertexBufferLayout => ({
-    arrayStride: floatBytes * 18,
+    arrayStride: floatBytes * 10,
+    stepMode: 'instance',
+    attributes: [
+      { shaderLocation: 0, offset: floatBytes * 0, format: 'float32x2' },
+      { shaderLocation: 1, offset: floatBytes * 2, format: 'float32x2' },
+      { shaderLocation: 2, offset: floatBytes * 4, format: 'float32x2' },
+      { shaderLocation: 3, offset: floatBytes * 6, format: 'float32x4' },
+    ],
+  });
+
+  const createCurvePatchLayout = (): GPUVertexBufferLayout => ({
+    arrayStride: floatBytes * 14,
     stepMode: 'instance',
     attributes: [
       { shaderLocation: 0, offset: floatBytes * 0, format: 'float32x2' },
@@ -448,11 +344,10 @@ export const createDawnResourceProvider = (
       { shaderLocation: 3, offset: floatBytes * 6, format: 'float32x2' },
       { shaderLocation: 4, offset: floatBytes * 8, format: 'float32x2' },
       { shaderLocation: 5, offset: floatBytes * 10, format: 'float32x4' },
-      { shaderLocation: 6, offset: floatBytes * 14, format: 'float32x4' },
     ],
   });
 
-  const createCurvePatchLayout = (): GPUVertexBufferLayout => ({
+  const createStrokePatchLayout = (): GPUVertexBufferLayout => ({
     arrayStride: floatBytes * 16,
     stepMode: 'instance',
     attributes: [
@@ -460,69 +355,20 @@ export const createDawnResourceProvider = (
       { shaderLocation: 1, offset: floatBytes * 2, format: 'float32x2' },
       { shaderLocation: 2, offset: floatBytes * 4, format: 'float32x2' },
       { shaderLocation: 3, offset: floatBytes * 6, format: 'float32x2' },
-      { shaderLocation: 4, offset: floatBytes * 8, format: 'float32x4' },
-      { shaderLocation: 5, offset: floatBytes * 12, format: 'float32x4' },
-    ],
-  });
-
-  const createStrokePatchLayout = (): GPUVertexBufferLayout => ({
-    arrayStride: floatBytes * 18,
-    stepMode: 'instance',
-    attributes: [
-      { shaderLocation: 0, offset: floatBytes * 0, format: 'float32x2' },
-      { shaderLocation: 1, offset: floatBytes * 2, format: 'float32x2' },
-      { shaderLocation: 2, offset: floatBytes * 4, format: 'float32x2' },
-      { shaderLocation: 3, offset: floatBytes * 6, format: 'float32x2' },
-      { shaderLocation: 4, offset: floatBytes * 8, format: 'float32x4' },
-      { shaderLocation: 5, offset: floatBytes * 12, format: 'float32x2' },
-      { shaderLocation: 6, offset: floatBytes * 14, format: 'float32x4' },
+      { shaderLocation: 4, offset: floatBytes * 8, format: 'float32x2' },
+      { shaderLocation: 5, offset: floatBytes * 10, format: 'float32x2' },
+      { shaderLocation: 6, offset: floatBytes * 12, format: 'float32x4' },
     ],
   });
 
   const sampleCount = backend.target.kind === 'offscreen' ? backend.target.sampleCount : 1;
-
-  const createIntrinsicBindGroup = (): Readonly<{
-    width: number;
-    height: number;
-    bindGroup: GPUBindGroup;
-  }> => {
-    const buffer = backend.device.createBuffer({
-      label: 'drawing-intrinsics',
-      size: intrinsicUniformBytes,
-      usage: uniformBufferUsage,
-      mappedAtCreation: true,
-    });
-    new Float32Array(buffer.getMappedRange()).set([
-      backend.target.width,
-      backend.target.height,
-      0,
-      0,
-    ]);
-    buffer.unmap();
-    return {
-      width: backend.target.width,
-      height: backend.target.height,
-      bindGroup: backend.device.createBindGroup({
-        label: 'drawing-intrinsics-bind-group',
-        layout: sharedContext.getIntrinsicBindGroupLayout(),
-        entries: [
-          {
-            binding: 0,
-            resource: {
-              buffer,
-            },
-          },
-        ],
-      }),
-    };
-  };
 
   const createPathFillCoverPipeline = (): GPURenderPipeline => {
     const shaderModule = createPathShaderModule(backend);
 
     return backend.device.createRenderPipeline({
       label: 'drawing-path-fill-cover',
-      layout: sharedContext.getPathPipelineLayout(),
+      layout: 'auto',
       vertex: {
         module: shaderModule,
         entryPoint: 'vs_main',
@@ -551,7 +397,7 @@ export const createDawnResourceProvider = (
     const shaderModule = createPathShaderModule(backend);
     return backend.device.createRenderPipeline({
       label: 'drawing-clip-stencil-write',
-      layout: sharedContext.getPathPipelineLayout(),
+      layout: 'auto',
       vertex: {
         module: shaderModule,
         entryPoint: 'vs_main',
@@ -580,47 +426,8 @@ export const createDawnResourceProvider = (
         depthCompare: 'always',
         stencilReadMask: 0xff,
         stencilWriteMask: 0xff,
-        stencilFront: createStencilFaceState('replace'),
-        stencilBack: createStencilFaceState('replace'),
-      },
-    });
-  };
-
-  const createClipStencilIntersectPipeline = (): GPURenderPipeline => {
-    const shaderModule = createPathShaderModule(backend);
-    return backend.device.createRenderPipeline({
-      label: 'drawing-clip-stencil-intersect',
-      layout: sharedContext.getPathPipelineLayout(),
-      vertex: {
-        module: shaderModule,
-        entryPoint: 'vs_main',
-        buffers: [createVertexLayout()],
-      },
-      fragment: {
-        module: shaderModule,
-        entryPoint: 'fs_main',
-        targets: [
-          {
-            format: backend.target.format,
-            writeMask: noColorWrites,
-          },
-        ],
-      },
-      primitive: {
-        topology: 'triangle-list',
-        cullMode: 'none',
-      },
-      multisample: {
-        count: sampleCount,
-      },
-      depthStencil: {
-        format: stencilFormat,
-        depthWriteEnabled: false,
-        depthCompare: 'always',
-        stencilReadMask: 0xff,
-        stencilWriteMask: 0xff,
-        stencilFront: createStencilFaceState('replace', 'equal'),
-        stencilBack: createStencilFaceState('replace', 'equal'),
+        stencilFront: createStencilFaceState('increment-clamp'),
+        stencilBack: createStencilFaceState('increment-clamp'),
       },
     });
   };
@@ -629,7 +436,7 @@ export const createDawnResourceProvider = (
     const shaderModule = createPathShaderModule(backend);
     return backend.device.createRenderPipeline({
       label,
-      layout: sharedContext.getPathPipelineLayout(),
+      layout: 'auto',
       vertex: {
         module: shaderModule,
         entryPoint: 'vs_main',
@@ -668,7 +475,7 @@ export const createDawnResourceProvider = (
 
     return backend.device.createRenderPipeline({
       label: 'drawing-path-stroke-cover',
-      layout: sharedContext.getPathPipelineLayout(),
+      layout: 'auto',
       vertex: {
         module: shaderModule,
         entryPoint: 'vs_main',
@@ -701,7 +508,7 @@ export const createDawnResourceProvider = (
   ): GPURenderPipeline =>
     backend.device.createRenderPipeline({
       label,
-      layout: sharedContext.getPathPipelineLayout(),
+      layout: 'auto',
       vertex: {
         module: shaderModule,
         entryPoint: 'vs_main',
@@ -727,60 +534,7 @@ export const createDawnResourceProvider = (
     resourceBudget: options.resourceBudget ?? Number.POSITIVE_INFINITY,
     createBuffer: (descriptor) => backend.device.createBuffer(descriptor),
     createTexture: (descriptor) => backend.device.createTexture(descriptor),
-    createSampler: (descriptor = {}) => {
-      const normalized = canonicalizeSamplerDescriptor(descriptor);
-      const key = createSamplerKey(normalized);
-      const existing = samplers.get(key);
-      if (existing) {
-        return existing;
-      }
-
-      const sampler = backend.device.createSampler(normalized);
-      samplers.set(key, sampler);
-      return sampler;
-    },
-    getIntrinsicBindGroup: () => {
-      if (
-        intrinsicBindGroup &&
-        intrinsicBindGroup.width === backend.target.width &&
-        intrinsicBindGroup.height === backend.target.height
-      ) {
-        return intrinsicBindGroup.bindGroup;
-      }
-      intrinsicBindGroup = createIntrinsicBindGroup();
-      return intrinsicBindGroup.bindGroup;
-    },
-    getSingleTextureSamplerBindGroup: (
-      sampler: GPUSampler,
-      textureView: GPUTextureView,
-    ): GPUBindGroup => {
-      const cached = singleTextureSamplerBindGroups.find((entry) =>
-        entry.sampler === sampler && entry.textureView === textureView
-      );
-      if (cached) {
-        return cached.bindGroup;
-      }
-      const bindGroup = backend.device.createBindGroup({
-        label: 'drawing-single-texture-sampler-bind-group',
-        layout: sharedContext.getSingleTextureSamplerBindGroupLayout(),
-        entries: [
-          {
-            binding: 0,
-            resource: sampler,
-          },
-          {
-            binding: 1,
-            resource: textureView,
-          },
-        ],
-      });
-      singleTextureSamplerBindGroups.push({
-        sampler,
-        textureView,
-        bindGroup,
-      });
-      return bindGroup;
-    },
+    createSampler: (descriptor = {}) => backend.device.createSampler(descriptor),
     getPipeline: (key) => {
       switch (key) {
         case 'clip-stencil-write':
@@ -789,12 +543,6 @@ export const createDawnResourceProvider = (
           }
           clipStencilWritePipeline = createClipStencilWritePipeline();
           return clipStencilWritePipeline;
-        case 'clip-stencil-intersect':
-          if (clipStencilIntersectPipeline) {
-            return clipStencilIntersectPipeline;
-          }
-          clipStencilIntersectPipeline = createClipStencilIntersectPipeline();
-          return clipStencilIntersectPipeline;
         case 'path-fill-cover':
           if (pathFillCoverPipeline) {
             return pathFillCoverPipeline;

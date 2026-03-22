@@ -102,8 +102,9 @@ const getPipelineDescsForDraw = (
   const usesStencilClip = Boolean(draw.clip?.elements?.length);
   switch (draw.kind) {
     case 'pathFill': {
-      const fillStencilDesc = draw.fillRule === 'evenodd'
-        ? draw.renderer === 'stencil-tessellated-curves'
+      const rendererFillRule = draw.renderer.fillRule ?? draw.fillRule;
+      const fillStencilDesc = rendererFillRule === 'evenodd'
+        ? draw.renderer.kind === 'stencil-tessellated-curves'
           ? createPipelineDesc(
             'drawing-path-fill-curve-patch-stencil-evenodd',
             'curve-patch',
@@ -111,7 +112,7 @@ const getPipelineDescsForDraw = (
             'fill-stencil-evenodd',
             true,
           )
-          : draw.renderer === 'stencil-tessellated-wedges'
+          : draw.renderer.kind === 'stencil-tessellated-wedges'
           ? createPipelineDesc(
             'drawing-path-fill-patch-stencil-evenodd',
             'wedge-patch',
@@ -126,7 +127,7 @@ const getPipelineDescsForDraw = (
             'fill-stencil-evenodd',
             true,
           )
-        : draw.renderer === 'stencil-tessellated-curves'
+        : draw.renderer.kind === 'stencil-tessellated-curves'
         ? createPipelineDesc(
           'drawing-path-fill-curve-patch-stencil-nonzero',
           'curve-patch',
@@ -134,7 +135,7 @@ const getPipelineDescsForDraw = (
           'fill-stencil-nonzero',
           true,
         )
-        : draw.renderer === 'stencil-tessellated-wedges'
+        : draw.renderer.kind === 'stencil-tessellated-wedges'
         ? createPipelineDesc(
           'drawing-path-fill-patch-stencil-nonzero',
           'wedge-patch',
@@ -161,7 +162,7 @@ const getPipelineDescsForDraw = (
           ),
         ];
       }
-      if (draw.renderer === 'stencil-tessellated-curves') {
+      if (draw.renderer.patchMode === 'curve') {
         return usesStencilClip
           ? [createPipelineDesc(
             'drawing-path-fill-curve-patch-clip-cover',
@@ -177,10 +178,7 @@ const getPipelineDescsForDraw = (
             ),
           ];
       }
-      if (
-        draw.renderer === 'convex-tessellated-wedges' ||
-        draw.renderer === 'stencil-tessellated-wedges'
-      ) {
+      if (draw.renderer.patchMode === 'wedge') {
         return usesStencilClip
           ? [createPipelineDesc(
             'drawing-path-fill-patch-clip-cover',
@@ -338,6 +336,7 @@ export const prepareDrawingRecording = (
             isDrawingStencilFillRenderer(prepared.draw.renderer) &&
             !prepared.draw.clip?.elements?.length,
           usesDepth: prepared.draw.kind === 'pathStroke' &&
+            prepared.draw.renderer.usesDepth &&
             prepared.draw.usesTessellatedStrokePatches &&
             prepared.draw.patches.length > 0,
         });

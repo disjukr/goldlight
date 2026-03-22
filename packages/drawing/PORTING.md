@@ -513,6 +513,10 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
     of exposing `middle-out-fan` as a standalone renderer kind; fill selection now also follows
     `Device::chooseMSAARenderer()`-style wedge-vs-curve heuristics from path verb count and draw
     bounds area
+  - Update 2026-03-23: the provider now owns fill-rule-specific stencil wedge/curve singleton
+    renderers and explicit renderer metadata (`kind`, patch mode, stencil/depth usage), and the
+    draw/prepare path consumes that metadata instead of re-deriving behavior from renderer-kind
+    strings
   - Remaining delta: still only the tessellation family is modeled; there is no atlas/compute
     strategy selection, shared RenderStep graph, or renderer-wide precompile iteration comparable to
     Graphite
@@ -554,6 +558,15 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
 
 ## Recent Updates
 
+- 2026-03-23
+  - Files: `src/renderer_provider.ts`, `src/path_renderer.ts`, `src/draw_pass.ts`,
+    `src/prepare_resources.ts`, `tests/drawing_graphite_dawn_test.ts`
+  - Status transition: `RendererProvider` now owns Graphite-like singleton renderer objects with
+    fill-rule-specific stencil variants, and prepared draws/resource setup consume renderer metadata
+    instead of string-only renderer kinds
+  - Remaining delta: the provider still does not own a Graphite-style `RenderStep` graph, and only
+    the tessellation renderer family needed for Dawn-backed 2D drawing is modeled
+  - Validation: `deno test tests/drawing_graphite_dawn_test.ts`
 - 2026-03-23
   - Files: `src/renderer_provider.ts`, `src/path_renderer.ts`, `tests/drawing_graphite_dawn_test.ts`
   - Status transition: `RendererProvider` now applies Graphite-like wedge-versus-curve heuristics

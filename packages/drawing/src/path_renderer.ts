@@ -14,7 +14,7 @@ import type {
   DrawPathCommand,
   DrawShapeCommand,
 } from './types.ts';
-import { type DrawingRendererKind, type DrawingRendererProvider } from './renderer_provider.ts';
+import { type DrawingRenderer, type DrawingRendererProvider } from './renderer_provider.ts';
 
 type FlattenedSubpath = Readonly<{
   points: readonly Point2D[];
@@ -115,7 +115,7 @@ type DrawingStrokeSegmentRecord = Readonly<{
 
 export type DrawingPreparedPathFill = Readonly<{
   kind: 'pathFill';
-  renderer: DrawingRendererKind;
+  renderer: DrawingRenderer;
   triangles: readonly Point2D[];
   fringeVertices?: readonly DrawingPreparedVertex[];
   patches: readonly DrawingPreparedPatch[];
@@ -130,7 +130,7 @@ export type DrawingPreparedPathFill = Readonly<{
 
 export type DrawingPreparedPathStroke = Readonly<{
   kind: 'pathStroke';
-  renderer: DrawingRendererKind;
+  renderer: DrawingRenderer;
   triangles: readonly Point2D[];
   fringeVertices?: readonly DrawingPreparedVertex[];
   patches: readonly DrawingPreparedStrokePatch[];
@@ -2724,7 +2724,7 @@ const preparePathFill = (
     });
 
     let baseTriangles: readonly Point2D[] = [];
-    switch (renderer) {
+    switch (renderer.kind) {
       case 'convex-tessellated-wedges':
       case 'stencil-tessellated-wedges':
         baseTriangles = tessellateFillFromPatches(patches) ??

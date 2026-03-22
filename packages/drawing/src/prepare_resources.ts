@@ -599,10 +599,9 @@ const prepareStepResources = (
     const fillVertices = usesPatchFill
       ? null
       : createVertexModulationData(step.draw.triangles, [1, 1, 1, 1]);
-    const patchVertices = step.draw.renderer === 'convex-tessellated-wedges' ||
-        step.draw.renderer === 'stencil-tessellated-wedges'
+    const patchVertices = step.draw.renderer.patchMode === 'wedge'
       ? createWedgePatchInstanceData(step.draw.patches)
-      : step.draw.renderer === 'stencil-tessellated-curves'
+      : step.draw.renderer.patchMode === 'curve'
       ? createCurvePatchInstanceData(step.draw.patches)
       : null;
     const fringeVertices = step.draw.fringeVertices
@@ -648,13 +647,9 @@ const prepareStepResources = (
         : null,
       patchInstanceCount: patchVertices
         ? patchVertices.length /
-          (step.draw.renderer === 'convex-tessellated-wedges' ||
-              step.draw.renderer === 'stencil-tessellated-wedges'
-            ? wedgePatchFloats
-            : curvePatchFloats)
+          (step.draw.renderer.patchMode === 'wedge' ? wedgePatchFloats : curvePatchFloats)
         : 0,
-      patchVertexCount: step.draw.renderer === 'convex-tessellated-wedges' ||
-          step.draw.renderer === 'stencil-tessellated-wedges'
+      patchVertexCount: step.draw.renderer.patchMode === 'wedge'
         ? wedgePatchVertexCount
         : curvePatchVertexCount,
       fringeVertexBuffer: fringeVertices ? createVertexBuffer(sharedContext, fringeVertices) : null,

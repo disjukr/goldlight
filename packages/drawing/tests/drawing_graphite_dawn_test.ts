@@ -236,7 +236,7 @@ Deno.test('dawn shared context exposes resource provider over gpu device', () =>
   assertEquals(sharedContext.rendererProvider.pathRendererStrategy, 'tessellation');
   assertEquals(sharedContext.caps.supportsTimestampQuery, true);
   assertEquals(sharedContext.rendererProvider.pathRendererStrategy, 'tessellation');
-  assertEquals(sharedContext.rendererProvider.renderers.length, 4);
+  assertEquals(sharedContext.rendererProvider.renderers.length, 6);
   assertEquals(mock.created.bindGroupLayouts.length, 2);
   assertEquals(mock.created.buffers.length, 1);
   assertEquals(mock.created.textures.length, 1);
@@ -249,7 +249,7 @@ Deno.test('drawing renderer provider follows graphite wedge versus curve heurist
     createDawnCaps(createDawnBackendContext(mock.context)),
   );
 
-  assertEquals(provider.convexTessellatedWedges(), 'convex-tessellated-wedges');
+  assertEquals(provider.convexTessellatedWedges().kind, 'convex-tessellated-wedges');
   assertEquals(
     provider.getPathFillRenderer({
       fillRule: 'nonzero',
@@ -258,7 +258,7 @@ Deno.test('drawing renderer provider follows graphite wedge versus curve heurist
       isSingleConvexContour: true,
       verbCount: 12,
       drawBoundsArea: 4096,
-    }),
+    }).kind,
     'convex-tessellated-wedges',
   );
   assertEquals(
@@ -269,7 +269,7 @@ Deno.test('drawing renderer provider follows graphite wedge versus curve heurist
       isSingleConvexContour: false,
       verbCount: 60,
       drawBoundsArea: 512 * 512,
-    }),
+    }).kind,
     'stencil-tessellated-curves',
   );
   assertEquals(
@@ -280,9 +280,11 @@ Deno.test('drawing renderer provider follows graphite wedge versus curve heurist
       isSingleConvexContour: false,
       verbCount: 20,
       drawBoundsArea: 128 * 128,
-    }),
+    }).kind,
     'stencil-tessellated-wedges',
   );
+  assertEquals(provider.stencilTessellatedWedges('evenodd').fillRule, 'evenodd');
+  assertEquals(provider.stencilTessellatedCurves('nonzero').fillRule, 'nonzero');
 });
 
 Deno.test('prepareDawnRecording uses the shared-context renderer provider', () => {
@@ -295,7 +297,9 @@ Deno.test('prepareDawnRecording uses the shared-context renderer provider', () =
     getPathFillRenderer: typeof provider.getPathFillRenderer;
   }).getPathFillRenderer = (options) => {
     const selected = originalGetPathFillRenderer(options);
-    return selected === 'convex-tessellated-wedges' ? 'stencil-tessellated-curves' : selected;
+    return selected.kind === 'convex-tessellated-wedges'
+      ? provider.stencilTessellatedCurves(options.fillRule)
+      : selected;
   };
   (sharedContext as { rendererProvider: typeof provider }).rendererProvider = provider;
 
@@ -314,7 +318,7 @@ Deno.test('prepareDawnRecording uses the shared-context renderer provider', () =
   const prepared = prepareDawnRecording(sharedContext, finishDrawingRecorder(recorder));
   const draw = prepared.prepared.passes[0]?.steps[0]?.draw;
   assertEquals(draw?.kind, 'pathFill');
-  assertEquals(draw?.renderer, 'stencil-tessellated-curves');
+  assertEquals(draw?.renderer.kind, 'stencil-tessellated-curves');
 });
 
 Deno.test('dawn resource provider uses replace for first clip writes', () => {
@@ -750,7 +754,7 @@ Deno.test('drawing prepared recording selects convex tessellated wedges for simp
   const draw = prepared.passes[0]?.steps[0]?.draw;
 
   assertEquals(draw?.kind, 'pathFill');
-  assertEquals(draw?.renderer, 'convex-tessellated-wedges');
+  assertEquals(draw?.renderer.kind, 'convex-tessellated-wedges');
   assertEquals((draw?.triangles.length ?? 0) > 0, true);
 });
 
@@ -777,7 +781,7 @@ Deno.test('drawing prepared recording flattens quadratic and cubic paths for fil
   if (draw?.kind !== 'pathFill') {
     throw new Error('expected pathFill draw');
   }
-  assertEquals(draw.renderer, 'convex-tessellated-wedges');
+  assertEquals(draw.renderer.kind, 'convex-tessellated-wedges');
   assertEquals(draw.triangles.length > 6, true);
   assertEquals(draw.bounds.origin[0], 24);
   assertEquals(draw.patches.length > 0, true);
@@ -984,7 +988,7 @@ Deno.test('drawing prepared recording preserves patch fill when convex clips are
   if (draw?.kind !== 'pathFill') {
     throw new Error('expected pathFill draw');
   }
-  assertEquals(draw.renderer, 'convex-tessellated-wedges');
+  assertEquals(draw.renderer.kind, 'convex-tessellated-wedges');
   assertEquals(draw.patches.length > 0, true);
   assertEquals((draw.fringeVertices?.length ?? 0) > 0, true);
   assertEquals(step?.clipRect, createRect(32, 32, 80, 80));
@@ -1240,7 +1244,7 @@ Deno.test('drawing prepared recording expands stroke geometry', () => {
   if (draw?.kind !== 'pathStroke') {
     throw new Error('expected pathStroke draw');
   }
-  assertEquals(draw.renderer, 'tessellated-strokes');
+  assertEquals(draw.renderer.kind, 'tessellated-strokes');
   assertEquals(draw.patches.length > 0, true);
   assertEquals(draw.usesTessellatedStrokePatches, true);
 });
@@ -1564,7 +1568,7 @@ Deno.test('drawing prepared recording scales hairline alpha coverage', () => {
   const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
   const draw = prepared.passes[0]?.steps[0]?.draw;
   assertEquals(draw?.kind, 'pathStroke');
-  assertEquals(draw?.renderer, 'tessellated-strokes');
+  assertEquals(draw?.renderer.kind, 'tessellated-strokes');
   assertEquals(draw?.color, [0.4, 0.6, 0.8, 0.5]);
 });
 

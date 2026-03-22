@@ -56,8 +56,11 @@ export type DrawingPreparedPatch = Readonly<
 export type DrawingPreparedStrokePatch = Readonly<{
   patch: DrawingPreparedPatch;
   prevPoint: Point2D;
+  joinControlPoint: Point2D;
   contourStart: boolean;
   contourEnd: boolean;
+  startCap: 'none' | 'butt' | 'square' | 'round';
+  endCap: 'none' | 'butt' | 'square' | 'round';
 }>;
 
 type DrawingPatchDefinition =
@@ -378,6 +381,7 @@ const getPatchEndPoint = (patch: DrawingPreparedPatch): Point2D => {
 
 const createPreparedStrokePatches = (
   patches: readonly DrawingPreparedPatch[],
+  cap: NonNullable<DrawingPaint['strokeCap']>,
 ): readonly DrawingPreparedStrokePatch[] => {
   if (patches.length === 0) {
     return Object.freeze([]);
@@ -394,8 +398,11 @@ const createPreparedStrokePatches = (
     prepared.push({
       patch,
       prevPoint: contourStart ? start : previousEnd,
+      joinControlPoint: contourStart ? start : previousEnd,
       contourStart,
       contourEnd,
+      startCap: contourStart ? cap : 'none',
+      endCap: contourEnd ? cap : 'none',
     });
     previousEnd = end;
   }
@@ -1930,7 +1937,10 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
   }
 
   const strokeStyle = resolveStrokeStyle(command.paint);
-  const patches = createPreparedStrokePatches(preparePatches(command.path, identityMatrix2D, false));
+  const patches = createPreparedStrokePatches(
+    preparePatches(command.path, identityMatrix2D, false),
+    strokeStyle.cap,
+  );
   const usesTessellatedStrokePatches = canUseTessellatedStrokePatches(subpaths, command.paint);
   const preparedStroke = prepareStrokeTriangles(subpaths, command.paint);
   const strokedBounds = computeStrokeBounds(applyDashPattern(subpaths, command.paint), strokeStyle.halfWidth);

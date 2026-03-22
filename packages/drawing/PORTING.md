@@ -634,6 +634,30 @@ When work is added in this package, update this document with:
 
 ## Skia Graphite/Dawn Delta Checklist
 
+## High-Priority Structural Gaps
+
+- `P0` Remove legacy graphics-pipeline switch path
+  - Why high priority: until `resource_provider` stops translating descriptor-shaped pipeline
+    requests back into the old local switch table, the pipeline layer is still structurally unlike
+    Skia Graphite/Dawn
+  - To match Skia better: make `src/resource_provider.ts` build and cache graphics pipelines
+    directly from descriptor/state inputs, without a legacy key translation layer
+- `P0` Port `ClipStack` semantics instead of intersect-only clipping
+  - Why high priority: clip behavior is still one of the largest remaining correctness and
+    architecture deltas
+  - To match Skia better: add clip ops/state comparable to Skia save records, ordering, difference,
+    and analytic/atlas-backed clip handling instead of convex/direct fallback paths
+- `P0` Move transform and paint replay to Skia-like uniform/storage payloads
+  - Why high priority: current draw preparation still bakes too much geometry on the CPU, which
+    keeps the draw-pass/pipeline architecture from matching Graphite
+  - To match Skia better: preserve more local-space geometry through preparation and bind
+    `localToDevice`, render-step data, and paint data as pass-owned GPU payloads
+- `P1` Introduce a closer `Recorder -> Recording -> prepareResources -> CommandBuffer` flow
+  - Why high priority: recording/task preparation boundaries are still much simpler than Skia's
+    pipeline
+  - To match Skia better: make resource preparation an explicit stage between immutable recordings
+    and backend command encoding, with clearer ownership of pass-local resources
+
 - `Recorder` / recording lifecycle
   - Current delta: no ordered-recording policy, no task graph, no upload or device flush model
   - To match Skia better: introduce recording ordering/flush rules and explicit per-recording

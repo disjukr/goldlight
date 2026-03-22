@@ -25,6 +25,8 @@ export type DrawingVertexLayoutKey =
 export type DrawingDepthStencilKey =
   | 'none'
   | 'clip-stencil-write'
+  | 'clip-stencil-intersect'
+  | 'clip-stencil-difference'
   | 'clip-cover'
   | 'fill-stencil-evenodd'
   | 'fill-stencil-nonzero'
@@ -41,6 +43,7 @@ export type DrawingGraphicsPipelineDesc = Readonly<{
 export type DrawingPreparedStep = Readonly<{
   draw: DrawingPreparedDraw;
   pipelineDescs: readonly DrawingGraphicsPipelineDesc[];
+  clipPipelineDescs: readonly DrawingGraphicsPipelineDesc[];
   clipRect?: DrawingClipRect;
   drawBounds: DrawingPreparedDraw['bounds'];
   clipBounds?: Rect;
@@ -87,7 +90,7 @@ const createPipelineDesc = (
 const getPipelineDescsForDraw = (
   draw: DrawingPreparedDraw,
 ): readonly DrawingGraphicsPipelineDesc[] => {
-  const usesStencilClip = Boolean(draw.clip?.triangleRuns?.length);
+  const usesStencilClip = Boolean(draw.clip?.elements?.length);
   switch (draw.kind) {
     case 'pathFill': {
       const fillStencilDesc = draw.fillRule === 'evenodd'
@@ -151,40 +154,22 @@ const getPipelineDescsForDraw = (
       }
       if (draw.renderer === 'middle-out-fan') {
         return usesStencilClip
-          ? [
-            createPipelineDesc(
-              'drawing-clip-stencil-write',
-              'path',
-              'device-vertex',
-              'clip-stencil-write',
-              true,
-            ),
-            createPipelineDesc(
+          ? [createPipelineDesc(
               'drawing-path-fill-clip-cover',
               'path',
               'device-vertex',
               'clip-cover',
-            ),
-          ]
+            )]
           : [createPipelineDesc('drawing-path-fill-cover', 'path', 'device-vertex')];
       }
       if (draw.renderer === 'stencil-tessellated-curves') {
         return usesStencilClip
-          ? [
-            createPipelineDesc(
-              'drawing-clip-stencil-write',
-              'path',
-              'device-vertex',
-              'clip-stencil-write',
-              true,
-            ),
-            createPipelineDesc(
+          ? [createPipelineDesc(
               'drawing-path-fill-curve-patch-clip-cover',
               'curve-patch',
               'curve-patch-instance',
               'clip-cover',
-            ),
-          ]
+            )]
           : [
             createPipelineDesc(
               'drawing-path-fill-curve-patch-cover',
@@ -195,13 +180,6 @@ const getPipelineDescsForDraw = (
       }
       if (usesStencilClip) {
         return [
-          createPipelineDesc(
-            'drawing-clip-stencil-write',
-            'path',
-            'device-vertex',
-            'clip-stencil-write',
-            true,
-          ),
           createPipelineDesc(
             'drawing-path-fill-patch-clip-cover',
             'wedge-patch',
@@ -215,41 +193,67 @@ const getPipelineDescsForDraw = (
     case 'pathStroke':
       if (draw.patches.length === 0) {
         return usesStencilClip
-          ? [
-            createPipelineDesc(
-              'drawing-clip-stencil-write',
-              'path',
-              'device-vertex',
-              'clip-stencil-write',
-              true,
-            ),
-            createPipelineDesc(
+          ? [createPipelineDesc(
               'drawing-path-stroke-clip-cover',
               'path',
               'device-vertex',
               'clip-cover',
-            ),
-          ]
+            )]
           : [createPipelineDesc('drawing-path-stroke-cover', 'path', 'device-vertex')];
       }
       return usesStencilClip
-        ? [
-          createPipelineDesc(
-            'drawing-clip-stencil-write',
-            'path',
-            'device-vertex',
-            'clip-stencil-write',
-            true,
-          ),
-          createPipelineDesc(
+        ? [createPipelineDesc(
             'drawing-path-stroke-patch-clip-cover',
             'stroke-patch',
             'stroke-patch-instance',
             'clip-cover',
-          ),
-        ]
+          )]
         : [createPipelineDesc('drawing-path-stroke-patch-cover', 'stroke-patch', 'stroke-patch-instance')];
   }
+};
+
+const getClipPipelineDescsForDraw = (
+  draw: DrawingPreparedDraw,
+): readonly DrawingGraphicsPipelineDesc[] => {
+  if (!draw.clip?.elements?.length) {
+    return Object.freeze([]);
+  }
+
+  const clipPipelines: DrawingGraphicsPipelineDesc[] = [];
+  if (draw.clip.elements[0]!.op === 'difference') {
+    clipPipelines.push(
+      createPipelineDesc(
+        'drawing-clip-stencil-write',
+        'path',
+        'device-vertex',
+        'clip-stencil-write',
+        true,
+      ),
+    );
+  }
+
+  for (let index = 0; index < draw.clip.elements.length; index += 1) {
+    const element = draw.clip.elements[index]!;
+    clipPipelines.push(
+      createPipelineDesc(
+        index === 0 && element.op === 'intersect'
+          ? 'drawing-clip-stencil-write'
+          : element.op === 'difference'
+          ? 'drawing-clip-stencil-difference'
+          : 'drawing-clip-stencil-intersect',
+        'path',
+        'device-vertex',
+        index === 0 && element.op === 'intersect'
+          ? 'clip-stencil-write'
+          : element.op === 'difference'
+          ? 'clip-stencil-difference'
+          : 'clip-stencil-intersect',
+        true,
+      ),
+    );
+  }
+
+  return Object.freeze(clipPipelines);
 };
 
 export const prepareDrawingRecording = (
@@ -301,13 +305,14 @@ export const prepareDrawingRecording = (
         currentSteps.push({
           draw: prepared.draw,
           pipelineDescs: getPipelineDescsForDraw(prepared.draw),
+          clipPipelineDescs: getClipPipelineDescsForDraw(prepared.draw),
           clipRect: prepared.draw.clipRect,
           drawBounds: prepared.draw.bounds,
           clipBounds: prepared.draw.clip?.bounds,
           usesStencil: prepared.draw.usesStencil,
           usesFillStencil: prepared.draw.kind === 'pathFill' &&
             prepared.draw.renderer !== 'middle-out-fan' &&
-            !prepared.draw.clip?.triangleRuns?.length,
+            !prepared.draw.clip?.elements?.length,
         });
       } else {
         currentUnsupportedDraws.push(command);

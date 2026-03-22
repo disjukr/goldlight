@@ -33,6 +33,7 @@ const cloneCommand = (command: DrawingCommand): DrawingCommand => {
           clip.kind === 'rect'
             ? {
               kind: 'rect',
+              op: clip.op,
               rect: {
                 origin: [...clip.rect.origin] as typeof clip.rect.origin,
                 size: { ...clip.rect.size },
@@ -41,6 +42,7 @@ const cloneCommand = (command: DrawingCommand): DrawingCommand => {
             }
             : {
               kind: 'path',
+              op: clip.op,
               path: clonePath(clip.path)!,
               transform: [...clip.transform] as typeof clip.transform,
             }
@@ -57,6 +59,7 @@ const cloneCommand = (command: DrawingCommand): DrawingCommand => {
           clip.kind === 'rect'
             ? {
               kind: 'rect',
+              op: clip.op,
               rect: {
                 origin: [...clip.rect.origin] as typeof clip.rect.origin,
                 size: { ...clip.rect.size },
@@ -65,6 +68,7 @@ const cloneCommand = (command: DrawingCommand): DrawingCommand => {
             }
             : {
               kind: 'path',
+              op: clip.op,
               path: clonePath(clip.path)!,
               transform: [...clip.transform] as typeof clip.transform,
             }

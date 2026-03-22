@@ -1,6 +1,7 @@
 import { type PathFillRule2D, type Point2D, type Rect, transformPoint2D } from '@rieul3d/geometry';
 import type {
   DrawingClip,
+  DrawingClipOp,
   DrawingClipRect,
   DrawingPaint,
   DrawingPath2D,
@@ -25,7 +26,12 @@ export type DrawingPreparedVertex = Readonly<{
 
 export type DrawingPreparedClip = Readonly<{
   bounds?: Rect;
-  triangleRuns?: readonly (readonly Point2D[])[];
+  elements?: readonly DrawingPreparedClipElement[];
+}>;
+
+export type DrawingPreparedClipElement = Readonly<{
+  op: DrawingClipOp;
+  triangles: readonly Point2D[];
 }>;
 
 type DrawingPreparedPatchBase = Readonly<{
@@ -1693,6 +1699,18 @@ type PreparedClipStack = Readonly<{
   stencilClip?: DrawingPreparedClip;
 }>;
 
+const createPolygonTriangles = (polygon: readonly Point2D[]): readonly Point2D[] => {
+  if (polygon.length < 3) {
+    return Object.freeze([]) as readonly Point2D[];
+  }
+
+  const triangles: Point2D[] = [];
+  for (let index = 1; index < polygon.length - 1; index += 1) {
+    triangles.push(polygon[0]!, polygon[index]!, polygon[index + 1]!);
+  }
+  return Object.freeze(triangles);
+};
+
 const createRectClipPolygon = (
   clipRect: DrawingClipRect,
   transform: readonly [number, number, number, number, number, number],
@@ -1714,13 +1732,20 @@ const prepareClipStack = (clips: readonly DrawingClip[]): PreparedClipStack | un
 
   const convexPolygons: Point2D[][] = [];
   let bounds: Rect | undefined;
-  const stencilTriangleRuns: Point2D[][] = [];
+  const stencilElements: DrawingPreparedClipElement[] = [];
 
   for (const clip of clips) {
     if (clip.kind === 'rect') {
       const polygon = createRectClipPolygon(clip.rect, clip.transform);
-      convexPolygons.push([...polygon]);
-      bounds = intersectBounds(bounds, computeBounds(polygon));
+      if (clip.op === 'intersect') {
+        convexPolygons.push([...polygon]);
+        bounds = intersectBounds(bounds, computeBounds(polygon));
+      } else {
+        stencilElements.push({
+          op: clip.op,
+          triangles: createPolygonTriangles(polygon),
+        });
+      }
       continue;
     }
 
@@ -1730,9 +1755,12 @@ const prepareClipStack = (clips: readonly DrawingClip[]): PreparedClipStack | un
     }
 
     const clipBounds = unionBounds(subpaths.map((subpath) => computeBounds(subpath.points)));
-    bounds = intersectBounds(bounds, clipBounds);
+    if (clip.op === 'intersect') {
+      bounds = intersectBounds(bounds, clipBounds);
+    }
 
     if (
+      clip.op === 'intersect' &&
       subpaths.length === 1 &&
       subpaths[0]!.closed &&
       isConvexPolygon(subpaths[0]!.points)
@@ -1743,16 +1771,17 @@ const prepareClipStack = (clips: readonly DrawingClip[]): PreparedClipStack | un
 
     const clipTriangles = prepareFillTriangles(subpaths, clip.path.fillRule);
     if (clipTriangles && clipTriangles.length > 0) {
-      stencilTriangleRuns.push([...clipTriangles]);
+      stencilElements.push({
+        op: clip.op,
+        triangles: Object.freeze([...clipTriangles]),
+      });
     }
   }
 
-  const stencilClip = stencilTriangleRuns.length > 0
+  const stencilClip = stencilElements.length > 0
     ? {
       bounds,
-      triangleRuns: Object.freeze(
-        stencilTriangleRuns.map((triangles) => Object.freeze(triangles)),
-      ),
+      elements: Object.freeze(stencilElements),
     }
     : undefined;
 
@@ -1885,7 +1914,7 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
         bounds: computeBounds(triangles),
         clipRect: preparedClipStack?.bounds,
         clip: preparedClipStack?.stencilClip,
-        usesStencil: Boolean(preparedClipStack?.stencilClip?.triangleRuns?.length),
+        usesStencil: Boolean(preparedClipStack?.stencilClip?.elements?.length),
       },
     };
   }
@@ -1913,7 +1942,7 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
       bounds: computeBounds(strokeTriangles),
       clipRect: preparedClipStack?.bounds,
       clip: preparedClipStack?.stencilClip,
-      usesStencil: Boolean(preparedClipStack?.stencilClip?.triangleRuns?.length),
+      usesStencil: Boolean(preparedClipStack?.stencilClip?.elements?.length),
     },
   };
 };

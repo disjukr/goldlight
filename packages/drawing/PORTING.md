@@ -637,16 +637,16 @@ When work is added in this package, update this document with:
 ## High-Priority Structural Gaps
 
 - `P0` Remove legacy graphics-pipeline switch path
-  - Why high priority: until `resource_provider` stops translating descriptor-shaped pipeline
-    requests back into the old local switch table, the pipeline layer is still structurally unlike
-    Skia Graphite/Dawn
-  - To match Skia better: make `src/resource_provider.ts` build and cache graphics pipelines
-    directly from descriptor/state inputs, without a legacy key translation layer
+  - Status: done in `src/resource_provider.ts`; graphics pipelines are now created and cached from
+    descriptor/state inputs directly, with the legacy key path retained only as a compatibility shim
+    for older call sites and tests
 - `P0` Port `ClipStack` semantics instead of intersect-only clipping
   - Why high priority: clip behavior is still one of the largest remaining correctness and
     architecture deltas
-  - To match Skia better: add clip ops/state comparable to Skia save records, ordering, difference,
-    and analytic/atlas-backed clip handling instead of convex/direct fallback paths
+  - Current progress: `DrawingClip` now carries explicit clip ops and the Dawn path can replay
+    stencil clips with separate `write`, `intersect`, and `difference` stencil states
+  - To match Skia better: continue from this state toward save-record ordering and atlas/analytic
+    clip handling instead of the remaining convex/direct fallback paths
 - `P0` Move transform and paint replay to Skia-like uniform/storage payloads
   - Why high priority: current draw preparation still bakes too much geometry on the CPU, which
     keeps the draw-pass/pipeline architecture from matching Graphite

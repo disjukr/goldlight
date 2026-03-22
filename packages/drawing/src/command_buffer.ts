@@ -7,7 +7,11 @@ import type { Point2D } from '@rieul3d/geometry';
 import { type DrawingPreparedRecording, prepareDrawingRecording } from './draw_pass.ts';
 import { submitToDawnQueueManager } from './queue_manager.ts';
 import type { DrawingRecording } from './recording.ts';
-import type { DrawingPreparedPatch, DrawingPreparedVertex } from './path_renderer.ts';
+import type {
+  DrawingPreparedClipElement,
+  DrawingPreparedPatch,
+  DrawingPreparedVertex,
+} from './path_renderer.ts';
 import type { DawnSharedContext } from './shared_context.ts';
 import type { DrawingCommand } from './types.ts';
 
@@ -22,6 +26,7 @@ export type DawnCommandBuffer = Readonly<{
 
 type DrawingPreparedStepResources = Readonly<{
   pipelines: readonly GPURenderPipeline[];
+  clipPipelines: readonly GPURenderPipeline[];
   fringePipeline: GPURenderPipeline | null;
   fillVertexBuffer: GPUBuffer | null;
   fillVertexCount: number;
@@ -34,6 +39,7 @@ type DrawingPreparedStepResources = Readonly<{
   boundsCoverVertexCount: number;
   clipVertexBuffers: readonly GPUBuffer[];
   clipVertexCounts: readonly number[];
+  clipElements: readonly DrawingPreparedClipElement[];
 }>;
 
 type DrawingPreparedPassResources = Readonly<{
@@ -43,6 +49,8 @@ type DrawingPreparedPassResources = Readonly<{
 type DrawingPreparedCommandResources = Readonly<{
   viewportTransformBuffer: GPUBuffer;
   viewportBindGroup: GPUBindGroup;
+  fullscreenClipVertexBuffer: GPUBuffer;
+  fullscreenClipVertexCount: number;
   passes: readonly DrawingPreparedPassResources[];
 }>;
 
@@ -157,6 +165,17 @@ const createViewportTransformBuffer = (
   buffer.unmap();
   return buffer;
 };
+
+const createFullscreenClipVertexData = (
+  target: Readonly<{ width: number; height: number }>,
+): Float32Array =>
+  createBoundsCoverVertexData({
+    origin: [0, 0],
+    size: {
+      width: target.width,
+      height: target.height,
+    },
+  }, [0, 0, 0, 0]);
 
 const toCurveType = (patch: DrawingPreparedPatch): number => {
   switch (patch.kind) {
@@ -328,7 +347,7 @@ const applyStepClip = (
 
 const getStencilClipCount = (
   step: DrawingPreparedRecording['passes'][number]['steps'][number],
-): number => step.draw.clip?.triangleRuns?.length ?? 0;
+): number => step.draw.clip?.elements?.length ?? 0;
 
 const createClipStepResources = (
   sharedContext: DawnSharedContext,
@@ -336,25 +355,28 @@ const createClipStepResources = (
 ): Readonly<{
   buffers: readonly GPUBuffer[];
   counts: readonly number[];
+  elements: readonly DrawingPreparedClipElement[];
 }> => {
-  const triangleRuns = step.draw.clip?.triangleRuns;
-  if (!triangleRuns || triangleRuns.length === 0) {
+  const clipElements = step.draw.clip?.elements;
+  if (!clipElements || clipElements.length === 0) {
     return {
       buffers: Object.freeze([]),
       counts: Object.freeze([]),
+      elements: Object.freeze([]),
     };
   }
 
   const buffers: GPUBuffer[] = [];
   const counts: number[] = [];
-  for (const triangles of triangleRuns) {
-    const clipVertices = createDeviceSpaceVertexData(triangles, [0, 0, 0, 0]);
+  for (const element of clipElements) {
+    const clipVertices = createDeviceSpaceVertexData(element.triangles, [0, 0, 0, 0]);
     buffers.push(createVertexBuffer(sharedContext, clipVertices));
     counts.push(clipVertices.length / floatsPerVertex);
   }
   return {
     buffers: Object.freeze(buffers),
     counts: Object.freeze(counts),
+    elements: Object.freeze([...clipElements]),
   };
 };
 
@@ -363,6 +385,9 @@ const prepareStepResources = (
   step: DrawingPreparedRecording['passes'][number]['steps'][number],
 ): DrawingPreparedStepResources => {
   const pipelines = step.pipelineDescs.map((descriptor) =>
+    sharedContext.resourceProvider.findOrCreateGraphicsPipeline(descriptor)
+  );
+  const clipPipelines = step.clipPipelineDescs.map((descriptor) =>
     sharedContext.resourceProvider.findOrCreateGraphicsPipeline(descriptor)
   );
   const clipResources = createClipStepResources(sharedContext, step);
@@ -398,6 +423,7 @@ const prepareStepResources = (
 
     return {
       pipelines: Object.freeze(pipelines),
+      clipPipelines: Object.freeze(clipPipelines),
       fringePipeline,
       fillVertexBuffer: fillVertices ? createVertexBuffer(sharedContext, fillVertices) : null,
       fillVertexCount: fillVertices ? fillVertices.length / floatsPerVertex : 0,
@@ -419,6 +445,7 @@ const prepareStepResources = (
       boundsCoverVertexCount: boundsCoverVertices ? boundsCoverVertices.length / floatsPerVertex : 0,
       clipVertexBuffers: clipResources.buffers,
       clipVertexCounts: clipResources.counts,
+      clipElements: clipResources.elements,
     };
   }
 
@@ -434,6 +461,7 @@ const prepareStepResources = (
 
   return {
     pipelines: Object.freeze(pipelines),
+    clipPipelines: Object.freeze(clipPipelines),
     fringePipeline: step.draw.fringeVertices
       ? sharedContext.resourceProvider.findOrCreateGraphicsPipeline({
         label: getStencilClipCount(step) > 0
@@ -456,6 +484,7 @@ const prepareStepResources = (
     boundsCoverVertexCount: 0,
     clipVertexBuffers: clipResources.buffers,
     clipVertexCounts: clipResources.counts,
+    clipElements: clipResources.elements,
   };
 };
 
@@ -467,10 +496,14 @@ const prepareCommandResources = (
   const viewportBindGroup = sharedContext.resourceProvider.createViewportBindGroup(
     viewportTransformBuffer,
   );
+  const fullscreenClipVertices = createFullscreenClipVertexData(sharedContext.backend.target);
+  const fullscreenClipVertexBuffer = createVertexBuffer(sharedContext, fullscreenClipVertices);
 
   return {
     viewportTransformBuffer,
     viewportBindGroup,
+    fullscreenClipVertexBuffer,
+    fullscreenClipVertexCount: fullscreenClipVertices.length / floatsPerVertex,
     passes: Object.freeze(prepared.passes.map((passInfo) => ({
       steps: Object.freeze(passInfo.steps.map((step) => prepareStepResources(sharedContext, step))),
     }))),
@@ -479,23 +512,37 @@ const prepareCommandResources = (
 
 const encodeStencilClips = (
   pass: GPURenderPassEncoder,
-  step: DrawingPreparedRecording['passes'][number]['steps'][number],
   resources: DrawingPreparedStepResources,
+  commandResources: DrawingPreparedCommandResources,
   viewportBindGroup: GPUBindGroup,
-): void => {
+): number => {
   if (resources.clipVertexBuffers.length === 0) {
-    return;
+    return 0;
   }
 
-  const clipPipeline = resources.pipelines[0]!;
-  pass.setStencilReference?.(0);
-  pass.setPipeline(clipPipeline);
   pass.setBindGroup(0, viewportBindGroup);
+  let clipPipelineIndex = 0;
+  let clipReference = 0;
+
+  if (resources.clipElements[0]?.op === 'difference') {
+    pass.setPipeline(resources.clipPipelines[clipPipelineIndex++]!);
+    pass.setStencilReference?.(1);
+    pass.setVertexBuffer(0, commandResources.fullscreenClipVertexBuffer);
+    pass.draw(commandResources.fullscreenClipVertexCount);
+    clipReference = 1;
+  }
+
   for (let index = 0; index < resources.clipVertexBuffers.length; index += 1) {
+    const element = resources.clipElements[index]!;
+    const nextReference = element.op === 'intersect' ? clipReference + 1 : clipReference;
+    pass.setPipeline(resources.clipPipelines[clipPipelineIndex++]!);
+    pass.setStencilReference?.(nextReference);
     pass.setVertexBuffer(0, resources.clipVertexBuffers[index]!);
     pass.draw(resources.clipVertexCounts[index]!);
+    clipReference = nextReference;
   }
-  pass.setStencilReference?.(resources.clipVertexBuffers.length);
+  pass.setStencilReference?.(clipReference);
+  return clipReference;
 };
 
 const createRenderPassDescriptor = (
@@ -531,6 +578,7 @@ const encodePreparedFillStep = (
   pass: GPURenderPassEncoder,
   step: DrawingPreparedRecording['passes'][number]['steps'][number],
   resources: DrawingPreparedStepResources,
+  commandResources: DrawingPreparedCommandResources,
   target: Readonly<{ width: number; height: number }>,
   viewportBindGroup: GPUBindGroup,
 ): void => {
@@ -571,8 +619,9 @@ const encodePreparedFillStep = (
   }
 
   if (getStencilClipCount(step) > 0) {
-    const colorPipeline = resources.pipelines[1]!;
-    encodeStencilClips(pass, step, resources, viewportBindGroup);
+    const colorPipeline = resources.pipelines[0]!;
+    const clipReference = encodeStencilClips(pass, resources, commandResources, viewportBindGroup);
+    pass.setStencilReference?.(clipReference);
     pass.setPipeline(colorPipeline);
   } else {
     pass.setPipeline(resources.pipelines[0]!);
@@ -589,7 +638,7 @@ const encodePreparedFillStep = (
 
   if (resources.fringeVertexBuffer && resources.fringeVertexCount > 0) {
     if (usesPatchFill) {
-      pass.setPipeline(resources.fringePipeline ?? resources.pipelines[getStencilClipCount(step) > 0 ? 1 : 0]!);
+      pass.setPipeline(resources.fringePipeline ?? resources.pipelines[0]!);
       pass.setBindGroup(0, viewportBindGroup);
     }
     pass.setVertexBuffer(0, resources.fringeVertexBuffer);
@@ -601,6 +650,7 @@ const encodePreparedStrokeStep = (
   pass: GPURenderPassEncoder,
   step: DrawingPreparedRecording['passes'][number]['steps'][number],
   resources: DrawingPreparedStepResources,
+  commandResources: DrawingPreparedCommandResources,
   target: Readonly<{ width: number; height: number }>,
   viewportBindGroup: GPUBindGroup,
 ): void => {
@@ -610,8 +660,9 @@ const encodePreparedStrokeStep = (
 
   applyStepClip(pass, step, target);
   if (getStencilClipCount(step) > 0) {
-    encodeStencilClips(pass, step, resources, viewportBindGroup);
-    pass.setPipeline(resources.pipelines[1]!);
+    const clipReference = encodeStencilClips(pass, resources, commandResources, viewportBindGroup);
+    pass.setStencilReference?.(clipReference);
+    pass.setPipeline(resources.pipelines[0]!);
   } else {
     pass.setPipeline(resources.pipelines[0]!);
   }
@@ -626,7 +677,7 @@ const encodePreparedStrokeStep = (
   }
 
   if (resources.fringeVertexBuffer && resources.fringeVertexCount > 0) {
-    pass.setPipeline(resources.fringePipeline ?? resources.pipelines[getStencilClipCount(step) > 0 ? 1 : 0]!);
+    pass.setPipeline(resources.fringePipeline ?? resources.pipelines[0]!);
     pass.setBindGroup(0, viewportBindGroup);
     pass.setVertexBuffer(0, resources.fringeVertexBuffer);
     pass.draw(resources.fringeVertexCount);
@@ -637,15 +688,16 @@ const encodePreparedStep = (
   pass: GPURenderPassEncoder,
   step: DrawingPreparedRecording['passes'][number]['steps'][number],
   resources: DrawingPreparedStepResources,
+  commandResources: DrawingPreparedCommandResources,
   target: Readonly<{ width: number; height: number }>,
   viewportBindGroup: GPUBindGroup,
 ): void => {
   switch (step.draw.kind) {
     case 'pathFill':
-      encodePreparedFillStep(pass, step, resources, target, viewportBindGroup);
+      encodePreparedFillStep(pass, step, resources, commandResources, target, viewportBindGroup);
       break;
     case 'pathStroke':
-      encodePreparedStrokeStep(pass, step, resources, target, viewportBindGroup);
+      encodePreparedStrokeStep(pass, step, resources, commandResources, target, viewportBindGroup);
       break;
   }
 };
@@ -715,6 +767,7 @@ export const encodeDawnCommandBuffer = (
           pass,
           step,
           passResources.steps[stepIndex]!,
+          resources,
           sharedContext.backend.target,
           resources.viewportBindGroup,
         );
@@ -737,6 +790,7 @@ export const encodeDawnCommandBuffer = (
           pass,
           passInfo.steps[stepIndex]!,
           passResources.steps[stepIndex]!,
+          resources,
           sharedContext.backend.target,
           resources.viewportBindGroup,
         );

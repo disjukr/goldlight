@@ -16,9 +16,9 @@ export type DawnAtlasProvider = Readonly<{
 export type DawnSharedContext = Readonly<{
   backend: DawnBackendContext;
   caps: DawnCaps;
+  rendererProvider: DrawingRendererProvider;
   resourceProvider: DawnResourceProvider;
   threadSafeResourceProvider: DawnResourceProvider;
-  rendererProvider: DrawingRendererProvider;
   atlasProvider: DawnAtlasProvider;
   queueManager: DawnQueueManager;
   noopFragmentShader: GPUShaderModule;
@@ -103,18 +103,18 @@ export const createDawnSharedContext = (
   }> = {},
 ): DawnSharedContext => {
   const caps = createDawnCaps(backend);
+  const rendererProvider = createDrawingRendererProvider(caps);
   const resourceProvider = createDawnResourceProvider(backend, {
     caps,
     resourceBudget: options.resourceBudget,
   });
   const clipAtlasManager = createDawnClipAtlasManager(backend, resourceProvider);
-  const rendererProvider = createDrawingRendererProvider(caps);
   return {
     backend,
     caps,
+    rendererProvider,
     resourceProvider,
     threadSafeResourceProvider: resourceProvider,
-    rendererProvider,
     atlasProvider: {
       getClipAtlasManager: () => clipAtlasManager,
     },

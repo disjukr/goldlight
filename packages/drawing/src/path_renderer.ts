@@ -2744,6 +2744,7 @@ const preparePathFill = (
       subpaths[0]!.closed &&
       isConvexPolygon(subpaths[0]!.points);
     const renderer = rendererProvider.getPathFillRenderer({
+    const renderer = rendererProvider.getPathFillRenderer({
       fillRule: command.path.fillRule,
       patchCount: patches.length,
       hasCurves,
@@ -2842,6 +2843,7 @@ const preparePathFill = (
     supported: true,
     draw: {
       kind: 'pathStroke',
+      renderer: rendererProvider.getPathStrokeRenderer(patches.map((patch) => patch.patch)),
       renderer: rendererProvider.getPathStrokeRenderer(patches.map((patch) => patch.patch)),
       triangles: strokeTriangles,
       fringeVertices: preparedStroke.fringeVertices,

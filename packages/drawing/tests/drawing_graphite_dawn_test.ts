@@ -23,6 +23,7 @@ import {
   createDrawingContext,
   createDrawingPath2DFromShape,
   createDrawingRecorder,
+  createDrawingRendererProvider,
   encodeDawnCommandBuffer,
   encodePreparedDawnCommandBuffer,
   finishDrawingRecorder,
@@ -232,6 +233,7 @@ Deno.test('dawn shared context exposes resource provider over gpu device', () =>
 
   assertEquals(sharedContext.resourceProvider.resourceBudget, 1024);
   assertEquals(sharedContext.caps.backend, 'graphite-dawn');
+  assertEquals(sharedContext.rendererProvider.pathRendererStrategy, 'tessellation');
   assertEquals(sharedContext.caps.supportsTimestampQuery, true);
   assertEquals(sharedContext.rendererProvider.pathRendererStrategy, 'tessellation');
   assertEquals(sharedContext.rendererProvider.renderers.length, 4);
@@ -239,6 +241,40 @@ Deno.test('dawn shared context exposes resource provider over gpu device', () =>
   assertEquals(mock.created.buffers.length, 1);
   assertEquals(mock.created.textures.length, 1);
   assertEquals(mock.created.samplers.length, 1);
+});
+
+Deno.test('prepareDawnRecording uses the shared-context renderer provider', () => {
+  const mock = createMockGpuContext();
+  const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
+  const recorder = createDrawingRecorder(sharedContext);
+  const provider = createDrawingRendererProvider(sharedContext.caps);
+  const originalSelectPathFillRenderer = provider.selectPathFillRenderer;
+  (provider as {
+    selectPathFillRenderer: typeof provider.selectPathFillRenderer;
+  }).selectPathFillRenderer = (options) => {
+    const selected = originalSelectPathFillRenderer(options);
+    return selected.kind === 'middle-out-fan'
+      ? provider.stencilTessellatedCurves(options.fillRule)
+      : selected;
+  };
+  (sharedContext as { rendererProvider: typeof provider }).rendererProvider = provider;
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [16, 16] },
+      { kind: 'lineTo', to: [96, 16] },
+      { kind: 'lineTo', to: [96, 96] },
+      { kind: 'lineTo', to: [16, 96] },
+      { kind: 'close' },
+    ),
+    { style: 'fill' },
+  );
+
+  const prepared = prepareDawnRecording(sharedContext, finishDrawingRecorder(recorder));
+  const draw = prepared.prepared.passes[0]?.steps[0]?.draw;
+  assertEquals(draw?.kind, 'pathFill');
+  assertEquals(draw?.renderer, 'stencil-tessellated-curves');
 });
 
 Deno.test('dawn resource provider uses replace for first clip writes', () => {

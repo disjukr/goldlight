@@ -191,6 +191,12 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Update 2026-03-22: fill/stroke patches now carry Skia-style per-patch resolve levels derived
     from Wang-like formulas, and fill patches preserve contour fan points instead of degrading
     curved wedges into line-only triangles
+  - Update 2026-03-23: stroke patch preparation now finishes open/closed contours through a
+    `StrokeIterator`-like sequence with deferred first-patch replay and explicit `moveWithinContour`
+    barriers instead of the previous ad hoc contour flush
+  - Update 2026-03-23: cubic 180-degree chop handling now follows Skia's cusp branches more closely
+    by pinning one-cusp cubic controls onto the cusp point and converting two-cusp chops into
+    circle-plus-line fallback instead of always replaying chopped cubics
 - `src/renderer_provider.ts`
   - Status: `started`
   - Role: context-wide renderer set and Graphite-like fill/stroke selection for convex tessellated
@@ -523,16 +529,16 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
 - `Stroke tessellation` is structurally close but still not 1:1
   - Local state: `src/path_renderer.ts` now has iterator-like contour events, deferred first-patch
     rewrite, open-cap patch emission, Graphite-style replicated line patches, `chopAndWriteCubics`,
-    `FindCubicConvex180Chops`-style cubic chop detection, and open-contour patch chaining that now
-    keeps split curves connected to their true predecessor join control points;
-    `src/resource_provider.ts` now uses triangle-strip stroke patch replay with `edgeID` /
-    `combinedEdgeID`-driven body tessellation, and its WGSL branch structure now more directly
-    mirrors Skia's `tessellate_stroked_curve()` for degenerate square/circle patches and segment
-    counting
+    `FindCubicConvex180Chops`-style cubic chop detection, `StrokeIterator`-like contour finishing
+    with explicit move barriers, and open-contour patch chaining that now keeps split curves
+    connected to their true predecessor join control points; `src/resource_provider.ts` now uses
+    triangle-strip stroke patch replay with `edgeID` / `combinedEdgeID`-driven body tessellation,
+    and its WGSL branch structure now more directly mirrors Skia's `tessellate_stroked_curve()` for
+    degenerate square/circle patches and segment counting
   - Remaining delta: `tessellate_stroked_curve()` seam math still has local safety branches,
-    `StrokeIterator` is event-driven rather than a verb-for-verb port, cusp / duplicated-edge
-    handling is still a reduced version of Skia's full implementation, and translucent round
-    cap/join coverage still needs Graphite-like analytic evaluation instead of flat color fill
+    duplicated-edge handling is still a reduced version of Skia's full implementation, and
+    translucent round cap/join coverage still needs Graphite-like analytic evaluation instead of
+    flat color fill
 - `QueueManager` submission model is still simplified
   - Local state: queue submission, ordered outstanding submission ownership, and completion draining
     exist in `src/queue_manager.ts`
@@ -547,9 +553,8 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
 ## Work Order
 
 1. `P1` Finish stroke tessellation parity
-   - Port the remaining `tessellate_stroked_curve()` seam math, duplicated-edge handling, and
-     `StrokeIterator` verb semantics so the current stroke implementation is no longer a reduced
-     Graphite variant
+   - Port the remaining `tessellate_stroked_curve()` seam math and duplicated-edge handling so the
+     current stroke implementation is no longer a reduced Graphite variant
    - Target files: `src/path_renderer.ts`, `src/resource_provider.ts`
 2. `P2` Finish `Caps`
    - Port remaining DawnCaps workaround logic, multiplanar/external format coverage, and binding

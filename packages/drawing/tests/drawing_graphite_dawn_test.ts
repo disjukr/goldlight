@@ -1527,6 +1527,32 @@ Deno.test('drawing prepared stroke patches emit cusp circles for turnaround curv
   assertEquals(draw.patches.length > 0, true);
 });
 
+Deno.test('drawing prepared stroke patches convert two-cusp cubics into line fallback', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [0, 0] },
+      { kind: 'cubicTo', control1: [100, 0], control2: [-100, 0], to: [0, 0] },
+    ),
+    { style: 'stroke', strokeWidth: 10, strokeJoin: 'round', strokeCap: 'round' },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const draw = prepared.passes[0]?.steps[0]?.draw;
+  assertEquals(draw?.kind, 'pathStroke');
+  if (draw?.kind !== 'pathStroke') {
+    throw new Error('expected pathStroke draw');
+  }
+  assertEquals(
+    draw.patches.filter((patch) => patch.patch.kind === 'line').length,
+    3,
+  );
+});
+
 Deno.test('drawing prepared recording applies dash pattern to strokes', () => {
   const mock = createMockGpuContext();
   const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));

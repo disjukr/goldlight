@@ -457,8 +457,8 @@ These decisions directly affect the remaining work and are not settled yet.
 - curve patch preparation is closer to Skia Graphite terminology now, but it is still CPU-generated
   geometry instead of true GPU patch tessellation
 - patch-instance replay now exists for wedges, curves, and strokes, and now carries per-patch
-  Wang-style resolve levels, but it still uses a bounded fixed-count WGSL topology instead of
-  Skia's static vertex/index buffers plus full Graphite patch writer behavior
+  Wang-style resolve levels, but it still uses a bounded fixed-count WGSL topology instead of Skia's
+  static vertex/index buffers plus full Graphite patch writer behavior
 - evenodd/nonzero fills now rely on prepared geometry plus scanline fallback rather than Skia-style
   path renderers, and coverage is still not Skia-grade
 - no SVG parser or SVG-to-`Path2D` ingestion path yet

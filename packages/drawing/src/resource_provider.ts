@@ -625,7 +625,10 @@ fn restrict_join_stroke_outset(
   return select(max(strokeOutset, 0.0), min(strokeOutset, 0.0), turn < 0.0);
 }
 
-fn stroke_outset_from_edge_id(edgeID: f32) -> f32 {
+fn stroke_outset_from_vertex_id(vertexIndex: u32, edgeID: f32) -> f32 {
+  if (abs(edgeID) <= 1e-5) {
+    return select(1.0, -1.0, (vertexIndex & 1u) != 0u);
+  }
   return sign(edgeID);
 }
 
@@ -659,6 +662,8 @@ fn vs_main(
   let flags = u32(max(curveMeta.w, 0.0));
   let roundStart = (flags & 16u) != 0u;
   let roundEnd = (flags & 32u) != 0u;
+  let contourStart = (flags & 1u) != 0u;
+  let contourEnd = (flags & 2u) != 0u;
   var curveP0 = p0;
   var curveP1 = p1;
   var curveP2 = p2;
@@ -693,63 +698,68 @@ fn vs_main(
   }
   let maxEdges = f32(SEGMENTS);
   var numEdgesInJoin = stroke_join_edges(joinType, prevTan, tan0, stroke.x);
+  if (contourStart) {
+    numEdgesInJoin = 0.0;
+    prevTan = tan0;
+  }
   if (joinType < 0.0) {
     numEdgesInJoin = min(numEdgesInJoin, maxEdges - 2.0);
   }
-  var local = curveP3;
-  if (segmentIndex < activeSegments) {
-    let squareStart = (flags & 4u) != 0u;
-    let squareEnd = (flags & 8u) != 0u;
-    var joinTan0 = tan0;
-    var joinTan1 = tan1;
-    var turn = cross_length_2d(tan0, tan1);
-    var strokeOutset = stroke_outset_from_edge_id(edgeID);
-    var combinedEdgeID = abs(edgeID) - numEdgesInJoin;
+  let squareStart = (flags & 4u) != 0u;
+  let squareEnd = (flags & 8u) != 0u;
+  var joinTan0 = tan0;
+  var joinTan1 = tan1;
+  var turn = cross_length_2d(tan0, tan1);
+  var strokeOutset = stroke_outset_from_vertex_id(vertexIndex, edgeID);
+  var combinedEdgeID = abs(edgeID) - numEdgesInJoin;
+  if (combinedEdgeID < 0.0) {
+    joinTan1 = joinTan0;
+    if (distance(lastControlPoint, curveP0) > 1e-5) {
+      joinTan0 = prevTan;
+    }
+    turn = cross_length_2d(joinTan0, joinTan1);
+  }
+  if (contourEnd) {
+    joinTan1 = tan1;
+  }
+  let cosTheta = cosine_between_unit_vectors(joinTan0, joinTan1);
+  var rotation = acos(cosTheta);
+  if (turn < 0.0) {
+    rotation = -rotation;
+  }
+  var numParametricSegments = f32(activeSegments);
+  var numRadialSegments: f32;
+  if (combinedEdgeID < 0.0) {
+    numRadialSegments = numEdgesInJoin - 2.0;
+    numParametricSegments = 1.0;
+    curveP1 = curveP0;
+    curveP2 = curveP0;
+    curveP3 = curveP0;
+    combinedEdgeID += numRadialSegments + 1.0;
     if (combinedEdgeID < 0.0) {
-      joinTan1 = joinTan0;
-      if (distance(lastControlPoint, curveP0) > 1e-5) {
-        joinTan0 = prevTan;
-      }
-      turn = cross_length_2d(joinTan0, joinTan1);
+      combinedEdgeID = 0.0;
+    } else if (!tangents_nearly_parallel(turn, joinTan0, joinTan1) || dot(joinTan0, joinTan1) < 0.0) {
+      strokeOutset = select(max(strokeOutset, 0.0), min(strokeOutset, 0.0), turn < 0.0);
     }
-    let cosTheta = cosine_between_unit_vectors(joinTan0, joinTan1);
-    var rotation = acos(cosTheta);
-    if (turn < 0.0) {
-      rotation = -rotation;
-    }
-    var numParametricSegments = f32(activeSegments);
-    var numRadialSegments: f32;
-    if (combinedEdgeID < 0.0) {
-      numRadialSegments = numEdgesInJoin - 2.0;
-      numParametricSegments = 1.0;
-      curveP1 = curveP0;
-      curveP2 = curveP0;
-      curveP3 = curveP0;
-      combinedEdgeID += numRadialSegments + 1.0;
-      if (combinedEdgeID < 0.0) {
-        combinedEdgeID = 0.0;
-      } else if (!tangents_nearly_parallel(turn, joinTan0, joinTan1) || dot(joinTan0, joinTan1) < 0.0) {
-        strokeOutset = select(max(strokeOutset, 0.0), min(strokeOutset, 0.0), turn < 0.0);
-      }
-    } else {
-      let maxCombinedSegments = maxEdges - numEdgesInJoin - 1.0;
-      numRadialSegments = max(ceil(abs(rotation) * num_radial_segments_per_radian(stroke.x)), 1.0);
-      numRadialSegments = min(numRadialSegments, maxCombinedSegments);
-      numParametricSegments = min(numParametricSegments, maxCombinedSegments - numRadialSegments + 1.0);
-    }
-    let radsPerSegment = rotation / numRadialSegments;
-    let numCombinedSegments = numParametricSegments + numRadialSegments - 1.0;
-    let isFinalEdge = combinedEdgeID >= numCombinedSegments;
-    if (combinedEdgeID > numCombinedSegments) {
-      strokeOutset = 0.0;
-    }
-    if (abs(edgeID) == 2.0 && joinType > 0.0) {
-      strokeOutset *= miter_extent(cosTheta, joinType);
-    }
-    var strokeCoord: vec2<f32>;
-    var curveTangent: vec2<f32>;
-    if (combinedEdgeID != 0.0 && !isFinalEdge) {
-        var parametricT = combinedEdgeID / max(numCombinedSegments, 1.0);
+  } else {
+    let maxCombinedSegments = maxEdges - numEdgesInJoin - 1.0;
+    numRadialSegments = max(ceil(abs(rotation) * num_radial_segments_per_radian(stroke.x)), 1.0);
+    numRadialSegments = min(numRadialSegments, maxCombinedSegments);
+    numParametricSegments = min(numParametricSegments, maxCombinedSegments - numRadialSegments + 1.0);
+  }
+  let radsPerSegment = rotation / numRadialSegments;
+  let numCombinedSegments = numParametricSegments + numRadialSegments - 1.0;
+  let isFinalEdge = combinedEdgeID >= numCombinedSegments;
+  if (combinedEdgeID > numCombinedSegments) {
+    strokeOutset = 0.0;
+  }
+  if (abs(edgeID) == 2.0 && joinType > 0.0) {
+    strokeOutset *= miter_extent(cosTheta, joinType);
+  }
+  var strokeCoord: vec2<f32>;
+  var curveTangent: vec2<f32>;
+  if (combinedEdgeID != 0.0 && !isFinalEdge) {
+        var parametricT = combinedEdgeID / numCombinedSegments;
         var coeffA: vec2<f32>;
         var coeffB: vec2<f32>;
         var coeffC = curveP1 - curveP0;
@@ -790,13 +800,10 @@ fn vs_main(
           if (testParametricID <= maxParametricEdgeID) {
             var testTan = (coeffA * testParametricID) + coeffBScaled;
             testTan = (testTan * testParametricID) + coeffCScaled;
-            let testTanLength = length(testTan);
-            if (testTanLength > 1e-5) {
-              let cosRotationAtTest = dot(testTan / testTanLength, joinTan0);
-              let maxRotation = min((testParametricID * negAbsRadsPerSegment) + maxRotation0, 3.14159265359);
-              if (cosRotationAtTest >= cos(maxRotation)) {
-                lastParametricEdgeID = testParametricID;
-              }
+            let cosRotationAtTest = dot(normalize(testTan), joinTan0);
+            let maxRotation = min((testParametricID * negAbsRadsPerSegment) + maxRotation0, 3.14159265359);
+            if (cosRotationAtTest >= cos(maxRotation)) {
+              lastParametricEdgeID = testParametricID;
             }
           }
           exp *= 0.5;
@@ -867,22 +874,22 @@ fn vs_main(
             tangentAtT = robust_normalize_diff(bcd, abc);
           }
         }
-        curveTangent = tangentAtT;
+    curveTangent = tangentAtT;
+  } else {
+    curveTangent = select(joinTan0, joinTan1, isFinalEdge);
+    strokeCoord = select(curveP0, curveP3, isFinalEdge);
+  }
+  if (combinedEdgeID >= 0.0) {
+    if (is_exact_start_edge(segmentIndex, activeSegments) && squareStart) {
+      strokeCoord -= curveTangent * stroke.x;
     } else {
-      curveTangent = select(joinTan0, joinTan1, isFinalEdge);
-      strokeCoord = select(curveP0, curveP3, isFinalEdge);
-    }
-    if (combinedEdgeID >= 0.0) {
-      if (is_exact_start_edge(segmentIndex, activeSegments) && squareStart) {
-        strokeCoord -= curveTangent * stroke.x;
-      }
       if (is_exact_end_edge(segmentIndex, activeSegments) && squareEnd) {
         strokeCoord += curveTangent * stroke.x;
       }
     }
-    let ortho = vec2<f32>(curveTangent.y, -curveTangent.x);
-    local = strokeCoord + (ortho * stroke.x * strokeOutset);
   }
+  let ortho = vec2<f32>(curveTangent.y, -curveTangent.x);
+  let local = strokeCoord + (ortho * stroke.x * strokeOutset);
   let devicePosition = local_to_device(local);
   var out: VertexOut;
   out.position = device_to_ndc(devicePosition);

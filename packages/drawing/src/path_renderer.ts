@@ -408,6 +408,85 @@ const finalizePatch = (
   }
 };
 
+const maxStrokeCubicResolveLevelBeforeChop = 4;
+
+const accountForStrokeCurve = (resolveLevel: number): number => {
+  if (resolveLevel <= maxStrokeCubicResolveLevelBeforeChop) {
+    return 0;
+  }
+  return 1 << (resolveLevel - maxStrokeCubicResolveLevelBeforeChop);
+};
+
+const chopAndWriteStrokeCubics = (
+  p0: Point2D,
+  p1: Point2D,
+  p2: Point2D,
+  p3: Point2D,
+  numPatches: number,
+): readonly DrawingPreparedPatch[] => {
+  const prepared: DrawingPreparedPatch[] = [];
+  let currentP0 = p0;
+  let currentP1 = p1;
+  let currentP2 = p2;
+  let currentP3 = p3;
+
+  for (; numPatches >= 3; numPatches -= 2) {
+    const t0 = 1 / numPatches;
+    const t1 = 2 / numPatches;
+    const ab0 = lerp(currentP0, currentP1, t0);
+    const bc0 = lerp(currentP1, currentP2, t0);
+    const cd0 = lerp(currentP2, currentP3, t0);
+    const abc0 = lerp(ab0, bc0, t0);
+    const bcd0 = lerp(bc0, cd0, t0);
+    const abcd0 = lerp(abc0, bcd0, t0);
+
+    const ab1 = lerp(currentP0, currentP1, t1);
+    const bc1 = lerp(currentP1, currentP2, t1);
+    const cd1 = lerp(currentP2, currentP3, t1);
+    const abc1 = lerp(ab1, bc1, t1);
+    const bcd1 = lerp(bc1, cd1, t1);
+    const abcd1 = lerp(abc1, bcd1, t1);
+    const middleP1 = lerp(abc0, bcd0, t1);
+    const middleP2 = lerp(abc1, bcd1, t0);
+
+    prepared.push(finalizePatch({ kind: 'cubic', points: [currentP0, ab0, abc0, abcd0] }));
+    prepared.push(finalizePatch({ kind: 'cubic', points: [abcd0, middleP1, middleP2, abcd1] }));
+
+    currentP0 = abcd1;
+    currentP1 = bcd1;
+    currentP2 = cd1;
+  }
+
+  if (numPatches === 2) {
+    const [left, right] = splitCubicAt(currentP0, currentP1, currentP2, currentP3, 0.5);
+    prepared.push(finalizePatch({ kind: 'cubic', points: left }));
+    prepared.push(finalizePatch({ kind: 'cubic', points: right }));
+  } else {
+    prepared.push(finalizePatch({ kind: 'cubic', points: [currentP0, currentP1, currentP2, currentP3] }));
+  }
+
+  return Object.freeze(prepared);
+};
+
+const subdivideStrokePreparedPatch = (
+  patch: DrawingPreparedPatch,
+): readonly DrawingPreparedPatch[] => {
+  if (patch.kind !== 'cubic') {
+    return Object.freeze([patch]);
+  }
+  const numPatches = accountForStrokeCurve(patch.resolveLevel);
+  return numPatches > 0
+    ? chopAndWriteStrokeCubics(patch.points[0], patch.points[1], patch.points[2], patch.points[3], numPatches)
+    : Object.freeze([patch]);
+};
+
+const prepareStrokePatches = (
+  path: DrawingPath2D,
+): readonly DrawingPreparedPatch[] =>
+  Object.freeze(
+    preparePatches(path, identityMatrix2D, false).flatMap((patch) => subdivideStrokePreparedPatch(patch)),
+  );
+
 const getPatchStartPoint = (patch: DrawingPreparedPatch): Point2D => {
   switch (patch.kind) {
     case 'line':
@@ -630,6 +709,22 @@ const createPreparedStrokeContourPatches = (
     const leadingPatches: DrawingStrokeContourEvent[] = [];
     const bodyPatches: DrawingStrokeContourEvent[] = [];
     const trailingPatches: DrawingStrokeContourEvent[] = [];
+    if (!contour.closed && cap === 'round') {
+      leadingPatches.push({
+        patch: createDegenerateRoundStrokePatch(firstStart).patch,
+        contourStart: true,
+        contourEnd: false,
+        startCap: 'round',
+        endCap: 'round',
+      });
+      trailingPatches.push({
+        patch: createDegenerateRoundStrokePatch(lastEnd).patch,
+        contourStart: false,
+        contourEnd: true,
+        startCap: 'round',
+        endCap: 'round',
+      });
+    }
     if (hasPrependedSquareCap && firstTangent) {
       leadingPatches.push({
         patch: createStrokeLinePatch(add(firstStart, scale(firstTangent, -halfWidth)), firstStart),
@@ -643,8 +738,10 @@ const createPreparedStrokeContourPatches = (
       patch: firstPatch,
       contourStart: !hasPrependedSquareCap,
       contourEnd: !hasAppendedSquareCap && contour.patches.length === 1,
-      startCap: !contour.closed && !hasPrependedSquareCap ? cap : 'none',
-      endCap: !contour.closed && !hasAppendedSquareCap && contour.patches.length === 1 ? cap : 'none',
+      startCap: !contour.closed && !hasPrependedSquareCap && cap !== 'round' ? cap : 'none',
+      endCap: !contour.closed && !hasAppendedSquareCap && contour.patches.length === 1 && cap !== 'round'
+        ? cap
+        : 'none',
     };
     for (let index = 1; index < contour.patches.length; index += 1) {
       bodyPatches.push({
@@ -652,7 +749,7 @@ const createPreparedStrokeContourPatches = (
         contourStart: false,
         contourEnd: !hasAppendedSquareCap && index + 1 === contour.patches.length,
         startCap: 'none',
-        endCap: !contour.closed && !hasAppendedSquareCap && index + 1 === contour.patches.length
+        endCap: !contour.closed && !hasAppendedSquareCap && index + 1 === contour.patches.length && cap !== 'round'
           ? cap
           : 'none',
       });
@@ -819,6 +916,34 @@ const splitCubicAt = (
   ];
 };
 
+const splitCubicAtMany = (
+  from: Point2D,
+  control1: Point2D,
+  control2: Point2D,
+  to: Point2D,
+  ts: readonly number[],
+): readonly (readonly [Point2D, Point2D, Point2D, Point2D])[] => {
+  if (ts.length === 0) {
+    return Object.freeze([[from, control1, control2, to]]);
+  }
+  const sorted = [...ts].filter((t) => t > epsilon && t < 1 - epsilon).sort((a, b) => a - b);
+  if (sorted.length === 0) {
+    return Object.freeze([[from, control1, control2, to]]);
+  }
+  const segments: (readonly [Point2D, Point2D, Point2D, Point2D])[] = [];
+  let current: readonly [Point2D, Point2D, Point2D, Point2D] = [from, control1, control2, to];
+  let lastT = 0;
+  for (const t of sorted) {
+    const localT = (t - lastT) / Math.max(1 - lastT, epsilon);
+    const [left, right] = splitCubicAt(current[0], current[1], current[2], current[3], localT);
+    segments.push(left);
+    current = right;
+    lastT = t;
+  }
+  segments.push(current);
+  return Object.freeze(segments);
+};
+
 const findQuadraticCuspT = (
   from: Point2D,
   control: Point2D,
@@ -852,6 +977,66 @@ const findCuspTBySampling = (
       bestT < 1 - epsilon
     ? bestT
     : null;
+};
+
+const cubicConvex180ChopEpsilon = 1 / (1 << 11);
+
+const findCubicConvex180Chops = (
+  from: Point2D,
+  control1: Point2D,
+  control2: Point2D,
+  to: Point2D,
+): Readonly<{ ts: readonly number[]; areCusps: boolean }> => {
+  const cross2 = (lhs: Point2D, rhs: Point2D): number => (lhs[0] * rhs[1]) - (lhs[1] * rhs[0]);
+  const c = subtract(control1, from);
+  const d = subtract(control2, control1);
+  const e = subtract(to, from);
+  const b = subtract(d, c);
+  const a = subtract(e, scale(d, 3));
+
+  let qa = cross2(a, b);
+  let qbOverMinus2 = -0.5 * cross2(a, c);
+  let qc = cross2(b, c);
+  let discrOver4 = (qbOverMinus2 * qbOverMinus2) - (qa * qc);
+  let cuspThreshold = qa * (cubicConvex180ChopEpsilon / 2);
+  cuspThreshold *= cuspThreshold;
+
+  if (discrOver4 < -cuspThreshold) {
+    const root = qbOverMinus2 !== 0 ? qc / qbOverMinus2 : Number.NaN;
+    return root > cubicConvex180ChopEpsilon && root < 1 - cubicConvex180ChopEpsilon
+      ? { ts: Object.freeze([root]), areCusps: false }
+      : { ts: Object.freeze([]), areCusps: false };
+  }
+
+  let areCusps = discrOver4 <= cuspThreshold;
+  if (areCusps) {
+    if (qa !== 0 || qbOverMinus2 !== 0 || qc !== 0) {
+      const root = qa !== 0 ? qbOverMinus2 / qa : Number.NaN;
+      return root > cubicConvex180ChopEpsilon && root < 1 - cubicConvex180ChopEpsilon
+        ? { ts: Object.freeze([root]), areCusps: true }
+        : { ts: Object.freeze([]), areCusps: true };
+    }
+
+    const tan0 = (Math.abs(c[0]) > epsilon || Math.abs(c[1]) > epsilon) ? c : subtract(control2, from);
+    qa = dot(tan0, a);
+    qbOverMinus2 = -dot(tan0, b);
+    qc = dot(tan0, c);
+    discrOver4 = (qbOverMinus2 * qbOverMinus2) - (qa * qc);
+    if (discrOver4 < -cuspThreshold) {
+      return { ts: Object.freeze([]), areCusps: false };
+    }
+    discrOver4 = Math.max(discrOver4, 0);
+  }
+
+  let q = Math.sqrt(Math.max(discrOver4, 0));
+  q = Math.sign(qbOverMinus2 || 1) * q + qbOverMinus2;
+  const roots = [
+    qa !== 0 ? q / qa : Number.NaN,
+    q !== 0 ? qc / q : Number.NaN,
+  ].filter((root) => root > cubicConvex180ChopEpsilon && root < 1 - cubicConvex180ChopEpsilon);
+
+  const uniqueSorted = [...new Set(roots.map((root) => Number(root.toFixed(9))))].sort((lhs, rhs) => lhs - rhs);
+  return { ts: Object.freeze(uniqueSorted), areCusps };
 };
 
 const flattenConic = (
@@ -1582,13 +1767,20 @@ const preparePatches = (
         const control1 = transformPoint2D(verb.control1, transform);
         const control2 = transformPoint2D(verb.control2, transform);
         const to = transformPoint2D(verb.to, transform);
-        const cuspT = findCuspTBySampling((t) =>
-          derivativeCubic(currentPoint!, control1, control2, to, t)
-        );
-        if (cuspT !== null) {
-          const [left, right] = splitCubicAt(currentPoint, control1, control2, to, cuspT);
-          pushPatch({ kind: 'cubic', points: left });
-          pushPatch({ kind: 'cubic', points: right });
+        const chops = findCubicConvex180Chops(currentPoint, control1, control2, to);
+        if (chops.ts.length > 0) {
+          const chopped = splitCubicAtMany(currentPoint, control1, control2, to, chops.ts);
+          for (let index = 0; index < chopped.length; index += 1) {
+            const points = chopped[index]!;
+            pushPatch({ kind: 'cubic', points });
+            if (chops.areCusps && index + 1 < chopped.length) {
+              const cuspPoint = points[3];
+              pushPatch({
+                kind: 'cubic',
+                points: [cuspPoint, cuspPoint, cuspPoint, cuspPoint],
+              });
+            }
+          }
         } else {
           pushPatch({ kind: 'cubic', points: [currentPoint, control1, control2, to] });
         }
@@ -2371,7 +2563,7 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
       strokeContours,
       (command.paint.dashArray?.length ?? 0) > 0 || lineOnlyStrokeContours
         ? createLinePatchesFromContours(strokeContours)
-        : preparePatches(command.path, identityMatrix2D, false),
+        : prepareStrokePatches(command.path),
       strokeStyle.cap,
       strokeStyle,
     )

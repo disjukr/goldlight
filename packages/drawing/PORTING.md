@@ -510,6 +510,10 @@ Compared with Skia Graphite/Dawn `TessellateWedgesRenderStep`, `TessellateCurves
     metadata and curved wedge preservation
   - Validation: `deno check packages/drawing/mod.ts`,
     `deno test packages/drawing/tests/drawing_graphite_dawn_test.ts`
+- 2026-03-22
+  - Files changed: `tests/render_basic_paths_snapshot_test.ts`
+  - Status transition: snapshot baseline updated to match Wang-style patch replay output
+  - Validation: `deno test packages/drawing/tests/render_basic_paths_snapshot_test.ts`
 
 ## Recommended Next Steps
 

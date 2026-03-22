@@ -540,8 +540,8 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
     triangle-strip stroke patch replay with `edgeID` / `combinedEdgeID`-driven body tessellation,
     and its WGSL branch structure now more directly mirrors Skia's `tessellate_stroked_curve()` for
     degenerate square/circle patches, duplicated-edge join seaming, `lastRadialEdgeID == 0`
-    stabilization, segment counting, and CPU-provided `maxScale` stroke tolerances instead of a
-    shader-local approximation
+    stabilization, segment counting, CPU-provided `maxScale` stroke tolerances instead of a
+    shader-local approximation, and hairline pre-transforming before tessellation
   - Remaining delta: `tessellate_stroked_curve()` seam math still has local safety branches,
     duplicated-edge handling is still a reduced version of Skia's full implementation, and
     translucent round cap/join coverage still needs Graphite-like analytic evaluation instead of
@@ -576,6 +576,14 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
 
 ## Recent Updates
 
+- 2026-03-23
+  - Files: `src/resource_provider.ts`, `tests/drawing_graphite_dawn_test.ts`
+  - Status transition: hairline stroke tessellation now follows Graphite's order of operations by
+    applying the affine 2x2 to patch control points and join control points before tessellating,
+    then adding translation only after device-space stroking
+  - Remaining delta: join seam/root solving is still a reduced WGSL transcription and round
+    join/cap coverage remains flat-color instead of analytic
+  - Validation: `deno test tests/drawing_graphite_dawn_test.ts`
 - 2026-03-23
   - Files: `src/prepare_resources.ts`, `src/resource_provider.ts`,
     `tests/drawing_graphite_dawn_test.ts`

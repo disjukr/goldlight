@@ -733,6 +733,11 @@ fn vs_main(
   );
   if (isHairline) {
     strokeRadius = 0.5;
+    curveP0 = affine * curveP0;
+    curveP1 = affine * curveP1;
+    curveP2 = affine * curveP2;
+    curveP3 = affine * curveP3;
+    lastControlPoint = affine * lastControlPoint;
   }
   var prevTan = robust_normalize_diff(curveP0, lastControlPoint);
   var tan0 = robust_normalize_diff(select(select(curveP2, curveP3, all(curveP1 == curveP2)), curveP1, !all(curveP0 == curveP1)), curveP0);
@@ -939,8 +944,12 @@ fn vs_main(
     strokeCoord = select(curveP0, curveP3, isFinalEdge);
   }
   let ortho = vec2<f32>(curveTangent.y, -curveTangent.x);
-  let local = strokeCoord + (ortho * strokeRadius * strokeOutset);
-  let devicePosition = local_to_device(local);
+  let strokedCoord = strokeCoord + (ortho * strokeRadius * strokeOutset);
+  let devicePosition = select(
+    local_to_device(strokedCoord),
+    strokedCoord + step.matrix1.xy,
+    isHairline,
+  );
   var out: VertexOut;
   out.position = device_to_ndc(devicePosition);
   out.color = step.color;

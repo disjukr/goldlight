@@ -377,6 +377,35 @@ Deno.test('dawn stroke shader keeps graphite duplicated-edge seam handling', () 
   assertEquals(typeof strokeShaderCode, 'string');
 });
 
+Deno.test('dawn stroke shader pretransforms hairlines before tessellation like graphite', () => {
+  const mock = createMockGpuContext();
+  const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
+  const binding = createOffscreenBinding(mock.context);
+  const recorder = createDrawingRecorder(sharedContext);
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [24, 24] },
+      { kind: 'lineTo', to: [96, 48] },
+    ),
+    { style: 'stroke', strokeWidth: 0, strokeCap: 'round' },
+  );
+
+  encodeDawnCommandBuffer(sharedContext, finishDrawingRecorder(recorder), binding);
+
+  const strokeShaderCode = mock.created.shaderModules
+    .map((descriptor) => descriptor.code)
+    .find((code) =>
+      typeof code === 'string' &&
+      code.includes('curveP0 = affine * curveP0;') &&
+      code.includes('lastControlPoint = affine * lastControlPoint;') &&
+      code.includes('strokedCoord + step.matrix1.xy')
+    );
+
+  assertEquals(typeof strokeShaderCode, 'string');
+});
+
 Deno.test('dawn caps expose feature, format, and sample count policy', () => {
   const mock = createMockGpuContext();
   const caps = createDawnCaps(createDawnBackendContext(mock.context));

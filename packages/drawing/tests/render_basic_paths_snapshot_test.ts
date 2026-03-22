@@ -1,4 +1,5 @@
 import { assertEquals } from 'jsr:@std/assert@^1.0.14';
+import { canUseWebGPU } from '@rieul3d/gpu';
 import { renderBasicPathsSnapshot } from '../examples/render_basic_paths/render.ts';
 
 const expectedPngSha256 = '90fabc0728ab9ecbdbb73a87946a0d5825c3f1b86e4df189dc65617c46a5d59d';
@@ -11,7 +12,7 @@ Deno.test({
   sanitizeOps: false,
   sanitizeResources: false,
   fn: async () => {
-    if (!globalThis.navigator?.gpu) {
+    if (!(await canUseWebGPU())) {
       return;
     }
 

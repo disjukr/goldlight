@@ -76,6 +76,20 @@ export type GpuLostInfo = Readonly<{
 
 export const isWebGPUAvailable = (gpu: GPU | undefined = globalThis.navigator?.gpu) => Boolean(gpu);
 
+export const canUseWebGPU = async (
+  gpu: GPU | undefined = globalThis.navigator?.gpu,
+): Promise<boolean> => {
+  if (!gpu) {
+    return false;
+  }
+
+  try {
+    return (await gpu.requestAdapter()) !== null;
+  } catch {
+    return false;
+  }
+};
+
 export const requestGpuContext = async (
   options: GpuContextOptions,
 ): Promise<GpuContext> => {

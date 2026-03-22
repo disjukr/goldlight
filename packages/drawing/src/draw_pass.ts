@@ -10,29 +10,37 @@ import type { Rect } from '@rieul3d/geometry';
 
 export type DrawingDrawCommand = DrawPathCommand | DrawShapeCommand;
 
-export type DrawingPipelineKey =
+export type DrawingShaderKey =
+  | 'path'
+  | 'wedge-patch'
+  | 'curve-patch'
+  | 'stroke-patch';
+
+export type DrawingVertexLayoutKey =
+  | 'device-vertex'
+  | 'wedge-patch-instance'
+  | 'curve-patch-instance'
+  | 'stroke-patch-instance';
+
+export type DrawingDepthStencilKey =
+  | 'none'
   | 'clip-stencil-write'
-  | 'path-fill-stencil-evenodd'
-  | 'path-fill-stencil-nonzero'
-  | 'path-fill-patch-stencil-evenodd'
-  | 'path-fill-patch-stencil-nonzero'
-  | 'path-fill-curve-patch-stencil-evenodd'
-  | 'path-fill-curve-patch-stencil-nonzero'
-  | 'path-fill-cover'
-  | 'path-fill-stencil-cover'
-  | 'path-fill-patch-cover'
-  | 'path-fill-curve-patch-cover'
-  | 'path-fill-clip-cover'
-  | 'path-fill-patch-clip-cover'
-  | 'path-fill-curve-patch-clip-cover'
-  | 'path-stroke-cover'
-  | 'path-stroke-patch-cover'
-  | 'path-stroke-clip-cover'
-  | 'path-stroke-patch-clip-cover';
+  | 'clip-cover'
+  | 'fill-stencil-evenodd'
+  | 'fill-stencil-nonzero'
+  | 'fill-stencil-cover';
+
+export type DrawingGraphicsPipelineDesc = Readonly<{
+  label: string;
+  shader: DrawingShaderKey;
+  vertexLayout: DrawingVertexLayoutKey;
+  colorWriteDisabled: boolean;
+  depthStencil: DrawingDepthStencilKey;
+}>;
 
 export type DrawingPreparedStep = Readonly<{
   draw: DrawingPreparedDraw;
-  pipelineKeys: readonly DrawingPipelineKey[];
+  pipelineDescs: readonly DrawingGraphicsPipelineDesc[];
   clipRect?: DrawingClipRect;
   drawBounds: DrawingPreparedDraw['bounds'];
   clipBounds?: Rect;
@@ -62,49 +70,185 @@ const defaultClearColor: readonly [number, number, number, number] = [0, 0, 0, 0
 const isDrawCommand = (command: DrawingCommand): command is DrawingDrawCommand =>
   command.kind === 'drawPath' || command.kind === 'drawShape';
 
-const getPipelineKeysForDraw = (draw: DrawingPreparedDraw): readonly DrawingPipelineKey[] => {
+const createPipelineDesc = (
+  label: string,
+  shader: DrawingShaderKey,
+  vertexLayout: DrawingVertexLayoutKey,
+  depthStencil: DrawingDepthStencilKey = 'none',
+  colorWriteDisabled = false,
+): DrawingGraphicsPipelineDesc => ({
+  label,
+  shader,
+  vertexLayout,
+  depthStencil,
+  colorWriteDisabled,
+});
+
+const getPipelineDescsForDraw = (
+  draw: DrawingPreparedDraw,
+): readonly DrawingGraphicsPipelineDesc[] => {
   const usesStencilClip = Boolean(draw.clip?.triangleRuns?.length);
   switch (draw.kind) {
     case 'pathFill': {
-      const fillStencilKey = draw.fillRule === 'evenodd'
+      const fillStencilDesc = draw.fillRule === 'evenodd'
         ? draw.renderer === 'stencil-tessellated-curves'
-          ? 'path-fill-curve-patch-stencil-evenodd'
+          ? createPipelineDesc(
+            'drawing-path-fill-curve-patch-stencil-evenodd',
+            'curve-patch',
+            'curve-patch-instance',
+            'fill-stencil-evenodd',
+            true,
+          )
           : draw.renderer === 'stencil-tessellated-wedges'
-          ? 'path-fill-patch-stencil-evenodd'
-          : 'path-fill-stencil-evenodd'
+          ? createPipelineDesc(
+            'drawing-path-fill-patch-stencil-evenodd',
+            'wedge-patch',
+            'wedge-patch-instance',
+            'fill-stencil-evenodd',
+            true,
+          )
+          : createPipelineDesc(
+            'drawing-path-fill-stencil-evenodd',
+            'path',
+            'device-vertex',
+            'fill-stencil-evenodd',
+            true,
+          )
         : draw.renderer === 'stencil-tessellated-curves'
-        ? 'path-fill-curve-patch-stencil-nonzero'
+        ? createPipelineDesc(
+          'drawing-path-fill-curve-patch-stencil-nonzero',
+          'curve-patch',
+          'curve-patch-instance',
+          'fill-stencil-nonzero',
+          true,
+        )
         : draw.renderer === 'stencil-tessellated-wedges'
-        ? 'path-fill-patch-stencil-nonzero'
-        : 'path-fill-stencil-nonzero';
+        ? createPipelineDesc(
+          'drawing-path-fill-patch-stencil-nonzero',
+          'wedge-patch',
+          'wedge-patch-instance',
+          'fill-stencil-nonzero',
+          true,
+        )
+        : createPipelineDesc(
+          'drawing-path-fill-stencil-nonzero',
+          'path',
+          'device-vertex',
+          'fill-stencil-nonzero',
+          true,
+        );
 
       if (!usesStencilClip && draw.renderer !== 'middle-out-fan') {
-        return [fillStencilKey, 'path-fill-stencil-cover'];
+        return [
+          fillStencilDesc,
+          createPipelineDesc(
+            'drawing-path-fill-stencil-cover',
+            'path',
+            'device-vertex',
+            'fill-stencil-cover',
+          ),
+        ];
       }
       if (draw.renderer === 'middle-out-fan') {
         return usesStencilClip
-          ? ['clip-stencil-write', 'path-fill-clip-cover']
-          : ['path-fill-cover'];
+          ? [
+            createPipelineDesc(
+              'drawing-clip-stencil-write',
+              'path',
+              'device-vertex',
+              'clip-stencil-write',
+              true,
+            ),
+            createPipelineDesc(
+              'drawing-path-fill-clip-cover',
+              'path',
+              'device-vertex',
+              'clip-cover',
+            ),
+          ]
+          : [createPipelineDesc('drawing-path-fill-cover', 'path', 'device-vertex')];
       }
       if (draw.renderer === 'stencil-tessellated-curves') {
         return usesStencilClip
-          ? ['clip-stencil-write', 'path-fill-curve-patch-clip-cover']
-          : ['path-fill-curve-patch-cover'];
+          ? [
+            createPipelineDesc(
+              'drawing-clip-stencil-write',
+              'path',
+              'device-vertex',
+              'clip-stencil-write',
+              true,
+            ),
+            createPipelineDesc(
+              'drawing-path-fill-curve-patch-clip-cover',
+              'curve-patch',
+              'curve-patch-instance',
+              'clip-cover',
+            ),
+          ]
+          : [
+            createPipelineDesc(
+              'drawing-path-fill-curve-patch-cover',
+              'curve-patch',
+              'curve-patch-instance',
+            ),
+          ];
       }
       if (usesStencilClip) {
-        return ['clip-stencil-write', 'path-fill-patch-clip-cover'];
+        return [
+          createPipelineDesc(
+            'drawing-clip-stencil-write',
+            'path',
+            'device-vertex',
+            'clip-stencil-write',
+            true,
+          ),
+          createPipelineDesc(
+            'drawing-path-fill-patch-clip-cover',
+            'wedge-patch',
+            'wedge-patch-instance',
+            'clip-cover',
+          ),
+        ];
       }
-      return ['path-fill-patch-cover'];
+      return [createPipelineDesc('drawing-path-fill-patch-cover', 'wedge-patch', 'wedge-patch-instance')];
     }
     case 'pathStroke':
       if (draw.patches.length === 0) {
         return usesStencilClip
-          ? ['clip-stencil-write', 'path-stroke-clip-cover']
-          : ['path-stroke-cover'];
+          ? [
+            createPipelineDesc(
+              'drawing-clip-stencil-write',
+              'path',
+              'device-vertex',
+              'clip-stencil-write',
+              true,
+            ),
+            createPipelineDesc(
+              'drawing-path-stroke-clip-cover',
+              'path',
+              'device-vertex',
+              'clip-cover',
+            ),
+          ]
+          : [createPipelineDesc('drawing-path-stroke-cover', 'path', 'device-vertex')];
       }
       return usesStencilClip
-        ? ['clip-stencil-write', 'path-stroke-patch-clip-cover']
-        : ['path-stroke-patch-cover'];
+        ? [
+          createPipelineDesc(
+            'drawing-clip-stencil-write',
+            'path',
+            'device-vertex',
+            'clip-stencil-write',
+            true,
+          ),
+          createPipelineDesc(
+            'drawing-path-stroke-patch-clip-cover',
+            'stroke-patch',
+            'stroke-patch-instance',
+            'clip-cover',
+          ),
+        ]
+        : [createPipelineDesc('drawing-path-stroke-patch-cover', 'stroke-patch', 'stroke-patch-instance')];
   }
 };
 
@@ -156,7 +300,7 @@ export const prepareDrawingRecording = (
       if (prepared.supported) {
         currentSteps.push({
           draw: prepared.draw,
-          pipelineKeys: getPipelineKeysForDraw(prepared.draw),
+          pipelineDescs: getPipelineDescsForDraw(prepared.draw),
           clipRect: prepared.draw.clipRect,
           drawBounds: prepared.draw.bounds,
           clipBounds: prepared.draw.clip?.bounds,

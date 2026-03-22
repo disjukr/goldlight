@@ -20,6 +20,32 @@ export type DawnCommandBuffer = Readonly<{
   unsupportedCommands: readonly DrawingCommand[];
 }>;
 
+type DrawingPreparedStepResources = Readonly<{
+  pipelines: readonly GPURenderPipeline[];
+  fringePipeline: GPURenderPipeline | null;
+  fillVertexBuffer: GPUBuffer | null;
+  fillVertexCount: number;
+  patchVertexBuffer: GPUBuffer | null;
+  patchInstanceCount: number;
+  patchVertexCount: number;
+  fringeVertexBuffer: GPUBuffer | null;
+  fringeVertexCount: number;
+  boundsCoverVertexBuffer: GPUBuffer | null;
+  boundsCoverVertexCount: number;
+  clipVertexBuffers: readonly GPUBuffer[];
+  clipVertexCounts: readonly number[];
+}>;
+
+type DrawingPreparedPassResources = Readonly<{
+  steps: readonly DrawingPreparedStepResources[];
+}>;
+
+type DrawingPreparedCommandResources = Readonly<{
+  viewportTransformBuffer: GPUBuffer;
+  viewportBindGroup: GPUBindGroup;
+  passes: readonly DrawingPreparedPassResources[];
+}>;
+
 const vertexBufferUsage = 0x0020;
 const uniformBufferUsage = 0x0040;
 const floatsPerVertex = 6;
@@ -102,7 +128,7 @@ const createVertexBuffer = (
   sharedContext: DawnSharedContext,
   vertices: Float32Array,
 ): GPUBuffer => {
-  const buffer = sharedContext.backend.device.createBuffer({
+  const buffer = sharedContext.resourceProvider.createBuffer({
     label: 'drawing-vertices',
     size: vertices.byteLength,
     usage: vertexBufferUsage,
@@ -116,7 +142,7 @@ const createVertexBuffer = (
 const createViewportTransformBuffer = (
   sharedContext: DawnSharedContext,
 ): GPUBuffer => {
-  const buffer = sharedContext.backend.device.createBuffer({
+  const buffer = sharedContext.resourceProvider.createBuffer({
     label: 'drawing-viewport-transform',
     size: Float32Array.BYTES_PER_ELEMENT * 4,
     usage: uniformBufferUsage,
@@ -304,28 +330,172 @@ const getStencilClipCount = (
   step: DrawingPreparedRecording['passes'][number]['steps'][number],
 ): number => step.draw.clip?.triangleRuns?.length ?? 0;
 
-const encodeStencilClips = (
-  pass: GPURenderPassEncoder,
+const createClipStepResources = (
   sharedContext: DawnSharedContext,
   step: DrawingPreparedRecording['passes'][number]['steps'][number],
-  viewportBindGroup: GPUBindGroup,
-): void => {
+): Readonly<{
+  buffers: readonly GPUBuffer[];
+  counts: readonly number[];
+}> => {
   const triangleRuns = step.draw.clip?.triangleRuns;
   if (!triangleRuns || triangleRuns.length === 0) {
+    return {
+      buffers: Object.freeze([]),
+      counts: Object.freeze([]),
+    };
+  }
+
+  const buffers: GPUBuffer[] = [];
+  const counts: number[] = [];
+  for (const triangles of triangleRuns) {
+    const clipVertices = createDeviceSpaceVertexData(triangles, [0, 0, 0, 0]);
+    buffers.push(createVertexBuffer(sharedContext, clipVertices));
+    counts.push(clipVertices.length / floatsPerVertex);
+  }
+  return {
+    buffers: Object.freeze(buffers),
+    counts: Object.freeze(counts),
+  };
+};
+
+const prepareStepResources = (
+  sharedContext: DawnSharedContext,
+  step: DrawingPreparedRecording['passes'][number]['steps'][number],
+): DrawingPreparedStepResources => {
+  const pipelines = step.pipelineDescs.map((descriptor) =>
+    sharedContext.resourceProvider.findOrCreateGraphicsPipeline(descriptor)
+  );
+  const clipResources = createClipStepResources(sharedContext, step);
+
+  if (step.draw.kind === 'pathFill') {
+    const usesPatchFill = step.draw.renderer !== 'middle-out-fan';
+    const fillVertices = usesPatchFill
+      ? null
+      : createDeviceSpaceVertexData(step.draw.triangles, step.draw.color);
+    const patchVertices = step.draw.renderer === 'stencil-tessellated-wedges'
+      ? createWedgePatchInstanceData(step.draw.patches, step.draw.color)
+      : step.draw.renderer === 'stencil-tessellated-curves'
+      ? createCurvePatchInstanceData(step.draw.patches, step.draw.color)
+      : null;
+    const fringeVertices = step.draw.fringeVertices
+      ? createColoredDeviceSpaceVertexData(step.draw.fringeVertices)
+      : null;
+    const boundsCoverVertices = step.usesFillStencil
+      ? createBoundsCoverVertexData(step.draw.bounds, step.draw.color)
+      : null;
+
+    const fringePipeline = step.draw.fringeVertices
+      ? sharedContext.resourceProvider.findOrCreateGraphicsPipeline({
+        label: getStencilClipCount(step) > 0
+          ? 'drawing-path-fill-clip-cover'
+          : 'drawing-path-fill-cover',
+        shader: 'path',
+        vertexLayout: 'device-vertex',
+        depthStencil: getStencilClipCount(step) > 0 ? 'clip-cover' : 'none',
+        colorWriteDisabled: false,
+      })
+      : null;
+
+    return {
+      pipelines: Object.freeze(pipelines),
+      fringePipeline,
+      fillVertexBuffer: fillVertices ? createVertexBuffer(sharedContext, fillVertices) : null,
+      fillVertexCount: fillVertices ? fillVertices.length / floatsPerVertex : 0,
+      patchVertexBuffer: patchVertices && patchVertices.length > 0
+        ? createVertexBuffer(sharedContext, patchVertices)
+        : null,
+      patchInstanceCount: patchVertices
+        ? patchVertices.length /
+          (step.draw.renderer === 'stencil-tessellated-wedges' ? wedgePatchFloats : curvePatchFloats)
+        : 0,
+      patchVertexCount: step.draw.renderer === 'stencil-tessellated-wedges'
+        ? wedgePatchVertexCount
+        : curvePatchVertexCount,
+      fringeVertexBuffer: fringeVertices ? createVertexBuffer(sharedContext, fringeVertices) : null,
+      fringeVertexCount: fringeVertices ? fringeVertices.length / floatsPerVertex : 0,
+      boundsCoverVertexBuffer: boundsCoverVertices
+        ? createVertexBuffer(sharedContext, boundsCoverVertices)
+        : null,
+      boundsCoverVertexCount: boundsCoverVertices ? boundsCoverVertices.length / floatsPerVertex : 0,
+      clipVertexBuffers: clipResources.buffers,
+      clipVertexCounts: clipResources.counts,
+    };
+  }
+
+  const strokeVertices = createDeviceSpaceVertexData(step.draw.triangles, step.draw.color);
+  const patchVertices = createStrokePatchInstanceData(
+    step.draw.patches,
+    step.draw.color,
+    step.draw.halfWidth,
+  );
+  const fringeVertices = step.draw.fringeVertices
+    ? createColoredDeviceSpaceVertexData(step.draw.fringeVertices)
+    : null;
+
+  return {
+    pipelines: Object.freeze(pipelines),
+    fringePipeline: step.draw.fringeVertices
+      ? sharedContext.resourceProvider.findOrCreateGraphicsPipeline({
+        label: getStencilClipCount(step) > 0
+          ? 'drawing-path-stroke-clip-cover'
+          : 'drawing-path-stroke-cover',
+        shader: 'path',
+        vertexLayout: 'device-vertex',
+        depthStencil: getStencilClipCount(step) > 0 ? 'clip-cover' : 'none',
+        colorWriteDisabled: false,
+      })
+      : null,
+    fillVertexBuffer: createVertexBuffer(sharedContext, strokeVertices),
+    fillVertexCount: strokeVertices.length / floatsPerVertex,
+    patchVertexBuffer: patchVertices.length > 0 ? createVertexBuffer(sharedContext, patchVertices) : null,
+    patchInstanceCount: patchVertices.length / strokePatchFloats,
+    patchVertexCount: strokePatchVertexCount,
+    fringeVertexBuffer: fringeVertices ? createVertexBuffer(sharedContext, fringeVertices) : null,
+    fringeVertexCount: fringeVertices ? fringeVertices.length / floatsPerVertex : 0,
+    boundsCoverVertexBuffer: null,
+    boundsCoverVertexCount: 0,
+    clipVertexBuffers: clipResources.buffers,
+    clipVertexCounts: clipResources.counts,
+  };
+};
+
+const prepareCommandResources = (
+  sharedContext: DawnSharedContext,
+  prepared: DrawingPreparedRecording,
+): DrawingPreparedCommandResources => {
+  const viewportTransformBuffer = createViewportTransformBuffer(sharedContext);
+  const viewportBindGroup = sharedContext.resourceProvider.createViewportBindGroup(
+    viewportTransformBuffer,
+  );
+
+  return {
+    viewportTransformBuffer,
+    viewportBindGroup,
+    passes: Object.freeze(prepared.passes.map((passInfo) => ({
+      steps: Object.freeze(passInfo.steps.map((step) => prepareStepResources(sharedContext, step))),
+    }))),
+  };
+};
+
+const encodeStencilClips = (
+  pass: GPURenderPassEncoder,
+  step: DrawingPreparedRecording['passes'][number]['steps'][number],
+  resources: DrawingPreparedStepResources,
+  viewportBindGroup: GPUBindGroup,
+): void => {
+  if (resources.clipVertexBuffers.length === 0) {
     return;
   }
 
-  const clipPipeline = sharedContext.resourceProvider.getPipeline(step.pipelineKeys[0]!);
+  const clipPipeline = resources.pipelines[0]!;
   pass.setStencilReference?.(0);
   pass.setPipeline(clipPipeline);
   pass.setBindGroup(0, viewportBindGroup);
-  for (const triangles of triangleRuns) {
-    const clipVertices = createDeviceSpaceVertexData(triangles, [0, 0, 0, 0]);
-    const clipVertexBuffer = createVertexBuffer(sharedContext, clipVertices);
-    pass.setVertexBuffer(0, clipVertexBuffer);
-    pass.draw(clipVertices.length / floatsPerVertex);
+  for (let index = 0; index < resources.clipVertexBuffers.length; index += 1) {
+    pass.setVertexBuffer(0, resources.clipVertexBuffers[index]!);
+    pass.draw(resources.clipVertexCounts[index]!);
   }
-  pass.setStencilReference?.(triangleRuns.length);
+  pass.setStencilReference?.(resources.clipVertexBuffers.length);
 };
 
 const createRenderPassDescriptor = (
@@ -359,8 +529,9 @@ const createRenderPassDescriptor = (
 
 const encodePreparedFillStep = (
   pass: GPURenderPassEncoder,
-  sharedContext: DawnSharedContext,
   step: DrawingPreparedRecording['passes'][number]['steps'][number],
+  resources: DrawingPreparedStepResources,
+  target: Readonly<{ width: number; height: number }>,
   viewportBindGroup: GPUBindGroup,
 ): void => {
   if (step.draw.kind !== 'pathFill') {
@@ -369,168 +540,112 @@ const encodePreparedFillStep = (
 
   const usesPatchFill = step.draw.renderer !== 'middle-out-fan';
   const usesFillStencil = step.usesFillStencil;
-  const fillVertices = usesPatchFill
-    ? null
-    : createDeviceSpaceVertexData(step.draw.triangles, step.draw.color);
-  const fillVertexBuffer = fillVertices ? createVertexBuffer(sharedContext, fillVertices) : null;
-  const patchVertices = step.draw.renderer === 'stencil-tessellated-wedges'
-    ? createWedgePatchInstanceData(step.draw.patches, step.draw.color)
-    : step.draw.renderer === 'stencil-tessellated-curves'
-    ? createCurvePatchInstanceData(step.draw.patches, step.draw.color)
-    : null;
-  const patchVertexBuffer = patchVertices && patchVertices.length > 0
-    ? createVertexBuffer(sharedContext, patchVertices)
-    : null;
-  const fringeVertices = step.draw.fringeVertices
-    ? createColoredDeviceSpaceVertexData(step.draw.fringeVertices)
-    : null;
-  const fringeVertexBuffer = fringeVertices
-    ? createVertexBuffer(sharedContext, fringeVertices)
-    : null;
-  const boundsCoverVertices = usesFillStencil
-    ? createBoundsCoverVertexData(step.draw.bounds, step.draw.color)
-    : null;
-  const boundsCoverVertexBuffer = boundsCoverVertices
-    ? createVertexBuffer(sharedContext, boundsCoverVertices)
-    : null;
-
-  applyStepClip(pass, step, sharedContext.backend.target);
+  applyStepClip(pass, step, target);
   if (usesFillStencil) {
-    const stencilPipeline = sharedContext.resourceProvider.getPipeline(step.pipelineKeys[0]!);
-    const coverPipeline = sharedContext.resourceProvider.getPipeline(step.pipelineKeys[1]!);
+    const stencilPipeline = resources.pipelines[0]!;
+    const coverPipeline = resources.pipelines[1]!;
     pass.setPipeline(stencilPipeline);
     pass.setBindGroup(0, viewportBindGroup);
-    if (usesPatchFill && patchVertexBuffer && patchVertices) {
-      pass.setVertexBuffer(0, patchVertexBuffer);
-      pass.draw(
-        step.draw.renderer === 'stencil-tessellated-wedges' ? 3 : curvePatchVertexCount,
-        patchVertices.length /
-          (step.draw.renderer === 'stencil-tessellated-wedges'
-            ? wedgePatchFloats
-            : curvePatchFloats),
-      );
-    } else if (fillVertexBuffer && fillVertices) {
-      pass.setVertexBuffer(0, fillVertexBuffer);
-      pass.draw(fillVertices.length / floatsPerVertex);
+    if (usesPatchFill && resources.patchVertexBuffer && resources.patchInstanceCount > 0) {
+      pass.setVertexBuffer(0, resources.patchVertexBuffer);
+      pass.draw(resources.patchVertexCount, resources.patchInstanceCount);
+    } else if (resources.fillVertexBuffer && resources.fillVertexCount > 0) {
+      pass.setVertexBuffer(0, resources.fillVertexBuffer);
+      pass.draw(resources.fillVertexCount);
     }
 
-    if (boundsCoverVertexBuffer && boundsCoverVertices) {
+    if (resources.boundsCoverVertexBuffer && resources.boundsCoverVertexCount > 0) {
       pass.setPipeline(coverPipeline);
       pass.setBindGroup(0, viewportBindGroup);
-      pass.setVertexBuffer(0, boundsCoverVertexBuffer);
-      pass.draw(boundsCoverVertices.length / floatsPerVertex);
+      pass.setVertexBuffer(0, resources.boundsCoverVertexBuffer);
+      pass.draw(resources.boundsCoverVertexCount);
     }
 
-    if (fringeVertices && fringeVertexBuffer) {
-      pass.setPipeline(sharedContext.resourceProvider.getPipeline('path-fill-cover'));
+    if (resources.fringeVertexBuffer && resources.fringeVertexCount > 0) {
+      pass.setPipeline(resources.fringePipeline ?? resources.pipelines[0]!);
       pass.setBindGroup(0, viewportBindGroup);
-      pass.setVertexBuffer(0, fringeVertexBuffer);
-      pass.draw(fringeVertices.length / floatsPerVertex);
+      pass.setVertexBuffer(0, resources.fringeVertexBuffer);
+      pass.draw(resources.fringeVertexCount);
     }
     return;
   }
 
   if (getStencilClipCount(step) > 0) {
-    const colorPipeline = sharedContext.resourceProvider.getPipeline(step.pipelineKeys[1]!);
-    encodeStencilClips(pass, sharedContext, step, viewportBindGroup);
+    const colorPipeline = resources.pipelines[1]!;
+    encodeStencilClips(pass, step, resources, viewportBindGroup);
     pass.setPipeline(colorPipeline);
   } else {
-    pass.setPipeline(sharedContext.resourceProvider.getPipeline(step.pipelineKeys[0]!));
+    pass.setPipeline(resources.pipelines[0]!);
   }
   pass.setBindGroup(0, viewportBindGroup);
 
-  if (usesPatchFill && patchVertexBuffer && patchVertices) {
-    pass.setVertexBuffer(0, patchVertexBuffer);
-    pass.draw(
-      step.draw.renderer === 'stencil-tessellated-wedges'
-        ? wedgePatchVertexCount
-        : curvePatchVertexCount,
-      patchVertices.length /
-        (step.draw.renderer === 'stencil-tessellated-wedges' ? wedgePatchFloats : curvePatchFloats),
-    );
-  } else if (fillVertexBuffer && fillVertices) {
-    pass.setVertexBuffer(0, fillVertexBuffer);
-    pass.draw(fillVertices.length / floatsPerVertex);
+  if (usesPatchFill && resources.patchVertexBuffer && resources.patchInstanceCount > 0) {
+    pass.setVertexBuffer(0, resources.patchVertexBuffer);
+    pass.draw(resources.patchVertexCount, resources.patchInstanceCount);
+  } else if (resources.fillVertexBuffer && resources.fillVertexCount > 0) {
+    pass.setVertexBuffer(0, resources.fillVertexBuffer);
+    pass.draw(resources.fillVertexCount);
   }
 
-  if (fringeVertices && fringeVertexBuffer) {
+  if (resources.fringeVertexBuffer && resources.fringeVertexCount > 0) {
     if (usesPatchFill) {
-      pass.setPipeline(sharedContext.resourceProvider.getPipeline(
-        getStencilClipCount(step) > 0 ? 'path-fill-clip-cover' : 'path-fill-cover',
-      ));
+      pass.setPipeline(resources.fringePipeline ?? resources.pipelines[getStencilClipCount(step) > 0 ? 1 : 0]!);
       pass.setBindGroup(0, viewportBindGroup);
     }
-    pass.setVertexBuffer(0, fringeVertexBuffer);
-    pass.draw(fringeVertices.length / floatsPerVertex);
+    pass.setVertexBuffer(0, resources.fringeVertexBuffer);
+    pass.draw(resources.fringeVertexCount);
   }
 };
 
 const encodePreparedStrokeStep = (
   pass: GPURenderPassEncoder,
-  sharedContext: DawnSharedContext,
   step: DrawingPreparedRecording['passes'][number]['steps'][number],
+  resources: DrawingPreparedStepResources,
+  target: Readonly<{ width: number; height: number }>,
   viewportBindGroup: GPUBindGroup,
 ): void => {
   if (step.draw.kind !== 'pathStroke') {
     return;
   }
 
-  const strokeVertices = createDeviceSpaceVertexData(step.draw.triangles, step.draw.color);
-  const strokeVertexBuffer = createVertexBuffer(sharedContext, strokeVertices);
-  const patchVertices = createStrokePatchInstanceData(
-    step.draw.patches,
-    step.draw.color,
-    step.draw.halfWidth,
-  );
-  const patchVertexBuffer = patchVertices.length > 0
-    ? createVertexBuffer(sharedContext, patchVertices)
-    : null;
-  const fringeVertices = step.draw.fringeVertices
-    ? createColoredDeviceSpaceVertexData(step.draw.fringeVertices)
-    : null;
-  const fringeVertexBuffer = fringeVertices
-    ? createVertexBuffer(sharedContext, fringeVertices)
-    : null;
-
-  applyStepClip(pass, step, sharedContext.backend.target);
+  applyStepClip(pass, step, target);
   if (getStencilClipCount(step) > 0) {
-    encodeStencilClips(pass, sharedContext, step, viewportBindGroup);
-    pass.setPipeline(sharedContext.resourceProvider.getPipeline(step.pipelineKeys[1]!));
+    encodeStencilClips(pass, step, resources, viewportBindGroup);
+    pass.setPipeline(resources.pipelines[1]!);
   } else {
-    pass.setPipeline(sharedContext.resourceProvider.getPipeline(step.pipelineKeys[0]!));
+    pass.setPipeline(resources.pipelines[0]!);
   }
   pass.setBindGroup(0, viewportBindGroup);
 
-  if (patchVertexBuffer) {
-    pass.setVertexBuffer(0, patchVertexBuffer);
-    pass.draw(strokePatchVertexCount, patchVertices.length / strokePatchFloats);
+  if (resources.patchVertexBuffer && resources.patchInstanceCount > 0) {
+    pass.setVertexBuffer(0, resources.patchVertexBuffer);
+    pass.draw(resources.patchVertexCount, resources.patchInstanceCount);
   } else {
-    pass.setVertexBuffer(0, strokeVertexBuffer);
-    pass.draw(strokeVertices.length / floatsPerVertex);
+    pass.setVertexBuffer(0, resources.fillVertexBuffer!);
+    pass.draw(resources.fillVertexCount);
   }
 
-  if (fringeVertices && fringeVertexBuffer) {
-    pass.setPipeline(sharedContext.resourceProvider.getPipeline(
-      getStencilClipCount(step) > 0 ? 'path-stroke-clip-cover' : 'path-stroke-cover',
-    ));
+  if (resources.fringeVertexBuffer && resources.fringeVertexCount > 0) {
+    pass.setPipeline(resources.fringePipeline ?? resources.pipelines[getStencilClipCount(step) > 0 ? 1 : 0]!);
     pass.setBindGroup(0, viewportBindGroup);
-    pass.setVertexBuffer(0, fringeVertexBuffer);
-    pass.draw(fringeVertices.length / floatsPerVertex);
+    pass.setVertexBuffer(0, resources.fringeVertexBuffer);
+    pass.draw(resources.fringeVertexCount);
   }
 };
 
 const encodePreparedStep = (
   pass: GPURenderPassEncoder,
-  sharedContext: DawnSharedContext,
   step: DrawingPreparedRecording['passes'][number]['steps'][number],
+  resources: DrawingPreparedStepResources,
+  target: Readonly<{ width: number; height: number }>,
   viewportBindGroup: GPUBindGroup,
 ): void => {
   switch (step.draw.kind) {
     case 'pathFill':
-      encodePreparedFillStep(pass, sharedContext, step, viewportBindGroup);
+      encodePreparedFillStep(pass, step, resources, target, viewportBindGroup);
       break;
     case 'pathStroke':
-      encodePreparedStrokeStep(pass, sharedContext, step, viewportBindGroup);
+      encodePreparedStrokeStep(pass, step, resources, target, viewportBindGroup);
       break;
   }
 };
@@ -553,10 +668,7 @@ export const encodeDawnCommandBuffer = (
   const resolveView = acquireColorResolveView(binding);
   const unsupportedCommands: DrawingCommand[] = [...prepared.unsupportedCommands];
   let passCount = 0;
-  const viewportTransformBuffer = createViewportTransformBuffer(sharedContext);
-  const viewportBindGroup = sharedContext.resourceProvider.createViewportBindGroup(
-    viewportTransformBuffer,
-  );
+  const resources = prepareCommandResources(sharedContext, prepared);
   const hasStencilSteps = prepared.passes.some((passInfo) =>
     passInfo.steps.some((step) => step.usesStencil || step.usesFillStencil)
   );
@@ -564,7 +676,9 @@ export const encodeDawnCommandBuffer = (
     ? sharedContext.resourceProvider.getStencilAttachmentView()
     : undefined;
 
-  for (const passInfo of prepared.passes) {
+  for (let passIndex = 0; passIndex < prepared.passes.length; passIndex += 1) {
+    const passInfo = prepared.passes[passIndex]!;
+    const passResources = resources.passes[passIndex]!;
     if (passInfo.steps.length === 0) {
       const pass = encoder.beginRenderPass({
         colorAttachments: [
@@ -597,7 +711,13 @@ export const encodeDawnCommandBuffer = (
             stencilView,
           ),
         );
-        encodePreparedStep(pass, sharedContext, step, viewportBindGroup);
+        encodePreparedStep(
+          pass,
+          step,
+          passResources.steps[stepIndex]!,
+          sharedContext.backend.target,
+          resources.viewportBindGroup,
+        );
         pass.end();
         passCount += 1;
         colorLoadOp = 'load';
@@ -608,8 +728,18 @@ export const encodeDawnCommandBuffer = (
       const pass = encoder.beginRenderPass(
         createRenderPassDescriptor(colorView, resolveView, passInfo.clearColor, colorLoadOp),
       );
-      while (stepIndex < passInfo.steps.length && !passInfo.steps[stepIndex]!.usesStencil) {
-        encodePreparedStep(pass, sharedContext, passInfo.steps[stepIndex]!, viewportBindGroup);
+      while (
+        stepIndex < passInfo.steps.length &&
+        !passInfo.steps[stepIndex]!.usesStencil &&
+        !passInfo.steps[stepIndex]!.usesFillStencil
+      ) {
+        encodePreparedStep(
+          pass,
+          passInfo.steps[stepIndex]!,
+          passResources.steps[stepIndex]!,
+          sharedContext.backend.target,
+          resources.viewportBindGroup,
+        );
         stepIndex += 1;
       }
       pass.end();

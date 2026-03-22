@@ -661,6 +661,15 @@ When work is added in this package, update this document with:
 ## Recent Updates
 
 - 2026-03-22
+  - Files changed: `src/draw_pass.ts`, `src/resource_provider.ts`, `src/command_buffer.ts`,
+    `src/shared_context.ts`, `tests/drawing_graphite_dawn_test.ts`
+  - Status transition: draw-pass/pipeline preparation `partial` -> `partial` with descriptor-shaped
+    pipeline metadata and pre-encode resource preparation
+  - Remaining gaps: pipeline creation is still backed by the legacy local switch table, and
+    prepared passes still do not own Skia-like sampled-resource or uniform payload objects
+  - Validation: `deno check packages/drawing/mod.ts`;
+    `deno test packages/drawing/tests/drawing_graphite_dawn_test.ts`
+- 2026-03-22
   - Files changed: `src/path_renderer.ts`, `src/draw_pass.ts`, `src/command_buffer.ts`,
     `src/resource_provider.ts`, `src/queue_manager.ts`, `tests/drawing_graphite_dawn_test.ts`,
     `tests/render_basic_paths_snapshot_test.ts`
@@ -675,3 +684,52 @@ When work is added in this package, update this document with:
   - Validation: `deno test packages/drawing/tests/drawing_graphite_dawn_test.ts`;
     `deno test
     packages/drawing/tests/render_basic_paths_snapshot_test.ts`
+
+## 2026-03-22 Skia Delta Audit
+
+Compared against Skia Graphite/Dawn in `~/github/google/skia`, the highest-signal remaining deltas
+inside `packages/drawing` are:
+
+1. Shared context still stops at layouts and a resource provider
+   - Local status: `src/shared_context.ts` creates the noop shader, bind-group layouts, and a
+     single resource provider, but it does not own a thread-safe resource-provider split or real
+     graphics-pipeline factory entry points.
+   - Skia reference: `src/gpu/graphite/dawn/DawnSharedContext.cpp`,
+     `src/gpu/graphite/dawn/DawnGraphicsPipeline.cpp`
+2. Pipeline selection is still string-keyed instead of descriptor/key driven
+   - Local status: `src/draw_pass.ts` hardcodes a small `DrawingPipelineKey` enum and chooses
+     pipelines with `getPipelineKeysForDraw()`.
+   - Skia reference: `src/gpu/graphite/DrawPass.cpp`, `src/gpu/graphite/dawn/DawnCaps.cpp`,
+     `src/gpu/graphite/dawn/DawnGraphicsPipeline.cpp`
+3. Command encoding still allocates transient geometry/bindings during replay
+   - Local status: `src/command_buffer.ts` creates viewport buffers, vertex buffers, and viewport
+     bind groups while encoding, so prepared passes do not yet own resolved GPU resources.
+   - Skia reference: `src/gpu/graphite/DrawPass.cpp`,
+     `src/gpu/graphite/dawn/DawnCommandBuffer.cpp`,
+     `src/gpu/graphite/dawn/DawnResourceProvider.cpp`
+4. Clip semantics are still intersect-only and use correctness fallbacks
+   - Local status: `src/types.ts` has no clip op, `src/path_renderer.ts` only intersects clip
+     bounds, and convex clips force patch paths back to direct geometry with AA fringe disabled.
+   - Skia reference: `src/gpu/graphite/ClipStack.cpp`,
+     `src/gpu/graphite/ClipAtlasManager.cpp`
+5. Path rendering strategy is a small heuristic, not a context-wide renderer strategy
+   - Local status: `src/renderer_provider.ts` only switches between middle-out fan, wedge patches,
+     curve patches, and stroke tessellation per draw.
+   - Skia reference: `src/gpu/graphite/RendererProvider.h`,
+     `src/gpu/graphite/RendererProvider.cpp`
+6. Cap probing is still a compact static table
+   - Local status: `src/caps.ts` recognizes a small fixed set of formats, assumes simple 1x/4x
+     MSAA policy, and does not carry Dawn backend-specific storage-buffer or resolve workarounds.
+   - Skia reference: `src/gpu/graphite/dawn/DawnCaps.cpp`
+7. Queue completion tracking is simpler than Graphite's submission model
+   - Local status: `src/queue_manager.ts` tracks serial counts and `queue.onSubmittedWorkDone()`
+     promises, but it has no submission object ownership, wait-any behavior, or resource/fence
+     correlation.
+   - Skia reference: `src/gpu/graphite/dawn/DawnQueueManager.cpp`,
+     `src/gpu/graphite/QueueManager.h`
+
+These deltas suggest the next implementation priority order remains:
+
+1. Move `DrawPass` and `ResourceProvider` toward pre-resolved pipeline/resource state
+2. Port clip-stack semantics before expanding more path-renderer variants
+3. Replace viewport-only uniform replay with local-to-device/painter-data bindings

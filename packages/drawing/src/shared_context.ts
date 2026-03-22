@@ -1,4 +1,5 @@
 import { createDawnCaps, type DawnCaps } from './caps.ts';
+import type { DrawingGraphicsPipelineDesc } from './draw_pass.ts';
 import { createDawnQueueManager, type DawnQueueManager } from './queue_manager.ts';
 import { createDawnResourceProvider, type DawnResourceProvider } from './resource_provider.ts';
 import type { DawnBackendContext } from './dawn_backend_context.ts';
@@ -7,10 +8,12 @@ export type DawnSharedContext = Readonly<{
   backend: DawnBackendContext;
   caps: DawnCaps;
   resourceProvider: DawnResourceProvider;
+  threadSafeResourceProvider: DawnResourceProvider;
   queueManager: DawnQueueManager;
   noopFragmentShader: GPUShaderModule;
   uniformBufferBindGroupLayout: GPUBindGroupLayout;
   singleTextureSamplerBindGroupLayout: GPUBindGroupLayout;
+  createGraphicsPipeline: (descriptor: DrawingGraphicsPipelineDesc) => GPURenderPipeline;
   hasTick: boolean;
   recorderCount: number;
 }>;
@@ -89,16 +92,19 @@ export const createDawnSharedContext = (
   }> = {},
 ): DawnSharedContext => {
   const caps = createDawnCaps(backend);
+  const resourceProvider = createDawnResourceProvider(backend, {
+    resourceBudget: options.resourceBudget,
+  });
   return {
     backend,
     caps,
-    resourceProvider: createDawnResourceProvider(backend, {
-      resourceBudget: options.resourceBudget,
-    }),
+    resourceProvider,
+    threadSafeResourceProvider: resourceProvider,
     queueManager: createDawnQueueManager(backend),
     noopFragmentShader: createNoopFragmentShader(backend),
     uniformBufferBindGroupLayout: createUniformBufferBindGroupLayout(backend, caps),
     singleTextureSamplerBindGroupLayout: createSingleTextureSamplerBindGroupLayout(backend),
+    createGraphicsPipeline: (descriptor) => resourceProvider.findOrCreateGraphicsPipeline(descriptor),
     hasTick: typeof backend.tick === 'function',
     recorderCount: 0,
   };

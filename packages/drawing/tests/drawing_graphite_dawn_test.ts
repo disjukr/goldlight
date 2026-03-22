@@ -382,7 +382,9 @@ Deno.test('drawing prepared recording groups clear and prepared steps into passe
   assertEquals(prepared.passCount, 2);
   assertEquals(prepared.passes[0]?.loadOp, 'clear');
   assertEquals(prepared.passes[0]?.steps.length, 1);
-  assertEquals(prepared.passes[0]?.steps[0]?.pipelineKeys, ['path-fill-cover']);
+  assertEquals(prepared.passes[0]?.steps[0]?.pipelineDescs.map((pipeline) => pipeline.label), [
+    'drawing-path-fill-cover',
+  ]);
   assertEquals(prepared.passes[0]?.steps[0]?.usesStencil, false);
   assertEquals(prepared.passes[1]?.loadOp, 'clear');
   assertEquals(prepared.passes[1]?.steps.length, 0);
@@ -440,10 +442,10 @@ Deno.test('drawing prepared recording flattens quadratic and cubic paths for fil
   assertEquals(draw?.bounds.origin[0], 24);
   assertEquals((draw?.patches.length ?? 0) > 0, true);
   assertEquals(draw?.patches.some((patch) => patch.fanPoint !== undefined), true);
-  assertEquals(
-    prepared.passes[0]?.steps[0]?.pipelineKeys,
-    ['path-fill-patch-stencil-nonzero', 'path-fill-stencil-cover'],
-  );
+  assertEquals(prepared.passes[0]?.steps[0]?.pipelineDescs.map((pipeline) => pipeline.label), [
+    'drawing-path-fill-patch-stencil-nonzero',
+    'drawing-path-fill-stencil-cover',
+  ]);
 });
 
 Deno.test('drawing prepared recording flattens conic and arc verbs', () => {
@@ -566,7 +568,10 @@ Deno.test('drawing prepared recording preserves evenodd fill rule through draw s
     throw new Error('expected pathFill draw');
   }
   assertEquals(draw.fillRule, 'evenodd');
-  assertEquals(step?.pipelineKeys, ['path-fill-patch-stencil-evenodd', 'path-fill-stencil-cover']);
+  assertEquals(step?.pipelineDescs.map((pipeline) => pipeline.label), [
+    'drawing-path-fill-patch-stencil-evenodd',
+    'drawing-path-fill-stencil-cover',
+  ]);
   assertEquals(step?.usesFillStencil, true);
 });
 
@@ -599,7 +604,9 @@ Deno.test('drawing prepared recording derives clip bounds from clip path', () =>
 
   const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
   assertEquals(prepared.passes[0]?.steps[0]?.clipRect, createRect(32, 40, 64, 48));
-  assertEquals(prepared.passes[0]?.steps[0]?.pipelineKeys, ['path-fill-cover']);
+  assertEquals(prepared.passes[0]?.steps[0]?.pipelineDescs.map((pipeline) => pipeline.label), [
+    'drawing-path-fill-cover',
+  ]);
 });
 
 Deno.test('drawing prepared recording falls back to direct fill when convex clips would bypass patch clipping', () => {
@@ -641,7 +648,7 @@ Deno.test('drawing prepared recording falls back to direct fill when convex clip
   assertEquals(draw.fringeVertices, undefined);
   assertEquals(draw.bounds.origin[0] >= 32, true);
   assertEquals(draw.bounds.origin[1] >= 32, true);
-  assertEquals(step?.pipelineKeys, ['path-fill-cover']);
+  assertEquals(step?.pipelineDescs.map((pipeline) => pipeline.label), ['drawing-path-fill-cover']);
   assertEquals(step?.usesFillStencil, false);
 });
 
@@ -712,7 +719,9 @@ Deno.test('drawing prepared recording falls back to direct stroke geometry when 
   }
   assertEquals(draw.patches.length, 0);
   assertEquals(draw.fringeVertices, undefined);
-  assertEquals(prepared.passes[0]?.steps[0]?.pipelineKeys, ['path-stroke-cover']);
+  assertEquals(prepared.passes[0]?.steps[0]?.pipelineDescs.map((pipeline) => pipeline.label), [
+    'drawing-path-stroke-cover',
+  ]);
 });
 
 Deno.test('drawing prepared recording preserves multiple complex path clips for stencil replay', () => {

@@ -201,6 +201,9 @@ stack that fits this repository's TypeScript and WebGPU architecture.
     barriers instead of the previous ad hoc contour flush
   - Update 2026-03-23: explicit `close` on otherwise empty stroke contours now emits the same
     zero-length round/square cap geometry that Skia `StrokeIterator` produces
+  - Update 2026-03-23: subpath flattening plus fill/stroke patch prep now preserve the contour start
+    point after `close`, matching Skia/Canvas current-point semantics for verbs that follow a closed
+    contour
   - Update 2026-03-23: cubic 180-degree chop handling now follows Skia's cusp branches more closely
     by pinning one-cusp cubic controls onto the cusp point and converting two-cusp chops into
     circle-plus-line fallback instead of always replaying chopped cubics
@@ -538,13 +541,14 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
     rewrite, open-cap patch emission, Graphite-style replicated line patches, `chopAndWriteCubics`,
     `FindCubicConvex180Chops`-style cubic chop detection, `StrokeIterator`-like contour finishing
     with explicit move barriers, explicit close-only contours that now emit Skia-style zero-length
-    cap geometry, and open-contour patch chaining that now keeps split curves connected to their
-    true predecessor join control points; `src/resource_provider.ts` now uses
-    triangle-strip stroke patch replay with `edgeID` / `combinedEdgeID`-driven body tessellation,
-    and its WGSL branch structure now more directly mirrors Skia's `tessellate_stroked_curve()` for
-    degenerate square/circle patches, duplicated-edge join seaming, `lastRadialEdgeID == 0`
-    stabilization, segment counting, CPU-provided `maxScale` stroke tolerances instead of a
-    shader-local approximation, and hairline pre-transforming before tessellation
+    cap geometry, post-`close` current-point preservation for subsequent verbs, and open-contour
+    patch chaining that now keeps split curves connected to their true predecessor join control
+    points; `src/resource_provider.ts` now uses triangle-strip stroke patch replay with `edgeID` /
+    `combinedEdgeID`-driven body tessellation, and its WGSL branch structure now more directly
+    mirrors Skia's `tessellate_stroked_curve()` for degenerate square/circle patches,
+    duplicated-edge join seaming, `lastRadialEdgeID == 0` stabilization, segment counting,
+    CPU-provided `maxScale` stroke tolerances instead of a shader-local approximation, and hairline
+    pre-transforming before tessellation
   - Remaining delta: `tessellate_stroked_curve()` seam math still has local safety branches,
     duplicated-edge handling is still a reduced version of Skia's full implementation, and
     translucent round cap/join coverage still needs Graphite-like analytic evaluation instead of
@@ -573,6 +577,8 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
      shader-side edge budgeting no longer diverges from upload-time planning
    - Update 2026-03-23: empty `moveTo`/`close` contours now match Skia's zero-length cap behavior;
      remaining work is duplicated-edge/shader seam parity plus fuller verb-level iterator matching
+   - Update 2026-03-23: post-`close` current-point semantics now match Skia/Canvas, so subsequent
+     verbs reopen from the closed contour start instead of failing path preparation
    - Target files: `src/path_renderer.ts`, `src/resource_provider.ts`
 2. `P2` Finish `Caps`
    - Port remaining DawnCaps workaround logic, multiplanar/external format coverage, and binding
@@ -602,8 +608,14 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
   - Files: `src/path_renderer.ts`, `tests/drawing_graphite_dawn_test.ts`
   - Status transition: explicit close-only contours now stroke as zero-length round/square caps,
     matching Skia `StrokeIterator` instead of dropping the contour
-  - Remaining delta: duplicated-edge seam math and fuller verb-for-verb iterator parity still
-    remain
+  - Remaining delta: duplicated-edge seam math and fuller verb-for-verb iterator parity still remain
+  - Validation: `deno test tests/drawing_graphite_dawn_test.ts`
+- 2026-03-23
+  - Files: `src/path_renderer.ts`, `tests/drawing_graphite_dawn_test.ts`
+  - Status transition: `close` now preserves the contour start as the post-close current point
+    across subpath flattening and patch preparation, so later verbs reopen from the same place as
+    Skia/Canvas instead of failing or being dropped
+  - Remaining delta: duplicated-edge seam math and fuller verb-for-verb iterator parity still remain
   - Validation: `deno test tests/drawing_graphite_dawn_test.ts`
 - 2026-03-23
   - Files: `src/renderer_provider.ts`, `src/path_renderer.ts`, `src/draw_pass.ts`,

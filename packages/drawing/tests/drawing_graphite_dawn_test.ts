@@ -1642,6 +1642,40 @@ Deno.test('drawing prepared stroke patches treat empty closed contours as zero-l
   assertEquals(draw.patches[0]?.joinControlPoint, [200, 140]);
 });
 
+Deno.test('drawing prepared recording reopens contours from the closed start point', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [10, 10] },
+      { kind: 'lineTo', to: [30, 10] },
+      { kind: 'lineTo', to: [30, 30] },
+      { kind: 'close' },
+      { kind: 'lineTo', to: [60, 10] },
+    ),
+    { style: 'stroke', strokeWidth: 8, strokeCap: 'round', strokeJoin: 'round' },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const draw = prepared.passes[0]?.steps[0]?.draw;
+  assertEquals(draw?.kind, 'pathStroke');
+  if (draw?.kind !== 'pathStroke') {
+    throw new Error('expected pathStroke draw');
+  }
+  const reopenedLinePatch = draw.patches.find((patch) =>
+    patch.patch.kind === 'line' &&
+    patch.patch.points[0]?.[0] === 10 &&
+    patch.patch.points[0]?.[1] === 10 &&
+    patch.patch.points[1]?.[0] === 60 &&
+    patch.patch.points[1]?.[1] === 10
+  );
+  assertEquals(Boolean(reopenedLinePatch), true);
+  assertEquals(draw.usesTessellatedStrokePatches, true);
+});
+
 Deno.test('dawn prepared stroke payload stores cpu-derived maxScale for tessellation', () => {
   const mock = createMockGpuContext();
   const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));

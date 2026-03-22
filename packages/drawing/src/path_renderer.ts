@@ -930,6 +930,7 @@ const createPreparedStrokePatchesFromPath = (
   const prepared: DrawingPreparedStrokePatch[] = [];
   let currentPoint: Point2D | null = null;
   let contourStart: Point2D | null = null;
+  let pendingContourStart: Point2D | null = null;
   let lastDegeneratePoint: Point2D | null = null;
   let contourUnits: DrawingStrokeContourSequenceItem[] = [];
   const cap = strokeStyle.cap;
@@ -939,6 +940,18 @@ const createPreparedStrokePatchesFromPath = (
     contourStart = nextMoveTo;
     lastDegeneratePoint = null;
     contourUnits = [];
+  };
+
+  const ensureImplicitContour = (): boolean => {
+    if (currentPoint) {
+      return true;
+    }
+    if (!pendingContourStart) {
+      return false;
+    }
+    resetContour(pendingContourStart);
+    pendingContourStart = null;
+    return true;
   };
 
   const appendPreparedSequencePatch = (patch: DrawingPreparedStrokePatch): void => {
@@ -1151,62 +1164,65 @@ const createPreparedStrokePatchesFromPath = (
         break;
       }
       case 'lineTo': {
-        if (!currentPoint) break;
+        if (!ensureImplicitContour()) break;
+        const from = currentPoint!;
         const to = transformPoint2D(verb.to, identityMatrix2D);
-        if (pointsEqual(currentPoint, to)) {
+        if (pointsEqual(from, to)) {
           lastDegeneratePoint = to;
           currentPoint = to;
           break;
         }
-        emitPatchDefinition({ kind: 'line', points: [currentPoint, to] });
+        emitPatchDefinition({ kind: 'line', points: [from, to] });
         currentPoint = to;
         lastDegeneratePoint = null;
         break;
       }
       case 'quadTo': {
-        if (!currentPoint) break;
+        if (!ensureImplicitContour()) break;
+        const from = currentPoint!;
         const control = transformPoint2D(verb.control, identityMatrix2D);
         const to = transformPoint2D(verb.to, identityMatrix2D);
-        if (pointsEqual(currentPoint, control) && pointsEqual(control, to)) {
+        if (pointsEqual(from, control) && pointsEqual(control, to)) {
           lastDegeneratePoint = to;
           currentPoint = to;
           break;
         }
-        const cuspT = findQuadraticCuspT(currentPoint, control, to);
+        const cuspT = findQuadraticCuspT(from, control, to);
         if (cuspT !== null) {
-          const [left] = splitQuadraticAt(currentPoint, control, to, cuspT);
+          const [left] = splitQuadraticAt(from, control, to, cuspT);
           const cuspPoint = left[2];
           appendPreparedSequencePatch(createDegenerateRoundStrokePatch(cuspPoint));
-          emitPatchDefinition({ kind: 'line', points: [currentPoint, cuspPoint] });
+          emitPatchDefinition({ kind: 'line', points: [from, cuspPoint] });
           emitPatchDefinition({ kind: 'line', points: [cuspPoint, to] });
         } else {
-          emitPatchDefinition({ kind: 'quadratic', points: [currentPoint, control, to] });
+          emitPatchDefinition({ kind: 'quadratic', points: [from, control, to] });
         }
         currentPoint = to;
         lastDegeneratePoint = null;
         break;
       }
       case 'conicTo': {
-        if (!currentPoint) break;
+        if (!ensureImplicitContour()) break;
+        const from = currentPoint!;
         const control = transformPoint2D(verb.control, identityMatrix2D);
         const to = transformPoint2D(verb.to, identityMatrix2D);
-        if (pointsEqual(currentPoint, control) && pointsEqual(control, to)) {
+        if (pointsEqual(from, control) && pointsEqual(control, to)) {
           lastDegeneratePoint = to;
           currentPoint = to;
           break;
         }
         const cuspT = findCuspTBySampling((t) =>
-          derivativeConic(currentPoint!, control, to, verb.weight, t)
+          derivativeConic(from, control, to, verb.weight, t)
         );
         if (cuspT !== null) {
-          const cusp = evaluateConic(currentPoint, control, to, verb.weight, cuspT);
+          const cusp = evaluateConic(from, control, to, verb.weight, cuspT);
           appendPreparedSequencePatch(createDegenerateRoundStrokePatch(cusp));
-          emitPatchDefinition({ kind: 'line', points: [currentPoint, cusp] });
+          emitPatchDefinition({ kind: 'line', points: [from, cusp] });
           emitPatchDefinition({ kind: 'line', points: [cusp, to] });
         } else {
           emitPatchDefinition({
             kind: 'conic',
-            points: [currentPoint, control, to],
+            points: [from, control, to],
             weight: verb.weight,
           });
         }
@@ -1215,12 +1231,13 @@ const createPreparedStrokePatchesFromPath = (
         break;
       }
       case 'cubicTo': {
-        if (!currentPoint) break;
+        if (!ensureImplicitContour()) break;
+        const from = currentPoint!;
         const control1 = transformPoint2D(verb.control1, identityMatrix2D);
         const control2 = transformPoint2D(verb.control2, identityMatrix2D);
         const to = transformPoint2D(verb.to, identityMatrix2D);
         if (
-          pointsEqual(currentPoint, control1) &&
+          pointsEqual(from, control1) &&
           pointsEqual(control1, control2) &&
           pointsEqual(control2, to)
         ) {
@@ -1228,9 +1245,9 @@ const createPreparedStrokePatchesFromPath = (
           currentPoint = to;
           break;
         }
-        const chops = findCubicConvex180Chops(currentPoint, control1, control2, to);
+        const chops = findCubicConvex180Chops(from, control1, control2, to);
         if (chops.ts.length > 0) {
-          const chopped = splitCubicAtMany(currentPoint, control1, control2, to, chops.ts);
+          const chopped = splitCubicAtMany(from, control1, control2, to, chops.ts);
           if (chops.areCusps && chopped.length === 2) {
             const cuspPoint = chopped[0]![3];
             appendPreparedSequencePatch(createDegenerateRoundStrokePatch(cuspPoint));
@@ -1256,14 +1273,14 @@ const createPreparedStrokePatchesFromPath = (
             }
           }
         } else {
-          emitPatchDefinition({ kind: 'cubic', points: [currentPoint, control1, control2, to] });
+          emitPatchDefinition({ kind: 'cubic', points: [from, control1, control2, to] });
         }
         currentPoint = to;
         lastDegeneratePoint = null;
         break;
       }
       case 'arcTo': {
-        if (!currentPoint) break;
+        if (!ensureImplicitContour()) break;
         const arcPatches = createArcConicPatches(
           verb.center,
           verb.radius,
@@ -1290,6 +1307,7 @@ const createPreparedStrokePatchesFromPath = (
           emitPatchDefinition({ kind: 'line', points: [currentPoint, contourStart] });
         }
         currentPoint = contourStart;
+        pendingContourStart = contourStart;
         flushClosedContour();
         break;
       }
@@ -1948,6 +1966,7 @@ const flattenSubpaths = (
   const subpaths: FlattenedSubpath[] = [];
   let points: Point2D[] = [];
   let currentPoint: Point2D | null = null;
+  let pendingContourStart: Point2D | null = null;
   let sawClose = false;
 
   const flush = (): void => {
@@ -1967,28 +1986,43 @@ const flattenSubpaths = (
     sawClose = false;
   };
 
+  const ensureImplicitContour = (): boolean => {
+    if (currentPoint) {
+      return true;
+    }
+    if (!pendingContourStart) {
+      return false;
+    }
+    points.push(pendingContourStart);
+    currentPoint = pendingContourStart;
+    pendingContourStart = null;
+    return true;
+  };
+
   for (const verb of path.verbs) {
     switch (verb.kind) {
       case 'moveTo':
         flush();
+        pendingContourStart = null;
         points.push(transformPoint2D(verb.to, transform));
         currentPoint = transformPoint2D(verb.to, transform);
         break;
       case 'lineTo':
-        if (!currentPoint) return null;
+        if (!ensureImplicitContour()) return null;
         points.push(transformPoint2D(verb.to, transform));
         currentPoint = transformPoint2D(verb.to, transform);
         break;
       case 'quadTo':
-        if (!currentPoint) return null;
+        if (!ensureImplicitContour()) return null;
         {
+          const from = currentPoint!;
           const control = transformPoint2D(verb.control, transform);
           const to = transformPoint2D(verb.to, transform);
           const targetDepth = Math.ceil(
-            Math.log2(approximateQuadraticSegments(currentPoint, control, to)),
+            Math.log2(approximateQuadraticSegments(from, control, to)),
           );
           flattenQuadraticRecursive(
-            currentPoint,
+            from,
             control,
             to,
             0,
@@ -1999,19 +2033,20 @@ const flattenSubpaths = (
         }
         break;
       case 'cubicTo':
-        if (!currentPoint) return null;
+        if (!ensureImplicitContour()) return null;
         {
+          const from = currentPoint!;
           const control1 = transformPoint2D(verb.control1, transform);
           const control2 = transformPoint2D(verb.control2, transform);
           const to = transformPoint2D(verb.to, transform);
           const targetDepth = Math.ceil(Math.log2(approximateCubicSegments(
-            currentPoint,
+            from,
             control1,
             control2,
             to,
           )));
           flattenCubicRecursive(
-            currentPoint,
+            from,
             control1,
             control2,
             to,
@@ -2023,22 +2058,25 @@ const flattenSubpaths = (
         }
         break;
       case 'conicTo':
-        if (!currentPoint) return null;
+        if (!ensureImplicitContour()) return null;
         {
+          const from = currentPoint!;
           const control = transformPoint2D(verb.control, transform);
           const to = transformPoint2D(verb.to, transform);
-          flattenConic(currentPoint, control, to, verb.weight, points);
+          flattenConic(from, control, to, verb.weight, points);
           currentPoint = to;
         }
         break;
       case 'arcTo':
-        if (!currentPoint) {
+        if (!currentPoint && !pendingContourStart) {
           const startPoint = transformPoint2D([
             verb.center[0] + (Math.cos(verb.startAngle) * verb.radius),
             verb.center[1] + (Math.sin(verb.startAngle) * verb.radius),
           ], transform);
           points.push(startPoint);
           currentPoint = startPoint;
+        } else if (!ensureImplicitContour()) {
+          return null;
         }
         flattenArc(
           verb.center,
@@ -2054,6 +2092,7 @@ const flattenSubpaths = (
       case 'close':
         if (!currentPoint) return null;
         sawClose = true;
+        pendingContourStart = points[0] ?? currentPoint;
         flush();
         break;
     }
@@ -2071,6 +2110,7 @@ const preparePatches = (
   const patches: DrawingPreparedPatch[] = [];
   let currentPoint: Point2D | null = null;
   let contourStart: Point2D | null = null;
+  let pendingContourStart: Point2D | null = null;
   let contourPoints: Point2D[] = [];
   let contourPatches: DrawingPatchDefinition[] = [];
 
@@ -2104,10 +2144,25 @@ const preparePatches = (
     contourStart = null;
   };
 
+  const ensureImplicitContour = (): boolean => {
+    if (currentPoint) {
+      return true;
+    }
+    if (!pendingContourStart) {
+      return false;
+    }
+    currentPoint = pendingContourStart;
+    contourStart = pendingContourStart;
+    contourPoints = [pendingContourStart];
+    pendingContourStart = null;
+    return true;
+  };
+
   for (const verb of path.verbs) {
     switch (verb.kind) {
       case 'moveTo': {
         flushWedges();
+        pendingContourStart = null;
         const to = transformPoint2D(verb.to, transform);
         currentPoint = to;
         contourStart = to;
@@ -2115,44 +2170,47 @@ const preparePatches = (
         break;
       }
       case 'lineTo': {
-        if (!currentPoint) break;
+        if (!ensureImplicitContour()) break;
+        const from = currentPoint!;
         const to = transformPoint2D(verb.to, transform);
-        pushPatch({ kind: 'line', points: [currentPoint, to] });
+        pushPatch({ kind: 'line', points: [from, to] });
         contourPoints.push(to);
         currentPoint = to;
         break;
       }
       case 'quadTo': {
-        if (!currentPoint) break;
+        if (!ensureImplicitContour()) break;
+        const from = currentPoint!;
         const control = transformPoint2D(verb.control, transform);
         const to = transformPoint2D(verb.to, transform);
-        const cuspT = findQuadraticCuspT(currentPoint, control, to);
+        const cuspT = findQuadraticCuspT(from, control, to);
         if (cuspT !== null) {
-          const [left, right] = splitQuadraticAt(currentPoint, control, to, cuspT);
+          const [left, right] = splitQuadraticAt(from, control, to, cuspT);
           pushPatch({ kind: 'quadratic', points: left });
           pushPatch({ kind: 'quadratic', points: right });
         } else {
-          pushPatch({ kind: 'quadratic', points: [currentPoint, control, to] });
+          pushPatch({ kind: 'quadratic', points: [from, control, to] });
         }
         contourPoints.push(to);
         currentPoint = to;
         break;
       }
       case 'conicTo': {
-        if (!currentPoint) break;
+        if (!ensureImplicitContour()) break;
+        const from = currentPoint!;
         const control = transformPoint2D(verb.control, transform);
         const to = transformPoint2D(verb.to, transform);
         const cuspT = findCuspTBySampling((t) =>
-          derivativeConic(currentPoint!, control, to, verb.weight, t)
+          derivativeConic(from, control, to, verb.weight, t)
         );
         if (cuspT !== null) {
-          const cusp = evaluateConic(currentPoint, control, to, verb.weight, cuspT);
-          pushPatch({ kind: 'line', points: [currentPoint, cusp] });
+          const cusp = evaluateConic(from, control, to, verb.weight, cuspT);
+          pushPatch({ kind: 'line', points: [from, cusp] });
           pushPatch({ kind: 'line', points: [cusp, to] });
         } else {
           pushPatch({
             kind: 'conic',
-            points: [currentPoint, control, to],
+            points: [from, control, to],
             weight: verb.weight,
           });
         }
@@ -2161,13 +2219,14 @@ const preparePatches = (
         break;
       }
       case 'cubicTo': {
-        if (!currentPoint) break;
+        if (!ensureImplicitContour()) break;
+        const from = currentPoint!;
         const control1 = transformPoint2D(verb.control1, transform);
         const control2 = transformPoint2D(verb.control2, transform);
         const to = transformPoint2D(verb.to, transform);
-        const chops = findCubicConvex180Chops(currentPoint, control1, control2, to);
+        const chops = findCubicConvex180Chops(from, control1, control2, to);
         if (chops.ts.length > 0) {
-          const chopped = splitCubicAtMany(currentPoint, control1, control2, to, chops.ts);
+          const chopped = splitCubicAtMany(from, control1, control2, to, chops.ts);
           for (let index = 0; index < chopped.length; index += 1) {
             const points = chopped[index]!;
             pushPatch({ kind: 'cubic', points });
@@ -2180,14 +2239,14 @@ const preparePatches = (
             }
           }
         } else {
-          pushPatch({ kind: 'cubic', points: [currentPoint, control1, control2, to] });
+          pushPatch({ kind: 'cubic', points: [from, control1, control2, to] });
         }
         contourPoints.push(to);
         currentPoint = to;
         break;
       }
       case 'arcTo': {
-        if (!currentPoint) break;
+        if (!ensureImplicitContour()) break;
         const arcPatches = createArcConicPatches(
           verb.center,
           verb.radius,
@@ -2207,6 +2266,7 @@ const preparePatches = (
         if (currentPoint && contourStart && !pointsEqual(currentPoint, contourStart)) {
           pushPatch({ kind: 'line', points: [currentPoint, contourStart] });
         }
+        pendingContourStart = contourStart;
         flushWedges();
         currentPoint = contourStart;
         break;

@@ -5,6 +5,7 @@ export * from './src/dawn_backend_context.ts';
 export * from './src/draw_pass.ts';
 export * from './src/geometry.ts';
 export * from './src/path_renderer.ts';
+export * from './src/prepare_resources.ts';
 export * from './src/queue_manager.ts';
 export * from './src/recording.ts';
 export * from './src/recorder.ts';

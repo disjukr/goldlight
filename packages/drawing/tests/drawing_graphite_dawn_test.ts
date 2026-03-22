@@ -20,8 +20,10 @@ import {
   createDrawingContext,
   createDrawingPath2DFromShape,
   createDrawingRecorder,
+  encodePreparedDawnCommandBuffer,
   encodeDawnCommandBuffer,
   finishDrawingRecorder,
+  prepareDawnRecording,
   prepareDrawingRecording,
   recordClear,
   recordDrawPath,
@@ -396,6 +398,34 @@ Deno.test('drawing prepared recording groups clear and prepared steps into passe
   assertEquals(prepared.passes[1]?.loadOp, 'clear');
   assertEquals(prepared.passes[1]?.steps.length, 0);
   assertEquals(prepared.unsupportedCommands.length, 0);
+});
+
+Deno.test('dawn preparation separates recording, draw-pass preparation, and resource preparation', () => {
+  const mock = createMockGpuContext();
+  const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
+  const recorder = createDrawingRecorder(sharedContext);
+  const binding = createOffscreenBinding(mock.context);
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [16, 16] },
+      { kind: 'quadTo', control: [64, 0], to: [112, 16] },
+      { kind: 'lineTo', to: [112, 112] },
+      { kind: 'close' },
+    ),
+    { style: 'fill', color: [0.2, 0.5, 0.8, 1] },
+  );
+
+  const recording = finishDrawingRecorder(recorder);
+  const preparedWork = prepareDawnRecording(sharedContext, recording);
+  const commandBuffer = encodePreparedDawnCommandBuffer(sharedContext, preparedWork, binding);
+
+  assertEquals(preparedWork.recording.commandCount, 1);
+  assertEquals(preparedWork.prepared.passes.length, 1);
+  assertEquals(preparedWork.resources.passes.length, 1);
+  assertEquals(preparedWork.resources.passes[0]?.steps.length, 1);
+  assertEquals(commandBuffer.prepared, preparedWork.prepared);
 });
 
 Deno.test('drawing prepared recording selects middle-out fan for simple convex fills', () => {

@@ -646,8 +646,10 @@ When work is added in this package, update this document with:
 - `P1` Introduce a closer `Recorder -> Recording -> prepareResources -> CommandBuffer` flow
   - Why high priority: recording/task preparation boundaries are still much simpler than Skia's
     pipeline
-  - To match Skia better: make resource preparation an explicit stage between immutable recordings
-    and backend command encoding, with clearer ownership of pass-local resources
+  - Current progress: `src/prepare_resources.ts` now makes resource preparation an explicit stage
+    between immutable recordings and backend command encoding
+  - To match Skia better: continue from this state toward task lists / child-task preparation and
+    richer command-buffer resource ownership, instead of the current direct draw-pass iteration
 
 - `Recorder` / recording lifecycle
   - Current delta: no ordered-recording policy, no task graph, no upload or device flush model

@@ -351,6 +351,30 @@ const createStrokePatchShaderModule = (backend: DawnBackendContext): GPUShaderMo
     code: strokePatchShaderSource,
   });
 
+const canonicalizeSamplerDescriptor = (
+  descriptor: DrawingSamplerDescriptor = {},
+): Required<DrawingSamplerDescriptor> => ({
+  label: descriptor.label ?? '',
+  magFilter: descriptor.magFilter ?? 'nearest',
+  minFilter: descriptor.minFilter ?? 'nearest',
+  mipmapFilter: descriptor.mipmapFilter ?? 'nearest',
+  addressModeU: descriptor.addressModeU ?? 'clamp-to-edge',
+  addressModeV: descriptor.addressModeV ?? 'clamp-to-edge',
+  addressModeW: descriptor.addressModeW ?? 'clamp-to-edge',
+});
+
+const createSamplerCacheKey = (
+  descriptor: Required<DrawingSamplerDescriptor>,
+): string =>
+  [
+    descriptor.magFilter,
+    descriptor.minFilter,
+    descriptor.mipmapFilter,
+    descriptor.addressModeU,
+    descriptor.addressModeV,
+    descriptor.addressModeW,
+  ].join('|');
+
 export const createDawnResourceProvider = (
   backend: DawnBackendContext,
   options: Readonly<{
@@ -384,6 +408,7 @@ export const createDawnResourceProvider = (
       view: GPUTextureView;
     }>
     | null = null;
+  const samplerCache = new Map<string, GPUSampler>();
 
   const createVertexLayout = (): GPUVertexBufferLayout => ({
     arrayStride: floatBytes * floatsPerVertex,
@@ -679,7 +704,21 @@ export const createDawnResourceProvider = (
     resourceBudget: options.resourceBudget ?? Number.POSITIVE_INFINITY,
     createBuffer: (descriptor) => backend.device.createBuffer(descriptor),
     createTexture: (descriptor) => backend.device.createTexture(descriptor),
-    createSampler: (descriptor = {}) => backend.device.createSampler(descriptor),
+    createSampler: (descriptor = {}) => {
+      const normalized = canonicalizeSamplerDescriptor(descriptor);
+      const key = createSamplerCacheKey(normalized);
+      const existing = samplerCache.get(key);
+      if (existing) {
+        return existing;
+      }
+
+      const sampler = backend.device.createSampler({
+        ...normalized,
+        label: descriptor.label,
+      });
+      samplerCache.set(key, sampler);
+      return sampler;
+    },
     getPipeline: (key) => {
       switch (key) {
         case 'clip-stencil-write':

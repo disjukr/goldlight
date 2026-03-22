@@ -15,6 +15,9 @@ export type DrawingLimits = Readonly<{
   maxBufferSize: number;
   minUniformBufferOffsetAlignment: number;
   minStorageBufferOffsetAlignment: number;
+  maxStorageBuffersPerShaderStage: number;
+  maxUniformBuffersPerShaderStage: number;
+  maxInterStageShaderVariables: number;
 }>;
 
 export type DawnCaps = Readonly<{
@@ -24,7 +27,12 @@ export type DawnCaps = Readonly<{
   limits: DrawingLimits;
   preferredCanvasFormat: GPUTextureFormat;
   supportsTimestampQuery: boolean;
+  supportsShaderF16: boolean;
   supportsStorageBuffers: boolean;
+  supportsTransientAttachments: boolean;
+  supportsMSAARenderToSingleSampled: boolean;
+  requiresStorageBufferWorkaround: boolean;
+  requiredBytesPerRowAlignment: number;
   defaultSampleCount: 1 | 4;
   maxSampleCount: 1 | 4;
   isFormatTexturable: (format: GPUTextureFormat) => boolean;
@@ -78,12 +86,26 @@ const readLimits = (
     maxBufferSize: get('maxBufferSize', 256 * 1024 * 1024),
     minUniformBufferOffsetAlignment: get('minUniformBufferOffsetAlignment', 256),
     minStorageBufferOffsetAlignment: get('minStorageBufferOffsetAlignment', 256),
+    maxStorageBuffersPerShaderStage: get('maxStorageBuffersPerShaderStage', 0),
+    maxUniformBuffersPerShaderStage: get('maxUniformBuffersPerShaderStage', 12),
+    maxInterStageShaderVariables: get('maxInterStageShaderVariables', 8),
   };
 };
 
 const choosePreferredCanvasFormat = (
   backend: DawnBackendContext,
 ): GPUTextureFormat => backend.target.format;
+
+const chooseMaxSampleCount = (
+  backend: DawnBackendContext,
+  limits: DrawingLimits,
+): 1 | 4 => {
+  if (backend.target.kind === 'offscreen' && backend.target.sampleCount === 4) {
+    return 4;
+  }
+
+  return limits.maxColorAttachments > 0 ? 4 : 1;
+};
 
 const createFormatCapabilities = (
   format: GPUTextureFormat,
@@ -102,9 +124,18 @@ export const createDawnCaps = (
   const deviceFeatures = readFeatureSet(backend.device);
   const limits = readLimits(backend.device);
   const supportsTimestampQuery = deviceFeatures.has('timestamp-query');
-  const supportsStorageBuffers = true;
-  const maxSampleCount: 1 | 4 = limits.maxColorAttachments > 0 ? 4 : 1;
-  const defaultSampleCount: 1 | 4 = maxSampleCount;
+  const supportsShaderF16 = deviceFeatures.has('shader-f16');
+  const supportsTransientAttachments = deviceFeatures.has('transient-attachments');
+  const supportsMSAARenderToSingleSampled = deviceFeatures.has('msaa-render-to-single-sampled');
+  const requiresStorageBufferWorkaround = false;
+  const supportsStorageBuffers = !requiresStorageBufferWorkaround &&
+    limits.maxStorageBuffersPerShaderStage >= 1;
+  const requiredBytesPerRowAlignment = 256;
+  const maxSampleCount = chooseMaxSampleCount(backend, limits);
+  const defaultSampleCount: 1 | 4 =
+    backend.target.kind === 'offscreen' && backend.target.sampleCount === 4 && maxSampleCount === 4
+      ? 4
+      : 1;
 
   return {
     backend: 'graphite-dawn',
@@ -113,7 +144,12 @@ export const createDawnCaps = (
     limits,
     preferredCanvasFormat: choosePreferredCanvasFormat(backend),
     supportsTimestampQuery,
+    supportsShaderF16,
     supportsStorageBuffers,
+    supportsTransientAttachments,
+    supportsMSAARenderToSingleSampled,
+    requiresStorageBufferWorkaround,
+    requiredBytesPerRowAlignment,
     defaultSampleCount,
     maxSampleCount,
     isFormatTexturable: (format) =>

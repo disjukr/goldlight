@@ -44,12 +44,14 @@ const createMockGpuContext = () => {
   const submitted: GPUCommandBuffer[][] = [];
   const finishedCommandBuffers: GPUCommandBuffer[] = [];
   const shaderModules: GPUShaderModuleDescriptor[] = [];
+  const bindGroupLayouts: GPUBindGroupLayoutDescriptor[] = [];
   const renderPipelines: GPURenderPipelineDescriptor[] = [];
   const drawCalls: number[] = [];
   const scissorCalls: Array<readonly [number, number, number, number]> = [];
   const stencilReferences: number[] = [];
   const submissionDoneResolvers: Array<() => void> = [];
   const mappedBuffers: ArrayBuffer[] = [];
+  const submittedWorkDoneResolvers = submissionDoneResolvers;
   const offscreenView = { label: 'offscreen-view' } as unknown as GPUTextureView;
   const ticks: number[] = [];
 
@@ -62,12 +64,14 @@ const createMockGpuContext = () => {
       submitted,
       finishedCommandBuffers,
       shaderModules,
+      bindGroupLayouts,
       renderPipelines,
       drawCalls,
       scissorCalls,
       stencilReferences,
       submissionDoneResolvers,
       mappedBuffers,
+      submittedWorkDoneResolvers,
     },
     context: {
       adapter: {
@@ -81,6 +85,9 @@ const createMockGpuContext = () => {
           maxBufferSize: 1024 * 1024,
           minUniformBufferOffsetAlignment: 256,
           minStorageBufferOffsetAlignment: 256,
+          maxStorageBuffersPerShaderStage: 8,
+          maxUniformBuffersPerShaderStage: 12,
+          maxInterStageShaderVariables: 16,
         },
         createBuffer: (descriptor: GPUBufferDescriptor) => {
           buffers.push(descriptor);
@@ -106,6 +113,10 @@ const createMockGpuContext = () => {
         createShaderModule: (descriptor: GPUShaderModuleDescriptor) => {
           shaderModules.push(descriptor);
           return { descriptor } as unknown as GPUShaderModule;
+        },
+        createBindGroupLayout: (descriptor: GPUBindGroupLayoutDescriptor) => {
+          bindGroupLayouts.push(descriptor);
+          return { descriptor } as unknown as GPUBindGroupLayout;
         },
         createRenderPipeline: (descriptor: GPURenderPipelineDescriptor) => {
           renderPipelines.push(descriptor);
@@ -190,10 +201,14 @@ Deno.test('dawn shared context exposes resource provider over gpu device', () =>
   sharedContext.resourceProvider.createSampler({
     label: 'linear',
   });
+  sharedContext.resourceProvider.createSampler({
+    label: 'linear-again',
+  });
 
   assertEquals(sharedContext.resourceProvider.resourceBudget, 1024);
   assertEquals(sharedContext.caps.backend, 'graphite-dawn');
   assertEquals(sharedContext.caps.supportsTimestampQuery, true);
+  assertEquals(mock.created.bindGroupLayouts.length, 2);
   assertEquals(mock.created.buffers.length, 1);
   assertEquals(mock.created.textures.length, 1);
   assertEquals(mock.created.samplers.length, 1);
@@ -205,7 +220,10 @@ Deno.test('dawn caps expose feature, format, and sample count policy', () => {
 
   assertEquals(caps.preferredCanvasFormat, 'rgba8unorm');
   assertEquals(caps.supportsTimestampQuery, true);
+  assertEquals(caps.supportsShaderF16, false);
   assertEquals(caps.limits.maxTextureDimension2D, 8192);
+  assertEquals(caps.limits.maxStorageBuffersPerShaderStage, 8);
+  assertEquals(caps.supportsStorageBuffers, true);
   assertEquals(caps.isFormatRenderable('rgba8unorm'), true);
   assertEquals(caps.getFormatCapabilities('depth24plus').texturable, true);
   assertEquals(caps.supportsSampleCount(1), true);
@@ -1091,7 +1109,7 @@ Deno.test('dawn resource provider reuses pipelines across command buffers', () =
   encodeDawnCommandBuffer(sharedContext, createRecording('stroke'), binding);
 
   assertEquals(mock.created.renderPipelines.length, 3);
-  assertEquals(mock.created.shaderModules.length, 3);
+  assertEquals(mock.created.shaderModules.length, 4);
 });
 
 Deno.test('dawn pipelines honor target sample count for MSAA', () => {
@@ -1128,6 +1146,8 @@ Deno.test('dawn queue manager tracks explicit submitted-work completion', async 
   const backend = createDawnBackendContext(mock.context, {
     tick: () => {
       mock.ticks.push(1);
+      const resolver = mock.created.submittedWorkDoneResolvers.shift();
+      resolver?.();
     },
   });
   const queueManager = createDawnQueueManager(backend);
@@ -1213,6 +1233,7 @@ Deno.test('dawn queue manager falls back to coarse tick completion without submi
   assertEquals(mock.ticks.length, 1);
   assertEquals(queueManager.completedCount, 1);
   assertEquals(queueManager.inFlightCount, 0);
+  assertEquals(queueManager.lastCompletedRecorderId, commandBuffer.recording.recorderId);
 });
 
 Deno.test('dawn queue manager clears pending completion when submitted-work callback rejects', async () => {

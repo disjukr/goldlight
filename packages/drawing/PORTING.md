@@ -37,17 +37,20 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Status: `started`
   - Dawn/WebGPU device lifecycle wrapper exists.
 - Shared context
-  - Status: `started`
-  - Shared backend state, caps, and resource provider are present.
+  - Status: `partial`
+  - Shared backend state, caps, noop fragment shader, bind group layouts, and resource provider are
+    present.
 - Resource allocation
-  - Status: `started`
-  - Thin buffer/texture/sampler allocation layer exists.
+  - Status: `partial`
+  - Thin buffer/texture/sampler allocation layer exists, and samplers now canonicalize and reuse
+    like a first backend cache.
 - Recording
   - Status: `partial`
   - Abstract commands, clip-stack state, and immutable recordings exist.
 - Capability probing
-  - Status: `started`
-  - Initial caps and limits layer exists.
+  - Status: `partial`
+  - Caps now derive more policy from actual device features and limits instead of a mostly static
+    table.
 - GPU encoding
   - Status: `partial`
   - Clear, direct fill replay, patch-instance fill/stroke replay, clip-stencil replay for complex
@@ -55,11 +58,11 @@ stack that fits this repository's TypeScript and WebGPU architecture.
     pass, first Skia-like stencil-then-cover replay for patch fills without stencil clips, and first
     stroke command buffer translation exist.
 - Queue submission
-  - Status: `started`
-  - Queue manager can submit encoded command buffers, track in-flight work counts, and use
-    `queue.onSubmittedWorkDone()` when available.
-  - Current state: command-buffer submission now routes through the queue manager instead of
-    bypassing tracking.
+  - Status: `partial`
+  - Queue manager can submit encoded command buffers, track in-flight work counts, and follow
+    submission completion through `queue.onSubmittedWorkDone()` when available.
+  - Current state: command-buffer submission routes through the queue manager, with callback-based
+    completion when available and coarse fallback when it is not.
 - Path rendering
   - Status: `partial`
   - Flattened contours can be pushed through direct tessellated fills, convex clip-stack clipping,
@@ -78,15 +81,18 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - What exists: wraps adapter/device/queue/tick
   - Missing: device feature negotiation policy
 - `DawnSharedContext` -> `src/shared_context.ts`
-  - Status: `started`
-  - What exists: shared backend state, caps, and resource provider creation
-  - Missing: bind group layouts and pipeline helpers
+  - Status: `partial`
+  - What exists: shared backend state, caps, noop fragment shader, resource provider creation, and
+    backend-global bind group layouts
+  - Missing: graphics pipeline factory/helpers and threaded resource-provider split
 - `DawnResourceProvider` -> `src/resource_provider.ts`
-  - Status: `started`
+  - Status: `partial`
   - What exists: simple resource allocation plus cached fill/stroke/clip pipelines, first
     patch-instance pipelines, dedicated evenodd/nonzero stencil pipelines for patch fills,
-    stencil-cover separation, stencil attachment reuse, and multisample-aware pipelines
-  - Missing: bind groups, wrapped resources, broader cache policy, and generalized pipeline keys
+    stencil-cover separation, stencil attachment reuse, multisample-aware pipelines, sampler
+    canonicalization/reuse, and cached uniform/texture bind groups
+  - Missing: wrapped resources, broader cache policy, intrinsic/uniform data upload plumbing, and
+    generalized pipeline keys
 - `Context` -> `src/context.ts`
   - Status: `started`
   - What exists: context factory and recorder creation
@@ -97,9 +103,10 @@ stack that fits this repository's TypeScript and WebGPU architecture.
     state
   - Missing: ordering rules and flush rules
 - `DawnCaps` -> `src/caps.ts`
-  - Status: `started`
-  - What exists: initial feature, format, and limit policy
-  - Missing: richer probing and backend-specific fallbacks
+  - Status: `partial`
+  - What exists: device feature collection, limit probing, storage-buffer gating, row-alignment
+    policy, and initial format/sample policy
+  - Missing: richer format table coverage and backend-specific fallback/workaround policy
 - `DawnCommandBuffer` -> `src/command_buffer.ts`
   - Status: `partial`
   - What exists: clear plus direct fill replay, first patch-instance fill/stroke replay, convex-clip
@@ -113,11 +120,12 @@ stack that fits this repository's TypeScript and WebGPU architecture.
     and patch-carrying draw steps
   - Missing: pipeline/state/resource preparation comparable to Skia DrawPass
 - `DawnQueueManager` -> `src/queue_manager.ts`
-  - Status: `started`
-  - What exists: queue submit, tick, unfinished work tracking, explicit submitted-work completion
-    when WebGPU exposes it, coarse fallback when it does not, and settle cleanup when completion
+  - Status: `partial`
+  - What exists: queue submit, tick, unfinished work tracking, submission-scoped completion via
+    `queue.onSubmittedWorkDone()`, coarse fallback when callbacks are unavailable, and cleanup when
     callbacks reject
-  - Missing: richer GPU fence/error handling and per-resource completion tracking
+  - Missing: richer GPU fence/error handling, wait-any style batching, and per-resource completion
+    tracking
 - `GraphicsPipeline` / caches -> `src/pipeline*.ts`
   - Status: `pending`
   - Missing: pipeline creation and reuse
@@ -135,12 +143,12 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Status: `started`
   - Role: Dawn/WebGPU backend handles
 - `src/shared_context.ts`
-  - Status: `started`
-  - Role: shared backend objects
+  - Status: `partial`
+  - Role: shared backend objects, noop shader, and backend-global bind group layouts
 - `src/resource_provider.ts`
-  - Status: `started`
-  - Role: low-level resource creation, cached fill/stroke/clip pipelines, and fill stencil/cover
-    pipeline selection
+  - Status: `partial`
+  - Role: low-level resource creation, cached render pipelines, fill stencil/cover pipeline
+    selection, stencil attachment reuse, canonical sampler reuse, and bind-group reuse
 - `src/recorder.ts`
   - Status: `partial`
   - Role: command recording API with transform and clip-stack state
@@ -151,8 +159,8 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Status: `started`
   - Role: shared drawing command and paint types
 - `src/caps.ts`
-  - Status: `started`
-  - Role: backend capability model
+  - Status: `partial`
+  - Role: backend capability model derived from actual device features and limits
 - `src/command_buffer.ts`
   - Status: `started`
   - Role: command encoder translation
@@ -160,8 +168,8 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Status: `started`
   - Role: prepared render-pass partitioning between recording and backend encoding
 - `src/queue_manager.ts`
-  - Status: `started`
-  - Role: queue submission and completion
+  - Status: `partial`
+  - Role: queue submission and submission-scoped completion tracking
 - `src/recording.ts`
   - Status: `started`
   - Role: immutable recorded command package
@@ -313,11 +321,11 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
   - Status: `started`
   - Backend context requests a device
 - Feature negotiation
-  - Status: `started`
-  - Adapter/device features are collected
+  - Status: `partial`
+  - Adapter/device features are collected and now drive storage-buffer/f16/transient/MSAA policy
 - Limits tracking
-  - Status: `started`
-  - Key device limits are exposed in caps
+  - Status: `partial`
+  - Key device limits are exposed in caps and now include shader-stage binding counts
 - Format support
   - Status: `started`
   - Initial static format policy exists
@@ -325,8 +333,8 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
   - Status: `started`
   - Simple `1` / `4` sample policy exists
 - Storage buffer support
-  - Status: `started`
-  - Capability is surfaced in caps
+  - Status: `partial`
+  - Capability is surfaced in caps and now gated by available shader-stage storage-buffer limits
 - Fallback/workaround policy
   - Status: `pending`
   - No centralized backend policy
@@ -342,12 +350,13 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
   - Current state: direct wrapper exists
   - Missing: reuse strategy
 - Sampler creation
-  - Status: `started`
-  - Current state: direct wrapper exists
-  - Missing: canonicalization/cache
+  - Status: `partial`
+  - Current state: canonical descriptor reuse now caches identical samplers
+  - Missing: broader backend cache eviction/purge policy
 - Bind groups
-  - Status: `pending`
-  - Missing: required for real draw execution
+  - Status: `started`
+  - Current state: shared-context bind group layouts now exist to match Skia's backend-global setup
+  - Missing: actual bind group allocation/cache wired into draw encoding
 - Shader modules
   - Status: `pending`
   - Missing: shader lifecycle
@@ -407,8 +416,9 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
   - Status: `started`
   - Command buffer submission helper exists for encoded clears and first fill draws
 - Async work completion
-  - Status: `started`
-  - Tick and in-flight submission tracking exist, but completion is still coarse
+  - Status: `partial`
+  - Tick and in-flight submission tracking exist, and completion now follows GPU queue submission
+    promises when the backend exposes them
 
 ## Rendering Strategy Decisions
 
@@ -495,15 +505,15 @@ These decisions directly affect the remaining work and are not settled yet.
   this is still a correctness fallback rather than Skia's native clip-aware patch rendering
 - no SVG parser or SVG-to-`Path2D` ingestion path yet
 - no retained scene model
-- no bind group cache
+- bind group layouts exist now, but there is still no bind group cache
 - `command_buffer` still does per-draw render pass replay for stencil clears instead of a richer
   DrawPass command stream
 - non-stencil steps can now batch, but stencil-heavy recordings still fragment replay more than Skia
   Graphite
 - draw-pass preparation still does not batch or pre-resolve resource/pipeline state like Skia
   `DrawPass::prepareResources()`
-- `queue_manager` currently treats `tick()` as coarse completion rather than using explicit GPU
-  fences
+- `queue_manager` still lacks Skia-style outstanding submission objects and explicit error scopes,
+  even though it now follows `queue.onSubmittedWorkDone()` when available
 
 ## Skia Parity Review (2026-03-22)
 
@@ -557,15 +567,47 @@ Compared with Skia Graphite/Dawn `TessellateWedgesRenderStep`, `TessellateCurves
    - Move more patch metadata toward Skia's instance layout
 3. Improve transform and paint replay
    - Move per-draw transform from CPU-prepared geometry toward uniform-driven replay
-   - Start separating paint data from vertex payloads
+   - Start separating paint data from vertex payloads and route it through the cached bind groups
 4. Port draw-pass style replay closer to Skia
    - Batch multiple prepared steps into fewer render passes
    - Separate clip, pipeline, and geometry state preparation from command encoding
 5. Add pipeline/resource caching
-   - Extend reuse toward bind groups, transient buffers, and richer pipeline keys
+   - Extend reuse toward transient buffers and richer pipeline keys
 6. Deepen `src/caps.ts`
    - Replace static format assumptions with richer backend policy
    - Add feature-gated fallbacks
+
+## Current Porting Delta Vs Skia Graphite/Dawn
+
+To align behavior more closely with Skia Graphite/Dawn, the package still needs:
+
+1. Real graphics-pipeline objects and keys separate from `resource_provider`
+   - Skia keys pipelines from render-pass and pipeline descriptors, while the local code still
+     hardcodes a small switch over draw-step keys.
+2. Bind-group allocation and cache in real draw execution
+   - Skia owns uniform/texture bind group layouts and caches bind groups in the resource provider;
+     this package now has the layouts, but draw encoding still uploads per-draw vertex payloads.
+3. Uniform/storage-buffer driven transform and paint replay
+   - Skia does not bake all transforms and paint data into transient vertices the way the current
+     code still does.
+4. Richer format table and backend workaround policy in `caps`
+   - Skia probes texture usage, resolve policy, and backend quirks much more deeply.
+5. Command-buffer owned completion objects in `queue_manager`
+   - The queue manager now tracks real submission completion promises, but it still lacks Skia-style
+     outstanding submission objects, error scopes, and batching semantics.
+
+## Latest Work
+
+- 2026-03-22
+  - Updated `src/caps.ts`, `src/shared_context.ts`, `src/resource_provider.ts`,
+    `src/queue_manager.ts`, and `tests/drawing_graphite_dawn_test.ts`
+  - Status transitions:
+    - `Shared context`: `started` -> `partial`
+    - `Resource allocation`: `started` -> `partial`
+    - `Capability probing`: `started` -> `partial`
+    - `Queue submission`: `started` -> `partial`
+  - Validation:
+    - `deno test packages/drawing/tests/drawing_graphite_dawn_test.ts`
 
 ## Update Rules
 

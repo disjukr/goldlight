@@ -35,6 +35,7 @@ export type DawnResourceProvider = Readonly<{
   createTexture: (descriptor: DrawingTextureDescriptor) => GPUTexture;
   createSampler: (descriptor?: DrawingSamplerDescriptor) => GPUSampler;
   createViewportBindGroup: (buffer: GPUBuffer) => GPUBindGroup;
+  createStepBindGroup: (buffer: GPUBuffer) => GPUBindGroup;
   findOrCreateGraphicsPipeline: (descriptor: DrawingGraphicsPipelineDesc) => GPURenderPipeline;
   getStencilAttachmentView: () => GPUTextureView;
 }>;
@@ -47,6 +48,7 @@ const noColorWrites = 0;
 const maxPatchResolveLevel = 6;
 const curveFillSegments = 1 << maxPatchResolveLevel;
 const strokePatchSegments = 1 << maxPatchResolveLevel;
+const stepUniformFloats = 16;
 
 const fillPathShaderSource = `
 struct ViewportUniform {
@@ -56,10 +58,26 @@ struct ViewportUniform {
 
 @group(0) @binding(0) var<uniform> viewport: ViewportUniform;
 
+struct StepUniform {
+  matrix0: vec4<f32>,
+  matrix1: vec4<f32>,
+  color: vec4<f32>,
+  params: vec4<f32>,
+};
+
+@group(1) @binding(0) var<uniform> step: StepUniform;
+
 struct VertexOut {
   @builtin(position) position: vec4<f32>,
   @location(0) color: vec4<f32>,
 };
+
+fn local_to_device(position: vec2<f32>) -> vec2<f32> {
+  return vec2<f32>(
+    (step.matrix0.x * position.x) + (step.matrix0.z * position.y) + step.matrix1.x,
+    (step.matrix0.y * position.x) + (step.matrix0.w * position.y) + step.matrix1.y,
+  );
+}
 
 fn device_to_ndc(position: vec2<f32>) -> vec4<f32> {
   return vec4<f32>((position * viewport.scale) + viewport.translate, 0.0, 1.0);
@@ -71,14 +89,14 @@ fn vs_main(
   @location(1) color: vec4<f32>,
 ) -> VertexOut {
   var out: VertexOut;
-  out.position = device_to_ndc(position);
+  out.position = device_to_ndc(local_to_device(position));
   out.color = color;
   return out;
 }
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
-  return in.color;
+  return in.color * step.color;
 }
 `;
 
@@ -93,6 +111,15 @@ struct ViewportUniform {
 
 @group(0) @binding(0) var<uniform> viewport: ViewportUniform;
 
+struct StepUniform {
+  matrix0: vec4<f32>,
+  matrix1: vec4<f32>,
+  color: vec4<f32>,
+  params: vec4<f32>,
+};
+
+@group(1) @binding(0) var<uniform> step: StepUniform;
+
 struct VertexOut {
   @builtin(position) position: vec4<f32>,
   @location(0) color: vec4<f32>,
@@ -100,6 +127,13 @@ struct VertexOut {
 
 fn device_to_ndc(position: vec2<f32>) -> vec4<f32> {
   return vec4<f32>((position * viewport.scale) + viewport.translate, 0.0, 1.0);
+}
+
+fn local_to_device(position: vec2<f32>) -> vec2<f32> {
+  return vec2<f32>(
+    (step.matrix0.x * position.x) + (step.matrix0.z * position.y) + step.matrix1.x,
+    (step.matrix0.y * position.x) + (step.matrix0.w * position.y) + step.matrix1.y,
+  );
 }
 
 @vertex
@@ -111,7 +145,6 @@ fn vs_main(
   @location(3) p3: vec2<f32>,
   @location(4) curveMeta: vec4<f32>,
   @location(5) fanPoint: vec2<f32>,
-  @location(6) color: vec4<f32>,
 ) -> VertexOut {
   let triVertex = vertexIndex % 3u;
   let segmentIndex = vertexIndex / 3u;
@@ -158,8 +191,8 @@ fn vs_main(
     local = b;
   }
   var out: VertexOut;
-  out.position = device_to_ndc(local);
-  out.color = color;
+  out.position = device_to_ndc(local_to_device(local));
+  out.color = step.color;
   return out;
 }
 
@@ -180,6 +213,15 @@ struct ViewportUniform {
 
 @group(0) @binding(0) var<uniform> viewport: ViewportUniform;
 
+struct StepUniform {
+  matrix0: vec4<f32>,
+  matrix1: vec4<f32>,
+  color: vec4<f32>,
+  params: vec4<f32>,
+};
+
+@group(1) @binding(0) var<uniform> step: StepUniform;
+
 struct VertexOut {
   @builtin(position) position: vec4<f32>,
   @location(0) color: vec4<f32>,
@@ -187,6 +229,13 @@ struct VertexOut {
 
 fn device_to_ndc(position: vec2<f32>) -> vec4<f32> {
   return vec4<f32>((position * viewport.scale) + viewport.translate, 0.0, 1.0);
+}
+
+fn local_to_device(position: vec2<f32>) -> vec2<f32> {
+  return vec2<f32>(
+    (step.matrix0.x * position.x) + (step.matrix0.z * position.y) + step.matrix1.x,
+    (step.matrix0.y * position.x) + (step.matrix0.w * position.y) + step.matrix1.y,
+  );
 }
 
 fn eval_patch(
@@ -224,7 +273,6 @@ fn vs_main(
   @location(2) p2: vec2<f32>,
   @location(3) p3: vec2<f32>,
   @location(4) curveMeta: vec4<f32>,
-  @location(5) color: vec4<f32>,
 ) -> VertexOut {
   let triVertex = vertexIndex % 3u;
   let segmentIndex = vertexIndex / 3u;
@@ -242,8 +290,8 @@ fn vs_main(
     local = eval_patch(curveMeta.x, curveMeta.y, p0, p1, p2, p3, t1);
   }
   var out: VertexOut;
-  out.position = device_to_ndc(local);
-  out.color = color;
+  out.position = device_to_ndc(local_to_device(local));
+  out.color = step.color;
   return out;
 }
 
@@ -264,6 +312,15 @@ struct ViewportUniform {
 
 @group(0) @binding(0) var<uniform> viewport: ViewportUniform;
 
+struct StepUniform {
+  matrix0: vec4<f32>,
+  matrix1: vec4<f32>,
+  color: vec4<f32>,
+  params: vec4<f32>,
+};
+
+@group(1) @binding(0) var<uniform> step: StepUniform;
+
 struct VertexOut {
   @builtin(position) position: vec4<f32>,
   @location(0) color: vec4<f32>,
@@ -271,6 +328,13 @@ struct VertexOut {
 
 fn device_to_ndc(position: vec2<f32>) -> vec4<f32> {
   return vec4<f32>((position * viewport.scale) + viewport.translate, 0.0, 1.0);
+}
+
+fn local_to_device(position: vec2<f32>) -> vec2<f32> {
+  return vec2<f32>(
+    (step.matrix0.x * position.x) + (step.matrix0.z * position.y) + step.matrix1.x,
+    (step.matrix0.y * position.x) + (step.matrix0.w * position.y) + step.matrix1.y,
+  );
 }
 
 fn eval_patch(
@@ -308,8 +372,6 @@ fn vs_main(
   @location(2) p2: vec2<f32>,
   @location(3) p3: vec2<f32>,
   @location(4) curveMeta: vec4<f32>,
-  @location(5) strokeMeta: vec2<f32>,
-  @location(6) color: vec4<f32>,
 ) -> VertexOut {
   let quadVertex = vertexIndex % 6u;
   let segmentIndex = vertexIndex / 6u;
@@ -322,14 +384,14 @@ fn vs_main(
   if (segmentIndex < activeSegments) {
     let delta = b - a;
     let deltaLength = max(length(delta), 1e-5);
-    let normal = vec2<f32>(-delta.y / deltaLength, delta.x / deltaLength) * strokeMeta.x;
+    let normal = vec2<f32>(-delta.y / deltaLength, delta.x / deltaLength) * step.params.x;
     let corners = array<vec2<f32>, 4>(a + normal, b + normal, b - normal, a - normal);
     let indices = array<u32, 6>(0u, 1u, 2u, 0u, 2u, 3u);
     local = corners[indices[quadVertex]];
   }
   var out: VertexOut;
-  out.position = device_to_ndc(local);
-  out.color = color;
+  out.position = device_to_ndc(local_to_device(local));
+  out.color = step.color;
   return out;
 }
 
@@ -427,7 +489,8 @@ export const createDawnResourceProvider = (
   }> = {},
 ): DawnResourceProvider => {
   let viewportBindGroupLayout: GPUBindGroupLayout | null = null;
-  let viewportPipelineLayout: GPUPipelineLayout | null = null;
+  let stepBindGroupLayout: GPUBindGroupLayout | null = null;
+  let drawingPipelineLayout: GPUPipelineLayout | null = null;
   let stencilAttachment:
     | Readonly<{
       width: number;
@@ -458,7 +521,7 @@ export const createDawnResourceProvider = (
   });
 
   const createWedgePatchLayout = (): GPUVertexBufferLayout => ({
-    arrayStride: floatBytes * 18,
+    arrayStride: floatBytes * 14,
     stepMode: 'instance',
     attributes: [
       { shaderLocation: 0, offset: floatBytes * 0, format: 'float32x2' },
@@ -467,12 +530,11 @@ export const createDawnResourceProvider = (
       { shaderLocation: 3, offset: floatBytes * 6, format: 'float32x2' },
       { shaderLocation: 4, offset: floatBytes * 8, format: 'float32x4' },
       { shaderLocation: 5, offset: floatBytes * 12, format: 'float32x2' },
-      { shaderLocation: 6, offset: floatBytes * 14, format: 'float32x4' },
     ],
   });
 
   const createCurvePatchLayout = (): GPUVertexBufferLayout => ({
-    arrayStride: floatBytes * 16,
+    arrayStride: floatBytes * 12,
     stepMode: 'instance',
     attributes: [
       { shaderLocation: 0, offset: floatBytes * 0, format: 'float32x2' },
@@ -480,12 +542,11 @@ export const createDawnResourceProvider = (
       { shaderLocation: 2, offset: floatBytes * 4, format: 'float32x2' },
       { shaderLocation: 3, offset: floatBytes * 6, format: 'float32x2' },
       { shaderLocation: 4, offset: floatBytes * 8, format: 'float32x4' },
-      { shaderLocation: 5, offset: floatBytes * 12, format: 'float32x4' },
     ],
   });
 
   const createStrokePatchLayout = (): GPUVertexBufferLayout => ({
-    arrayStride: floatBytes * 18,
+    arrayStride: floatBytes * 12,
     stepMode: 'instance',
     attributes: [
       { shaderLocation: 0, offset: floatBytes * 0, format: 'float32x2' },
@@ -493,8 +554,6 @@ export const createDawnResourceProvider = (
       { shaderLocation: 2, offset: floatBytes * 4, format: 'float32x2' },
       { shaderLocation: 3, offset: floatBytes * 6, format: 'float32x2' },
       { shaderLocation: 4, offset: floatBytes * 8, format: 'float32x4' },
-      { shaderLocation: 5, offset: floatBytes * 12, format: 'float32x2' },
-      { shaderLocation: 6, offset: floatBytes * 14, format: 'float32x4' },
     ],
   });
 
@@ -518,16 +577,34 @@ export const createDawnResourceProvider = (
     return viewportBindGroupLayout;
   };
 
-  const getViewportPipelineLayout = (): GPUPipelineLayout => {
-    if (viewportPipelineLayout) {
-      return viewportPipelineLayout;
+  const getStepBindGroupLayout = (): GPUBindGroupLayout => {
+    if (stepBindGroupLayout) {
+      return stepBindGroupLayout;
     }
 
-    viewportPipelineLayout = backend.device.createPipelineLayout({
-      label: 'drawing-viewport-pipeline-layout',
-      bindGroupLayouts: [getViewportBindGroupLayout()],
+    stepBindGroupLayout = backend.device.createBindGroupLayout({
+      label: 'drawing-step-bind-group-layout',
+      entries: [{
+        binding: 0,
+        visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+        buffer: {
+          type: 'uniform',
+        },
+      }],
     });
-    return viewportPipelineLayout;
+    return stepBindGroupLayout;
+  };
+
+  const getDrawingPipelineLayout = (): GPUPipelineLayout => {
+    if (drawingPipelineLayout) {
+      return drawingPipelineLayout;
+    }
+
+    drawingPipelineLayout = backend.device.createPipelineLayout({
+      label: 'drawing-pipeline-layout',
+      bindGroupLayouts: [getViewportBindGroupLayout(), getStepBindGroupLayout()],
+    });
+    return drawingPipelineLayout;
   };
   const getOrCreateShaderModule = (
     descriptor: DrawingGraphicsPipelineDesc,
@@ -628,7 +705,7 @@ export const createDawnResourceProvider = (
     descriptor: DrawingGraphicsPipelineDesc,
   ): GPURenderPipelineDescriptor => ({
     label: descriptor.label,
-    layout: getViewportPipelineLayout(),
+    layout: getDrawingPipelineLayout(),
     vertex: {
       module: getOrCreateShaderModule(descriptor),
       entryPoint: 'vs_main',
@@ -662,6 +739,17 @@ export const createDawnResourceProvider = (
       backend.device.createBindGroup({
         label: 'drawing-viewport-bind-group',
         layout: getViewportBindGroupLayout(),
+        entries: [{
+          binding: 0,
+          resource: {
+            buffer,
+          },
+        }],
+      }),
+    createStepBindGroup: (buffer) =>
+      backend.device.createBindGroup({
+        label: 'drawing-step-bind-group',
+        layout: getStepBindGroupLayout(),
         entries: [{
           binding: 0,
           resource: {

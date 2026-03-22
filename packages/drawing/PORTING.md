@@ -636,10 +636,6 @@ When work is added in this package, update this document with:
 
 ## High-Priority Structural Gaps
 
-- `P0` Remove legacy graphics-pipeline switch path
-  - Status: done in `src/resource_provider.ts`; graphics pipelines are now created and cached from
-    descriptor/state inputs directly, with the legacy key path retained only as a compatibility shim
-    for older call sites and tests
 - `P0` Port `ClipStack` semantics instead of intersect-only clipping
   - Why high priority: clip behavior is still one of the largest remaining correctness and
     architecture deltas
@@ -647,11 +643,6 @@ When work is added in this package, update this document with:
     stencil clips with separate `write`, `intersect`, and `difference` stencil states
   - To match Skia better: continue from this state toward save-record ordering and atlas/analytic
     clip handling instead of the remaining convex/direct fallback paths
-- `P0` Move transform and paint replay to Skia-like uniform/storage payloads
-  - Why high priority: current draw preparation still bakes too much geometry on the CPU, which
-    keeps the draw-pass/pipeline architecture from matching Graphite
-  - To match Skia better: preserve more local-space geometry through preparation and bind
-    `localToDevice`, render-step data, and paint data as pass-owned GPU payloads
 - `P1` Introduce a closer `Recorder -> Recording -> prepareResources -> CommandBuffer` flow
   - Why high priority: recording/task preparation boundaries are still much simpler than Skia's
     pipeline

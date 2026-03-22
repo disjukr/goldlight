@@ -28,6 +28,8 @@ type DrawingPreparedStepResources = Readonly<{
   pipelines: readonly GPURenderPipeline[];
   clipPipelines: readonly GPURenderPipeline[];
   fringePipeline: GPURenderPipeline | null;
+  stepPayloadBuffer: GPUBuffer;
+  stepBindGroup: GPUBindGroup;
   fillVertexBuffer: GPUBuffer | null;
   fillVertexCount: number;
   patchVertexBuffer: GPUBuffer | null;
@@ -49,6 +51,8 @@ type DrawingPreparedPassResources = Readonly<{
 type DrawingPreparedCommandResources = Readonly<{
   viewportTransformBuffer: GPUBuffer;
   viewportBindGroup: GPUBindGroup;
+  identityStepPayloadBuffer: GPUBuffer;
+  identityStepBindGroup: GPUBindGroup;
   fullscreenClipVertexBuffer: GPUBuffer;
   fullscreenClipVertexCount: number;
   passes: readonly DrawingPreparedPassResources[];
@@ -57,9 +61,10 @@ type DrawingPreparedCommandResources = Readonly<{
 const vertexBufferUsage = 0x0020;
 const uniformBufferUsage = 0x0040;
 const floatsPerVertex = 6;
-const wedgePatchFloats = 18;
-const curvePatchFloats = 16;
-const strokePatchFloats = 18;
+const stepPayloadFloats = 16;
+const wedgePatchFloats = 14;
+const curvePatchFloats = 12;
+const strokePatchFloats = 12;
 const maxPatchResolveLevel = 6;
 const patchSegmentCount = 1 << maxPatchResolveLevel;
 const wedgePatchVertexCount = patchSegmentCount * 3;
@@ -83,7 +88,7 @@ const createBoundsCoverVertexData = (
   }>,
   color: readonly [number, number, number, number],
 ): Float32Array =>
-  createDeviceSpaceVertexData(
+  createVertexModulationData(
     [
       bounds.origin,
       [bounds.origin[0] + bounds.size.width, bounds.origin[1]],
@@ -95,9 +100,9 @@ const createBoundsCoverVertexData = (
     color,
   );
 
-const createDeviceSpaceVertexData = (
+const createVertexModulationData = (
   triangles: readonly (readonly [number, number])[],
-  color: readonly [number, number, number, number],
+  modulation: readonly [number, number, number, number],
 ): Float32Array => {
   const vertices = new Float32Array(triangles.length * floatsPerVertex);
   let offset = 0;
@@ -105,10 +110,10 @@ const createDeviceSpaceVertexData = (
   for (const point of triangles) {
     vertices[offset++] = point[0];
     vertices[offset++] = point[1];
-    vertices[offset++] = color[0];
-    vertices[offset++] = color[1];
-    vertices[offset++] = color[2];
-    vertices[offset++] = color[3];
+    vertices[offset++] = modulation[0];
+    vertices[offset++] = modulation[1];
+    vertices[offset++] = modulation[2];
+    vertices[offset++] = modulation[3];
   }
 
   return vertices;
@@ -121,12 +126,13 @@ const createColoredDeviceSpaceVertexData = (
   let offset = 0;
 
   for (const vertex of triangles) {
+    const coverage = vertex.color[3];
     vertices[offset++] = vertex.point[0];
     vertices[offset++] = vertex.point[1];
-    vertices[offset++] = vertex.color[0];
-    vertices[offset++] = vertex.color[1];
-    vertices[offset++] = vertex.color[2];
-    vertices[offset++] = vertex.color[3];
+    vertices[offset++] = coverage;
+    vertices[offset++] = coverage;
+    vertices[offset++] = coverage;
+    vertices[offset++] = coverage;
   }
 
   return vertices;
@@ -161,6 +167,40 @@ const createViewportTransformBuffer = (
     -2 / Math.max(sharedContext.backend.target.height, 1),
     -1,
     1,
+  ]);
+  buffer.unmap();
+  return buffer;
+};
+
+const createStepPayloadBuffer = (
+  sharedContext: DawnSharedContext,
+  transform: readonly [number, number, number, number, number, number],
+  color: readonly [number, number, number, number],
+  halfWidth: number,
+): GPUBuffer => {
+  const buffer = sharedContext.resourceProvider.createBuffer({
+    label: 'drawing-step-payload',
+    size: Float32Array.BYTES_PER_ELEMENT * stepPayloadFloats,
+    usage: uniformBufferUsage,
+    mappedAtCreation: true,
+  });
+  new Float32Array(buffer.getMappedRange()).set([
+    transform[0],
+    transform[1],
+    transform[2],
+    transform[3],
+    transform[4],
+    transform[5],
+    0,
+    0,
+    color[0],
+    color[1],
+    color[2],
+    color[3],
+    halfWidth,
+    0,
+    0,
+    0,
   ]);
   buffer.unmap();
   return buffer;
@@ -203,7 +243,6 @@ const getPatchPoints = (
 
 const createWedgePatchInstanceData = (
   patches: readonly DrawingPreparedPatch[],
-  color: readonly [number, number, number, number],
 ): Float32Array => {
   const wedgePatches = patches.filter((patch) => patch.fanPoint !== undefined);
   const data = new Float32Array(wedgePatches.length * wedgePatchFloats);
@@ -224,17 +263,12 @@ const createWedgePatchInstanceData = (
     data[offset++] = 0;
     data[offset++] = patch.fanPoint![0];
     data[offset++] = patch.fanPoint![1];
-    data[offset++] = color[0];
-    data[offset++] = color[1];
-    data[offset++] = color[2];
-    data[offset++] = color[3];
   }
   return data;
 };
 
 const createCurvePatchInstanceData = (
   patches: readonly DrawingPreparedPatch[],
-  color: readonly [number, number, number, number],
 ): Float32Array => {
   const curvePatches = patches;
   const data = new Float32Array(curvePatches.length * curvePatchFloats);
@@ -253,18 +287,12 @@ const createCurvePatchInstanceData = (
     data[offset++] = patch.kind === 'conic' ? patch.weight : 1;
     data[offset++] = Math.min(maxPatchResolveLevel, Math.max(0, patch.resolveLevel));
     data[offset++] = 0;
-    data[offset++] = color[0];
-    data[offset++] = color[1];
-    data[offset++] = color[2];
-    data[offset++] = color[3];
   }
   return data;
 };
 
 const createStrokePatchInstanceData = (
   patches: readonly DrawingPreparedPatch[],
-  color: readonly [number, number, number, number],
-  halfWidth: number,
 ): Float32Array => {
   const curvePatches = patches;
   const data = new Float32Array(curvePatches.length * strokePatchFloats);
@@ -283,12 +311,6 @@ const createStrokePatchInstanceData = (
     data[offset++] = patch.kind === 'conic' ? patch.weight : 1;
     data[offset++] = Math.min(maxPatchResolveLevel, Math.max(0, patch.resolveLevel));
     data[offset++] = 0;
-    data[offset++] = halfWidth;
-    data[offset++] = 0;
-    data[offset++] = color[0];
-    data[offset++] = color[1];
-    data[offset++] = color[2];
-    data[offset++] = color[3];
   }
   return data;
 };
@@ -369,7 +391,7 @@ const createClipStepResources = (
   const buffers: GPUBuffer[] = [];
   const counts: number[] = [];
   for (const element of clipElements) {
-    const clipVertices = createDeviceSpaceVertexData(element.triangles, [0, 0, 0, 0]);
+    const clipVertices = createVertexModulationData(element.triangles, [0, 0, 0, 0]);
     buffers.push(createVertexBuffer(sharedContext, clipVertices));
     counts.push(clipVertices.length / floatsPerVertex);
   }
@@ -391,16 +413,23 @@ const prepareStepResources = (
     sharedContext.resourceProvider.findOrCreateGraphicsPipeline(descriptor)
   );
   const clipResources = createClipStepResources(sharedContext, step);
+  const stepPayloadBuffer = createStepPayloadBuffer(
+    sharedContext,
+    step.draw.transform,
+    step.draw.color,
+    step.draw.kind === 'pathStroke' ? step.draw.halfWidth : 0,
+  );
+  const stepBindGroup = sharedContext.resourceProvider.createStepBindGroup(stepPayloadBuffer);
 
   if (step.draw.kind === 'pathFill') {
     const usesPatchFill = step.draw.renderer !== 'middle-out-fan';
     const fillVertices = usesPatchFill
       ? null
-      : createDeviceSpaceVertexData(step.draw.triangles, step.draw.color);
+      : createVertexModulationData(step.draw.triangles, [1, 1, 1, 1]);
     const patchVertices = step.draw.renderer === 'stencil-tessellated-wedges'
-      ? createWedgePatchInstanceData(step.draw.patches, step.draw.color)
+      ? createWedgePatchInstanceData(step.draw.patches)
       : step.draw.renderer === 'stencil-tessellated-curves'
-      ? createCurvePatchInstanceData(step.draw.patches, step.draw.color)
+      ? createCurvePatchInstanceData(step.draw.patches)
       : null;
     const fringeVertices = step.draw.fringeVertices
       ? createColoredDeviceSpaceVertexData(step.draw.fringeVertices)
@@ -425,6 +454,8 @@ const prepareStepResources = (
       pipelines: Object.freeze(pipelines),
       clipPipelines: Object.freeze(clipPipelines),
       fringePipeline,
+      stepPayloadBuffer,
+      stepBindGroup,
       fillVertexBuffer: fillVertices ? createVertexBuffer(sharedContext, fillVertices) : null,
       fillVertexCount: fillVertices ? fillVertices.length / floatsPerVertex : 0,
       patchVertexBuffer: patchVertices && patchVertices.length > 0
@@ -449,12 +480,8 @@ const prepareStepResources = (
     };
   }
 
-  const strokeVertices = createDeviceSpaceVertexData(step.draw.triangles, step.draw.color);
-  const patchVertices = createStrokePatchInstanceData(
-    step.draw.patches,
-    step.draw.color,
-    step.draw.halfWidth,
-  );
+  const strokeVertices = createVertexModulationData(step.draw.triangles, [1, 1, 1, 1]);
+  const patchVertices = createStrokePatchInstanceData(step.draw.patches);
   const fringeVertices = step.draw.fringeVertices
     ? createColoredDeviceSpaceVertexData(step.draw.fringeVertices)
     : null;
@@ -473,6 +500,8 @@ const prepareStepResources = (
         colorWriteDisabled: false,
       })
       : null,
+    stepPayloadBuffer,
+    stepBindGroup,
     fillVertexBuffer: createVertexBuffer(sharedContext, strokeVertices),
     fillVertexCount: strokeVertices.length / floatsPerVertex,
     patchVertexBuffer: patchVertices.length > 0 ? createVertexBuffer(sharedContext, patchVertices) : null,
@@ -496,12 +525,23 @@ const prepareCommandResources = (
   const viewportBindGroup = sharedContext.resourceProvider.createViewportBindGroup(
     viewportTransformBuffer,
   );
+  const identityStepPayloadBuffer = createStepPayloadBuffer(
+    sharedContext,
+    [1, 0, 0, 1, 0, 0],
+    [0, 0, 0, 0],
+    0,
+  );
+  const identityStepBindGroup = sharedContext.resourceProvider.createStepBindGroup(
+    identityStepPayloadBuffer,
+  );
   const fullscreenClipVertices = createFullscreenClipVertexData(sharedContext.backend.target);
   const fullscreenClipVertexBuffer = createVertexBuffer(sharedContext, fullscreenClipVertices);
 
   return {
     viewportTransformBuffer,
     viewportBindGroup,
+    identityStepPayloadBuffer,
+    identityStepBindGroup,
     fullscreenClipVertexBuffer,
     fullscreenClipVertexCount: fullscreenClipVertices.length / floatsPerVertex,
     passes: Object.freeze(prepared.passes.map((passInfo) => ({
@@ -521,6 +561,7 @@ const encodeStencilClips = (
   }
 
   pass.setBindGroup(0, viewportBindGroup);
+  pass.setBindGroup(1, commandResources.identityStepBindGroup);
   let clipPipelineIndex = 0;
   let clipReference = 0;
 
@@ -627,6 +668,7 @@ const encodePreparedFillStep = (
     pass.setPipeline(resources.pipelines[0]!);
   }
   pass.setBindGroup(0, viewportBindGroup);
+  pass.setBindGroup(1, resources.stepBindGroup);
 
   if (usesPatchFill && resources.patchVertexBuffer && resources.patchInstanceCount > 0) {
     pass.setVertexBuffer(0, resources.patchVertexBuffer);
@@ -640,6 +682,7 @@ const encodePreparedFillStep = (
     if (usesPatchFill) {
       pass.setPipeline(resources.fringePipeline ?? resources.pipelines[0]!);
       pass.setBindGroup(0, viewportBindGroup);
+      pass.setBindGroup(1, resources.stepBindGroup);
     }
     pass.setVertexBuffer(0, resources.fringeVertexBuffer);
     pass.draw(resources.fringeVertexCount);
@@ -667,6 +710,7 @@ const encodePreparedStrokeStep = (
     pass.setPipeline(resources.pipelines[0]!);
   }
   pass.setBindGroup(0, viewportBindGroup);
+  pass.setBindGroup(1, resources.stepBindGroup);
 
   if (resources.patchVertexBuffer && resources.patchInstanceCount > 0) {
     pass.setVertexBuffer(0, resources.patchVertexBuffer);
@@ -679,6 +723,7 @@ const encodePreparedStrokeStep = (
   if (resources.fringeVertexBuffer && resources.fringeVertexCount > 0) {
     pass.setPipeline(resources.fringePipeline ?? resources.pipelines[0]!);
     pass.setBindGroup(0, viewportBindGroup);
+    pass.setBindGroup(1, resources.stepBindGroup);
     pass.setVertexBuffer(0, resources.fringeVertexBuffer);
     pass.draw(resources.fringeVertexCount);
   }

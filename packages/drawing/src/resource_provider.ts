@@ -478,6 +478,8 @@ fn vs_main(
   let flags = u32(max(curveMeta.w, 0.0));
   let circlePatch = (flags & 64u) != 0u;
   let squarePatch = (flags & 128u) != 0u;
+  let bevelPatch = (flags & 256u) != 0u;
+  let miterPatch = (flags & 512u) != 0u;
   var a = eval_patch(curveType, weight, p0, p1, p2, p3, t0);
   var b = eval_patch(curveType, weight, p0, p1, p2, p3, t1);
   var local = p3;
@@ -508,6 +510,14 @@ fn vs_main(
       );
       let indices = array<u32, 6>(0u, 1u, 2u, 0u, 2u, 3u);
       local = corners[indices[quadVertex]];
+    } else if (bevelPatch) {
+      let triangle = array<vec2<f32>, 4>(p0, p1, p2, p0);
+      let indices = array<u32, 6>(0u, 1u, 2u, 0u, 2u, 3u);
+      local = triangle[indices[quadVertex]];
+    } else if (miterPatch) {
+      let quad = array<vec2<f32>, 4>(p0, p1, p2, p3);
+      let indices = array<u32, 6>(0u, 1u, 2u, 0u, 2u, 3u);
+      local = quad[indices[quadVertex]];
     } else {
       var delta = b - a;
       if (length(delta) <= 1e-5) {

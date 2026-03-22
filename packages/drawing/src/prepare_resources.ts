@@ -346,7 +346,9 @@ const createStrokePatchInstanceData = (
       (patch.startCap === 'round' ? 16 : 0) +
       (patch.endCap === 'round' ? 32 : 0) +
       (patch.syntheticKind === 'circle' ? 64 : 0) +
-      (patch.syntheticKind === 'square' ? 128 : 0);
+      (patch.syntheticKind === 'square' ? 128 : 0) +
+      (patch.syntheticKind === 'bevel' ? 256 : 0) +
+      (patch.syntheticKind === 'miter' ? 512 : 0);
   }
   return data;
 };

@@ -1240,6 +1240,34 @@ Deno.test('drawing prepared stroke patches emit synthetic circle patches for rou
   assertEquals(draw.patches.some((patch) => patch.syntheticKind === 'circle'), true);
 });
 
+Deno.test('drawing prepared stroke patches emit synthetic join patches for bevel and miter joins', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+
+  const prepareJoinKinds = (strokeJoin: 'bevel' | 'miter') => {
+    const recorder = drawingContext.createRecorder();
+    recordDrawPath(
+      recorder,
+      createPath2D(
+        { kind: 'moveTo', to: [32, 96] },
+        { kind: 'lineTo', to: [96, 32] },
+        { kind: 'lineTo', to: [160, 96] },
+      ),
+      { style: 'stroke', strokeWidth: 12, strokeJoin, strokeCap: 'butt' },
+    );
+    const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+    const draw = prepared.passes[0]?.steps[0]?.draw;
+    assertEquals(draw?.kind, 'pathStroke');
+    if (draw?.kind !== 'pathStroke') {
+      throw new Error('expected pathStroke draw');
+    }
+    return draw.patches.map((patch) => patch.syntheticKind).filter(Boolean);
+  };
+
+  assertEquals(prepareJoinKinds('bevel').includes('bevel'), true);
+  assertEquals(prepareJoinKinds('miter').includes('miter'), true);
+});
+
 Deno.test('drawing prepared recording applies dash pattern to strokes', () => {
   const mock = createMockGpuContext();
   const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));

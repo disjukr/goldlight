@@ -55,8 +55,8 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Status: `partial`
   - Clear, direct fill replay, patch-instance fill/stroke replay, clip-stencil replay for complex
     clip paths, multi-path stencil clip-stack replay, non-stencil draw batching within a render
-    pass, first Skia-like stencil-then-cover replay for patch fills without stencil clips, and first
-    stroke command buffer translation exist.
+    pass, first Skia-like stencil-then-cover replay for patch fills without stencil clips,
+    viewport-uniform-driven device-to-NDC replay, and first stroke command buffer translation exist.
 - Queue submission
   - Status: `partial`
   - Queue manager can submit encoded command buffers, track in-flight work counts, and follow
@@ -84,13 +84,15 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Status: `partial`
   - What exists: shared backend state, caps, noop fragment shader, resource provider creation, and
     backend-global bind group layouts
-  - Missing: graphics pipeline factory/helpers and threaded resource-provider split
+  - Missing: graphics pipeline factory/helpers, broader bind-group families, and threaded
+    resource-provider split
 - `DawnResourceProvider` -> `src/resource_provider.ts`
   - Status: `partial`
   - What exists: simple resource allocation plus cached fill/stroke/clip pipelines, first
     patch-instance pipelines, dedicated evenodd/nonzero stencil pipelines for patch fills,
     stencil-cover separation, stencil attachment reuse, multisample-aware pipelines, sampler
-    canonicalization/reuse, and cached uniform/texture bind groups
+    canonicalization/reuse, cached uniform/texture bind groups, cached viewport bind-group layout,
+    and shared viewport pipeline layout
   - Missing: wrapped resources, broader cache policy, intrinsic/uniform data upload plumbing, and
     generalized pipeline keys
 - `Context` -> `src/context.ts`
@@ -111,9 +113,10 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Status: `partial`
   - What exists: clear plus direct fill replay, first patch-instance fill/stroke replay, convex-clip
     scissor replay, stencil replay for stacked complex clip paths, batching for consecutive
-    non-stencil steps, and first stencil-then-cover replay for patch-rendered fills
-  - Missing: broader draw path and draw shape encoding, richer pass replay, and clip/fill stencil
-    composition across arbitrary clip stacks
+    non-stencil steps, first stencil-then-cover replay for patch-rendered fills, and viewport
+    uniform replay for direct and patch draws
+  - Missing: local-space replay, broader draw path and draw shape encoding, richer pass replay, and
+    clip/fill stencil composition across arbitrary clip stacks
 - `DrawPass` -> `src/draw_pass.ts`
   - Status: `partial`
   - What exists: prepared pass partitioning plus pipeline-key, bounds, stencil, clip-stack metadata,
@@ -361,10 +364,11 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
   - Status: `pending`
   - Missing: shader lifecycle
 - Pipelines
-  - Status: `started`
+  - Status: `partial`
   - Current state: direct fill, clip stencil, clip-aware cover, evenodd/nonzero fill stencil,
-    stencil-cover, and stroke cover pipelines are cached in the resource provider
-  - Missing: generalized render pipeline creation and keying
+    stencil-cover, stroke cover, and viewport-layout-backed patch pipelines are cached in the
+    resource provider
+  - Missing: generalized render pipeline creation and keying beyond viewport-only bindings
 - Global cache
   - Status: `started`
   - Current state: path pipelines and stencil attachments are reused through the resource provider
@@ -409,9 +413,9 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
     pass shape closer to Graphite and convex clips forcing a safer direct-geometry fallback when
     patch replay would diverge
 - Pipeline binding
-  - Status: `started`
-  - Basic fill, clip, and stroke pipelines exist for first path draws and are reused across command
-    buffers
+  - Status: `partial`
+  - Basic fill, clip, and stroke pipelines exist for first path draws, are reused across command
+    buffers, and now bind viewport uniforms explicitly instead of baking clip-space vertices on CPU
 - Draw submission
   - Status: `started`
   - Command buffer submission helper exists for encoded clears and first fill draws
@@ -546,6 +550,15 @@ Compared with Skia Graphite/Dawn `TessellateWedgesRenderStep`, `TessellateCurves
 ## Latest Work Log
 
 - 2026-03-22
+  - Files changed: `src/command_buffer.ts`, `src/resource_provider.ts`,
+    `tests/drawing_graphite_dawn_test.ts`
+  - Status transition: pipeline binding `started` -> `partial`, pipelines `started` -> `partial`,
+    and GPU replay `partial` -> `partial` with viewport-uniform-driven device-to-NDC mapping
+  - Remaining gaps: draw preparation still bakes `localToDevice` into CPU geometry, and paint or
+    sampled-resource bind groups are still missing
+  - Validation: `deno test packages/drawing/tests/drawing_graphite_dawn_test.ts`;
+    `deno test packages/drawing/tests/render_basic_paths_snapshot_test.ts`
+- 2026-03-22
   - Files changed: `src/path_renderer.ts`, `src/command_buffer.ts`, `src/resource_provider.ts`,
     `tests/drawing_graphite_dawn_test.ts`
   - Status transition: patch-instance tessellation `partial` -> `partial` with Wang-style resolve
@@ -559,15 +572,15 @@ Compared with Skia Graphite/Dawn `TessellateWedgesRenderStep`, `TessellateCurves
 
 ## Recommended Next Steps
 
-1. Compose fill and clip stenciling
+1. Move from viewport-only uniforms to Skia-like local-space replay
+   - Keep draw geometry in local space through preparation and apply `localToDevice` in uniforms
+   - Separate transform and paint payloads from transient vertex uploads
+2. Compose fill and clip stenciling
    - Allow arbitrary clip-path stacks to intersect with the new patch-fill stencil path
    - Stop falling back to correctness-only paths for convex and multi-path clips
-2. Improve patch tessellation fidelity
+3. Improve patch tessellation fidelity
    - Replace fixed-count WGSL subdivision with Wang's-formula-like resolve levels
    - Move more patch metadata toward Skia's instance layout
-3. Improve transform and paint replay
-   - Move per-draw transform from CPU-prepared geometry toward uniform-driven replay
-   - Start separating paint data from vertex payloads and route it through the cached bind groups
 4. Port draw-pass style replay closer to Skia
    - Batch multiple prepared steps into fewer render passes
    - Separate clip, pipeline, and geometry state preparation from command encoding
@@ -586,10 +599,11 @@ To align behavior more closely with Skia Graphite/Dawn, the package still needs:
      hardcodes a small switch over draw-step keys.
 2. Bind-group allocation and cache in real draw execution
    - Skia owns uniform/texture bind group layouts and caches bind groups in the resource provider;
-     this package now has the layouts, but draw encoding still uploads per-draw vertex payloads.
+     this package now has the layouts and viewport bind groups, but draw encoding still uploads
+     per-draw geometry and lacks paint/resource bind-group reuse.
 3. Uniform/storage-buffer driven transform and paint replay
-   - Skia does not bake all transforms and paint data into transient vertices the way the current
-     code still does.
+   - Skia does not bake draw transforms into prepared geometry; this package only moved the
+     device-to-NDC step into uniforms and still needs real `localToDevice` replay.
 4. Richer format table and backend workaround policy in `caps`
    - Skia probes texture usage, resolve policy, and backend quirks much more deeply.
 5. Command-buffer owned completion objects in `queue_manager`

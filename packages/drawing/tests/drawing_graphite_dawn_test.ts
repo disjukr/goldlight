@@ -45,10 +45,13 @@ const createMockGpuContext = () => {
   const finishedCommandBuffers: GPUCommandBuffer[] = [];
   const shaderModules: GPUShaderModuleDescriptor[] = [];
   const bindGroupLayouts: GPUBindGroupLayoutDescriptor[] = [];
+  const pipelineLayouts: GPUPipelineLayoutDescriptor[] = [];
+  const bindGroups: GPUBindGroupDescriptor[] = [];
   const renderPipelines: GPURenderPipelineDescriptor[] = [];
   const drawCalls: number[] = [];
   const scissorCalls: Array<readonly [number, number, number, number]> = [];
   const stencilReferences: number[] = [];
+  const bindGroupCalls: number[] = [];
   const submissionDoneResolvers: Array<() => void> = [];
   const mappedBuffers: ArrayBuffer[] = [];
   const submittedWorkDoneResolvers = submissionDoneResolvers;
@@ -65,10 +68,13 @@ const createMockGpuContext = () => {
       finishedCommandBuffers,
       shaderModules,
       bindGroupLayouts,
+      pipelineLayouts,
+      bindGroups,
       renderPipelines,
       drawCalls,
       scissorCalls,
       stencilReferences,
+      bindGroupCalls,
       submissionDoneResolvers,
       mappedBuffers,
       submittedWorkDoneResolvers,
@@ -118,6 +124,14 @@ const createMockGpuContext = () => {
           bindGroupLayouts.push(descriptor);
           return { descriptor } as unknown as GPUBindGroupLayout;
         },
+        createPipelineLayout: (descriptor: GPUPipelineLayoutDescriptor) => {
+          pipelineLayouts.push(descriptor);
+          return { descriptor } as unknown as GPUPipelineLayout;
+        },
+        createBindGroup: (descriptor: GPUBindGroupDescriptor) => {
+          bindGroups.push(descriptor);
+          return { descriptor } as unknown as GPUBindGroup;
+        },
         createRenderPipeline: (descriptor: GPURenderPipelineDescriptor) => {
           renderPipelines.push(descriptor);
           return { descriptor } as unknown as GPURenderPipeline;
@@ -134,6 +148,9 @@ const createMockGpuContext = () => {
                 },
                 setStencilReference: (reference: number) => {
                   stencilReferences.push(reference);
+                },
+                setBindGroup: (index: number) => {
+                  bindGroupCalls.push(index);
                 },
                 draw: (vertexCount: number) => {
                   drawCalls.push(vertexCount);
@@ -897,6 +914,10 @@ Deno.test('dawn command buffer encodes fill draws with stencil and cover pipelin
   assertEquals(commandBuffer.unsupportedCommands.length, 0);
   assertEquals(mock.created.renderPasses.length, 1);
   assertEquals(mock.created.renderPipelines.length, 1);
+  assertEquals(mock.created.bindGroupLayouts.length > 0, true);
+  assertEquals(mock.created.pipelineLayouts.length > 0, true);
+  assertEquals(mock.created.bindGroups.length > 0, true);
+  assertEquals(mock.created.bindGroupCalls.length > 0, true);
   assertEquals(mock.created.drawCalls.length, 2);
   assertEquals(mock.created.renderPasses[0]?.depthStencilAttachment, undefined);
   assertEquals(mock.created.scissorCalls[0], [4, 6, 40, 50]);
@@ -1123,6 +1144,8 @@ Deno.test('dawn resource provider reuses pipelines across command buffers', () =
 
   assertEquals(mock.created.renderPipelines.length, 3);
   assertEquals(mock.created.shaderModules.length, 4);
+  assertEquals(mock.created.bindGroupLayouts.length > 0, true);
+  assertEquals(mock.created.pipelineLayouts.length > 0, true);
 });
 
 Deno.test('dawn pipelines honor target sample count for MSAA', () => {

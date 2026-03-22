@@ -21,6 +21,7 @@ export type DawnCommandBuffer = Readonly<{
 }>;
 
 const vertexBufferUsage = 0x0020;
+const uniformBufferUsage = 0x0040;
 const floatsPerVertex = 6;
 const wedgePatchFloats = 18;
 const curvePatchFloats = 16;
@@ -47,12 +48,8 @@ const createBoundsCoverVertexData = (
     }>;
   }>,
   color: readonly [number, number, number, number],
-  target: Readonly<{
-    width: number;
-    height: number;
-  }>,
 ): Float32Array =>
-  createClipSpaceVertexData(
+  createDeviceSpaceVertexData(
     [
       bounds.origin,
       [bounds.origin[0] + bounds.size.width, bounds.origin[1]],
@@ -62,25 +59,18 @@ const createBoundsCoverVertexData = (
       [bounds.origin[0], bounds.origin[1] + bounds.size.height],
     ],
     color,
-    target,
   );
 
-const createClipSpaceVertexData = (
+const createDeviceSpaceVertexData = (
   triangles: readonly (readonly [number, number])[],
   color: readonly [number, number, number, number],
-  target: Readonly<{
-    width: number;
-    height: number;
-  }>,
 ): Float32Array => {
   const vertices = new Float32Array(triangles.length * floatsPerVertex);
   let offset = 0;
-  const toClipX = (value: number) => (value / target.width) * 2 - 1;
-  const toClipY = (value: number) => 1 - (value / target.height) * 2;
 
   for (const point of triangles) {
-    vertices[offset++] = toClipX(point[0]);
-    vertices[offset++] = toClipY(point[1]);
+    vertices[offset++] = point[0];
+    vertices[offset++] = point[1];
     vertices[offset++] = color[0];
     vertices[offset++] = color[1];
     vertices[offset++] = color[2];
@@ -90,21 +80,15 @@ const createClipSpaceVertexData = (
   return vertices;
 };
 
-const createColoredClipSpaceVertexData = (
+const createColoredDeviceSpaceVertexData = (
   triangles: readonly DrawingPreparedVertex[],
-  target: Readonly<{
-    width: number;
-    height: number;
-  }>,
 ): Float32Array => {
   const vertices = new Float32Array(triangles.length * floatsPerVertex);
   let offset = 0;
-  const toClipX = (value: number) => (value / target.width) * 2 - 1;
-  const toClipY = (value: number) => 1 - (value / target.height) * 2;
 
   for (const vertex of triangles) {
-    vertices[offset++] = toClipX(vertex.point[0]);
-    vertices[offset++] = toClipY(vertex.point[1]);
+    vertices[offset++] = vertex.point[0];
+    vertices[offset++] = vertex.point[1];
     vertices[offset++] = vertex.color[0];
     vertices[offset++] = vertex.color[1];
     vertices[offset++] = vertex.color[2];
@@ -125,6 +109,25 @@ const createVertexBuffer = (
     mappedAtCreation: true,
   });
   new Float32Array(buffer.getMappedRange()).set(vertices);
+  buffer.unmap();
+  return buffer;
+};
+
+const createViewportTransformBuffer = (
+  sharedContext: DawnSharedContext,
+): GPUBuffer => {
+  const buffer = sharedContext.backend.device.createBuffer({
+    label: 'drawing-viewport-transform',
+    size: Float32Array.BYTES_PER_ELEMENT * 4,
+    usage: uniformBufferUsage,
+    mappedAtCreation: true,
+  });
+  new Float32Array(buffer.getMappedRange()).set([
+    2 / Math.max(sharedContext.backend.target.width, 1),
+    -2 / Math.max(sharedContext.backend.target.height, 1),
+    -1,
+    1,
+  ]);
   buffer.unmap();
   return buffer;
 };
@@ -156,29 +159,26 @@ const getPatchPoints = (
 const createWedgePatchInstanceData = (
   patches: readonly DrawingPreparedPatch[],
   color: readonly [number, number, number, number],
-  target: Readonly<{ width: number; height: number }>,
 ): Float32Array => {
   const wedgePatches = patches.filter((patch) => patch.fanPoint !== undefined);
   const data = new Float32Array(wedgePatches.length * wedgePatchFloats);
-  const toClipX = (value: number) => (value / target.width) * 2 - 1;
-  const toClipY = (value: number) => 1 - (value / target.height) * 2;
   let offset = 0;
   for (const patch of wedgePatches) {
     const points = getPatchPoints(patch);
-    data[offset++] = toClipX(points[0][0]);
-    data[offset++] = toClipY(points[0][1]);
-    data[offset++] = toClipX(points[1][0]);
-    data[offset++] = toClipY(points[1][1]);
-    data[offset++] = toClipX(points[2][0]);
-    data[offset++] = toClipY(points[2][1]);
-    data[offset++] = toClipX(points[3][0]);
-    data[offset++] = toClipY(points[3][1]);
+    data[offset++] = points[0][0];
+    data[offset++] = points[0][1];
+    data[offset++] = points[1][0];
+    data[offset++] = points[1][1];
+    data[offset++] = points[2][0];
+    data[offset++] = points[2][1];
+    data[offset++] = points[3][0];
+    data[offset++] = points[3][1];
     data[offset++] = toCurveType(patch);
     data[offset++] = patch.kind === 'conic' ? patch.weight : 1;
     data[offset++] = Math.min(maxPatchResolveLevel, Math.max(0, patch.resolveLevel));
     data[offset++] = 0;
-    data[offset++] = toClipX(patch.fanPoint![0]);
-    data[offset++] = toClipY(patch.fanPoint![1]);
+    data[offset++] = patch.fanPoint![0];
+    data[offset++] = patch.fanPoint![1];
     data[offset++] = color[0];
     data[offset++] = color[1];
     data[offset++] = color[2];
@@ -190,23 +190,20 @@ const createWedgePatchInstanceData = (
 const createCurvePatchInstanceData = (
   patches: readonly DrawingPreparedPatch[],
   color: readonly [number, number, number, number],
-  target: Readonly<{ width: number; height: number }>,
 ): Float32Array => {
   const curvePatches = patches;
   const data = new Float32Array(curvePatches.length * curvePatchFloats);
-  const toClipX = (value: number) => (value / target.width) * 2 - 1;
-  const toClipY = (value: number) => 1 - (value / target.height) * 2;
   let offset = 0;
   for (const patch of curvePatches) {
     const points = getPatchPoints(patch);
-    data[offset++] = toClipX(points[0]![0]);
-    data[offset++] = toClipY(points[0]![1]);
-    data[offset++] = toClipX(points[1]![0]);
-    data[offset++] = toClipY(points[1]![1]);
-    data[offset++] = toClipX(points[2]![0]);
-    data[offset++] = toClipY(points[2]![1]);
-    data[offset++] = toClipX(points[3]![0]);
-    data[offset++] = toClipY(points[3]![1]);
+    data[offset++] = points[0]![0];
+    data[offset++] = points[0]![1];
+    data[offset++] = points[1]![0];
+    data[offset++] = points[1]![1];
+    data[offset++] = points[2]![0];
+    data[offset++] = points[2]![1];
+    data[offset++] = points[3]![0];
+    data[offset++] = points[3]![1];
     data[offset++] = toCurveType(patch);
     data[offset++] = patch.kind === 'conic' ? patch.weight : 1;
     data[offset++] = Math.min(maxPatchResolveLevel, Math.max(0, patch.resolveLevel));
@@ -223,32 +220,25 @@ const createStrokePatchInstanceData = (
   patches: readonly DrawingPreparedPatch[],
   color: readonly [number, number, number, number],
   halfWidth: number,
-  target: Readonly<{ width: number; height: number }>,
 ): Float32Array => {
   const curvePatches = patches;
   const data = new Float32Array(curvePatches.length * strokePatchFloats);
-  const toClipX = (value: number) => (value / target.width) * 2 - 1;
-  const toClipY = (value: number) => 1 - (value / target.height) * 2;
   let offset = 0;
-  const clipHalfWidth = Math.max(
-    1 / Math.max(target.width, 1),
-    1 / Math.max(target.height, 1),
-  ) * halfWidth * 2;
   for (const patch of curvePatches) {
     const points = getPatchPoints(patch);
-    data[offset++] = toClipX(points[0]![0]);
-    data[offset++] = toClipY(points[0]![1]);
-    data[offset++] = toClipX(points[1]![0]);
-    data[offset++] = toClipY(points[1]![1]);
-    data[offset++] = toClipX(points[2]![0]);
-    data[offset++] = toClipY(points[2]![1]);
-    data[offset++] = toClipX(points[3]![0]);
-    data[offset++] = toClipY(points[3]![1]);
+    data[offset++] = points[0]![0];
+    data[offset++] = points[0]![1];
+    data[offset++] = points[1]![0];
+    data[offset++] = points[1]![1];
+    data[offset++] = points[2]![0];
+    data[offset++] = points[2]![1];
+    data[offset++] = points[3]![0];
+    data[offset++] = points[3]![1];
     data[offset++] = toCurveType(patch);
     data[offset++] = patch.kind === 'conic' ? patch.weight : 1;
     data[offset++] = Math.min(maxPatchResolveLevel, Math.max(0, patch.resolveLevel));
     data[offset++] = 0;
-    data[offset++] = clipHalfWidth;
+    data[offset++] = halfWidth;
     data[offset++] = 0;
     data[offset++] = color[0];
     data[offset++] = color[1];
@@ -318,6 +308,7 @@ const encodeStencilClips = (
   pass: GPURenderPassEncoder,
   sharedContext: DawnSharedContext,
   step: DrawingPreparedRecording['passes'][number]['steps'][number],
+  viewportBindGroup: GPUBindGroup,
 ): void => {
   const triangleRuns = step.draw.clip?.triangleRuns;
   if (!triangleRuns || triangleRuns.length === 0) {
@@ -327,12 +318,9 @@ const encodeStencilClips = (
   const clipPipeline = sharedContext.resourceProvider.getPipeline(step.pipelineKeys[0]!);
   pass.setStencilReference?.(0);
   pass.setPipeline(clipPipeline);
+  pass.setBindGroup(0, viewportBindGroup);
   for (const triangles of triangleRuns) {
-    const clipVertices = createClipSpaceVertexData(
-      triangles,
-      [0, 0, 0, 0],
-      sharedContext.backend.target,
-    );
+    const clipVertices = createDeviceSpaceVertexData(triangles, [0, 0, 0, 0]);
     const clipVertexBuffer = createVertexBuffer(sharedContext, clipVertices);
     pass.setVertexBuffer(0, clipVertexBuffer);
     pass.draw(clipVertices.length / floatsPerVertex);
@@ -373,6 +361,7 @@ const encodePreparedFillStep = (
   pass: GPURenderPassEncoder,
   sharedContext: DawnSharedContext,
   step: DrawingPreparedRecording['passes'][number]['steps'][number],
+  viewportBindGroup: GPUBindGroup,
 ): void => {
   if (step.draw.kind !== 'pathFill') {
     return;
@@ -380,43 +369,26 @@ const encodePreparedFillStep = (
 
   const usesPatchFill = step.draw.renderer !== 'middle-out-fan';
   const usesFillStencil = step.usesFillStencil;
-  const fillVertices = usesPatchFill ? null : createClipSpaceVertexData(
-    step.draw.triangles,
-    step.draw.color,
-    sharedContext.backend.target,
-  );
+  const fillVertices = usesPatchFill
+    ? null
+    : createDeviceSpaceVertexData(step.draw.triangles, step.draw.color);
   const fillVertexBuffer = fillVertices ? createVertexBuffer(sharedContext, fillVertices) : null;
   const patchVertices = step.draw.renderer === 'stencil-tessellated-wedges'
-    ? createWedgePatchInstanceData(
-      step.draw.patches,
-      step.draw.color,
-      sharedContext.backend.target,
-    )
+    ? createWedgePatchInstanceData(step.draw.patches, step.draw.color)
     : step.draw.renderer === 'stencil-tessellated-curves'
-    ? createCurvePatchInstanceData(
-      step.draw.patches,
-      step.draw.color,
-      sharedContext.backend.target,
-    )
+    ? createCurvePatchInstanceData(step.draw.patches, step.draw.color)
     : null;
   const patchVertexBuffer = patchVertices && patchVertices.length > 0
     ? createVertexBuffer(sharedContext, patchVertices)
     : null;
   const fringeVertices = step.draw.fringeVertices
-    ? createColoredClipSpaceVertexData(
-      step.draw.fringeVertices,
-      sharedContext.backend.target,
-    )
+    ? createColoredDeviceSpaceVertexData(step.draw.fringeVertices)
     : null;
   const fringeVertexBuffer = fringeVertices
     ? createVertexBuffer(sharedContext, fringeVertices)
     : null;
   const boundsCoverVertices = usesFillStencil
-    ? createBoundsCoverVertexData(
-      step.draw.bounds,
-      step.draw.color,
-      sharedContext.backend.target,
-    )
+    ? createBoundsCoverVertexData(step.draw.bounds, step.draw.color)
     : null;
   const boundsCoverVertexBuffer = boundsCoverVertices
     ? createVertexBuffer(sharedContext, boundsCoverVertices)
@@ -427,6 +399,7 @@ const encodePreparedFillStep = (
     const stencilPipeline = sharedContext.resourceProvider.getPipeline(step.pipelineKeys[0]!);
     const coverPipeline = sharedContext.resourceProvider.getPipeline(step.pipelineKeys[1]!);
     pass.setPipeline(stencilPipeline);
+    pass.setBindGroup(0, viewportBindGroup);
     if (usesPatchFill && patchVertexBuffer && patchVertices) {
       pass.setVertexBuffer(0, patchVertexBuffer);
       pass.draw(
@@ -443,12 +416,14 @@ const encodePreparedFillStep = (
 
     if (boundsCoverVertexBuffer && boundsCoverVertices) {
       pass.setPipeline(coverPipeline);
+      pass.setBindGroup(0, viewportBindGroup);
       pass.setVertexBuffer(0, boundsCoverVertexBuffer);
       pass.draw(boundsCoverVertices.length / floatsPerVertex);
     }
 
     if (fringeVertices && fringeVertexBuffer) {
       pass.setPipeline(sharedContext.resourceProvider.getPipeline('path-fill-cover'));
+      pass.setBindGroup(0, viewportBindGroup);
       pass.setVertexBuffer(0, fringeVertexBuffer);
       pass.draw(fringeVertices.length / floatsPerVertex);
     }
@@ -457,11 +432,12 @@ const encodePreparedFillStep = (
 
   if (getStencilClipCount(step) > 0) {
     const colorPipeline = sharedContext.resourceProvider.getPipeline(step.pipelineKeys[1]!);
-    encodeStencilClips(pass, sharedContext, step);
+    encodeStencilClips(pass, sharedContext, step, viewportBindGroup);
     pass.setPipeline(colorPipeline);
   } else {
     pass.setPipeline(sharedContext.resourceProvider.getPipeline(step.pipelineKeys[0]!));
   }
+  pass.setBindGroup(0, viewportBindGroup);
 
   if (usesPatchFill && patchVertexBuffer && patchVertices) {
     pass.setVertexBuffer(0, patchVertexBuffer);
@@ -482,6 +458,7 @@ const encodePreparedFillStep = (
       pass.setPipeline(sharedContext.resourceProvider.getPipeline(
         getStencilClipCount(step) > 0 ? 'path-fill-clip-cover' : 'path-fill-cover',
       ));
+      pass.setBindGroup(0, viewportBindGroup);
     }
     pass.setVertexBuffer(0, fringeVertexBuffer);
     pass.draw(fringeVertices.length / floatsPerVertex);
@@ -492,31 +469,24 @@ const encodePreparedStrokeStep = (
   pass: GPURenderPassEncoder,
   sharedContext: DawnSharedContext,
   step: DrawingPreparedRecording['passes'][number]['steps'][number],
+  viewportBindGroup: GPUBindGroup,
 ): void => {
   if (step.draw.kind !== 'pathStroke') {
     return;
   }
 
-  const strokeVertices = createClipSpaceVertexData(
-    step.draw.triangles,
-    step.draw.color,
-    sharedContext.backend.target,
-  );
+  const strokeVertices = createDeviceSpaceVertexData(step.draw.triangles, step.draw.color);
   const strokeVertexBuffer = createVertexBuffer(sharedContext, strokeVertices);
   const patchVertices = createStrokePatchInstanceData(
     step.draw.patches,
     step.draw.color,
     step.draw.halfWidth,
-    sharedContext.backend.target,
   );
   const patchVertexBuffer = patchVertices.length > 0
     ? createVertexBuffer(sharedContext, patchVertices)
     : null;
   const fringeVertices = step.draw.fringeVertices
-    ? createColoredClipSpaceVertexData(
-      step.draw.fringeVertices,
-      sharedContext.backend.target,
-    )
+    ? createColoredDeviceSpaceVertexData(step.draw.fringeVertices)
     : null;
   const fringeVertexBuffer = fringeVertices
     ? createVertexBuffer(sharedContext, fringeVertices)
@@ -524,11 +494,12 @@ const encodePreparedStrokeStep = (
 
   applyStepClip(pass, step, sharedContext.backend.target);
   if (getStencilClipCount(step) > 0) {
-    encodeStencilClips(pass, sharedContext, step);
+    encodeStencilClips(pass, sharedContext, step, viewportBindGroup);
     pass.setPipeline(sharedContext.resourceProvider.getPipeline(step.pipelineKeys[1]!));
   } else {
     pass.setPipeline(sharedContext.resourceProvider.getPipeline(step.pipelineKeys[0]!));
   }
+  pass.setBindGroup(0, viewportBindGroup);
 
   if (patchVertexBuffer) {
     pass.setVertexBuffer(0, patchVertexBuffer);
@@ -542,6 +513,7 @@ const encodePreparedStrokeStep = (
     pass.setPipeline(sharedContext.resourceProvider.getPipeline(
       getStencilClipCount(step) > 0 ? 'path-stroke-clip-cover' : 'path-stroke-cover',
     ));
+    pass.setBindGroup(0, viewportBindGroup);
     pass.setVertexBuffer(0, fringeVertexBuffer);
     pass.draw(fringeVertices.length / floatsPerVertex);
   }
@@ -551,13 +523,14 @@ const encodePreparedStep = (
   pass: GPURenderPassEncoder,
   sharedContext: DawnSharedContext,
   step: DrawingPreparedRecording['passes'][number]['steps'][number],
+  viewportBindGroup: GPUBindGroup,
 ): void => {
   switch (step.draw.kind) {
     case 'pathFill':
-      encodePreparedFillStep(pass, sharedContext, step);
+      encodePreparedFillStep(pass, sharedContext, step, viewportBindGroup);
       break;
     case 'pathStroke':
-      encodePreparedStrokeStep(pass, sharedContext, step);
+      encodePreparedStrokeStep(pass, sharedContext, step, viewportBindGroup);
       break;
   }
 };
@@ -580,6 +553,10 @@ export const encodeDawnCommandBuffer = (
   const resolveView = acquireColorResolveView(binding);
   const unsupportedCommands: DrawingCommand[] = [...prepared.unsupportedCommands];
   let passCount = 0;
+  const viewportTransformBuffer = createViewportTransformBuffer(sharedContext);
+  const viewportBindGroup = sharedContext.resourceProvider.createViewportBindGroup(
+    viewportTransformBuffer,
+  );
   const hasStencilSteps = prepared.passes.some((passInfo) =>
     passInfo.steps.some((step) => step.usesStencil || step.usesFillStencil)
   );
@@ -620,7 +597,7 @@ export const encodeDawnCommandBuffer = (
             stencilView,
           ),
         );
-        encodePreparedStep(pass, sharedContext, step);
+        encodePreparedStep(pass, sharedContext, step, viewportBindGroup);
         pass.end();
         passCount += 1;
         colorLoadOp = 'load';
@@ -632,7 +609,7 @@ export const encodeDawnCommandBuffer = (
         createRenderPassDescriptor(colorView, resolveView, passInfo.clearColor, colorLoadOp),
       );
       while (stepIndex < passInfo.steps.length && !passInfo.steps[stepIndex]!.usesStencil) {
-        encodePreparedStep(pass, sharedContext, passInfo.steps[stepIndex]!);
+        encodePreparedStep(pass, sharedContext, passInfo.steps[stepIndex]!, viewportBindGroup);
         stepIndex += 1;
       }
       pass.end();

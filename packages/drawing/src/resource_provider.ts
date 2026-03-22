@@ -34,6 +34,7 @@ export type DawnResourceProvider = Readonly<{
   createBuffer: (descriptor: DrawingBufferDescriptor) => GPUBuffer;
   createTexture: (descriptor: DrawingTextureDescriptor) => GPUTexture;
   createSampler: (descriptor?: DrawingSamplerDescriptor) => GPUSampler;
+  createViewportBindGroup: (buffer: GPUBuffer) => GPUBindGroup;
   getPipeline: (key: DrawingPipelineKey) => GPURenderPipeline;
   getStencilAttachmentView: () => GPUTextureView;
 }>;
@@ -48,10 +49,21 @@ const curveFillSegments = 1 << maxPatchResolveLevel;
 const strokePatchSegments = 1 << maxPatchResolveLevel;
 
 const fillPathShaderSource = `
+struct ViewportUniform {
+  scale: vec2<f32>,
+  translate: vec2<f32>,
+};
+
+@group(0) @binding(0) var<uniform> viewport: ViewportUniform;
+
 struct VertexOut {
   @builtin(position) position: vec4<f32>,
   @location(0) color: vec4<f32>,
 };
+
+fn device_to_ndc(position: vec2<f32>) -> vec4<f32> {
+  return vec4<f32>((position * viewport.scale) + viewport.translate, 0.0, 1.0);
+}
 
 @vertex
 fn vs_main(
@@ -59,7 +71,7 @@ fn vs_main(
   @location(1) color: vec4<f32>,
 ) -> VertexOut {
   var out: VertexOut;
-  out.position = vec4<f32>(position, 0.0, 1.0);
+  out.position = device_to_ndc(position);
   out.color = color;
   return out;
 }
@@ -74,10 +86,21 @@ const wedgePatchShaderSource = `
 const MAX_RESOLVE_LEVEL: f32 = ${maxPatchResolveLevel}.0;
 const SEGMENTS: u32 = ${curveFillSegments}u;
 
+struct ViewportUniform {
+  scale: vec2<f32>,
+  translate: vec2<f32>,
+};
+
+@group(0) @binding(0) var<uniform> viewport: ViewportUniform;
+
 struct VertexOut {
   @builtin(position) position: vec4<f32>,
   @location(0) color: vec4<f32>,
 };
+
+fn device_to_ndc(position: vec2<f32>) -> vec4<f32> {
+  return vec4<f32>((position * viewport.scale) + viewport.translate, 0.0, 1.0);
+}
 
 @vertex
 fn vs_main(
@@ -135,7 +158,7 @@ fn vs_main(
     local = b;
   }
   var out: VertexOut;
-  out.position = vec4<f32>(local, 0.0, 1.0);
+  out.position = device_to_ndc(local);
   out.color = color;
   return out;
 }
@@ -150,10 +173,21 @@ const curvePatchShaderSource = `
 const SEGMENTS: u32 = ${curveFillSegments}u;
 const MAX_RESOLVE_LEVEL: f32 = ${maxPatchResolveLevel}.0;
 
+struct ViewportUniform {
+  scale: vec2<f32>,
+  translate: vec2<f32>,
+};
+
+@group(0) @binding(0) var<uniform> viewport: ViewportUniform;
+
 struct VertexOut {
   @builtin(position) position: vec4<f32>,
   @location(0) color: vec4<f32>,
 };
+
+fn device_to_ndc(position: vec2<f32>) -> vec4<f32> {
+  return vec4<f32>((position * viewport.scale) + viewport.translate, 0.0, 1.0);
+}
 
 fn eval_patch(
   curveType: f32,
@@ -208,7 +242,7 @@ fn vs_main(
     local = eval_patch(curveMeta.x, curveMeta.y, p0, p1, p2, p3, t1);
   }
   var out: VertexOut;
-  out.position = vec4<f32>(local, 0.0, 1.0);
+  out.position = device_to_ndc(local);
   out.color = color;
   return out;
 }
@@ -223,10 +257,21 @@ const strokePatchShaderSource = `
 const SEGMENTS: u32 = ${strokePatchSegments}u;
 const MAX_RESOLVE_LEVEL: f32 = ${maxPatchResolveLevel}.0;
 
+struct ViewportUniform {
+  scale: vec2<f32>,
+  translate: vec2<f32>,
+};
+
+@group(0) @binding(0) var<uniform> viewport: ViewportUniform;
+
 struct VertexOut {
   @builtin(position) position: vec4<f32>,
   @location(0) color: vec4<f32>,
 };
+
+fn device_to_ndc(position: vec2<f32>) -> vec4<f32> {
+  return vec4<f32>((position * viewport.scale) + viewport.translate, 0.0, 1.0);
+}
 
 fn eval_patch(
   curveType: f32,
@@ -283,7 +328,7 @@ fn vs_main(
     local = corners[indices[quadVertex]];
   }
   var out: VertexOut;
-  out.position = vec4<f32>(local, 0.0, 1.0);
+  out.position = device_to_ndc(local);
   out.color = color;
   return out;
 }
@@ -399,6 +444,8 @@ export const createDawnResourceProvider = (
   let pathStrokePatchCoverPipeline: GPURenderPipeline | null = null;
   let pathStrokeClipCoverPipeline: GPURenderPipeline | null = null;
   let pathStrokePatchClipCoverPipeline: GPURenderPipeline | null = null;
+  let viewportBindGroupLayout: GPUBindGroupLayout | null = null;
+  let viewportPipelineLayout: GPUPipelineLayout | null = null;
   let stencilAttachment:
     | Readonly<{
       width: number;
@@ -469,12 +516,42 @@ export const createDawnResourceProvider = (
 
   const sampleCount = backend.target.kind === 'offscreen' ? backend.target.sampleCount : 1;
 
+  const getViewportBindGroupLayout = (): GPUBindGroupLayout => {
+    if (viewportBindGroupLayout) {
+      return viewportBindGroupLayout;
+    }
+
+    viewportBindGroupLayout = backend.device.createBindGroupLayout({
+      label: 'drawing-viewport-bind-group-layout',
+      entries: [{
+        binding: 0,
+        visibility: GPUShaderStage.VERTEX,
+        buffer: {
+          type: 'uniform',
+        },
+      }],
+    });
+    return viewportBindGroupLayout;
+  };
+
+  const getViewportPipelineLayout = (): GPUPipelineLayout => {
+    if (viewportPipelineLayout) {
+      return viewportPipelineLayout;
+    }
+
+    viewportPipelineLayout = backend.device.createPipelineLayout({
+      label: 'drawing-viewport-pipeline-layout',
+      bindGroupLayouts: [getViewportBindGroupLayout()],
+    });
+    return viewportPipelineLayout;
+  };
+
   const createPathFillCoverPipeline = (): GPURenderPipeline => {
     const shaderModule = createPathShaderModule(backend);
 
     return backend.device.createRenderPipeline({
       label: 'drawing-path-fill-cover',
-      layout: 'auto',
+      layout: getViewportPipelineLayout(),
       vertex: {
         module: shaderModule,
         entryPoint: 'vs_main',
@@ -504,7 +581,7 @@ export const createDawnResourceProvider = (
 
     return backend.device.createRenderPipeline({
       label: 'drawing-path-fill-stencil-cover',
-      layout: 'auto',
+      layout: getViewportPipelineLayout(),
       vertex: {
         module: shaderModule,
         entryPoint: 'vs_main',
@@ -534,7 +611,7 @@ export const createDawnResourceProvider = (
     const shaderModule = createPathShaderModule(backend);
     return backend.device.createRenderPipeline({
       label: 'drawing-clip-stencil-write',
-      layout: 'auto',
+      layout: getViewportPipelineLayout(),
       vertex: {
         module: shaderModule,
         entryPoint: 'vs_main',
@@ -573,7 +650,7 @@ export const createDawnResourceProvider = (
     const shaderModule = createPathShaderModule(backend);
     return backend.device.createRenderPipeline({
       label,
-      layout: 'auto',
+      layout: getViewportPipelineLayout(),
       vertex: {
         module: shaderModule,
         entryPoint: 'vs_main',
@@ -612,7 +689,7 @@ export const createDawnResourceProvider = (
 
     return backend.device.createRenderPipeline({
       label: 'drawing-path-stroke-cover',
-      layout: 'auto',
+      layout: getViewportPipelineLayout(),
       vertex: {
         module: shaderModule,
         entryPoint: 'vs_main',
@@ -645,7 +722,7 @@ export const createDawnResourceProvider = (
   ): GPURenderPipeline =>
     backend.device.createRenderPipeline({
       label,
-      layout: 'auto',
+      layout: getViewportPipelineLayout(),
       vertex: {
         module: shaderModule,
         entryPoint: 'vs_main',
@@ -674,7 +751,7 @@ export const createDawnResourceProvider = (
   ): GPURenderPipeline =>
     backend.device.createRenderPipeline({
       label,
-      layout: 'auto',
+      layout: getViewportPipelineLayout(),
       vertex: {
         module: shaderModule,
         entryPoint: 'vs_main',
@@ -704,6 +781,17 @@ export const createDawnResourceProvider = (
     resourceBudget: options.resourceBudget ?? Number.POSITIVE_INFINITY,
     createBuffer: (descriptor) => backend.device.createBuffer(descriptor),
     createTexture: (descriptor) => backend.device.createTexture(descriptor),
+    createViewportBindGroup: (buffer) =>
+      backend.device.createBindGroup({
+        label: 'drawing-viewport-bind-group',
+        layout: getViewportBindGroupLayout(),
+        entries: [{
+          binding: 0,
+          resource: {
+            buffer,
+          },
+        }],
+      }),
     createSampler: (descriptor = {}) => {
       const normalized = canonicalizeSamplerDescriptor(descriptor);
       const key = createSamplerCacheKey(normalized);

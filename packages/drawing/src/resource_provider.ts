@@ -304,6 +304,29 @@ const createStencilFaceState = (
   passOp,
 });
 
+const createFillStencilFaceState = (
+  frontPassOp: GPUStencilOperation,
+  backPassOp: GPUStencilOperation,
+): GPUDepthStencilState => ({
+  format: stencilFormat,
+  depthWriteEnabled: false,
+  depthCompare: 'always',
+  stencilReadMask: 0xff,
+  stencilWriteMask: 0xff,
+  stencilFront: createStencilFaceState(frontPassOp),
+  stencilBack: createStencilFaceState(backPassOp),
+});
+
+const createStencilCoverState = (): GPUDepthStencilState => ({
+  format: stencilFormat,
+  depthWriteEnabled: false,
+  depthCompare: 'always',
+  stencilReadMask: 0xff,
+  stencilWriteMask: 0x00,
+  stencilFront: createStencilFaceState('keep', 'not-equal'),
+  stencilBack: createStencilFaceState('keep', 'not-equal'),
+});
+
 const createPathShaderModule = (backend: DawnBackendContext): GPUShaderModule =>
   backend.device.createShaderModule({
     label: 'drawing-path-shader',
@@ -335,7 +358,14 @@ export const createDawnResourceProvider = (
   }> = {},
 ): DawnResourceProvider => {
   let clipStencilWritePipeline: GPURenderPipeline | null = null;
+  let pathFillStencilEvenOddPipeline: GPURenderPipeline | null = null;
+  let pathFillStencilNonZeroPipeline: GPURenderPipeline | null = null;
+  let pathFillPatchStencilEvenOddPipeline: GPURenderPipeline | null = null;
+  let pathFillPatchStencilNonZeroPipeline: GPURenderPipeline | null = null;
+  let pathFillCurvePatchStencilEvenOddPipeline: GPURenderPipeline | null = null;
+  let pathFillCurvePatchStencilNonZeroPipeline: GPURenderPipeline | null = null;
   let pathFillCoverPipeline: GPURenderPipeline | null = null;
+  let pathFillStencilCoverPipeline: GPURenderPipeline | null = null;
   let pathFillPatchCoverPipeline: GPURenderPipeline | null = null;
   let pathFillCurvePatchCoverPipeline: GPURenderPipeline | null = null;
   let pathFillClipCoverPipeline: GPURenderPipeline | null = null;
@@ -441,6 +471,37 @@ export const createDawnResourceProvider = (
       multisample: {
         count: sampleCount,
       },
+    });
+  };
+
+  const createPathFillStencilCoverPipeline = (): GPURenderPipeline => {
+    const shaderModule = createPathShaderModule(backend);
+
+    return backend.device.createRenderPipeline({
+      label: 'drawing-path-fill-stencil-cover',
+      layout: 'auto',
+      vertex: {
+        module: shaderModule,
+        entryPoint: 'vs_main',
+        buffers: [createVertexLayout()],
+      },
+      fragment: {
+        module: shaderModule,
+        entryPoint: 'fs_main',
+        targets: [
+          {
+            format: backend.target.format,
+          },
+        ],
+      },
+      primitive: {
+        topology: 'triangle-list',
+        cullMode: 'none',
+      },
+      multisample: {
+        count: sampleCount,
+      },
+      depthStencil: createStencilCoverState(),
     });
   };
 
@@ -580,6 +641,39 @@ export const createDawnResourceProvider = (
       depthStencil,
     });
 
+  const createStencilOnlyPathPipeline = (
+    label: string,
+    shaderModule: GPUShaderModule,
+    layout: GPUVertexBufferLayout,
+    depthStencil: GPUDepthStencilState,
+  ): GPURenderPipeline =>
+    backend.device.createRenderPipeline({
+      label,
+      layout: 'auto',
+      vertex: {
+        module: shaderModule,
+        entryPoint: 'vs_main',
+        buffers: [layout],
+      },
+      fragment: {
+        module: shaderModule,
+        entryPoint: 'fs_main',
+        targets: [{
+          format: backend.target.format,
+          writeMask: noColorWrites,
+        }],
+      },
+      primitive: {
+        topology: 'triangle-list',
+        cullMode: 'none',
+        frontFace: 'ccw',
+      },
+      multisample: {
+        count: sampleCount,
+      },
+      depthStencil,
+    });
+
   return {
     backend,
     resourceBudget: options.resourceBudget ?? Number.POSITIVE_INFINITY,
@@ -594,12 +688,84 @@ export const createDawnResourceProvider = (
           }
           clipStencilWritePipeline = createClipStencilWritePipeline();
           return clipStencilWritePipeline;
+        case 'path-fill-stencil-evenodd':
+          if (pathFillStencilEvenOddPipeline) {
+            return pathFillStencilEvenOddPipeline;
+          }
+          pathFillStencilEvenOddPipeline = createStencilOnlyPathPipeline(
+            'drawing-path-fill-stencil-evenodd',
+            createPathShaderModule(backend),
+            createVertexLayout(),
+            createFillStencilFaceState('invert', 'invert'),
+          );
+          return pathFillStencilEvenOddPipeline;
+        case 'path-fill-stencil-nonzero':
+          if (pathFillStencilNonZeroPipeline) {
+            return pathFillStencilNonZeroPipeline;
+          }
+          pathFillStencilNonZeroPipeline = createStencilOnlyPathPipeline(
+            'drawing-path-fill-stencil-nonzero',
+            createPathShaderModule(backend),
+            createVertexLayout(),
+            createFillStencilFaceState('increment-wrap', 'decrement-wrap'),
+          );
+          return pathFillStencilNonZeroPipeline;
+        case 'path-fill-patch-stencil-evenodd':
+          if (pathFillPatchStencilEvenOddPipeline) {
+            return pathFillPatchStencilEvenOddPipeline;
+          }
+          pathFillPatchStencilEvenOddPipeline = createStencilOnlyPathPipeline(
+            'drawing-path-fill-patch-stencil-evenodd',
+            createWedgePatchShaderModule(backend),
+            createWedgePatchLayout(),
+            createFillStencilFaceState('invert', 'invert'),
+          );
+          return pathFillPatchStencilEvenOddPipeline;
+        case 'path-fill-patch-stencil-nonzero':
+          if (pathFillPatchStencilNonZeroPipeline) {
+            return pathFillPatchStencilNonZeroPipeline;
+          }
+          pathFillPatchStencilNonZeroPipeline = createStencilOnlyPathPipeline(
+            'drawing-path-fill-patch-stencil-nonzero',
+            createWedgePatchShaderModule(backend),
+            createWedgePatchLayout(),
+            createFillStencilFaceState('increment-wrap', 'decrement-wrap'),
+          );
+          return pathFillPatchStencilNonZeroPipeline;
+        case 'path-fill-curve-patch-stencil-evenodd':
+          if (pathFillCurvePatchStencilEvenOddPipeline) {
+            return pathFillCurvePatchStencilEvenOddPipeline;
+          }
+          pathFillCurvePatchStencilEvenOddPipeline = createStencilOnlyPathPipeline(
+            'drawing-path-fill-curve-patch-stencil-evenodd',
+            createCurvePatchShaderModule(backend),
+            createCurvePatchLayout(),
+            createFillStencilFaceState('invert', 'invert'),
+          );
+          return pathFillCurvePatchStencilEvenOddPipeline;
+        case 'path-fill-curve-patch-stencil-nonzero':
+          if (pathFillCurvePatchStencilNonZeroPipeline) {
+            return pathFillCurvePatchStencilNonZeroPipeline;
+          }
+          pathFillCurvePatchStencilNonZeroPipeline = createStencilOnlyPathPipeline(
+            'drawing-path-fill-curve-patch-stencil-nonzero',
+            createCurvePatchShaderModule(backend),
+            createCurvePatchLayout(),
+            createFillStencilFaceState('increment-wrap', 'decrement-wrap'),
+          );
+          return pathFillCurvePatchStencilNonZeroPipeline;
         case 'path-fill-cover':
           if (pathFillCoverPipeline) {
             return pathFillCoverPipeline;
           }
           pathFillCoverPipeline = createPathFillCoverPipeline();
           return pathFillCoverPipeline;
+        case 'path-fill-stencil-cover':
+          if (pathFillStencilCoverPipeline) {
+            return pathFillStencilCoverPipeline;
+          }
+          pathFillStencilCoverPipeline = createPathFillStencilCoverPipeline();
+          return pathFillStencilCoverPipeline;
         case 'path-fill-clip-cover':
           if (pathFillClipCoverPipeline) {
             return pathFillClipCoverPipeline;

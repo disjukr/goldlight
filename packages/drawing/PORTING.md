@@ -52,7 +52,8 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Status: `partial`
   - Clear, direct fill replay, patch-instance fill/stroke replay, clip-stencil replay for complex
     clip paths, multi-path stencil clip-stack replay, non-stencil draw batching within a render
-    pass, and first stroke command buffer translation exist.
+    pass, first Skia-like stencil-then-cover replay for patch fills without stencil clips, and first
+    stroke command buffer translation exist.
 - Queue submission
   - Status: `started`
   - Queue manager can submit encoded command buffers, track in-flight work counts, and use
@@ -83,8 +84,9 @@ stack that fits this repository's TypeScript and WebGPU architecture.
 - `DawnResourceProvider` -> `src/resource_provider.ts`
   - Status: `started`
   - What exists: simple resource allocation plus cached fill/stroke/clip pipelines, first
-    patch-instance pipelines, stencil attachment reuse, and multisample-aware pipelines
-  - Missing: bind groups, wrapped resources, broader cache policy
+    patch-instance pipelines, dedicated evenodd/nonzero stencil pipelines for patch fills,
+    stencil-cover separation, stencil attachment reuse, and multisample-aware pipelines
+  - Missing: bind groups, wrapped resources, broader cache policy, and generalized pipeline keys
 - `Context` -> `src/context.ts`
   - Status: `started`
   - What exists: context factory and recorder creation
@@ -101,9 +103,10 @@ stack that fits this repository's TypeScript and WebGPU architecture.
 - `DawnCommandBuffer` -> `src/command_buffer.ts`
   - Status: `partial`
   - What exists: clear plus direct fill replay, first patch-instance fill/stroke replay, convex-clip
-    scissor replay, stencil replay for stacked complex clip paths, and batching for consecutive
-    non-stencil steps
-  - Missing: broader draw path and draw shape encoding, richer pass replay
+    scissor replay, stencil replay for stacked complex clip paths, batching for consecutive
+    non-stencil steps, and first stencil-then-cover replay for patch-rendered fills
+  - Missing: broader draw path and draw shape encoding, richer pass replay, and clip/fill stencil
+    composition across arbitrary clip stacks
 - `DrawPass` -> `src/draw_pass.ts`
   - Status: `partial`
   - What exists: prepared pass partitioning plus pipeline-key, bounds, stencil, clip-stack metadata,
@@ -136,7 +139,8 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Role: shared backend objects
 - `src/resource_provider.ts`
   - Status: `started`
-  - Role: low-level resource creation
+  - Role: low-level resource creation, cached fill/stroke/clip pipelines, and fill stencil/cover
+    pipeline selection
 - `src/recorder.ts`
   - Status: `partial`
   - Role: command recording API with transform and clip-stack state
@@ -233,9 +237,11 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
 - `drawPath`
   - Status: `started`
   - Current state: recordable, fill now selects between middle-out fan, tessellated wedge, and
-    tessellated curve preparation paths, path verbs include conic/arc flattening and cusp-aware
+    tessellated curve preparation paths, patch-rendered fills now use first stencil-then-cover
+    execution for evenodd/nonzero parity, path verbs include conic/arc flattening and cusp-aware
     splitting, and stroke has tessellated geometry preparation
-  - Missing: higher-quality rasterization and broader path feature coverage
+  - Missing: higher-quality rasterization, broader path feature coverage, and full clip-stack
+    interaction with fill stenciling
 - `drawShape`
   - Status: `started`
   - Current state: shape is converted to `Path2D` and uses the same fill/stroke execution path
@@ -345,8 +351,8 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
   - Missing: shader lifecycle
 - Pipelines
   - Status: `started`
-  - Current state: direct fill, clip stencil, clip-aware cover, and stroke cover pipelines are
-    cached in the resource provider
+  - Current state: direct fill, clip stencil, clip-aware cover, evenodd/nonzero fill stencil,
+    stencil-cover, and stroke cover pipelines are cached in the resource provider
   - Missing: generalized render pipeline creation and keying
 - Global cache
   - Status: `started`
@@ -388,7 +394,8 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
 - Render pass setup
   - Status: `started`
   - Recording can be partitioned into prepared draw passes, and draw replay now covers direct
-    fill/stroke plus clip stencil when needed
+    fill/stroke plus clip stencil when needed, with patch fills using a first stencil-then-cover
+    pass shape closer to Graphite
 - Pipeline binding
   - Status: `started`
   - Basic fill, clip, and stroke pipelines exist for first path draws and are reused across command
@@ -456,11 +463,14 @@ These decisions directly affect the remaining work and are not settled yet.
 - broader advanced curve/path features are still missing
 - curve patch preparation is closer to Skia Graphite terminology now, but it is still CPU-generated
   geometry instead of true GPU patch tessellation
-- patch-instance replay now exists for wedges, curves, and strokes, and now carries per-patch
-  Wang-style resolve levels, but it still uses a bounded fixed-count WGSL topology instead of Skia's
-  static vertex/index buffers plus full Graphite patch writer behavior
+- patch-instance replay now exists for wedges, curves, and strokes, and patch fills now shade
+  through a first stencil-then-cover path and now carry per-patch Wang-style resolve levels, but
+  they still use a bounded fixed-count WGSL topology instead of Skia's static vertex/index buffers
+  plus full Graphite patch writer behavior
 - evenodd/nonzero fills now rely on prepared geometry plus scanline fallback rather than Skia-style
   path renderers, and coverage is still not Skia-grade
+- fill stenciling and complex clip-path stenciling still cannot be composed like Skia's clip stack,
+  so multiple arbitrary clip paths can still diverge
 - no SVG parser or SVG-to-`Path2D` ingestion path yet
 - no retained scene model
 - no bind group cache
@@ -517,18 +527,21 @@ Compared with Skia Graphite/Dawn `TessellateWedgesRenderStep`, `TessellateCurves
 
 ## Recommended Next Steps
 
-1. Port draw-pass style replay closer to Skia
-   - Batch multiple prepared steps into fewer render passes
-   - Separate clip, pipeline, and geometry state preparation from command encoding
-2. Deepen clip-stack semantics
-   - Preserve ordered intersect/difference behavior instead of intersect-only accumulation
-   - Add nested arbitrary clip-path tests that match Skia Graphite expectations
+1. Compose fill and clip stenciling
+   - Allow arbitrary clip-path stacks to intersect with the new patch-fill stencil path
+   - Stop falling back to correctness-only paths for convex and multi-path clips
+2. Improve patch tessellation fidelity
+   - Replace fixed-count WGSL subdivision with Wang's-formula-like resolve levels
+   - Move more patch metadata toward Skia's instance layout
 3. Improve transform and paint replay
    - Move per-draw transform from CPU-prepared geometry toward uniform-driven replay
    - Start separating paint data from vertex payloads
-4. Add pipeline/resource caching
+4. Port draw-pass style replay closer to Skia
+   - Batch multiple prepared steps into fewer render passes
+   - Separate clip, pipeline, and geometry state preparation from command encoding
+5. Add pipeline/resource caching
    - Extend reuse toward bind groups, transient buffers, and richer pipeline keys
-5. Deepen `src/caps.ts`
+6. Deepen `src/caps.ts`
    - Replace static format assumptions with richer backend policy
    - Add feature-gated fallbacks
 

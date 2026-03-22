@@ -393,6 +393,10 @@ Deno.test('drawing prepared recording flattens quadratic and cubic paths for fil
   assertEquals(draw?.bounds.origin[0], 24);
   assertEquals((draw?.patches.length ?? 0) > 0, true);
   assertEquals(draw?.patches.some((patch) => patch.fanPoint !== undefined), true);
+  assertEquals(
+    prepared.passes[0]?.steps[0]?.pipelineKeys,
+    ['path-fill-patch-stencil-nonzero', 'path-fill-stencil-cover'],
+  );
 });
 
 Deno.test('drawing prepared recording flattens conic and arc verbs', () => {
@@ -515,7 +519,8 @@ Deno.test('drawing prepared recording preserves evenodd fill rule through draw s
     throw new Error('expected pathFill draw');
   }
   assertEquals(draw.fillRule, 'evenodd');
-  assertEquals(step?.pipelineKeys, ['path-fill-patch-cover']);
+  assertEquals(step?.pipelineKeys, ['path-fill-patch-stencil-evenodd', 'path-fill-stencil-cover']);
+  assertEquals(step?.usesFillStencil, true);
 });
 
 Deno.test('drawing prepared recording derives clip bounds from clip path', () => {
@@ -789,6 +794,31 @@ Deno.test('dawn command buffer encodes fill draws with stencil and cover pipelin
     mock.created.renderPasses[0]?.colorAttachments[0]?.clearValue,
     { r: 0.25, g: 0.5, b: 0.75, a: 1 },
   );
+});
+
+Deno.test('dawn command buffer uses stencil-cover fill path for patch-rendered nonzero fills', () => {
+  const mock = createMockGpuContext();
+  const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
+  const recorder = createDrawingRecorder(sharedContext);
+  const binding = createOffscreenBinding(mock.context);
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [24, 96] },
+      { kind: 'quadTo', control: [96, 24], to: [168, 96] },
+      { kind: 'cubicTo', control1: [192, 120], control2: [96, 180], to: [24, 144] },
+      { kind: 'close' },
+    ),
+    { style: 'fill', color: [0.2, 0.4, 0.6, 0.5] },
+  );
+
+  encodeDawnCommandBuffer(sharedContext, finishDrawingRecorder(recorder), binding);
+
+  assertEquals(mock.created.renderPasses.length, 1);
+  assertEquals(mock.created.renderPasses[0]?.depthStencilAttachment !== undefined, true);
+  assertEquals(mock.created.drawCalls.length, 3);
+  assertEquals(mock.created.renderPipelines.length, 3);
 });
 
 Deno.test('dawn command buffer clips via clip path bounds fallback', () => {

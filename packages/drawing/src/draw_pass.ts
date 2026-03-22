@@ -12,7 +12,14 @@ export type DrawingDrawCommand = DrawPathCommand | DrawShapeCommand;
 
 export type DrawingPipelineKey =
   | 'clip-stencil-write'
+  | 'path-fill-stencil-evenodd'
+  | 'path-fill-stencil-nonzero'
+  | 'path-fill-patch-stencil-evenodd'
+  | 'path-fill-patch-stencil-nonzero'
+  | 'path-fill-curve-patch-stencil-evenodd'
+  | 'path-fill-curve-patch-stencil-nonzero'
   | 'path-fill-cover'
+  | 'path-fill-stencil-cover'
   | 'path-fill-patch-cover'
   | 'path-fill-curve-patch-cover'
   | 'path-fill-clip-cover'
@@ -30,6 +37,7 @@ export type DrawingPreparedStep = Readonly<{
   drawBounds: DrawingPreparedDraw['bounds'];
   clipBounds?: Rect;
   usesStencil: boolean;
+  usesFillStencil: boolean;
 }>;
 
 export type DrawingDrawPass = Readonly<{
@@ -57,7 +65,22 @@ const isDrawCommand = (command: DrawingCommand): command is DrawingDrawCommand =
 const getPipelineKeysForDraw = (draw: DrawingPreparedDraw): readonly DrawingPipelineKey[] => {
   const usesStencilClip = Boolean(draw.clip?.triangleRuns?.length);
   switch (draw.kind) {
-    case 'pathFill':
+    case 'pathFill': {
+      const fillStencilKey = draw.fillRule === 'evenodd'
+        ? draw.renderer === 'stencil-tessellated-curves'
+          ? 'path-fill-curve-patch-stencil-evenodd'
+          : draw.renderer === 'stencil-tessellated-wedges'
+          ? 'path-fill-patch-stencil-evenodd'
+          : 'path-fill-stencil-evenodd'
+        : draw.renderer === 'stencil-tessellated-curves'
+        ? 'path-fill-curve-patch-stencil-nonzero'
+        : draw.renderer === 'stencil-tessellated-wedges'
+        ? 'path-fill-patch-stencil-nonzero'
+        : 'path-fill-stencil-nonzero';
+
+      if (!usesStencilClip && draw.renderer !== 'middle-out-fan') {
+        return [fillStencilKey, 'path-fill-stencil-cover'];
+      }
       if (draw.renderer === 'middle-out-fan') {
         return usesStencilClip
           ? ['clip-stencil-write', 'path-fill-clip-cover']
@@ -72,7 +95,13 @@ const getPipelineKeysForDraw = (draw: DrawingPreparedDraw): readonly DrawingPipe
         return ['clip-stencil-write', 'path-fill-patch-clip-cover'];
       }
       return ['path-fill-patch-cover'];
+    }
     case 'pathStroke':
+      if (draw.patches.length === 0) {
+        return usesStencilClip
+          ? ['clip-stencil-write', 'path-stroke-clip-cover']
+          : ['path-stroke-cover'];
+      }
       return usesStencilClip
         ? ['clip-stencil-write', 'path-stroke-patch-clip-cover']
         : ['path-stroke-patch-cover'];
@@ -132,6 +161,9 @@ export const prepareDrawingRecording = (
           drawBounds: prepared.draw.bounds,
           clipBounds: prepared.draw.clip?.bounds,
           usesStencil: prepared.draw.usesStencil,
+          usesFillStencil: prepared.draw.kind === 'pathFill' &&
+            prepared.draw.renderer !== 'middle-out-fan' &&
+            !prepared.draw.clip?.triangleRuns?.length,
         });
       } else {
         currentUnsupportedDraws.push(command);

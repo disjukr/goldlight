@@ -38,6 +38,33 @@ const toGpuColor = (color: readonly [number, number, number, number]): GPUColor 
   a: color[3],
 });
 
+const createBoundsCoverVertexData = (
+  bounds: Readonly<{
+    origin: readonly [number, number];
+    size: Readonly<{
+      width: number;
+      height: number;
+    }>;
+  }>,
+  color: readonly [number, number, number, number],
+  target: Readonly<{
+    width: number;
+    height: number;
+  }>,
+): Float32Array =>
+  createClipSpaceVertexData(
+    [
+      bounds.origin,
+      [bounds.origin[0] + bounds.size.width, bounds.origin[1]],
+      [bounds.origin[0] + bounds.size.width, bounds.origin[1] + bounds.size.height],
+      bounds.origin,
+      [bounds.origin[0] + bounds.size.width, bounds.origin[1] + bounds.size.height],
+      [bounds.origin[0], bounds.origin[1] + bounds.size.height],
+    ],
+    color,
+    target,
+  );
+
 const createClipSpaceVertexData = (
   triangles: readonly (readonly [number, number])[],
   color: readonly [number, number, number, number],
@@ -352,6 +379,7 @@ const encodePreparedFillStep = (
   }
 
   const usesPatchFill = step.draw.renderer !== 'middle-out-fan';
+  const usesFillStencil = step.usesFillStencil;
   const fillVertices = usesPatchFill ? null : createClipSpaceVertexData(
     step.draw.triangles,
     step.draw.color,
@@ -383,8 +411,50 @@ const encodePreparedFillStep = (
   const fringeVertexBuffer = fringeVertices
     ? createVertexBuffer(sharedContext, fringeVertices)
     : null;
+  const boundsCoverVertices = usesFillStencil
+    ? createBoundsCoverVertexData(
+      step.draw.bounds,
+      step.draw.color,
+      sharedContext.backend.target,
+    )
+    : null;
+  const boundsCoverVertexBuffer = boundsCoverVertices
+    ? createVertexBuffer(sharedContext, boundsCoverVertices)
+    : null;
 
   applyStepClip(pass, step, sharedContext.backend.target);
+  if (usesFillStencil) {
+    const stencilPipeline = sharedContext.resourceProvider.getPipeline(step.pipelineKeys[0]!);
+    const coverPipeline = sharedContext.resourceProvider.getPipeline(step.pipelineKeys[1]!);
+    pass.setPipeline(stencilPipeline);
+    if (usesPatchFill && patchVertexBuffer && patchVertices) {
+      pass.setVertexBuffer(0, patchVertexBuffer);
+      pass.draw(
+        step.draw.renderer === 'stencil-tessellated-wedges' ? 3 : curvePatchVertexCount,
+        patchVertices.length /
+          (step.draw.renderer === 'stencil-tessellated-wedges'
+            ? wedgePatchFloats
+            : curvePatchFloats),
+      );
+    } else if (fillVertexBuffer && fillVertices) {
+      pass.setVertexBuffer(0, fillVertexBuffer);
+      pass.draw(fillVertices.length / floatsPerVertex);
+    }
+
+    if (boundsCoverVertexBuffer && boundsCoverVertices) {
+      pass.setPipeline(coverPipeline);
+      pass.setVertexBuffer(0, boundsCoverVertexBuffer);
+      pass.draw(boundsCoverVertices.length / floatsPerVertex);
+    }
+
+    if (fringeVertices && fringeVertexBuffer) {
+      pass.setPipeline(sharedContext.resourceProvider.getPipeline('path-fill-cover'));
+      pass.setVertexBuffer(0, fringeVertexBuffer);
+      pass.draw(fringeVertices.length / floatsPerVertex);
+    }
+    return;
+  }
+
   if (getStencilClipCount(step) > 0) {
     const colorPipeline = sharedContext.resourceProvider.getPipeline(step.pipelineKeys[1]!);
     encodeStencilClips(pass, sharedContext, step);
@@ -511,7 +581,7 @@ export const encodeDawnCommandBuffer = (
   const unsupportedCommands: DrawingCommand[] = [...prepared.unsupportedCommands];
   let passCount = 0;
   const hasStencilSteps = prepared.passes.some((passInfo) =>
-    passInfo.steps.some((step) => step.usesStencil)
+    passInfo.steps.some((step) => step.usesStencil || step.usesFillStencil)
   );
   const stencilView = hasStencilSteps
     ? sharedContext.resourceProvider.getStencilAttachmentView()
@@ -540,7 +610,7 @@ export const encodeDawnCommandBuffer = (
     let stepIndex = 0;
     while (stepIndex < passInfo.steps.length) {
       const step = passInfo.steps[stepIndex]!;
-      if (step.usesStencil) {
+      if (step.usesStencil || step.usesFillStencil) {
         const pass = encoder.beginRenderPass(
           createRenderPassDescriptor(
             colorView,

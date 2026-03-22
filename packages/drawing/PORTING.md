@@ -249,8 +249,9 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
 - Clip path
   - Status: `started`
   - Current state: clip stack is recorded explicitly, rect clips and convex path clips are
-    intersected through prepared geometry, and multiple complex path clips now accumulate through
-    stencil replay before the color pass
+    intersected through prepared geometry, patch-rendered fills and strokes now fall back to direct
+    clipped triangles when convex clips would bypass exact clipping, and multiple complex path clips
+    now accumulate through stencil replay before the color pass
   - Missing: full nested arbitrary clip-path coverage beyond intersect-only semantics and Skia-like
     clip stack ordering rules
 - Transform stack
@@ -270,7 +271,8 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
   - Current state: pipeline multisample count follows target sample count, the basic snapshot
     example renders through a supersampled offscreen path before PNG export, and fill/stroke draws
     now emit a first geometry-fringe AA pass
-  - Missing: coverage/analytic AA beyond geometry fringe and example-specific supersampling
+  - Missing: coverage/analytic AA beyond geometry fringe, clip-aware AA for patch paths, and
+    example-specific supersampling
 - Text/glyph drawing
   - Status: `pending`
   - Out of scope for now
@@ -395,7 +397,8 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
   - Status: `started`
   - Recording can be partitioned into prepared draw passes, and draw replay now covers direct
     fill/stroke plus clip stencil when needed, with patch fills using a first stencil-then-cover
-    pass shape closer to Graphite
+    pass shape closer to Graphite and convex clips forcing a safer direct-geometry fallback when
+    patch replay would diverge
 - Pipeline binding
   - Status: `started`
   - Basic fill, clip, and stroke pipelines exist for first path draws and are reused across command
@@ -471,6 +474,14 @@ These decisions directly affect the remaining work and are not settled yet.
   path renderers, and coverage is still not Skia-grade
 - fill stenciling and complex clip-path stenciling still cannot be composed like Skia's clip stack,
   so multiple arbitrary clip paths can still diverge
+- convex clips now force exact direct-geometry fallbacks for patch-rendered fills and strokes, but
+  this is still a correctness fallback rather than Skia's native clip-aware patch rendering
+- convex clip fallbacks currently disable fringe AA instead of clipping it analytically, so clipped
+  edges remain correct but can look harsher than Skia
+- convex stroke fallbacks now also switch back to direct-cover pipelines so the Dawn vertex layout
+  matches the emitted geometry, but this is still separate from true clip-aware patch stroking
+- convex clips now force exact direct-geometry fallbacks for patch-rendered fills and strokes, but
+  this is still a correctness fallback rather than Skia's native clip-aware patch rendering
 - no SVG parser or SVG-to-`Path2D` ingestion path yet
 - no retained scene model
 - no bind group cache

@@ -555,6 +555,49 @@ Deno.test('drawing prepared recording derives clip bounds from clip path', () =>
   assertEquals(prepared.passes[0]?.steps[0]?.pipelineKeys, ['path-fill-cover']);
 });
 
+Deno.test('drawing prepared recording falls back to direct fill when convex clips would bypass patch clipping', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  clipDrawingRecorderPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [48, 32] },
+      { kind: 'lineTo', to: [112, 48] },
+      { kind: 'lineTo', to: [96, 112] },
+      { kind: 'lineTo', to: [32, 96] },
+      { kind: 'close' },
+    ),
+  );
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [24, 96] },
+      { kind: 'quadTo', control: [96, 24], to: [168, 96] },
+      { kind: 'cubicTo', control1: [192, 120], control2: [96, 180], to: [24, 144] },
+      { kind: 'close' },
+    ),
+    { style: 'fill' },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const step = prepared.passes[0]?.steps[0];
+  const draw = step?.draw;
+
+  assertEquals(draw?.kind, 'pathFill');
+  if (draw?.kind !== 'pathFill') {
+    throw new Error('expected pathFill draw');
+  }
+  assertEquals(draw.renderer, 'middle-out-fan');
+  assertEquals(draw.patches.length, 0);
+  assertEquals(draw.fringeVertices, undefined);
+  assertEquals(draw.bounds.origin[0] >= 32, true);
+  assertEquals(draw.bounds.origin[1] >= 32, true);
+  assertEquals(step?.pipelineKeys, ['path-fill-cover']);
+  assertEquals(step?.usesFillStencil, false);
+});
+
 Deno.test('drawing prepared recording accumulates clip stack intersections', () => {
   const mock = createMockGpuContext();
   const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
@@ -586,6 +629,43 @@ Deno.test('drawing prepared recording accumulates clip stack intersections', () 
 
   const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
   assertEquals(prepared.passes[0]?.steps[0]?.clipRect, createRect(32, 32, 48, 40));
+});
+
+Deno.test('drawing prepared recording falls back to direct stroke geometry when convex clips are present', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  clipDrawingRecorderPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [40, 32] },
+      { kind: 'lineTo', to: [104, 32] },
+      { kind: 'lineTo', to: [120, 96] },
+      { kind: 'lineTo', to: [56, 112] },
+      { kind: 'close' },
+    ),
+  );
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [32, 96] },
+      { kind: 'cubicTo', control1: [48, 16], control2: [144, 16], to: [160, 96] },
+      { kind: 'lineTo', to: [160, 160] },
+    ),
+    { style: 'stroke', strokeWidth: 8 },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const draw = prepared.passes[0]?.steps[0]?.draw;
+
+  assertEquals(draw?.kind, 'pathStroke');
+  if (draw?.kind !== 'pathStroke') {
+    throw new Error('expected pathStroke draw');
+  }
+  assertEquals(draw.patches.length, 0);
+  assertEquals(draw.fringeVertices, undefined);
+  assertEquals(prepared.passes[0]?.steps[0]?.pipelineKeys, ['path-stroke-cover']);
 });
 
 Deno.test('drawing prepared recording preserves multiple complex path clips for stencil replay', () => {

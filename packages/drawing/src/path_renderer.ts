@@ -1860,6 +1860,11 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
         baseTriangles = prepareFillTriangles(subpaths, command.path.fillRule) ?? [];
         break;
     }
+    const requiresExactConvexClipFallback = (preparedClipStack?.convexPolygons.length ?? 0) > 0 &&
+      renderer !== 'middle-out-fan';
+    const clippedFringeVertices = requiresExactConvexClipFallback
+      ? undefined
+      : buildFillFringe(subpaths, resolveFillColor(command.paint));
     const triangles = applyConvexClipStack(
       baseTriangles,
       preparedClipStack,
@@ -1871,13 +1876,13 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
       supported: true,
       draw: {
         kind: 'pathFill',
-        renderer,
+        renderer: requiresExactConvexClipFallback ? 'middle-out-fan' : renderer,
         triangles,
-        fringeVertices: buildFillFringe(subpaths, resolveFillColor(command.paint)),
-        patches,
+        fringeVertices: clippedFringeVertices,
+        patches: requiresExactConvexClipFallback ? [] : patches,
         fillRule: command.path.fillRule,
         color: resolveFillColor(command.paint),
-        bounds: unionBounds(subpaths.map((subpath) => computeBounds(subpath.points))),
+        bounds: computeBounds(triangles),
         clipRect: preparedClipStack?.bounds,
         clip: preparedClipStack?.stencilClip,
         usesStencil: Boolean(preparedClipStack?.stencilClip?.triangleRuns?.length),
@@ -1887,6 +1892,7 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
 
   const patches = preparePatches(command.path, command.transform, false);
   const preparedStroke = prepareStrokeTriangles(subpaths, command.paint);
+  const requiresExactConvexClipFallback = (preparedClipStack?.convexPolygons.length ?? 0) > 0;
   const strokeTriangles = applyConvexClipStack(
     preparedStroke?.triangles ?? [],
     preparedClipStack,
@@ -1900,8 +1906,8 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
       kind: 'pathStroke',
       renderer: selectPathStrokeRenderer(patches),
       triangles: strokeTriangles,
-      fringeVertices: preparedStroke?.fringeVertices,
-      patches,
+      fringeVertices: requiresExactConvexClipFallback ? undefined : preparedStroke?.fringeVertices,
+      patches: requiresExactConvexClipFallback ? [] : patches,
       color: resolveStrokeColor(command.paint),
       halfWidth: Math.max(0.5, Math.max(command.paint.strokeWidth ?? 1, epsilon)) / 2,
       bounds: computeBounds(strokeTriangles),

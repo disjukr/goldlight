@@ -111,6 +111,7 @@ fn local_to_device(position: vec2<f32>) -> vec2<f32> {
   );
 }
 
+
 fn device_to_ndc(position: vec2<f32>) -> vec4<f32> {
   return vec4<f32>((position * viewport.scale) + viewport.translate, 0.0, 1.0);
 }
@@ -466,6 +467,19 @@ fn local_to_device(position: vec2<f32>) -> vec2<f32> {
   );
 }
 
+fn affine_matrix() -> mat2x2<f32> {
+  return mat2x2<f32>(
+    vec2<f32>(step.matrix0.x, step.matrix0.y),
+    vec2<f32>(step.matrix0.z, step.matrix0.w),
+  );
+}
+
+fn max_scale_factor(affine: mat2x2<f32>) -> f32 {
+  let c0 = vec2<f32>(affine[0].x, affine[0].y);
+  let c1 = vec2<f32>(affine[1].x, affine[1].y);
+  return max(length(c0), length(c1));
+}
+
 fn eval_patch(
   curveType: f32,
   weight: f32,
@@ -666,6 +680,7 @@ fn vs_main(
   let roundEnd = (flags & 32u) != 0u;
   let contourStart = (flags & 1u) != 0u;
   let contourEnd = (flags & 2u) != 0u;
+  let smoothJoin = (flags & 64u) != 0u;
   var curveP0 = p0;
   var curveP1 = p1;
   var curveP2 = p2;
@@ -700,7 +715,7 @@ fn vs_main(
   }
   let maxEdges = f32(SEGMENTS);
   var numEdgesInJoin = stroke_join_edges(joinType, prevTan, tan0, stroke.x);
-  if (contourStart) {
+  if (contourStart || smoothJoin) {
     numEdgesInJoin = 0.0;
     prevTan = tan0;
   }

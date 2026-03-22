@@ -12,7 +12,7 @@ import {
   submitToDawnQueueManager,
 } from '@rieul3d/drawing';
 
-const outputSize = 640;
+const outputSize = 840;
 const supersampleScale = 2;
 
 const downsampleRgba = (
@@ -213,6 +213,42 @@ export const renderStrokesSnapshot = async (): Promise<
       strokeJoin: 'round',
       strokeCap: 'round',
       color: [0.11, 0.13, 0.18, 1],
+    },
+  );
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [80, 730] },
+      { kind: 'quadTo', control: [185, 620], to: [300, 730] },
+    ),
+    {
+      style: 'stroke',
+      strokeWidth: 18,
+      strokeJoin: 'round',
+      strokeCap: 'round',
+      color: [0.76, 0.18, 0.42, 0.55],
+    },
+  );
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [410, 730] },
+      {
+        kind: 'arcTo',
+        center: [500, 730],
+        radius: 90,
+        startAngle: Math.PI,
+        endAngle: 0,
+      },
+    ),
+    {
+      style: 'stroke',
+      strokeWidth: 18,
+      strokeJoin: 'round',
+      strokeCap: 'round',
+      color: [0.13, 0.45, 0.36, 0.85],
     },
   );
 

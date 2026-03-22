@@ -256,6 +256,23 @@ const toCurveType = (patch: DrawingPreparedPatch): number => {
   }
 };
 
+const quadraticToCubicPoints = (
+  p0: Point2D,
+  p1: Point2D,
+  p2: Point2D,
+): readonly [Point2D, Point2D, Point2D, Point2D] => {
+  const c1: Point2D = [
+    p0[0] + ((p1[0] - p0[0]) * (2 / 3)),
+    p0[1] + ((p1[1] - p0[1]) * (2 / 3)),
+  ];
+  const c2: Point2D = [
+    p2[0] + ((p1[0] - p2[0]) * (2 / 3)),
+    p2[1] + ((p1[1] - p2[1]) * (2 / 3)),
+  ];
+  return [p0, c1, c2, p2];
+};
+
+
 const getPatchPoints = (
   patch: DrawingPreparedPatch,
 ): readonly [Point2D, Point2D, Point2D, Point2D] =>
@@ -266,6 +283,16 @@ const getPatchPoints = (
     : patch.kind === 'conic'
     ? [patch.points[0], patch.points[1], patch.points[2], patch.points[2]]
     : [patch.points[0], patch.points[1], patch.points[2], patch.points[3]];
+
+const getStrokePatchPoints = (
+  patch: DrawingPreparedPatch,
+): readonly [Point2D, Point2D, Point2D, Point2D] =>
+  patch.kind === 'quadratic'
+    ? quadraticToCubicPoints(patch.points[0], patch.points[1], patch.points[2])
+    : getPatchPoints(patch);
+
+const toStrokeCurveType = (patch: DrawingPreparedPatch): number =>
+  patch.kind === 'quadratic' ? 3 : toCurveType(patch);
 
 const createWedgePatchInstanceData = (
   patches: readonly DrawingPreparedPatch[],
@@ -323,7 +350,7 @@ const createStrokePatchInstanceData = (
   const data = new Float32Array(patches.length * strokePatchFloats);
   let offset = 0;
   for (const patch of patches) {
-    const points = getPatchPoints(patch.patch);
+    const points = getStrokePatchPoints(patch.patch);
     data[offset++] = points[0]![0];
     data[offset++] = points[0]![1];
     data[offset++] = points[1]![0];
@@ -336,11 +363,12 @@ const createStrokePatchInstanceData = (
     data[offset++] = patch.joinControlPoint[1];
     data[offset++] = strokeStyle.halfWidth;
     data[offset++] = strokeStyle.joinLimit;
-    data[offset++] = toCurveType(patch.patch);
+    data[offset++] = toStrokeCurveType(patch.patch);
     data[offset++] = patch.patch.kind === 'conic' ? patch.patch.weight : 1;
     data[offset++] = Math.min(maxPatchResolveLevel, Math.max(0, patch.patch.resolveLevel));
     data[offset++] = (patch.contourStart ? 1 : 0) +
       (patch.contourEnd ? 2 : 0) +
+      (patch.smoothJoin ? 64 : 0) +
       (patch.startCap === 'square' ? 4 : 0) +
       (patch.endCap === 'square' ? 8 : 0) +
       (patch.startCap === 'round' ? 16 : 0) +

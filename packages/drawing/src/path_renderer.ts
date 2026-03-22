@@ -65,6 +65,7 @@ export type DrawingPreparedStrokePatch = Readonly<{
   joinControlPoint: Point2D;
   contourStart: boolean;
   contourEnd: boolean;
+  smoothJoin: boolean;
   startCap: 'none' | 'butt' | 'square' | 'round';
   endCap: 'none' | 'butt' | 'square' | 'round';
 }>;
@@ -102,8 +103,10 @@ type DrawingStrokeContourEvent = Readonly<{
   patch: DrawingPreparedPatch;
   contourStart: boolean;
   contourEnd: boolean;
+  smoothJoin: boolean;
   startCap: 'none' | 'butt' | 'square' | 'round';
   endCap: 'none' | 'butt' | 'square' | 'round';
+  joinControlPoint?: Point2D;
 }>;
 
 type DrawingStrokeIteratorContourState = Readonly<{
@@ -479,19 +482,30 @@ const chopAndWriteStrokeCubics = (
 const subdivideStrokePreparedPatch = (
   patch: DrawingPreparedPatch,
 ): readonly DrawingPreparedPatch[] => {
-  if (patch.kind !== 'cubic') {
-    return Object.freeze([patch]);
+  const normalizedPatch = patch.kind === 'quadratic'
+    ? finalizePatch({
+      kind: 'cubic',
+      points: [
+        patch.points[0],
+        add(patch.points[0], scale(subtract(patch.points[1], patch.points[0]), 2 / 3)),
+        add(patch.points[2], scale(subtract(patch.points[1], patch.points[2]), 2 / 3)),
+        patch.points[2],
+      ],
+    })
+    : patch;
+  if (normalizedPatch.kind !== 'cubic') {
+    return Object.freeze([normalizedPatch]);
   }
-  const numPatches = accountForStrokeCurve(patch.resolveLevel);
+  const numPatches = accountForStrokeCurve(normalizedPatch.resolveLevel);
   return numPatches > 0
     ? chopAndWriteStrokeCubics(
-      patch.points[0],
-      patch.points[1],
-      patch.points[2],
-      patch.points[3],
+      normalizedPatch.points[0],
+      normalizedPatch.points[1],
+      normalizedPatch.points[2],
+      normalizedPatch.points[3],
       numPatches,
     )
-    : Object.freeze([patch]);
+    : Object.freeze([normalizedPatch]);
 };
 
 const prepareStrokePatches = (
@@ -535,7 +549,7 @@ const getPatchPoints4 = (
   patch.kind === 'line'
     ? [patch.points[0], patch.points[0], patch.points[1], patch.points[1]]
     : patch.kind === 'quadratic'
-    ? [patch.points[0], patch.points[1], patch.points[2], patch.points[2]]
+    ? quadraticToCubicPoints(patch.points[0], patch.points[1], patch.points[2])
     : patch.kind === 'conic'
     ? [patch.points[0], patch.points[1], patch.points[2], patch.points[2]]
     : [patch.points[0], patch.points[1], patch.points[2], patch.points[3]];
@@ -586,6 +600,19 @@ const isCuspLikeStrokeTurn = (
   return cosine < -0.95;
 };
 
+const isSmoothStrokeContinuation = (
+  previousPatch: DrawingPreparedPatch,
+  currentPatch: DrawingPreparedPatch,
+): boolean => {
+  const outgoing = getPatchOutgoingTangent(previousPatch);
+  const incoming = getPatchIncomingTangent(currentPatch);
+  if (!outgoing || !incoming) {
+    return false;
+  }
+  const cosine = (outgoing[0] * incoming[0]) + (outgoing[1] * incoming[1]);
+  return cosine > 0.995;
+};
+
 const createDegenerateSquareStrokePatch = (
   center: Point2D,
   joinTo: Point2D,
@@ -600,6 +627,7 @@ const createDegenerateSquareStrokePatch = (
   joinControlPoint: joinTo,
   contourStart: false,
   contourEnd: false,
+  smoothJoin: false,
   startCap: 'none',
   endCap: 'none',
 });
@@ -616,6 +644,7 @@ const createDegenerateRoundStrokePatch = (
   joinControlPoint: center,
   contourStart: true,
   contourEnd: true,
+  smoothJoin: false,
   startCap: 'round',
   endCap: 'round',
 });
@@ -628,6 +657,72 @@ const createStrokeLinePatch = (
   points: [from, to],
   resolveLevel: 0,
 });
+
+const quadraticToCubicPoints = (
+  p0: Point2D,
+  p1: Point2D,
+  p2: Point2D,
+): readonly [Point2D, Point2D, Point2D, Point2D] => {
+  const c1 = add(p0, scale(subtract(p1, p0), 2 / 3));
+  const c2 = add(p2, scale(subtract(p1, p2), 2 / 3));
+  return [p0, c1, c2, p2];
+};
+
+const createArcConicPatches = (
+  center: Point2D,
+  radius: number,
+  startAngle: number,
+  endAngle: number,
+  counterClockwise: boolean,
+  transform: readonly [number, number, number, number, number, number],
+): readonly DrawingPatchDefinition[] => {
+  const turn = Math.PI * 2;
+  let sweep = endAngle - startAngle;
+  if (counterClockwise) {
+    while (sweep <= 0) {
+      sweep += turn;
+    }
+  } else {
+    while (sweep >= 0) {
+      sweep -= turn;
+    }
+  }
+  const segmentCount = Math.max(1, Math.ceil(Math.abs(sweep) / (Math.PI / 2)));
+  const segmentSweep = sweep / segmentCount;
+  const patches: DrawingPatchDefinition[] = [];
+
+  for (let index = 0; index < segmentCount; index += 1) {
+    const theta0 = startAngle + (segmentSweep * index);
+    const theta1 = theta0 + segmentSweep;
+    const thetaMid = (theta0 + theta1) / 2;
+    const halfSweep = segmentSweep / 2;
+    const weight = Math.cos(halfSweep);
+    const start: Point2D = [
+      center[0] + (Math.cos(theta0) * radius),
+      center[1] + (Math.sin(theta0) * radius),
+    ];
+    const end: Point2D = [
+      center[0] + (Math.cos(theta1) * radius),
+      center[1] + (Math.sin(theta1) * radius),
+    ];
+    const controlDistance = radius / Math.max(weight, 1e-5);
+    const control: Point2D = [
+      center[0] + (Math.cos(thetaMid) * controlDistance),
+      center[1] + (Math.sin(thetaMid) * controlDistance),
+    ];
+    patches.push({
+      kind: 'conic',
+      points: [
+        transformPoint2D(start, transform),
+        transformPoint2D(control, transform),
+        transformPoint2D(end, transform),
+      ],
+      weight,
+    });
+  }
+
+  return Object.freeze(patches);
+};
 
 const createPreparedStrokePatches = (
   contours: readonly DrawingStrokeContourRecord[],
@@ -730,17 +825,21 @@ const createPreparedStrokeContourPatches = (
     if (!contour.closed && cap === 'round') {
       leadingPatches.push({
         patch: createDegenerateRoundStrokePatch(firstStart).patch,
-        contourStart: true,
+        contourStart: false,
         contourEnd: false,
+        smoothJoin: false,
         startCap: 'round',
         endCap: 'round',
+        joinControlPoint: firstStart,
       });
       trailingPatches.push({
         patch: createDegenerateRoundStrokePatch(lastEnd).patch,
         contourStart: false,
-        contourEnd: true,
+        contourEnd: false,
+        smoothJoin: false,
         startCap: 'round',
         endCap: 'round',
+        joinControlPoint: lastEnd,
       });
     }
     if (hasPrependedSquareCap && firstTangent) {
@@ -748,6 +847,7 @@ const createPreparedStrokeContourPatches = (
         patch: createStrokeLinePatch(add(firstStart, scale(firstTangent, -halfWidth)), firstStart),
         contourStart: true,
         contourEnd: false,
+        smoothJoin: false,
         startCap: 'none',
         endCap: 'none',
       });
@@ -756,6 +856,7 @@ const createPreparedStrokeContourPatches = (
       patch: firstPatch,
       contourStart: !hasPrependedSquareCap,
       contourEnd: !hasAppendedSquareCap && contour.patches.length === 1,
+      smoothJoin: false,
       startCap: !contour.closed && !hasPrependedSquareCap && cap !== 'round' ? cap : 'none',
       endCap:
         !contour.closed && !hasAppendedSquareCap && contour.patches.length === 1 && cap !== 'round'
@@ -767,6 +868,7 @@ const createPreparedStrokeContourPatches = (
         patch: contour.patches[index]!,
         contourStart: false,
         contourEnd: !hasAppendedSquareCap && index + 1 === contour.patches.length,
+        smoothJoin: isSmoothStrokeContinuation(contour.patches[index - 1]!, contour.patches[index]!),
         startCap: 'none',
         endCap: !contour.closed && !hasAppendedSquareCap && index + 1 === contour.patches.length &&
             cap !== 'round'
@@ -779,6 +881,7 @@ const createPreparedStrokeContourPatches = (
         patch: createStrokeLinePatch(lastEnd, add(lastEnd, scale(lastTangent, halfWidth))),
         contourStart: false,
         contourEnd: true,
+        smoothJoin: false,
         startCap: 'none',
         endCap: 'none',
       });
@@ -793,18 +896,35 @@ const createPreparedStrokeContourPatches = (
   })();
   const iteratorVerbs: readonly DrawingStrokeIteratorVerb[] = (() => {
     const verbs: DrawingStrokeIteratorVerb[] = [];
-    for (const event of iteratorState.leadingPatches) {
-      verbs.push({ kind: 'patch', event });
-    }
-    verbs.push({ kind: 'patch', event: iteratorState.deferredFirstPatch });
-    for (const event of iteratorState.bodyPatches) {
-      verbs.push({ kind: 'patch', event });
-    }
-    for (const event of iteratorState.trailingPatches) {
-      verbs.push({ kind: 'patch', event });
-    }
-    if (iteratorState.joinBarrier === 'moveWithinContour') {
-      verbs.push({ kind: 'moveWithinContour' });
+    const usesRoundCapBarrier = !contour.closed && cap === 'round';
+    if (usesRoundCapBarrier) {
+      for (const event of iteratorState.bodyPatches) {
+        verbs.push({ kind: 'patch', event });
+      }
+      for (const event of iteratorState.trailingPatches) {
+        verbs.push({ kind: 'patch', event });
+      }
+      if (iteratorState.joinBarrier === 'moveWithinContour') {
+        verbs.push({ kind: 'moveWithinContour' });
+      }
+      for (const event of iteratorState.leadingPatches) {
+        verbs.push({ kind: 'patch', event });
+      }
+      verbs.push({ kind: 'patch', event: iteratorState.deferredFirstPatch });
+    } else {
+      for (const event of iteratorState.leadingPatches) {
+        verbs.push({ kind: 'patch', event });
+      }
+      verbs.push({ kind: 'patch', event: iteratorState.deferredFirstPatch });
+      for (const event of iteratorState.bodyPatches) {
+        verbs.push({ kind: 'patch', event });
+      }
+      for (const event of iteratorState.trailingPatches) {
+        verbs.push({ kind: 'patch', event });
+      }
+      if (iteratorState.joinBarrier === 'moveWithinContour') {
+        verbs.push({ kind: 'moveWithinContour' });
+      }
     }
     verbs.push({ kind: 'contourFinished' });
     return Object.freeze(verbs);
@@ -816,19 +936,19 @@ const createPreparedStrokeContourPatches = (
       case 'patch': {
         const event = verb.event;
         const joinControlPoint =
-          !deferredFirstConsumed && event === iteratorState.deferredFirstPatch
+          event.joinControlPoint ??
+          ((!deferredFirstConsumed && event === iteratorState.deferredFirstPatch)
             ? iteratorState.joinBarrier === 'join'
               ? getPatchOutgoingJoinControlPoint(lastPatch)
-              : iteratorState.leadingPatches.length > 0
-              ? previousJoinControlPoint
               : deferredJoinControlPoint
-            : previousJoinControlPoint;
+            : previousJoinControlPoint);
         prepared.push({
           patch: event.patch,
           prevPoint: joinControlPoint,
           joinControlPoint,
           contourStart: event.contourStart,
           contourEnd: event.contourEnd,
+          smoothJoin: event.smoothJoin,
           startCap: event.startCap,
           endCap: event.endCap,
         });
@@ -1815,21 +1935,19 @@ const preparePatches = (
       }
       case 'arcTo': {
         if (!currentPoint) break;
-        const points: Point2D[] = [currentPoint];
-        flattenArc(
+        const arcPatches = createArcConicPatches(
           verb.center,
           verb.radius,
           verb.startAngle,
           verb.endAngle,
           verb.counterClockwise ?? false,
           transform,
-          points,
         );
-        for (let index = 1; index < points.length; index += 1) {
-          pushPatch({ kind: 'line', points: [points[index - 1]!, points[index]!] });
-          contourPoints.push(points[index]!);
+        for (const arcPatch of arcPatches) {
+          pushPatch(arcPatch);
+          contourPoints.push(arcPatch.points[arcPatch.points.length - 1]!);
         }
-        currentPoint = points[points.length - 1] ?? currentPoint;
+        currentPoint = contourPoints[contourPoints.length - 1] ?? currentPoint;
         break;
       }
       case 'close':

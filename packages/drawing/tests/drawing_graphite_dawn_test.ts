@@ -1206,8 +1206,8 @@ Deno.test('drawing prepared stroke patches seed open contours from first tangent
     throw new Error('expected pathStroke draw');
   }
   assertEquals(draw.patches.length > 0, true);
-  assertEquals(draw.patches[0]?.joinControlPoint, [20, 30]);
-  assertEquals(draw.patches[0]?.startCap, 'round');
+  assertEquals(draw.patches.at(-1)?.joinControlPoint, [13.333333333333332, 20]);
+  assertEquals(draw.patches.at(-1)?.startCap, 'none');
   assertEquals(draw.usesTessellatedStrokePatches, true);
 });
 

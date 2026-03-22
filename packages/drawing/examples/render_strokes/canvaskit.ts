@@ -1,7 +1,7 @@
 import CanvasKitModule from 'npm:canvaskit-wasm';
 import { createPath2D } from '@rieul3d/geometry';
 
-const outputSize = 640;
+const outputSize = 840;
 type CanvasKitFactory = (options?: unknown) => Promise<any>;
 type CanvasKit = Awaited<ReturnType<CanvasKitFactory>>;
 
@@ -11,6 +11,81 @@ const toColor = (
   CanvasKit: CanvasKit,
   color: readonly [number, number, number, number],
 ) => CanvasKit.Color4f(color[0], color[1], color[2], color[3]);
+
+const radiansToDegrees = (radians: number): number => (radians * 180) / Math.PI;
+
+const normalizeSweep = (
+  startAngle: number,
+  endAngle: number,
+  counterClockwise: boolean | undefined,
+): number => {
+  const turn = Math.PI * 2;
+  let sweep = endAngle - startAngle;
+  if (counterClockwise) {
+    while (sweep <= 0) {
+      sweep += turn;
+    }
+  } else {
+    while (sweep >= 0) {
+      sweep -= turn;
+    }
+  }
+  return sweep;
+};
+
+const appendArcFallback = (
+  skPath: any,
+  center: readonly [number, number],
+  radius: number,
+  startAngle: number,
+  endAngle: number,
+  counterClockwise: boolean | undefined,
+): void => {
+  const sweep = normalizeSweep(startAngle, endAngle, counterClockwise);
+  const segments = Math.max(8, Math.ceil((Math.abs(sweep) / (Math.PI * 2)) * 48));
+  for (let index = 1; index <= segments; index += 1) {
+    const t = index / segments;
+    const theta = startAngle + (sweep * t);
+    skPath.lineTo(
+      center[0] + (Math.cos(theta) * radius),
+      center[1] + (Math.sin(theta) * radius),
+    );
+  }
+};
+
+const appendArc = (
+  CanvasKit: CanvasKit,
+  skPath: any,
+  center: readonly [number, number],
+  radius: number,
+  startAngle: number,
+  endAngle: number,
+  counterClockwise: boolean | undefined,
+): void => {
+  const sweep = normalizeSweep(startAngle, endAngle, counterClockwise);
+  const startDegrees = radiansToDegrees(startAngle);
+  const sweepDegrees = radiansToDegrees(sweep);
+  const oval = CanvasKit.LTRBRect(
+    center[0] - radius,
+    center[1] - radius,
+    center[0] + radius,
+    center[1] + radius,
+  );
+
+  if (typeof skPath.arcToOval === 'function') {
+    skPath.arcToOval(oval, startDegrees, sweepDegrees, false);
+    return;
+  }
+  if (typeof skPath.addArc === 'function') {
+    skPath.addArc(oval, startDegrees, sweepDegrees);
+    return;
+  }
+  if (typeof skPath.arcTo === 'function') {
+    skPath.arcTo(oval, startDegrees, sweepDegrees, false);
+    return;
+  }
+  appendArcFallback(skPath, center, radius, startAngle, endAngle, counterClockwise);
+};
 
 const createCanvasKitPath = (
   CanvasKit: CanvasKit,
@@ -36,6 +111,17 @@ const createCanvasKitPath = (
           verb.control2[1],
           verb.to[0],
           verb.to[1],
+        );
+        break;
+      case 'arcTo':
+        appendArc(
+          CanvasKit,
+          skPath,
+          verb.center,
+          verb.radius,
+          verb.startAngle,
+          verb.endAngle,
+          verb.counterClockwise,
         );
         break;
       case 'close':
@@ -256,6 +342,44 @@ export const renderStrokesCanvasKitSnapshot = async (): Promise<
       strokeJoin: 'round',
       strokeCap: 'round',
       color: [0.11, 0.13, 0.18, 1],
+    },
+  );
+
+  drawStroke(
+    CanvasKit,
+    canvas,
+    paint,
+    createPath2D(
+      { kind: 'moveTo', to: [80, 730] },
+      { kind: 'quadTo', control: [185, 620], to: [300, 730] },
+    ),
+    {
+      strokeWidth: 18,
+      strokeJoin: 'round',
+      strokeCap: 'round',
+      color: [0.76, 0.18, 0.42, 0.55],
+    },
+  );
+
+  drawStroke(
+    CanvasKit,
+    canvas,
+    paint,
+    createPath2D(
+      { kind: 'moveTo', to: [410, 730] },
+      {
+        kind: 'arcTo',
+        center: [500, 730],
+        radius: 90,
+        startAngle: Math.PI,
+        endAngle: 0,
+      },
+    ),
+    {
+      strokeWidth: 18,
+      strokeJoin: 'round',
+      strokeCap: 'round',
+      color: [0.13, 0.45, 0.36, 0.85],
     },
   );
 

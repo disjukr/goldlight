@@ -477,12 +477,6 @@ fn affine_matrix() -> mat2x2<f32> {
   );
 }
 
-fn max_scale_factor(affine: mat2x2<f32>) -> f32 {
-  let c0 = vec2<f32>(affine[0].x, affine[0].y);
-  let c1 = vec2<f32>(affine[1].x, affine[1].y);
-  return max(length(c0), length(c1));
-}
-
 fn wangs_formula_max_fdiff_p2(
   p0: vec2<f32>,
   p1: vec2<f32>,
@@ -718,7 +712,7 @@ fn vs_main(
   var strokeRadius = stroke.x;
   var joinType = stroke.y;
   let lastControlPoint = joinControlPoint;
-  let maxScale = max_scale_factor(affine);
+  let maxScale = max(step.matrix1.z, 1.0);
   var numParametricSegments: f32;
   if (weight < 0.0) {
     if (all(curveP0 == curveP1) && all(curveP2 == curveP3)) {

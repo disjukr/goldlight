@@ -185,7 +185,7 @@ const createStepPayloadBuffer = (
     transform[3],
     transform[4],
     transform[5],
-    0,
+    maxScaleFactor(transform),
     0,
     color[0],
     color[1],

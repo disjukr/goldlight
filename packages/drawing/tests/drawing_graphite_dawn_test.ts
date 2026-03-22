@@ -1,4 +1,4 @@
-import { assertEquals, assertThrows } from 'jsr:@std/assert@^1.0.14';
+import { assertAlmostEquals, assertEquals, assertThrows } from 'jsr:@std/assert@^1.0.14';
 import { createOffscreenBinding } from '@rieul3d/gpu';
 import {
   createPath2D,
@@ -1557,6 +1557,33 @@ Deno.test('drawing prepared stroke patches emit synthetic cap patches for degene
   const square = prepareCapKinds('square');
   assertEquals(square.usesTessellatedStrokePatches, true);
   assertEquals(square.patchCount > 0, true);
+});
+
+Deno.test('dawn prepared stroke payload stores cpu-derived maxScale for tessellation', () => {
+  const mock = createMockGpuContext();
+  const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
+  const recorder = createDrawingRecorder(sharedContext);
+  const transform: [number, number, number, number, number, number] = [1, 0, 1, 1, 0, 0];
+
+  concatDrawingRecorderTransform(recorder, transform);
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [0, 0] },
+      { kind: 'quadTo', control: [20, 30], to: [40, 0] },
+    ),
+    { style: 'stroke', strokeWidth: 8, strokeCap: 'round', strokeJoin: 'round' },
+  );
+
+  const prepared = prepareDawnRecording(sharedContext, finishDrawingRecorder(recorder));
+  const step = prepared.resources.tasks[0]?.passes[0]?.steps[0];
+  if (!step) {
+    throw new Error('expected prepared step resources');
+  }
+
+  const payload = new Float32Array(step.stepPayloadBuffer.getMappedRange());
+  const expectedMaxScale = Math.sqrt((3 + Math.sqrt(5)) / 2);
+  assertAlmostEquals(payload[6]!, expectedMaxScale, 1e-6);
 });
 
 Deno.test('drawing prepared stroke patches emit cusp circles for turnaround curves', () => {

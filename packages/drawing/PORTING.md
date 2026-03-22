@@ -540,7 +540,8 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
     triangle-strip stroke patch replay with `edgeID` / `combinedEdgeID`-driven body tessellation,
     and its WGSL branch structure now more directly mirrors Skia's `tessellate_stroked_curve()` for
     degenerate square/circle patches, duplicated-edge join seaming, `lastRadialEdgeID == 0`
-    stabilization, and segment counting
+    stabilization, segment counting, and CPU-provided `maxScale` stroke tolerances instead of a
+    shader-local approximation
   - Remaining delta: `tessellate_stroked_curve()` seam math still has local safety branches,
     duplicated-edge handling is still a reduced version of Skia's full implementation, and
     translucent round cap/join coverage still needs Graphite-like analytic evaluation instead of
@@ -565,6 +566,8 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
 1. `P1` Finish stroke tessellation parity
    - Port the remaining `tessellate_stroked_curve()` seam math and duplicated-edge handling so the
      current stroke implementation is no longer a reduced Graphite variant
+   - Done first: keep stroke segmentation on the same CPU-derived `maxScale` basis as Graphite so
+     shader-side edge budgeting no longer diverges from upload-time planning
    - Target files: `src/path_renderer.ts`, `src/resource_provider.ts`
 2. `P2` Finish `Caps`
    - Port remaining DawnCaps workaround logic, multiplanar/external format coverage, and binding
@@ -573,6 +576,15 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
 
 ## Recent Updates
 
+- 2026-03-23
+  - Files: `src/prepare_resources.ts`, `src/resource_provider.ts`,
+    `tests/drawing_graphite_dawn_test.ts`
+  - Status transition: stroke step payloads now carry the same CPU-derived `maxScale` that Skia's
+    `TessellateStrokesRenderStep` writes into uniforms, and the WGSL stroke tessellator now uses
+    that value instead of recomputing a looser column-length approximation in shader code
+  - Remaining delta: the rest of `tessellate_stroked_curve()` still has reduced seam-safety
+    branches and flat-color round join/cap coverage
+  - Validation: `deno test tests/drawing_graphite_dawn_test.ts`
 - 2026-03-23
   - Files: `src/renderer_provider.ts`, `src/path_renderer.ts`, `src/draw_pass.ts`,
     `src/prepare_resources.ts`, `tests/drawing_graphite_dawn_test.ts`

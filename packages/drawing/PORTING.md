@@ -565,9 +565,9 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
   - Update 2026-03-23: synthetic round helper patches are now separated from true degenerate
     round-cap contours, removing a metadata mismatch that would have conflicted with later analytic
     round cap/join coverage porting
-  - Update 2026-03-23: square caps now materialize as explicit line patches in the contour
-    sequence, closer to Skia `StrokeIterator` / `fillSquareCapPoints()` and avoiding the old
-    degenerate-conic placeholder path
+  - Update 2026-03-23: square caps now materialize as explicit line patches in the contour sequence,
+    closer to Skia `StrokeIterator` / `fillSquareCapPoints()` and avoiding the old degenerate-conic
+    placeholder path
 - `QueueManager` submission model is still simplified
   - Local state: queue submission, ordered outstanding submission ownership, completion draining, a
     `checkForFinishedWork`-style sync path, submission-owned transient buffer cleanup, and

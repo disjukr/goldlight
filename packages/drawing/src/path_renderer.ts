@@ -714,7 +714,13 @@ const createSquareCapStartPatch = (
   transform: readonly [number, number, number, number, number, number],
   isHairline: boolean,
 ): DrawingPreparedPatch => {
-  const offset = resolveSquareCapOffset(anchor, tangentControlPoint, halfWidth, transform, isHairline);
+  const offset = resolveSquareCapOffset(
+    anchor,
+    tangentControlPoint,
+    halfWidth,
+    transform,
+    isHairline,
+  );
   return finalizePatch({
     kind: 'line',
     points: [subtract(anchor, offset), anchor],
@@ -728,7 +734,13 @@ const createSquareCapEndPatch = (
   transform: readonly [number, number, number, number, number, number],
   isHairline: boolean,
 ): DrawingPreparedPatch => {
-  const offset = resolveSquareCapOffset(anchor, tangentControlPoint, halfWidth, transform, isHairline);
+  const offset = resolveSquareCapOffset(
+    anchor,
+    tangentControlPoint,
+    halfWidth,
+    transform,
+    isHairline,
+  );
   return finalizePatch({
     kind: 'line',
     points: [anchor, add(anchor, offset)],
@@ -740,8 +752,7 @@ const createDegenerateSquareStrokePatch = (
   halfWidth: number,
   transform: readonly [number, number, number, number, number, number],
   isHairline: boolean,
-): DrawingPreparedPatch =>
-  {
+): DrawingPreparedPatch => {
   const offset = resolveDegenerateSquareCapOffset(halfWidth, transform, isHairline);
   return finalizePatch({
     kind: 'line',

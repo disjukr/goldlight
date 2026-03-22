@@ -125,9 +125,9 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Missing: pipeline/state/resource preparation comparable to Skia DrawPass
 - `DawnQueueManager` -> `src/queue_manager.ts`
   - Status: `partial`
-  - What exists: queue submit, tick, unfinished work tracking, submission-scoped completion via
-    `queue.onSubmittedWorkDone()`, coarse fallback when callbacks are unavailable, and cleanup when
-    callbacks reject
+  - What exists: queue submit, tick, unfinished work tracking, explicit outstanding submission
+    objects, submission-scoped completion via `queue.onSubmittedWorkDone()`, coarse fallback when
+    callbacks are unavailable, and cleanup when callbacks reject
   - Missing: richer GPU fence/error handling, wait-any style batching, and per-resource completion
     tracking
 - `GraphicsPipeline` / caches -> `src/pipeline*.ts`
@@ -517,9 +517,11 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
     handling is still a reduced version of Skia's full implementation, and translucent round
     cap/join coverage still needs Graphite-like analytic evaluation instead of flat color fill
 - `QueueManager` submission model is still simplified
-  - Local state: queue submission and completion tracking exist in `src/queue_manager.ts`
-  - Remaining delta: no Graphite-style outstanding submission object ownership or resource/fence
-    correlation
+  - Local state: queue submission and completion tracking exist in `src/queue_manager.ts`, and
+    explicit outstanding submission objects now own command-buffer completion state until tick
+    drains them in order
+  - Remaining delta: no Graphite-style `waitAny`/future integration, resource/fence correlation, or
+    command-buffer reuse ownership
 - `Caps` still trails DawnCaps depth
   - Local state: `src/caps.ts` now owns a richer format table, color-type metadata,
     resolve/transient/MSRTSS policy, resource-binding requirements, and provider-facing usage checks
@@ -551,6 +553,13 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
     provider with a fixed path rendering strategy
   - Remaining delta: only the tessellation strategy exists; Graphite's renderer inventory,
     RenderStep ownership, and alternate atlas/compute strategies are still missing
+  - Validation: `deno test tests/drawing_graphite_dawn_test.ts`
+- 2026-03-23
+  - Files: `src/queue_manager.ts`, `tests/drawing_graphite_dawn_test.ts`
+  - Status transition: `QueueManager` grew explicit outstanding submission ownership instead of only
+    tracking aggregate counters
+  - Remaining delta: completion is still promise/tick based in WebGPU terms, without Graphite's
+    `WaitAny` path, fence/resource correlation, or command-buffer recycling
   - Validation: `deno test tests/drawing_graphite_dawn_test.ts`
 
 ## Update Rules

@@ -1821,6 +1821,8 @@ Deno.test('dawn queue manager tracks explicit submitted-work completion', async 
   assertEquals(queueManager.completedCount, 0);
   assertEquals(queueManager.inFlightCount, 1);
   assertEquals(queueManager.supportsSubmittedWorkDone, true);
+  assertEquals(queueManager.outstandingSubmissions.length, 1);
+  assertEquals(queueManager.outstandingSubmissions[0]?.serial, 1);
 
   mock.created.submissionDoneResolvers.shift()?.();
   await tickDawnQueueManager(queueManager);
@@ -1828,6 +1830,7 @@ Deno.test('dawn queue manager tracks explicit submitted-work completion', async 
   assertEquals(mock.ticks.length, 1);
   assertEquals(queueManager.completedCount, 1);
   assertEquals(queueManager.inFlightCount, 0);
+  assertEquals(queueManager.outstandingSubmissions.length, 0);
 });
 
 Deno.test('submitDawnCommandBuffer routes submissions through queue manager tracking', () => {
@@ -1847,6 +1850,7 @@ Deno.test('submitDawnCommandBuffer routes submissions through queue manager trac
 
   assertEquals(sharedContext.queueManager.submittedCount, 1);
   assertEquals(sharedContext.queueManager.inFlightCount, 1);
+  assertEquals(sharedContext.queueManager.outstandingSubmissions.length, 1);
   assertEquals(
     sharedContext.queueManager.lastSubmittedRecorderId,
     commandBuffer.recording.recorderId,
@@ -1881,12 +1885,14 @@ Deno.test('dawn queue manager falls back to coarse tick completion without submi
   assertEquals(queueManager.supportsSubmittedWorkDone, false);
   assertEquals(queueManager.completedCount, 0);
   assertEquals(queueManager.inFlightCount, 1);
+  assertEquals(queueManager.outstandingSubmissions.length, 1);
 
   await tickDawnQueueManager(queueManager);
 
   assertEquals(mock.ticks.length, 1);
   assertEquals(queueManager.completedCount, 1);
   assertEquals(queueManager.inFlightCount, 0);
+  assertEquals(queueManager.outstandingSubmissions.length, 0);
   assertEquals(queueManager.lastCompletedRecorderId, commandBuffer.recording.recorderId);
 });
 
@@ -1916,6 +1922,7 @@ Deno.test('dawn queue manager clears pending completion when submitted-work call
 
   assertEquals(queueManager.completedCount, 1);
   assertEquals(queueManager.inFlightCount, 0);
+  assertEquals(queueManager.outstandingSubmissions.length, 0);
   assertEquals(queueManager.pendingCompletions.length, 0);
 });
 

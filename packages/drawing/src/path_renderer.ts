@@ -2206,6 +2206,15 @@ const canUseTessellatedStrokePatches = (
     subpaths.every((subpath) => !subpath.closed && subpath.points.length === 2);
 };
 
+const shouldPrepareStrokePatches = (paint: DrawingPaint): boolean => {
+  const cap = paint.strokeCap ?? 'butt';
+  const join = paint.strokeJoin ?? 'miter';
+  if (join === 'bevel' || join === 'miter' || cap === 'square') {
+    return false;
+  }
+  return true;
+};
+
 const transformPoints = (
   points: readonly Point2D[],
   transform: readonly [number, number, number, number, number, number],
@@ -2349,15 +2358,16 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
   const lineOnlyStrokeContours = strokeContours.every((contour) =>
     contour.points.length <= 2 || contour.points.every((_, index) => index < 2)
   );
-  const strokePatchSource = (command.paint.dashArray?.length ?? 0) > 0 || lineOnlyStrokeContours
-    ? createLinePatchesFromContours(strokeContours)
-    : preparePatches(command.path, identityMatrix2D, false);
-  const patches = createPreparedStrokePatches(
-    strokeContours,
-    strokePatchSource,
-    strokeStyle.cap,
-    strokeStyle,
-  );
+  const patches = shouldPrepareStrokePatches(command.paint)
+    ? createPreparedStrokePatches(
+      strokeContours,
+      (command.paint.dashArray?.length ?? 0) > 0 || lineOnlyStrokeContours
+        ? createLinePatchesFromContours(strokeContours)
+        : preparePatches(command.path, identityMatrix2D, false),
+      strokeStyle.cap,
+      strokeStyle,
+    )
+    : Object.freeze([] as DrawingPreparedStrokePatch[]);
   const usesTessellatedStrokePatches = canUseTessellatedStrokePatches(
     patches,
     dashedStrokeSubpaths,

@@ -590,13 +590,14 @@ fn strip_vertex_position(
   b: vec2<f32>,
   strokeRadius: f32,
   quadVertex: u32,
+  strokeOutset: f32,
 ) -> vec2<f32> {
   let delta = b - a;
   let deltaLength = max(length(delta), 1e-5);
   let normal = vec2<f32>(-delta.y / deltaLength, delta.x / deltaLength) * strokeRadius;
   let edgeIndex = strip_edge_index(quadVertex);
   let edgePoint = strip_edge_point(a, b, edgeIndex);
-  let edgeOutset = strip_edge_outset(edgeIndex);
+  let edgeOutset = strip_edge_outset(edgeIndex) * strokeOutset;
   return edgePoint + (normal * edgeOutset);
 }
 
@@ -627,6 +628,24 @@ fn stroke_join_edges(joinType: f32, prevTan: vec2<f32>, tan0: vec2<f32>, strokeR
   let joinRads = acos(cosine_between_unit_vectors(prevTan, tan0));
   let numRadialSegmentsInJoin = max(ceil(joinRads * num_radial_segments_per_radian(strokeRadius)), 1.0);
   return numRadialSegmentsInJoin + 2.0;
+}
+
+fn tangents_nearly_parallel(turn: f32, tan0: vec2<f32>, tan1: vec2<f32>) -> bool {
+  let sinEpsilon = 1e-2;
+  let tangentScale = max(dot(tan0, tan0) * dot(tan1, tan1), 1e-5);
+  return abs(turn) * inverseSqrt(tangentScale) < sinEpsilon;
+}
+
+fn restrict_join_stroke_outset(
+  strokeOutset: f32,
+  turn: f32,
+  tan0: vec2<f32>,
+  tan1: vec2<f32>,
+) -> f32 {
+  if (tangents_nearly_parallel(turn, tan0, tan1) && dot(tan0, tan1) >= 0.0) {
+    return strokeOutset;
+  }
+  return select(max(strokeOutset, 0.0), min(strokeOutset, 0.0), turn < 0.0);
 }
 
 fn combined_edge_index(segmentIndex: u32, activeSegments: u32, quadVertex: u32) -> f32 {
@@ -733,6 +752,12 @@ fn vs_main(
       let squareStart = (flags & 4u) != 0u;
       let squareEnd = (flags & 8u) != 0u;
       let tangent = robust_normalize_diff(b, a);
+      let turn = cross_length_2d(tan0, tan1);
+      var strokeOutset = 1.0;
+      let hasJoinControlPoint = distance(joinControlPoint, p0) > 1e-5;
+      if (segmentIndex == 0u && hasJoinControlPoint) {
+        strokeOutset = restrict_join_stroke_outset(strokeOutset, turn, tan0, tan1);
+      }
       if (segmentIndex == 0u && squareStart) {
         a -= tangent * stroke.x;
       }
@@ -740,7 +765,7 @@ fn vs_main(
         b += tangent * stroke.x;
       }
       if (curveType < 0.5) {
-        local = strip_vertex_position(a, b, stroke.x, quadVertex);
+        local = strip_vertex_position(a, b, stroke.x, quadVertex, strokeOutset);
       } else {
       var tangent0 = eval_patch_tangent(curveType, weight, p0, p1, p2, p3, t0);
       var tangent1 = eval_patch_tangent(curveType, weight, p0, p1, p2, p3, t1);
@@ -754,7 +779,7 @@ fn vs_main(
       let edgeUsesEnd = stripEdgeIndex == 1u || stripEdgeIndex == 2u;
       let edgeTangent = select(tangent0, tangent1, edgeUsesEnd);
       let ortho = vec2<f32>(edgeTangent.y, -edgeTangent.x);
-      local = edgePoint + (ortho * stroke.x * signedEdge);
+      local = edgePoint + (ortho * stroke.x * signedEdge * strokeOutset);
       }
     }
   }

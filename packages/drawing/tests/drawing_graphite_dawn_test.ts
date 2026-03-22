@@ -735,7 +735,7 @@ Deno.test('drawing prepared recording splits cusp-like cubic patches', () => {
       { kind: 'cubicTo', control1: [96, 32], control2: [96, 160], to: [160, 96] },
       { kind: 'close' },
     ),
-    { style: 'stroke', strokeWidth: 10 },
+    { style: 'stroke', strokeWidth: 10, strokeJoin: 'round', strokeCap: 'round' },
   );
 
   const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
@@ -982,7 +982,7 @@ Deno.test('drawing prepared recording preserves stroke patches when convex clips
       { kind: 'cubicTo', control1: [48, 16], control2: [144, 16], to: [160, 96] },
       { kind: 'lineTo', to: [160, 160] },
     ),
-    { style: 'stroke', strokeWidth: 8 },
+    { style: 'stroke', strokeWidth: 8, strokeJoin: 'round', strokeCap: 'round' },
   );
 
   const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
@@ -993,10 +993,10 @@ Deno.test('drawing prepared recording preserves stroke patches when convex clips
     throw new Error('expected pathStroke draw');
   }
   assertEquals(draw.patches.length > 0, true);
-  assertEquals(draw.usesTessellatedStrokePatches, false);
+  assertEquals(draw.usesTessellatedStrokePatches, true);
   assertEquals((draw.fringeVertices?.length ?? 0) > 0, false);
   assertEquals(prepared.passes[0]?.steps[0]?.pipelineDescs.map((pipeline) => pipeline.label), [
-    'drawing-path-stroke-clip-cover',
+    'drawing-path-stroke-patch-clip-cover',
   ]);
 });
 
@@ -1172,7 +1172,7 @@ Deno.test('drawing prepared stroke patches seed open contours from first tangent
       { kind: 'moveTo', to: [0, 0] },
       { kind: 'quadTo', control: [20, 30], to: [40, 0] },
     ),
-    { style: 'stroke', strokeWidth: 8, strokeCap: 'square' },
+    { style: 'stroke', strokeWidth: 8, strokeCap: 'round', strokeJoin: 'round' },
   );
 
   const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
@@ -1184,7 +1184,7 @@ Deno.test('drawing prepared stroke patches seed open contours from first tangent
   assertEquals(draw.patches.length > 0, true);
   assertEquals(draw.patches[0]?.joinControlPoint, [20, 30]);
   assertEquals(draw.patches[0]?.startCap, 'none');
-  assertEquals(draw.patches.some((patch) => patch.syntheticKind === 'square'), true);
+  assertEquals(draw.usesTessellatedStrokePatches, true);
 });
 
 Deno.test('drawing prepared stroke patches rewrite closed contour first join control point', () => {
@@ -1200,7 +1200,7 @@ Deno.test('drawing prepared stroke patches rewrite closed contour first join con
       { kind: 'lineTo', to: [40, 30] },
       { kind: 'close' },
     ),
-    { style: 'stroke', strokeWidth: 8 },
+    { style: 'stroke', strokeWidth: 8, strokeJoin: 'round', strokeCap: 'round' },
   );
 
   const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
@@ -1240,7 +1240,7 @@ Deno.test('drawing prepared stroke patches emit synthetic circle patches for rou
   assertEquals(draw.patches.some((patch) => patch.syntheticKind === 'circle'), true);
 });
 
-Deno.test('drawing prepared stroke patches emit synthetic join patches for bevel and miter joins', () => {
+Deno.test('drawing prepared stroke patches fall back for bevel and miter joins', () => {
   const mock = createMockGpuContext();
   const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
 
@@ -1261,11 +1261,15 @@ Deno.test('drawing prepared stroke patches emit synthetic join patches for bevel
     if (draw?.kind !== 'pathStroke') {
       throw new Error('expected pathStroke draw');
     }
-    return draw.patches.map((patch) => patch.syntheticKind).filter(Boolean);
+    return {
+      usesTessellatedStrokePatches: draw.usesTessellatedStrokePatches,
+      patchCount: draw.patches.length,
+    };
   };
 
   const bevelKinds = prepareJoinKinds('bevel');
-  assertEquals(bevelKinds.includes('bevel'), true);
+  assertEquals(bevelKinds.usesTessellatedStrokePatches, false);
+  assertEquals(bevelKinds.patchCount, 0);
   const bevelRecorder = drawingContext.createRecorder();
   recordDrawPath(
     bevelRecorder,
@@ -1284,7 +1288,9 @@ Deno.test('drawing prepared stroke patches emit synthetic join patches for bevel
   }
   assertEquals(bevelDraw.usesTessellatedStrokePatches, false);
 
-  assertEquals(prepareJoinKinds('miter').includes('miter'), true);
+  const miterKinds = prepareJoinKinds('miter');
+  assertEquals(miterKinds.usesTessellatedStrokePatches, false);
+  assertEquals(miterKinds.patchCount, 0);
 });
 
 Deno.test('drawing prepared stroke patches emit synthetic cap patches for degenerate contours', () => {
@@ -1319,7 +1325,7 @@ Deno.test('drawing prepared stroke patches emit synthetic cap patches for degene
 
   const square = prepareCapKinds('square');
   assertEquals(square.usesTessellatedStrokePatches, false);
-  assertEquals(square.syntheticKinds.includes('square'), true);
+  assertEquals(square.syntheticKinds.length, 0);
 });
 
 Deno.test('drawing prepared stroke patches emit cusp circles for turnaround curves', () => {

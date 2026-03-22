@@ -85,12 +85,6 @@ type DrawingPatchDefinition =
     fanPoint?: Point2D;
   }>;
 
-type DrawingStrokePatchContour = Readonly<{
-  patches: readonly DrawingPreparedPatch[];
-  closed: boolean;
-  record: DrawingStrokeContourRecord;
-}>;
-
 type DrawingStrokeContourSequenceItem =
   | Readonly<{
     kind: 'basePatch';
@@ -775,152 +769,31 @@ const createArcConicPatches = (
   return Object.freeze(patches);
 };
 
-const createPreparedStrokePatches = (
-  contours: readonly DrawingStrokeContourRecord[],
-  patches: readonly DrawingPreparedPatch[],
-  cap: NonNullable<DrawingPaint['strokeCap']>,
-): readonly DrawingPreparedStrokePatch[] => {
-  const prepared: DrawingPreparedStrokePatch[] = [];
-  for (const contour of contours) {
-    if (contour.points.length >= 2 || !contour.degeneratePoint) {
+const createPathFromFlattenedStrokeSubpaths = (
+  subpaths: readonly FlattenedSubpath[],
+  fillRule: PathFillRule2D,
+): DrawingPath2D => {
+  const verbs: DrawingPath2D['verbs'][number][] = [];
+  for (const subpath of subpaths) {
+    if (subpath.points.length === 0) {
       continue;
     }
-    if (cap === 'round') {
-      prepared.push(createDegenerateRoundStrokePatch(contour.degeneratePoint));
-      continue;
-    }
-    if (cap === 'square') {
-      prepared.push(
-        createDegenerateSquareStrokePatch(contour.degeneratePoint, contour.degeneratePoint),
-      );
-    }
-  }
-  if (patches.length === 0) {
-    return Object.freeze(prepared);
-  }
-  const groupedContours = groupStrokePatchContours(contours, patches);
-  for (const contour of groupedContours) {
-    prepared.push(...createPreparedStrokeContourPatches(contour, cap));
-  }
-  return Object.freeze(prepared);
-};
-
-const groupStrokePatchContours = (
-  contours: readonly DrawingStrokeContourRecord[],
-  patches: readonly DrawingPreparedPatch[],
-): readonly DrawingStrokePatchContour[] => {
-  if (patches.length === 0 || contours.length === 0) {
-    return Object.freeze([]);
-  }
-  const grouped: DrawingStrokePatchContour[] = [];
-  let patchIndex = 0;
-  for (const contour of contours) {
-    const contourPatches: DrawingPreparedPatch[] = [];
-    if (contour.points.length < 2) {
-      continue;
-    }
-    const contourStart = contour.points[0]!;
-    let expectedStart = contourStart;
-    while (patchIndex < patches.length) {
-      const patch = patches[patchIndex]!;
-      const patchStart = getPatchStartPoint(patch);
-      if (!pointsEqual(patchStart, expectedStart)) {
-        break;
-      }
-      contourPatches.push(patch);
-      patchIndex += 1;
-      expectedStart = getPatchEndPoint(patch);
-      if (contour.closed) {
-        if (pointsEqual(expectedStart, contourStart)) {
-          break;
-        }
-      } else if (pointsEqual(expectedStart, contour.points[contour.points.length - 1]!)) {
-        break;
+    verbs.push({ kind: 'moveTo', to: subpath.points[0]! });
+    if (subpath.points.length === 1) {
+      verbs.push({ kind: 'lineTo', to: subpath.points[0]! });
+    } else {
+      for (let index = 1; index < subpath.points.length; index += 1) {
+        verbs.push({ kind: 'lineTo', to: subpath.points[index]! });
       }
     }
-    if (contourPatches.length > 0) {
-      grouped.push({
-        patches: Object.freeze(contourPatches),
-        closed: contour.closed,
-        record: contour,
-      });
+    if (subpath.closed) {
+      verbs.push({ kind: 'close' });
     }
   }
-  return Object.freeze(grouped);
-};
-
-const createPreparedStrokeContourPatches = (
-  contour: DrawingStrokePatchContour,
-  cap: NonNullable<DrawingPaint['strokeCap']>,
-): readonly DrawingPreparedStrokePatch[] => {
-  if (contour.patches.length === 0) {
-    return Object.freeze([]);
-  }
-  const prepared: DrawingPreparedStrokePatch[] = [];
-  const firstPatch = contour.patches[0]!;
-  const lastPatch = contour.patches[contour.patches.length - 1]!;
-  const firstStart = contour.record.firstPoint ?? getPatchStartPoint(firstPatch);
-  const lastEnd = contour.record.lastPoint ?? getPatchEndPoint(lastPatch);
-  const appendPreparedPatch = (
-    patch: DrawingPreparedPatch,
-    joinControlPoint: Point2D,
-    options: Readonly<{
-      contourStart?: boolean;
-      contourEnd?: boolean;
-      startCap?: 'none' | 'butt' | 'square' | 'round';
-      endCap?: 'none' | 'butt' | 'square' | 'round';
-    }> = {},
-  ): void => {
-    prepared.push({
-      patch,
-      prevPoint: joinControlPoint,
-      joinControlPoint,
-      contourStart: options.contourStart ?? false,
-      contourEnd: options.contourEnd ?? false,
-      startCap: options.startCap ?? 'none',
-      endCap: options.endCap ?? 'none',
-    });
+  return {
+    fillRule,
+    verbs: Object.freeze(verbs),
   };
-
-  let joinControlPoint = getPatchOutgoingJoinControlPoint(firstPatch);
-  for (let index = 1; index < contour.patches.length; index += 1) {
-    const patch = contour.patches[index]!;
-    appendPreparedPatch(patch, joinControlPoint);
-    joinControlPoint = getPatchOutgoingJoinControlPoint(patch);
-  }
-
-  if (contour.closed) {
-    appendPreparedPatch(firstPatch, joinControlPoint, { contourStart: true, contourEnd: true });
-    return Object.freeze(prepared);
-  }
-
-  if (cap === 'round') {
-    appendPreparedPatch(createDegenerateRoundStrokePatch(lastEnd).patch, lastEnd, {
-      startCap: 'round',
-      endCap: 'round',
-    });
-    appendPreparedPatch(createDegenerateRoundStrokePatch(firstStart).patch, firstStart, {
-      startCap: 'round',
-      endCap: 'round',
-    });
-  } else if (cap === 'square') {
-    appendPreparedPatch(
-      createDegenerateSquareStrokePatch(lastEnd, joinControlPoint).patch,
-      joinControlPoint,
-    );
-    appendPreparedPatch(
-      createDegenerateSquareStrokePatch(firstStart, getPatchFirstControlPoint(firstPatch)).patch,
-      getPatchFirstControlPoint(firstPatch),
-    );
-  }
-
-  appendPreparedPatch(firstPatch, firstStart, {
-    contourStart: true,
-    contourEnd: true,
-    startCap: cap,
-    endCap: cap,
-  });
-  return Object.freeze(prepared);
 };
 
 const createPreparedStrokePatchesFromPath = (
@@ -2802,23 +2675,6 @@ const createStrokeContourRecords = (
     };
   }));
 
-const createLinePatchesFromContours = (
-  contours: readonly DrawingStrokeContourRecord[],
-): readonly DrawingPreparedPatch[] => {
-  const patches: DrawingPreparedPatch[] = [];
-  for (const contour of contours) {
-    for (const segment of contour.segments) {
-      patches.push({
-        kind: 'line',
-        points: [segment.start, segment.end],
-        resolveLevel: 0,
-        wangsFormulaP4: 1,
-      });
-    }
-  }
-  return Object.freeze(patches);
-};
-
 const computeStrokeBounds = (
   subpaths: readonly FlattenedSubpath[],
   halfWidth: number,
@@ -2998,13 +2854,12 @@ const preparePathFill = (
     contour.points.length <= 2 || contour.points.every((_, index) => index < 2)
   );
   const patches = shouldPrepareStrokePatches(command.paint)
-    ? (command.paint.dashArray?.length ?? 0) > 0 || lineOnlyStrokeContours
-      ? createPreparedStrokePatches(
-        strokeContours,
-        createLinePatchesFromContours(strokeContours),
-        strokeStyle.cap,
-      )
-      : createPreparedStrokePatchesFromPath(command.path, strokeStyle)
+    ? createPreparedStrokePatchesFromPath(
+      (command.paint.dashArray?.length ?? 0) > 0 || lineOnlyStrokeContours
+        ? createPathFromFlattenedStrokeSubpaths(dashedStrokeSubpaths, command.path.fillRule)
+        : command.path,
+      strokeStyle,
+    )
     : Object.freeze([] as DrawingPreparedStrokePatch[]);
   const usesTessellatedStrokePatches = canUseTessellatedStrokePatches(
     patches,

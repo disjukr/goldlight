@@ -207,6 +207,9 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Update 2026-03-23: cubic 180-degree chop handling now follows Skia's cusp branches more closely
     by pinning one-cusp cubic controls onto the cusp point and converting two-cusp chops into
     circle-plus-line fallback instead of always replaying chopped cubics
+  - Update 2026-03-23: dashed and line-only stroke patch preparation now synthesize a stroke path
+    and reuse the same `StrokeIterator`-like patch writer path instead of keeping a separate
+    simplified contour patch assembler
 - `src/renderer_provider.ts`
   - Status: `started`
   - Role: context-wide renderer set and Graphite-like fill/stroke selection for convex tessellated
@@ -543,7 +546,8 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
     with explicit move barriers, explicit close-only contours that now emit Skia-style zero-length
     cap geometry, post-`close` current-point preservation for subsequent verbs, and open-contour
     patch chaining that now keeps split curves connected to their true predecessor join control
-    points; `src/resource_provider.ts` now uses triangle-strip stroke patch replay with `edgeID` /
+    points; dashed and line-only stroke patches now route through the same synthetic-path writer
+    flow; `src/resource_provider.ts` now uses triangle-strip stroke patch replay with `edgeID` /
     `combinedEdgeID`-driven body tessellation, and its WGSL branch structure now more directly
     mirrors Skia's `tessellate_stroked_curve()` for degenerate square/circle patches,
     duplicated-edge join seaming, `lastRadialEdgeID == 0` stabilization, segment counting,
@@ -579,6 +583,9 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
      remaining work is duplicated-edge/shader seam parity plus fuller verb-level iterator matching
    - Update 2026-03-23: post-`close` current-point semantics now match Skia/Canvas, so subsequent
      verbs reopen from the closed contour start instead of failing path preparation
+   - Update 2026-03-23: dashed and line-only stroke patches now reuse the same synthetic-path
+     `StrokeIterator`-like writer flow; remaining work is duplicated-edge/shader seam parity plus
+     fuller analytic coverage for round joins/caps
    - Target files: `src/path_renderer.ts`, `src/resource_provider.ts`
 2. `P2` Finish `Caps`
    - Port remaining DawnCaps workaround logic, multiplanar/external format coverage, and binding

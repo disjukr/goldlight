@@ -602,7 +602,8 @@ export const createDawnCaps = (
       ? 4
       : 1;
   const emulateLoadStoreResolve = !supportsPartialLoadResolve && !supportsTransientAttachments;
-  const differentResolveAttachmentSizeSupport = supportsPartialLoadResolve || emulateLoadStoreResolve;
+  const differentResolveAttachmentSizeSupport = supportsPartialLoadResolve ||
+    emulateLoadStoreResolve;
   const formatTable = createFormatTable(
     backend,
     adapterFeatures,

@@ -69,7 +69,9 @@ const rasterizeAtlasClip = (
     for (let index = 0; index < coverage.length; index += 1) {
       coverage[index] = element.op === 'difference'
         ? coverage[index]! && !elementMask[index] ? 255 : 0
-        : coverage[index]! && elementMask[index] ? 255 : coverage[index] === 0 && elements[0]?.op !== 'difference'
+        : coverage[index]! && elementMask[index]
+        ? 255
+        : coverage[index] === 0 && elements[0]?.op !== 'difference'
         ? elementMask[index]!
         : coverage[index]!;
     }

@@ -11,23 +11,25 @@ import {
 } from '@rieul3d/geometry';
 import {
   appendDrawingClipStackElement,
-  createDrawingClipStackSnapshot,
-  clipDrawingRecorderShader,
   clipDrawingRecorderPath,
   clipDrawingRecorderRect,
+  clipDrawingRecorderShader,
   concatDrawingRecorderTransform,
   createDawnBackendContext,
   createDawnCaps,
   createDawnQueueManager,
   createDawnSharedContext,
+  createDrawingClipStackSnapshot,
   createDrawingContext,
   createDrawingPath2DFromShape,
   createDrawingRecorder,
-  encodePreparedDawnCommandBuffer,
   encodeDawnCommandBuffer,
+  encodePreparedDawnCommandBuffer,
   finishDrawingRecorder,
+  popDrawingClipStackSave,
   prepareDawnRecording,
   prepareDrawingRecording,
+  pushDrawingClipStackSave,
   recordClear,
   recordDrawPath,
   recordDrawShape,
@@ -39,8 +41,6 @@ import {
   submitToDawnQueueManager,
   tickDawnQueueManager,
   translateDrawingRecorder,
-  popDrawingClipStackSave,
-  pushDrawingClipStackSave,
   visitDrawingClipStackForDraw,
 } from '@rieul3d/drawing';
 
@@ -362,10 +362,19 @@ Deno.test('dawn caps expose compressed and external format policy when features 
   assertEquals(caps.supportsCompressedBC, true);
   assertEquals(caps.supportsCompressedETC2, true);
   assertEquals(caps.supportsExternalTextures, true);
-  assertEquals(caps.getSupportedTextureUsages('bc1-rgba-unorm' as GPUTextureFormat).has('sample'), true);
-  assertEquals(caps.getSupportedTextureUsages('bc1-rgba-unorm' as GPUTextureFormat).has('copyDst'), true);
+  assertEquals(
+    caps.getSupportedTextureUsages('bc1-rgba-unorm' as GPUTextureFormat).has('sample'),
+    true,
+  );
+  assertEquals(
+    caps.getSupportedTextureUsages('bc1-rgba-unorm' as GPUTextureFormat).has('copyDst'),
+    true,
+  );
   assertEquals(caps.getSupportedTextureUsages('external' as GPUTextureFormat).has('sample'), true);
-  assertEquals(caps.getSupportedTextureUsages('external' as GPUTextureFormat).has('copyDst'), false);
+  assertEquals(
+    caps.getSupportedTextureUsages('external' as GPUTextureFormat).has('copyDst'),
+    false,
+  );
 });
 
 Deno.test('dawn resource provider validates caps-based texture usages', () => {
@@ -493,8 +502,14 @@ Deno.test('clip stack invalidates superseded rect intersects within the active s
       }
       const x0 = Math.max(bounds.origin[0], candidate.origin[0]);
       const y0 = Math.max(bounds.origin[1], candidate.origin[1]);
-      const x1 = Math.min(bounds.origin[0] + bounds.size.width, candidate.origin[0] + candidate.size.width);
-      const y1 = Math.min(bounds.origin[1] + bounds.size.height, candidate.origin[1] + candidate.size.height);
+      const x1 = Math.min(
+        bounds.origin[0] + bounds.size.width,
+        candidate.origin[0] + candidate.size.width,
+      );
+      const y1 = Math.min(
+        bounds.origin[1] + bounds.size.height,
+        candidate.origin[1] + candidate.size.height,
+      );
       return createRect(x0, y0, Math.max(0, x1 - x0), Math.max(0, y1 - y0));
     },
     (points) => {
@@ -628,7 +643,10 @@ Deno.test('dawn preparation separates recording, draw-pass preparation, and reso
   assertEquals(preparedWork.resources.tasks[0]?.passes.length, 1);
   assertEquals(preparedWork.resources.tasks[0]?.passes[0]?.steps.length, 1);
   assertEquals((preparedWork.resources.tasks[0]?.passes[0]?.pipelineHandles.length ?? 0) > 0, true);
-  assertEquals((preparedWork.resources.tasks[0]?.passes[0]?.resolvedPipelines.length ?? 0) > 0, true);
+  assertEquals(
+    (preparedWork.resources.tasks[0]?.passes[0]?.resolvedPipelines.length ?? 0) > 0,
+    true,
+  );
   assertEquals(commandBuffer.prepared, preparedWork.prepared);
 });
 
@@ -893,7 +911,9 @@ Deno.test('drawing prepared recording preserves patch fill when convex clips are
   assertEquals(draw.patches.length > 0, true);
   assertEquals((draw.fringeVertices?.length ?? 0) > 0, true);
   assertEquals(step?.clipRect, createRect(32, 32, 80, 80));
-  assertEquals(step?.pipelineDescs.map((pipeline) => pipeline.label), ['drawing-path-fill-patch-clip-cover']);
+  assertEquals(step?.pipelineDescs.map((pipeline) => pipeline.label), [
+    'drawing-path-fill-patch-clip-cover',
+  ]);
   assertEquals(step?.usesFillStencil, false);
 });
 
@@ -957,7 +977,10 @@ Deno.test('drawing prepared recording preserves difference clips as stencil elem
     'drawing-clip-stencil-write',
     'drawing-clip-stencil-difference',
   ]);
-  assertEquals(step?.draw.clip?.elements?.map((element) => element.op), ['intersect', 'difference']);
+  assertEquals(step?.draw.clip?.elements?.map((element) => element.op), [
+    'intersect',
+    'difference',
+  ]);
   assertEquals(step?.draw.clip?.atlasClip, undefined);
 });
 

@@ -124,7 +124,8 @@ export const saveDrawingRecorder = (recorder: DrawingRecorder): void => {
 export const restoreDrawingRecorder = (recorder: DrawingRecorder): void => {
   const mutable = recorder as MutableDrawingRecorder;
   const restored = mutable.stateStack.pop();
-  mutable.state = restored ?? { transform: identityMatrix2D, clipStack: createDrawingClipStackSnapshot() };
+  mutable.state = restored ??
+    { transform: identityMatrix2D, clipStack: createDrawingClipStackSnapshot() };
 };
 
 export const concatDrawingRecorderTransform = (

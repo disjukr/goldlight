@@ -160,21 +160,21 @@ const getPipelineDescsForDraw = (
       if (draw.renderer === 'middle-out-fan') {
         return usesStencilClip
           ? [createPipelineDesc(
-              'drawing-path-fill-clip-cover',
-              'path',
-              'device-vertex',
-              'clip-cover',
-            )]
+            'drawing-path-fill-clip-cover',
+            'path',
+            'device-vertex',
+            'clip-cover',
+          )]
           : [createPipelineDesc('drawing-path-fill-cover', 'path', 'device-vertex')];
       }
       if (draw.renderer === 'stencil-tessellated-curves') {
         return usesStencilClip
           ? [createPipelineDesc(
-              'drawing-path-fill-curve-patch-clip-cover',
-              'curve-patch',
-              'curve-patch-instance',
-              'clip-cover',
-            )]
+            'drawing-path-fill-curve-patch-clip-cover',
+            'curve-patch',
+            'curve-patch-instance',
+            'clip-cover',
+          )]
           : [
             createPipelineDesc(
               'drawing-path-fill-curve-patch-cover',
@@ -193,36 +193,38 @@ const getPipelineDescsForDraw = (
           ),
         ];
       }
-      return [createPipelineDesc('drawing-path-fill-patch-cover', 'wedge-patch', 'wedge-patch-instance')];
+      return [
+        createPipelineDesc('drawing-path-fill-patch-cover', 'wedge-patch', 'wedge-patch-instance'),
+      ];
     }
     case 'pathStroke':
       if (!draw.usesTessellatedStrokePatches || draw.patches.length === 0) {
         return usesStencilClip
           ? [createPipelineDesc(
-              'drawing-path-stroke-clip-cover',
-              'path',
-              'device-vertex',
-              'clip-cover',
-            )]
+            'drawing-path-stroke-clip-cover',
+            'path',
+            'device-vertex',
+            'clip-cover',
+          )]
           : [createPipelineDesc('drawing-path-stroke-cover', 'path', 'device-vertex')];
       }
       return usesStencilClip
         ? [createPipelineDesc(
-            'drawing-path-stroke-patch-clip-cover',
-            'stroke-patch',
-            'stroke-patch-instance',
-            'clip-cover',
-            false,
-            'triangle-strip',
-          )]
+          'drawing-path-stroke-patch-clip-cover',
+          'stroke-patch',
+          'stroke-patch-instance',
+          'clip-cover',
+          false,
+          'triangle-strip',
+        )]
         : [createPipelineDesc(
-            'drawing-path-stroke-patch-cover',
-            'stroke-patch',
-            'stroke-patch-instance',
-            'none',
-            false,
-            'triangle-strip',
-          )];
+          'drawing-path-stroke-patch-cover',
+          'stroke-patch',
+          'stroke-patch-instance',
+          'none',
+          false,
+          'triangle-strip',
+        )];
   }
 };
 

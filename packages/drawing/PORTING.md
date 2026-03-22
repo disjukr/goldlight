@@ -438,6 +438,9 @@ These decisions directly affect the remaining work and are not settled yet.
   - Status: `started`
   - First implementation now includes miter/bevel/round joins, butt/square/round caps, dash slicing,
     and hairline alpha scaling
+  - Update 2026-03-22: stroke patch replay now uses triangle-strip `vertexID` semantics, open round
+    caps are emitted as point-stroke patches, line endpoint replication matches Graphite, and stroke
+    cubics now go through Graphite-like chopping paths instead of a single high-resolve patch
 - Clip implementation
   - Status: `partial`
   - Save-record clip stacks, deferred save materialization, clip invalidation, deferred clip draw
@@ -477,13 +480,15 @@ These decisions directly affect the remaining work and are not settled yet.
 The remaining work should be judged against Skia Graphite/Dawn structure, not just current output.
 
 - `TaskList` / `RenderPassTask` layer is still missing
-  - Local state: `src/task.ts`, `src/render_pass_task.ts`, and `src/prepare_resources.ts` now form
-    a first `Recording -> TaskList -> RenderPassTask -> DrawPass -> prepareResources ->
-    CommandBuffer` flow
+  - Local state: `src/task.ts`, `src/render_pass_task.ts`, and `src/prepare_resources.ts` now form a
+    first
+    `Recording -> TaskList -> RenderPassTask -> DrawPass -> prepareResources ->
+    CommandBuffer`
+    flow
   - Remaining delta: no child-task graph or upload-task ownership
 - `DrawPass::prepareResources()` is still narrower than Skia
-  - Local state: prepared passes now own pipeline handles, resolved pipelines, sampled textures,
-    and step payloads before encode
+  - Local state: prepared passes now own pipeline handles, resolved pipelines, sampled textures, and
+    step payloads before encode
   - Remaining delta: payload families are still narrower than Graphite's recorder/task resource
     model
 - `ClipStack` is structurally closer but still incomplete
@@ -494,14 +499,21 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
 - `RendererProvider` is still a small selector
   - Local state: `src/renderer_provider.ts` chooses fill/stroke renderer variants
   - Remaining delta: no context-wide renderer set comparable to Graphite's provider
+- `Stroke tessellation` is structurally close but still not 1:1
+  - Local state: `src/path_renderer.ts` now has iterator-like contour events, deferred first-patch
+    rewrite, open-cap patch emission, Graphite-style replicated line patches, `chopAndWriteCubics`,
+    and `FindCubicConvex180Chops`-style cubic chop detection; `src/resource_provider.ts` now uses
+    triangle-strip stroke patch replay with `edgeID` / `combinedEdgeID`-driven body tessellation
+  - Remaining delta: `tessellate_stroked_curve()` seam math still has local safety branches,
+    `StrokeIterator` is event-driven rather than a verb-for-verb port, and cusp / duplicated-edge
+    handling is still a reduced version of Skia's full implementation
 - `QueueManager` submission model is still simplified
   - Local state: queue submission and completion tracking exist in `src/queue_manager.ts`
   - Remaining delta: no Graphite-style outstanding submission object ownership or resource/fence
     correlation
 - `Caps` still trails DawnCaps depth
   - Local state: `src/caps.ts` now owns a richer format table, color-type metadata,
-    resolve/transient/MSRTSS policy, resource-binding requirements, and provider-facing usage
-    checks
+    resolve/transient/MSRTSS policy, resource-binding requirements, and provider-facing usage checks
   - Remaining delta: no multiplanar view/aspect model; native-Dawn backend-type workarounds are
     intentionally out of scope for the WebGPU-only target
 
@@ -510,11 +522,16 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
 1. `P1` Widen `RendererProvider`
    - Replace per-draw heuristics with a more Graphite-like context-wide renderer strategy
    - Target files: `src/renderer_provider.ts`, `src/path_renderer.ts`, `src/shared_context.ts`
-2. `P1` Raise `QueueManager` to Graphite submission semantics
+2. `P1` Finish stroke tessellation parity
+   - Port the remaining `tessellate_stroked_curve()` seam math, duplicated-edge handling, and
+     `StrokeIterator` verb semantics so the current stroke implementation is no longer a reduced
+     Graphite variant
+   - Target files: `src/path_renderer.ts`, `src/resource_provider.ts`
+3. `P1` Raise `QueueManager` to Graphite submission semantics
    - Introduce explicit outstanding submissions and tighter command-buffer/resource completion
      ownership
    - Target files: `src/queue_manager.ts`, `src/command_buffer.ts`, `src/shared_context.ts`
-3. `P2` Finish `Caps`
+4. `P2` Finish `Caps`
    - Port remaining DawnCaps workaround logic, multiplanar/external format coverage, and binding
      requirement policy
    - Target files: `src/caps.ts`, `src/resource_provider.ts`

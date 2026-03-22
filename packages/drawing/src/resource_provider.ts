@@ -43,7 +43,9 @@ export type DawnResourceProvider = Readonly<{
   createViewportBindGroup: (buffer: GPUBuffer) => GPUBindGroup;
   createStepBindGroup: (buffer: GPUBuffer) => GPUBindGroup;
   createClipTextureBindGroup: (textureView?: GPUTextureView) => GPUBindGroup;
-  createGraphicsPipelineHandle: (descriptor: DrawingGraphicsPipelineDesc) => DrawingGraphicsPipelineHandle;
+  createGraphicsPipelineHandle: (
+    descriptor: DrawingGraphicsPipelineDesc,
+  ) => DrawingGraphicsPipelineHandle;
   resolveGraphicsPipelineHandle: (handle: DrawingGraphicsPipelineHandle) => GPURenderPipeline;
   findOrCreateGraphicsPipeline: (descriptor: DrawingGraphicsPipelineDesc) => GPURenderPipeline;
   getStencilAttachmentView: () => GPUTextureView;
@@ -1424,7 +1426,9 @@ export const createDawnResourceProvider = (
       return sampler;
     },
     findOrCreateGraphicsPipeline: (descriptor) => {
-      return provider.resolveGraphicsPipelineHandle(provider.createGraphicsPipelineHandle(descriptor));
+      return provider.resolveGraphicsPipelineHandle(
+        provider.createGraphicsPipelineHandle(descriptor),
+      );
     },
     getStencilAttachmentView: () => {
       const sampleCount = caps?.supportsSampleCount(

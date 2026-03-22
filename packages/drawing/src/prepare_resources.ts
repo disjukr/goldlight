@@ -405,7 +405,9 @@ const prepareStepResources = (
   const clipAtlasView = sharedContext.atlasProvider.getClipAtlasManager().findOrCreateEntry(
     step.draw.clip?.atlasClip,
   );
-  const clipTextureBindGroup = sharedContext.resourceProvider.createClipTextureBindGroup(clipAtlasView ?? undefined);
+  const clipTextureBindGroup = sharedContext.resourceProvider.createClipTextureBindGroup(
+    clipAtlasView ?? undefined,
+  );
   const clipPayload = {
     hasAtlas: Boolean(step.draw.clip?.atlasClip),
     atlasOrigin: step.draw.clip?.atlasClip?.bounds.origin ?? [0, 0],
@@ -488,7 +490,9 @@ const prepareStepResources = (
         : null,
       patchInstanceCount: patchVertices
         ? patchVertices.length /
-          (step.draw.renderer === 'stencil-tessellated-wedges' ? wedgePatchFloats : curvePatchFloats)
+          (step.draw.renderer === 'stencil-tessellated-wedges'
+            ? wedgePatchFloats
+            : curvePatchFloats)
         : 0,
       patchVertexCount: step.draw.renderer === 'stencil-tessellated-wedges'
         ? wedgePatchVertexCount
@@ -498,7 +502,9 @@ const prepareStepResources = (
       boundsCoverVertexBuffer: boundsCoverVertices
         ? createVertexBuffer(sharedContext, boundsCoverVertices)
         : null,
-      boundsCoverVertexCount: boundsCoverVertices ? boundsCoverVertices.length / floatsPerVertex : 0,
+      boundsCoverVertexCount: boundsCoverVertices
+        ? boundsCoverVertices.length / floatsPerVertex
+        : 0,
       clipVertexBuffers: clipResources.buffers,
       clipVertexCounts: clipResources.counts,
       clipElements: clipResources.elements,
@@ -538,7 +544,9 @@ const prepareStepResources = (
     clipTextureBindGroup,
     fillVertexBuffer: createVertexBuffer(sharedContext, strokeVertices),
     fillVertexCount: strokeVertices.length / floatsPerVertex,
-    patchVertexBuffer: patchVertices.length > 0 ? createVertexBuffer(sharedContext, patchVertices) : null,
+    patchVertexBuffer: patchVertices.length > 0
+      ? createVertexBuffer(sharedContext, patchVertices)
+      : null,
     patchInstanceCount: patchVertices.length / strokePatchFloats,
     patchVertexCount: strokePatchVertexCount,
     fringeVertexBuffer: fringeVertices ? createVertexBuffer(sharedContext, fringeVertices) : null,
@@ -609,7 +617,9 @@ export const prepareDawnResources = (
     fullscreenClipVertexCount: fullscreenClipVertices.length / floatsPerVertex,
     tasks: Object.freeze(tasks.tasks.map((task): DrawingPreparedRenderPassTaskResources => ({
       kind: 'renderPass',
-      passes: Object.freeze(task.drawPasses.map((passInfo) => preparePassResources(sharedContext, passInfo))),
+      passes: Object.freeze(
+        task.drawPasses.map((passInfo) => preparePassResources(sharedContext, passInfo)),
+      ),
     }))),
   };
 };

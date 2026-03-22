@@ -115,7 +115,8 @@ export const createDawnSharedContext = (
     noopFragmentShader: createNoopFragmentShader(backend),
     uniformBufferBindGroupLayout: createUniformBufferBindGroupLayout(backend, caps),
     singleTextureSamplerBindGroupLayout: createSingleTextureSamplerBindGroupLayout(backend),
-    createGraphicsPipeline: (descriptor) => resourceProvider.findOrCreateGraphicsPipeline(descriptor),
+    createGraphicsPipeline: (descriptor) =>
+      resourceProvider.findOrCreateGraphicsPipeline(descriptor),
     hasTick: typeof backend.tick === 'function',
     recorderCount: 0,
   };

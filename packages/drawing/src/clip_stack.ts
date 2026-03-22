@@ -130,7 +130,10 @@ const matricesEqual = (left: DrawingMatrix2D, right: DrawingMatrix2D): boolean =
   left.every((value, index) => value === right[index]);
 
 const clipsEquivalent = (left: DrawingClip, right: DrawingClip): boolean => {
-  if (left.kind !== right.kind || left.op !== right.op || !matricesEqual(left.transform, right.transform)) {
+  if (
+    left.kind !== right.kind || left.op !== right.op ||
+    !matricesEqual(left.transform, right.transform)
+  ) {
     return false;
   }
   if (left.kind === 'rect' && right.kind === 'rect') {
@@ -155,9 +158,11 @@ const classifyDrawingClipStateFromElements = (
   if (elements.length === 0) {
     return 'wideOpen';
   }
-  if (elements.length === 1 &&
+  if (
+    elements.length === 1 &&
     elements[0]?.clip.kind === 'rect' &&
-    elements[0].clip.op === 'intersect') {
+    elements[0].clip.op === 'intersect'
+  ) {
     return 'deviceRect';
   }
   return 'complex';
@@ -270,7 +275,7 @@ export const popDrawingClipStackSave = (
     .slice(0, restoredSaveRecord.elementCount)
     .map((element) =>
       element.invalidatedByIndex !== undefined &&
-          element.invalidatedByIndex >= restoredSaveRecord.elementCount
+        element.invalidatedByIndex >= restoredSaveRecord.elementCount
         ? { ...element, invalidatedByIndex: undefined }
         : element
     );
@@ -345,7 +350,10 @@ const computeConservativeBounds = (
     if (element.clip.kind !== 'rect' || element.clip.op !== 'intersect') {
       continue;
     }
-    bounds = intersectRects(bounds, computeRectDeviceBounds(element.clip.rect, element.clip.transform));
+    bounds = intersectRects(
+      bounds,
+      computeRectDeviceBounds(element.clip.rect, element.clip.transform),
+    );
   }
   return bounds;
 };
@@ -425,7 +433,9 @@ export const appendDrawingClipStackElement = (
     },
   ];
 
-  const activeAfterAppend = appendedElements.filter((element) => element.invalidatedByIndex === undefined);
+  const activeAfterAppend = appendedElements.filter((element) =>
+    element.invalidatedByIndex === undefined
+  );
   const bounds = computeConservativeBounds(activeAfterAppend);
   const nextSaveRecord: DrawingClipStackSaveRecord = {
     ...current,
@@ -461,10 +471,12 @@ export const visitDrawingClipStackForDraw = (
   preparePathClip: (
     path: DrawingPath2D,
     transform: DrawingMatrix2D,
-  ) => Readonly<{
-    bounds?: Rect;
-    triangles?: readonly Point2D[];
-  }> | null,
+  ) =>
+    | Readonly<{
+      bounds?: Rect;
+      triangles?: readonly Point2D[];
+    }>
+    | null,
   intersectBounds: (bounds: Rect | undefined, candidate: Rect | undefined) => Rect | undefined,
   computeBounds: (points: readonly Point2D[]) => Rect,
 ): DrawingVisitedClipStack => {
@@ -523,9 +535,7 @@ export const visitDrawingClipStackForDraw = (
       }))),
     }
     : undefined;
-  const stencilClip = atlasClip
-    ? undefined
-    : stencilElements.length > 0
+  const stencilClip = atlasClip ? undefined : stencilElements.length > 0
     ? {
       bounds,
       elements: Object.freeze(stencilElements),

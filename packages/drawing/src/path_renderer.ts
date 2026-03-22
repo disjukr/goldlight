@@ -1,4 +1,10 @@
-import { identityMatrix2D, type PathFillRule2D, type Point2D, type Rect, transformPoint2D } from '@rieul3d/geometry';
+import {
+  identityMatrix2D,
+  type PathFillRule2D,
+  type Point2D,
+  type Rect,
+  transformPoint2D,
+} from '@rieul3d/geometry';
 import {
   type DrawingPreparedClip,
   type DrawingPreparedClipElement,
@@ -462,7 +468,9 @@ const chopAndWriteStrokeCubics = (
     prepared.push(finalizePatch({ kind: 'cubic', points: left }));
     prepared.push(finalizePatch({ kind: 'cubic', points: right }));
   } else {
-    prepared.push(finalizePatch({ kind: 'cubic', points: [currentP0, currentP1, currentP2, currentP3] }));
+    prepared.push(
+      finalizePatch({ kind: 'cubic', points: [currentP0, currentP1, currentP2, currentP3] }),
+    );
   }
 
   return Object.freeze(prepared);
@@ -476,7 +484,13 @@ const subdivideStrokePreparedPatch = (
   }
   const numPatches = accountForStrokeCurve(patch.resolveLevel);
   return numPatches > 0
-    ? chopAndWriteStrokeCubics(patch.points[0], patch.points[1], patch.points[2], patch.points[3], numPatches)
+    ? chopAndWriteStrokeCubics(
+      patch.points[0],
+      patch.points[1],
+      patch.points[2],
+      patch.points[3],
+      numPatches,
+    )
     : Object.freeze([patch]);
 };
 
@@ -484,7 +498,9 @@ const prepareStrokePatches = (
   path: DrawingPath2D,
 ): readonly DrawingPreparedPatch[] =>
   Object.freeze(
-    preparePatches(path, identityMatrix2D, false).flatMap((patch) => subdivideStrokePreparedPatch(patch)),
+    preparePatches(path, identityMatrix2D, false).flatMap((patch) =>
+      subdivideStrokePreparedPatch(patch)
+    ),
   );
 
 const getPatchStartPoint = (patch: DrawingPreparedPatch): Point2D => {
@@ -551,11 +567,11 @@ const getPatchOutgoingJoinControlPoint = (patch: DrawingPreparedPatch): Point2D 
 
 const getPatchIncomingTangent = (patch: DrawingPreparedPatch): Point2D | null =>
   normalize(subtract(getPatchFirstControlPoint(patch), getPatchStartPoint(patch))) ??
-  normalize(subtract(getPatchEndPoint(patch), getPatchStartPoint(patch)));
+    normalize(subtract(getPatchEndPoint(patch), getPatchStartPoint(patch)));
 
 const getPatchOutgoingTangent = (patch: DrawingPreparedPatch): Point2D | null =>
   normalize(subtract(getPatchEndPoint(patch), getPatchOutgoingJoinControlPoint(patch))) ??
-  normalize(subtract(getPatchEndPoint(patch), getPatchStartPoint(patch)));
+    normalize(subtract(getPatchEndPoint(patch), getPatchStartPoint(patch)));
 
 const isCuspLikeStrokeTurn = (
   previousPatch: DrawingPreparedPatch,
@@ -629,7 +645,9 @@ const createPreparedStrokePatches = (
       continue;
     }
     if (cap === 'square') {
-      prepared.push(createDegenerateSquareStrokePatch(contour.degeneratePoint, contour.degeneratePoint));
+      prepared.push(
+        createDegenerateSquareStrokePatch(contour.degeneratePoint, contour.degeneratePoint),
+      );
     }
   }
   if (patches.length === 0) {
@@ -739,9 +757,10 @@ const createPreparedStrokeContourPatches = (
       contourStart: !hasPrependedSquareCap,
       contourEnd: !hasAppendedSquareCap && contour.patches.length === 1,
       startCap: !contour.closed && !hasPrependedSquareCap && cap !== 'round' ? cap : 'none',
-      endCap: !contour.closed && !hasAppendedSquareCap && contour.patches.length === 1 && cap !== 'round'
-        ? cap
-        : 'none',
+      endCap:
+        !contour.closed && !hasAppendedSquareCap && contour.patches.length === 1 && cap !== 'round'
+          ? cap
+          : 'none',
     };
     for (let index = 1; index < contour.patches.length; index += 1) {
       bodyPatches.push({
@@ -749,7 +768,8 @@ const createPreparedStrokeContourPatches = (
         contourStart: false,
         contourEnd: !hasAppendedSquareCap && index + 1 === contour.patches.length,
         startCap: 'none',
-        endCap: !contour.closed && !hasAppendedSquareCap && index + 1 === contour.patches.length && cap !== 'round'
+        endCap: !contour.closed && !hasAppendedSquareCap && index + 1 === contour.patches.length &&
+            cap !== 'round'
           ? cap
           : 'none',
       });
@@ -795,13 +815,14 @@ const createPreparedStrokeContourPatches = (
     switch (verb.kind) {
       case 'patch': {
         const event = verb.event;
-        const joinControlPoint = !deferredFirstConsumed && event === iteratorState.deferredFirstPatch
-          ? iteratorState.joinBarrier === 'join'
-            ? getPatchOutgoingJoinControlPoint(lastPatch)
-            : iteratorState.leadingPatches.length > 0
-            ? previousJoinControlPoint
-            : deferredJoinControlPoint
-          : previousJoinControlPoint;
+        const joinControlPoint =
+          !deferredFirstConsumed && event === iteratorState.deferredFirstPatch
+            ? iteratorState.joinBarrier === 'join'
+              ? getPatchOutgoingJoinControlPoint(lastPatch)
+              : iteratorState.leadingPatches.length > 0
+              ? previousJoinControlPoint
+              : deferredJoinControlPoint
+            : previousJoinControlPoint;
         prepared.push({
           patch: event.patch,
           prevPoint: joinControlPoint,
@@ -1017,7 +1038,9 @@ const findCubicConvex180Chops = (
         : { ts: Object.freeze([]), areCusps: true };
     }
 
-    const tan0 = (Math.abs(c[0]) > epsilon || Math.abs(c[1]) > epsilon) ? c : subtract(control2, from);
+    const tan0 = (Math.abs(c[0]) > epsilon || Math.abs(c[1]) > epsilon)
+      ? c
+      : subtract(control2, from);
     qa = dot(tan0, a);
     qbOverMinus2 = -dot(tan0, b);
     qc = dot(tan0, c);
@@ -1035,7 +1058,9 @@ const findCubicConvex180Chops = (
     q !== 0 ? qc / q : Number.NaN,
   ].filter((root) => root > cubicConvex180ChopEpsilon && root < 1 - cubicConvex180ChopEpsilon);
 
-  const uniqueSorted = [...new Set(roots.map((root) => Number(root.toFixed(9))))].sort((lhs, rhs) => lhs - rhs);
+  const uniqueSorted = [...new Set(roots.map((root) => Number(root.toFixed(9))))].sort((lhs, rhs) =>
+    lhs - rhs
+  );
   return { ts: Object.freeze(uniqueSorted), areCusps };
 };
 
@@ -2135,7 +2160,7 @@ const buildStrokeSegmentRecords = (
 const prepareStrokeTriangles = (
   contours: readonly DrawingStrokeContourRecord[],
   paint: DrawingPaint,
-): 
+):
   | Readonly<{
     triangles: readonly Point2D[];
     fringeVertices?: readonly DrawingPreparedVertex[];
@@ -2144,7 +2169,11 @@ const prepareStrokeTriangles = (
   const strokeStyle = resolveStrokeStyle(paint);
   const halfWidth = strokeStyle.halfWidth;
   const cap = strokeStyle.cap;
-  const join = strokeStyle.joinLimit < 0 ? 'round' : strokeStyle.joinLimit === 0 ? 'bevel' : 'miter';
+  const join = strokeStyle.joinLimit < 0
+    ? 'round'
+    : strokeStyle.joinLimit === 0
+    ? 'bevel'
+    : 'miter';
   const miterLimit = Math.max(1, strokeStyle.joinLimit);
   const triangles: Point2D[] = [];
   const fringeVertices: DrawingPreparedVertex[] = [];
@@ -2169,7 +2198,10 @@ const prepareStrokeTriangles = (
       );
       const leftOuterStart = add(segment.start, scale(segment.normal, halfWidth + aaFringeWidth));
       const leftOuterEnd = add(segment.end, scale(segment.normal, halfWidth + aaFringeWidth));
-      const rightOuterStart = add(segment.start, scale(segment.normal, -(halfWidth + aaFringeWidth)));
+      const rightOuterStart = add(
+        segment.start,
+        scale(segment.normal, -(halfWidth + aaFringeWidth)),
+      );
       const rightOuterEnd = add(segment.end, scale(segment.normal, -(halfWidth + aaFringeWidth)));
       appendColoredQuad(
         fringeVertices,
@@ -2538,7 +2570,8 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
             atlasClip: preparedClipStack.atlasClip,
             shader: preparedClipStack.shader,
           }
-          : preparedClipStack.analyticClip || preparedClipStack.atlasClip || preparedClipStack.shader
+          : preparedClipStack.analyticClip || preparedClipStack.atlasClip ||
+              preparedClipStack.shader
           ? {
             bounds: preparedClipStack.bounds,
             deferredClipDraws: preparedClipStack.deferredClipDraws,

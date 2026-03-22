@@ -457,6 +457,10 @@ struct VertexOut {
   @builtin(position) position: vec4<f32>,
   @location(0) color: vec4<f32>,
   @location(1) devicePosition: vec2<f32>,
+  @location(2) localPosition: vec2<f32>,
+  @location(3) capCenter: vec2<f32>,
+  @location(4) capVector: vec2<f32>,
+  @location(5) capMode: f32,
 };
 
 fn device_to_ndc(position: vec2<f32>) -> vec4<f32> {
@@ -701,14 +705,6 @@ fn restrict_join_stroke_outset(
   return select(max(strokeOutset, 0.0), min(strokeOutset, 0.0), turn < 0.0);
 }
 
-fn is_exact_start_edge(segmentIndex: u32, activeSegments: u32) -> bool {
-  return segmentIndex == 0u;
-}
-
-fn is_exact_end_edge(segmentIndex: u32, activeSegments: u32) -> bool {
-  return segmentIndex + 1u >= activeSegments;
-}
-
 @vertex
 fn vs_main(
   @builtin(vertex_index) vertexIndex: u32,
@@ -724,14 +720,12 @@ fn vs_main(
   if ((vertexIndex & 1u) != 0u) {
     edgeID = -edgeID;
   }
-  let segmentIndex = u32(abs(edgeID));
   let affine = affine_matrix();
   let curveType = curveMeta.x;
   let weight = curveMeta.y;
   let flags = u32(max(curveMeta.w, 0.0));
   let roundStart = (flags & 16u) != 0u;
   let roundEnd = (flags & 32u) != 0u;
-  let contourEnd = (flags & 2u) != 0u;
   var curveP0 = p0;
   var curveP1 = p1;
   var curveP2 = p2;
@@ -747,31 +741,35 @@ fn vs_main(
   } else {
     numParametricSegments = wangs_formula_cubic(curveP0, curveP1, curveP2, curveP3, affine);
   }
-  var activeSegments = max(1u, u32(ceil(numParametricSegments)));
   var prevTan = robust_normalize_diff(curveP0, lastControlPoint);
   var tan0 = patch_start_tangent(curveP0, curveP1, curveP2, curveP3);
   var tan1 = patch_end_tangent(curveP0, curveP1, curveP2, curveP3);
   if (length(tan0) <= 1e-5) {
     joinType = 0.0;
-    if (roundStart && roundEnd) {
-      tan0 = vec2<f32>(1.0, 0.0);
-      tan1 = vec2<f32>(-1.0, 0.0);
+    if (curveType < 1.5 || curveType >= 2.5) {
+      if (length(prevTan) > 1e-5) {
+        tan0 = prevTan;
+        tan1 = -prevTan;
+      } else {
+        tan0 = vec2<f32>(1.0, 0.0);
+        tan1 = vec2<f32>(-1.0, 0.0);
+      }
     } else {
-    tan0 = prevTan;
-    tan1 = prevTan;
-    if (length(prevTan) <= 1e-5) {
-      curveP2 = curveP0 + (stroke.x * vec2<f32>(1.0, 0.0));
-      curveP3 = curveP2;
-      curveP0 = curveP0 - (stroke.x * vec2<f32>(1.0, 0.0));
-      curveP1 = curveP0;
-      prevTan = vec2<f32>(1.0, 0.0);
       tan0 = prevTan;
       tan1 = prevTan;
-    } else {
-      curveP1 = curveP0;
-      curveP2 = curveP0 + (stroke.x * prevTan);
-      curveP3 = curveP2;
-    }
+      if (length(prevTan) <= 1e-5) {
+        curveP2 = curveP0 + (stroke.x * vec2<f32>(1.0, 0.0));
+        curveP3 = curveP2;
+        curveP0 = curveP0 - (stroke.x * vec2<f32>(1.0, 0.0));
+        curveP1 = curveP0;
+        prevTan = vec2<f32>(1.0, 0.0);
+        tan0 = prevTan;
+        tan1 = prevTan;
+      } else {
+        curveP1 = curveP0;
+        curveP2 = curveP0 + (stroke.x * prevTan);
+        curveP3 = curveP2;
+      }
     }
   }
   let maxEdges = f32(SEGMENTS);
@@ -779,8 +777,6 @@ fn vs_main(
   if (joinType < 0.0) {
     numEdgesInJoin = min(numEdgesInJoin, maxEdges - 2.0);
   }
-  let squareStart = (flags & 4u) != 0u;
-  let squareEnd = (flags & 8u) != 0u;
   var joinTan0 = tan0;
   var joinTan1 = tan1;
   var turn = cross_length_2d(tan0, tan1);
@@ -792,9 +788,6 @@ fn vs_main(
       joinTan0 = prevTan;
     }
     turn = cross_length_2d(joinTan0, joinTan1);
-  }
-  if (contourEnd) {
-    joinTan1 = tan1;
   }
   let cosTheta = cosine_between_unit_vectors(joinTan0, joinTan1);
   var rotation = acos(cosTheta);
@@ -952,15 +945,6 @@ fn vs_main(
     curveTangent = select(joinTan0, joinTan1, isFinalEdge);
     strokeCoord = select(curveP0, curveP3, isFinalEdge);
   }
-  if (combinedEdgeID >= 0.0) {
-    if (is_exact_start_edge(segmentIndex, activeSegments) && squareStart) {
-      strokeCoord -= curveTangent * stroke.x;
-    } else {
-      if (is_exact_end_edge(segmentIndex, activeSegments) && squareEnd) {
-        strokeCoord += curveTangent * stroke.x;
-      }
-    }
-  }
   let ortho = vec2<f32>(curveTangent.y, -curveTangent.x);
   let local = strokeCoord + (ortho * stroke.x * strokeOutset);
   let devicePosition = local_to_device(local);
@@ -968,6 +952,18 @@ fn vs_main(
   out.position = device_to_ndc(devicePosition);
   out.color = step.color;
   out.devicePosition = devicePosition;
+  out.localPosition = local;
+  out.capCenter = curveP0;
+  out.capVector = prevTan;
+  out.capMode = select(
+    0.0,
+    1.0,
+    (roundStart || roundEnd) &&
+      distance(curveP0, curveP1) <= 1e-5 &&
+      distance(curveP0, curveP2) <= 1e-5 &&
+      distance(curveP0, curveP3) <= 1e-5 &&
+      length(prevTan) > 1e-5,
+  );
   return out;
 }
 
@@ -987,6 +983,12 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
   var color = in.color;
   if (step.params.w > 0.5) {
     color *= step.clipShader;
+  }
+  if (in.capMode > 0.5) {
+    let capLocal = in.localPosition - in.capCenter;
+    if (dot(capLocal, in.capVector) < 0.0) {
+      color.a = 0.0;
+    }
   }
   color.a *= clipCoverage;
   return color;

@@ -95,24 +95,6 @@ type DrawingStrokePatchContour = Readonly<{
   record: DrawingStrokeContourRecord;
 }>;
 
-type DrawingStrokeContourEvent = Readonly<{
-  patch: DrawingPreparedPatch;
-  contourStart: boolean;
-  contourEnd: boolean;
-  startCap: 'none' | 'butt' | 'square' | 'round';
-  endCap: 'none' | 'butt' | 'square' | 'round';
-  joinControlPoint?: Point2D;
-}>;
-
-type DrawingStrokeIteratorContourState = Readonly<{
-  deferredFirstPatch: DrawingStrokeContourEvent;
-  leadingPatches: readonly DrawingStrokeContourEvent[];
-  bodyPatches: readonly DrawingStrokeContourEvent[];
-  trailingPatches: readonly DrawingStrokeContourEvent[];
-  joinBarrier: 'join' | 'moveWithinContour';
-  moveWithinContourJoinPoint: Point2D;
-}>;
-
 type DrawingStrokeContourRecord = Readonly<{
   points: readonly Point2D[];
   closed: boolean;
@@ -678,14 +660,6 @@ const getPatchOutgoingJoinControlPoint = (patch: DrawingPreparedPatch): Point2D 
   return resolvePatchTangentControlPoint(p3, p2, p1, p0);
 };
 
-const getPatchIncomingTangent = (patch: DrawingPreparedPatch): Point2D | null =>
-  normalize(subtract(getPatchFirstControlPoint(patch), getPatchStartPoint(patch))) ??
-    normalize(subtract(getPatchEndPoint(patch), getPatchStartPoint(patch)));
-
-const getPatchOutgoingTangent = (patch: DrawingPreparedPatch): Point2D | null =>
-  normalize(subtract(getPatchEndPoint(patch), getPatchOutgoingJoinControlPoint(patch))) ??
-    normalize(subtract(getPatchEndPoint(patch), getPatchStartPoint(patch)));
-
 const createDegenerateSquareStrokePatch = (
   center: Point2D,
   joinTo: Point2D,
@@ -707,6 +681,7 @@ const createDegenerateSquareStrokePatch = (
 
 const createDegenerateRoundStrokePatch = (
   center: Point2D,
+  joinTo: Point2D = center,
 ): DrawingPreparedStrokePatch => ({
   patch: {
     kind: 'cubic',
@@ -714,8 +689,8 @@ const createDegenerateRoundStrokePatch = (
     resolveLevel: Math.min(maxPatchResolveLevel, 4),
     wangsFormulaP4: 1,
   },
-  prevPoint: center,
-  joinControlPoint: center,
+  prevPoint: joinTo,
+  joinControlPoint: joinTo,
   contourStart: true,
   contourEnd: true,
   startCap: 'round',
@@ -874,116 +849,73 @@ const createPreparedStrokeContourPatches = (
   const lastPatch = contour.patches[contour.patches.length - 1]!;
   const firstStart = contour.record.firstPoint ?? getPatchStartPoint(firstPatch);
   const lastEnd = contour.record.lastPoint ?? getPatchEndPoint(lastPatch);
-  const deferredJoinControlPoint = firstStart;
-  const firstTangent = contour.record.startTangent ?? getPatchIncomingTangent(firstPatch);
-  const lastTangent = contour.record.endTangent ?? getPatchOutgoingTangent(lastPatch);
-  const hasPrependedSquareCap = !contour.closed && cap === 'square';
-  const hasAppendedSquareCap = !contour.closed && cap === 'square';
-  const iteratorState: DrawingStrokeIteratorContourState = (() => {
-    const leadingPatches: DrawingStrokeContourEvent[] = [];
-    const bodyPatches: DrawingStrokeContourEvent[] = [];
-    const trailingPatches: DrawingStrokeContourEvent[] = [];
-    if (!contour.closed && cap === 'round') {
-      leadingPatches.push({
-        patch: createDegenerateRoundStrokePatch(firstStart).patch,
-        contourStart: true,
-        contourEnd: true,
-        startCap: 'round',
-        endCap: 'round',
-        joinControlPoint: firstStart,
-      });
-      trailingPatches.push({
-        patch: createDegenerateRoundStrokePatch(lastEnd).patch,
-        contourStart: true,
-        contourEnd: true,
-        startCap: 'round',
-        endCap: 'round',
-        joinControlPoint: lastEnd,
-      });
-    }
-    if (hasPrependedSquareCap && firstTangent) {
-      leadingPatches.push({
-        patch: createDegenerateSquareStrokePatch(
-          firstStart,
-          getPatchFirstControlPoint(firstPatch),
-        ).patch,
-        contourStart: false,
-        contourEnd: false,
-        startCap: 'none',
-        endCap: 'none',
-        joinControlPoint: getPatchFirstControlPoint(firstPatch),
-      });
-    }
-    const deferredFirstPatch: DrawingStrokeContourEvent = {
-      patch: firstPatch,
-      contourStart: !hasPrependedSquareCap,
-      contourEnd: !hasAppendedSquareCap && contour.patches.length === 1,
-      startCap: !contour.closed && !hasPrependedSquareCap && cap !== 'round' ? cap : 'none',
-      endCap:
-        !contour.closed && !hasAppendedSquareCap && contour.patches.length === 1 && cap !== 'round'
-          ? cap
-          : 'none',
-    };
-    for (let index = 1; index < contour.patches.length; index += 1) {
-      bodyPatches.push({
-        patch: contour.patches[index]!,
-        contourStart: false,
-        contourEnd: !hasAppendedSquareCap && index + 1 === contour.patches.length,
-        startCap: 'none',
-        endCap: !contour.closed && !hasAppendedSquareCap && index + 1 === contour.patches.length &&
-            cap !== 'round'
-          ? cap
-          : 'none',
-      });
-    }
-    if (hasAppendedSquareCap && lastTangent) {
-      trailingPatches.push({
-        patch: createDegenerateSquareStrokePatch(
-          lastEnd,
-          getPatchOutgoingJoinControlPoint(lastPatch),
-        ).patch,
-        contourStart: false,
-        contourEnd: false,
-        startCap: 'none',
-        endCap: 'none',
-        joinControlPoint: getPatchOutgoingJoinControlPoint(lastPatch),
-      });
-    }
-    return {
-      deferredFirstPatch,
-      leadingPatches: Object.freeze(leadingPatches),
-      bodyPatches: Object.freeze(bodyPatches),
-      trailingPatches: Object.freeze(trailingPatches),
-      joinBarrier: contour.closed ? 'join' : 'moveWithinContour',
-      moveWithinContourJoinPoint: leadingPatches.length > 0
-        ? getPatchStartPoint(leadingPatches[0]!.patch)
-        : deferredJoinControlPoint,
-    };
-  })();
-  const orderedEvents = [
-    ...iteratorState.leadingPatches,
-    iteratorState.deferredFirstPatch,
-    ...iteratorState.bodyPatches,
-    ...iteratorState.trailingPatches,
-  ];
-  let previousJoinControlPoint = iteratorState.joinBarrier === 'join'
-    ? getPatchOutgoingJoinControlPoint(lastPatch)
-    : deferredJoinControlPoint;
-  for (const event of orderedEvents) {
-    const joinControlPoint = event.joinControlPoint ?? previousJoinControlPoint;
+  const appendPreparedPatch = (
+    patch: DrawingPreparedPatch,
+    joinControlPoint: Point2D,
+    options: Readonly<{
+      contourStart?: boolean;
+      contourEnd?: boolean;
+      startCap?: 'none' | 'butt' | 'square' | 'round';
+      endCap?: 'none' | 'butt' | 'square' | 'round';
+    }> = {},
+  ): void => {
     prepared.push({
-      patch: event.patch,
+      patch,
       prevPoint: joinControlPoint,
       joinControlPoint,
-      contourStart: event.contourStart,
-      contourEnd: event.contourEnd,
-      startCap: event.startCap,
-      endCap: event.endCap,
+      contourStart: options.contourStart ?? false,
+      contourEnd: options.contourEnd ?? false,
+      startCap: options.startCap ?? 'none',
+      endCap: options.endCap ?? 'none',
     });
-    if (!event.contourEnd || contour.closed) {
-      previousJoinControlPoint = getPatchOutgoingJoinControlPoint(event.patch);
-    }
+  };
+
+  let joinControlPoint = getPatchOutgoingJoinControlPoint(firstPatch);
+  for (let index = 1; index < contour.patches.length; index += 1) {
+    const patch = contour.patches[index]!;
+    appendPreparedPatch(patch, joinControlPoint);
+    joinControlPoint = getPatchOutgoingJoinControlPoint(patch);
   }
+
+  if (contour.closed) {
+    appendPreparedPatch(firstPatch, joinControlPoint, { contourStart: true, contourEnd: true });
+    return Object.freeze(prepared);
+  }
+
+  if (cap === 'round') {
+    appendPreparedPatch(
+      createDegenerateRoundStrokePatch(lastEnd, getPatchOutgoingJoinControlPoint(lastPatch)).patch,
+      getPatchOutgoingJoinControlPoint(lastPatch),
+      {
+      startCap: 'none',
+      endCap: 'round',
+      },
+    );
+    appendPreparedPatch(
+      createDegenerateRoundStrokePatch(firstStart, getPatchFirstControlPoint(firstPatch)).patch,
+      getPatchFirstControlPoint(firstPatch),
+      {
+      startCap: 'round',
+      endCap: 'none',
+      },
+    );
+  } else if (cap === 'square') {
+    appendPreparedPatch(
+      createDegenerateSquareStrokePatch(lastEnd, joinControlPoint).patch,
+      joinControlPoint,
+    );
+    appendPreparedPatch(
+      createDegenerateSquareStrokePatch(firstStart, getPatchFirstControlPoint(firstPatch)).patch,
+      getPatchFirstControlPoint(firstPatch),
+    );
+  }
+
+  appendPreparedPatch(firstPatch, firstStart, {
+    contourStart: true,
+    contourEnd: true,
+    startCap: cap,
+    endCap: cap,
+  });
   return Object.freeze(prepared);
 };
 

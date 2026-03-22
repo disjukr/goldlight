@@ -16,8 +16,9 @@
     "jsr:@std/path@^1.1.1": "1.1.2",
     "jsr:@std/path@^1.1.4": "1.1.4",
     "jsr:@std/yaml@1": "1.0.12",
-    "npm:canvaskit-wasm@*": "0.39.1",
+    "npm:canvaskit-wasm@*": "0.40.0",
     "npm:canvaskit-wasm@0.39.1": "0.39.1",
+    "npm:canvaskit-wasm@0.40": "0.40.0",
     "npm:jpeg-js@*": "0.4.4",
     "npm:jpeg-js@0.4.4": "0.4.4",
     "npm:parse-hdr@1.0.0": "1.0.0",
@@ -102,6 +103,12 @@
     },
     "canvaskit-wasm@0.39.1": {
       "integrity": "sha512-Gy3lCmhUdKq+8bvDrs9t8+qf7RvcjuQn+we7vTVVyqgOVO1UVfHpsnBxkTZw+R4ApEJ3D5fKySl9TU11hmjl/A==",
+      "dependencies": [
+        "@webgpu/types"
+      ]
+    },
+    "canvaskit-wasm@0.40.0": {
+      "integrity": "sha512-Od2o+ZmoEw9PBdN/yCGvzfu0WVqlufBPEWNG452wY7E9aT8RBE+ChpZF526doOlg7zumO4iCS+RAeht4P0Gbpw==",
       "dependencies": [
         "@webgpu/types"
       ]

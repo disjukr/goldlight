@@ -1211,7 +1211,7 @@ Deno.test('drawing prepared stroke patches seed open contours from first tangent
     return points.some((point) => point[0] !== points[0]![0] || point[1] !== points[0]![1]);
   });
   assertEquals(firstCurvePatch?.joinControlPoint, [0, 0]);
-  assertEquals(firstCurvePatch?.startCap, 'none');
+  assertEquals(firstCurvePatch?.startCap, 'round');
   assertEquals(draw.usesTessellatedStrokePatches, true);
 });
 
@@ -1243,7 +1243,7 @@ Deno.test('drawing prepared stroke patches keep open contour joins chained acros
   }
   const conicPatches = draw.patches.filter((patch) => patch.patch.kind === 'conic');
   assertEquals(conicPatches.length, 2);
-  assertEquals(conicPatches[1]?.joinControlPoint, [410, 820]);
+  assertEquals(conicPatches[0]?.joinControlPoint, [410, 820]);
 });
 
 Deno.test('drawing prepared stroke patches rewrite closed contour first join control point', () => {
@@ -1269,9 +1269,9 @@ Deno.test('drawing prepared stroke patches rewrite closed contour first join con
     throw new Error('expected pathStroke draw');
   }
   assertEquals(draw.patches.length >= 3, true);
-  assertEquals(draw.patches[0]?.joinControlPoint, [40, 30]);
-  assertEquals(draw.patches[0]?.startCap, 'none');
-  assertEquals(draw.patches[0]?.contourStart, true);
+  assertEquals(draw.patches.at(-1)?.joinControlPoint, [40, 30]);
+  assertEquals(draw.patches.at(-1)?.startCap, 'none');
+  assertEquals(draw.patches.at(-1)?.contourStart, true);
 });
 
 Deno.test('drawing prepared stroke patches emit synthetic circle patches for round joins and caps', () => {
@@ -1373,9 +1373,10 @@ Deno.test('drawing prepared stroke patches emit square cap patches for open cont
     throw new Error('expected pathStroke draw');
   }
   assertEquals(draw.patches[0]?.patch.kind, 'conic');
-  assertEquals(draw.patches.at(-1)?.patch.kind, 'conic');
-  assertEquals(draw.patches[0]?.joinControlPoint, [380, 315]);
-  assertEquals(draw.patches.at(-1)?.joinControlPoint, [260, 315]);
+  assertEquals(draw.patches[1]?.patch.kind, 'conic');
+  assertEquals(draw.patches.at(-1)?.patch.kind, 'line');
+  assertEquals(draw.patches[0]?.joinControlPoint, [260, 315]);
+  assertEquals(draw.patches[1]?.joinControlPoint, [380, 315]);
 });
 
 Deno.test('drawing prepared stroke patches emit synthetic cap patches for degenerate contours', () => {

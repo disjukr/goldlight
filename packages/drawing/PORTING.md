@@ -541,22 +541,20 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
     Graphite
 - `Stroke tessellation` is structurally close but still not 1:1
   - Local state: `src/path_renderer.ts` now has iterator-like contour events, deferred first-patch
-    rewrite, open-cap patch emission, Graphite-style replicated line patches, `chopAndWriteCubics`,
+    rewrite, open-cap patch emission, Graphite-style replicated line patches,
     `FindCubicConvex180Chops`-style cubic chop detection, `StrokeIterator`-like contour finishing
     with explicit move barriers, explicit close-only contours that now emit Skia-style zero-length
     cap geometry, post-`close` current-point preservation for subsequent verbs, and open-contour
     patch chaining that now keeps split curves connected to their true predecessor join control
     points; dashed and line-only stroke patches now route through the same synthetic-path writer
-    flow; `src/resource_provider.ts` now uses triangle-strip stroke patch replay with `edgeID` /
-    `combinedEdgeID`-driven body tessellation, and its WGSL branch structure now more directly
-    mirrors Skia's `tessellate_stroked_curve()` for degenerate square/circle patches,
-    duplicated-edge join seaming, `lastRadialEdgeID == 0` stabilization, segment counting,
-    CPU-provided `maxScale` stroke tolerances instead of a shader-local approximation, and hairline
-    pre-transforming before tessellation
-  - Remaining delta: `tessellate_stroked_curve()` seam math still has local safety branches,
-    duplicated-edge handling is still a reduced version of Skia's full implementation, and
-    translucent round cap/join coverage still needs Graphite-like analytic evaluation instead of
-    flat color fill
+    flow; `src/resource_provider.ts` now uses triangle-strip stroke patch replay with Skia-like
+    `edgeID` / `combinedEdgeID` sorting, binary-search parametric edge solve, `unchecked_mix`
+    evaluation, duplicated join-edge restriction, CPU-provided `maxScale` stroke tolerances instead
+    of a shader-local approximation, and hairline pre-transforming before tessellation
+  - Remaining delta: some `StrokeIterator` semantics are still event-driven rather than a
+    verb-for-verb port, cusp handling is still a reduced version of Skia's full writer path in a
+    few places, and translucent round cap/join coverage still needs Graphite-like analytic
+    evaluation instead of flat color fill
 - `QueueManager` submission model is still simplified
   - Local state: queue submission, ordered outstanding submission ownership, completion draining, a
     `checkForFinishedWork`-style sync path, submission-owned transient buffer cleanup, and
@@ -575,17 +573,8 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
 ## Work Order
 
 1. `P1` Finish stroke tessellation parity
-   - Port the remaining `tessellate_stroked_curve()` seam math and duplicated-edge handling so the
+   - Finish the remaining `StrokeIterator` verb semantics and analytic cap/join coverage so the
      current stroke implementation is no longer a reduced Graphite variant
-   - Done first: keep stroke segmentation on the same CPU-derived `maxScale` basis as Graphite so
-     shader-side edge budgeting no longer diverges from upload-time planning
-   - Update 2026-03-23: empty `moveTo`/`close` contours now match Skia's zero-length cap behavior;
-     remaining work is duplicated-edge/shader seam parity plus fuller verb-level iterator matching
-   - Update 2026-03-23: post-`close` current-point semantics now match Skia/Canvas, so subsequent
-     verbs reopen from the closed contour start instead of failing path preparation
-   - Update 2026-03-23: dashed and line-only stroke patches now reuse the same synthetic-path
-     `StrokeIterator`-like writer flow; remaining work is duplicated-edge/shader seam parity plus
-     fuller analytic coverage for round joins/caps
    - Target files: `src/path_renderer.ts`, `src/resource_provider.ts`
 2. `P2` Finish `Caps`
    - Port remaining DawnCaps workaround logic, multiplanar/external format coverage, and binding

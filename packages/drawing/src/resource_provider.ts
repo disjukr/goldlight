@@ -580,11 +580,19 @@ fn num_radial_segments_per_radian(approxDevStrokeRadius: f32) -> f32 {
 
 fn robust_normalize_diff(a: vec2<f32>, b: vec2<f32>) -> vec2<f32> {
   let delta = a - b;
-  let deltaLength = length(delta);
-  if (deltaLength <= 1e-5) {
+  if (all(delta == vec2<f32>(0.0, 0.0))) {
     return vec2<f32>(0.0, 0.0);
   }
-  return delta / deltaLength;
+  let invMag = 1.0 / max(abs(delta.x), abs(delta.y));
+  return normalize(invMag * delta);
+}
+
+fn unchecked_mix(a: f32, b: f32, t: f32) -> f32 {
+  return fma(b - a, t, a);
+}
+
+fn unchecked_mix_vec2(a: vec2<f32>, b: vec2<f32>, t: f32) -> vec2<f32> {
+  return fma(b - a, vec2<f32>(t), a);
 }
 
 fn patch_start_tangent(
@@ -820,125 +828,121 @@ fn vs_main(
   var strokeCoord: vec2<f32>;
   var curveTangent: vec2<f32>;
   if (combinedEdgeID != 0.0 && !isFinalEdge) {
-        var parametricT = combinedEdgeID / numCombinedSegments;
-        var coeffA: vec2<f32>;
-        var coeffB: vec2<f32>;
-        var coeffC = curveP1 - curveP0;
-        let deltaP = curveP3 - curveP0;
-        if (curveType < 2.5) {
-          if (curveType < 1.5) {
-            if (curveType < 0.5) {
-              let edgeP = curveP2 - curveP1;
-              coeffB = edgeP - coeffC;
-              coeffA = (-3.0 * edgeP) + deltaP;
-            } else {
-              coeffA = vec2<f32>(0.0, 0.0);
-              coeffB = (curveP2 - (2.0 * curveP1)) + curveP0;
-              coeffC = curveP1 - curveP0;
-            }
-          } else {
-            coeffC *= weight;
-            coeffB = (0.5 * deltaP) - coeffC;
-            coeffA = (weight - 1.0) * deltaP;
-          }
-        } else {
+    var coeffA: vec2<f32>;
+    var coeffB: vec2<f32>;
+    var coeffC = curveP1 - curveP0;
+    let deltaP = curveP3 - curveP0;
+    if (curveType < 2.5) {
+      if (curveType < 1.5) {
+        if (curveType < 0.5) {
           let edgeP = curveP2 - curveP1;
           coeffB = edgeP - coeffC;
           coeffA = (-3.0 * edgeP) + deltaP;
+        } else {
+          coeffA = vec2<f32>(0.0, 0.0);
+          coeffB = (0.5 * deltaP) - coeffC;
         }
-        let coeffBScaled = coeffB * (numParametricSegments * 2.0);
-        let coeffCScaled = coeffC * (numParametricSegments * numParametricSegments);
-        var lastParametricEdgeID = 0.0;
-        let maxParametricEdgeID = min(numParametricSegments - 1.0, combinedEdgeID);
-        let negAbsRadsPerSegment = -abs(radsPerSegment);
-        let maxRotation0 = (1.0 + combinedEdgeID) * abs(radsPerSegment);
-        var exp = 32.0;
-        loop {
-          if (exp < 1.0) {
-            break;
-          }
-          let testParametricID = lastParametricEdgeID + exp;
-          if (testParametricID <= maxParametricEdgeID) {
-            var testTan = (coeffA * testParametricID) + coeffBScaled;
-            testTan = (testTan * testParametricID) + coeffCScaled;
-            let cosRotationAtTest = dot(normalize(testTan), joinTan0);
-            let maxRotation = min((testParametricID * negAbsRadsPerSegment) + maxRotation0, 3.14159265359);
-            if (cosRotationAtTest >= cos(maxRotation)) {
-              lastParametricEdgeID = testParametricID;
-            }
-          }
-          exp *= 0.5;
+      } else {
+        coeffC *= weight;
+        coeffB = (0.5 * deltaP) - coeffC;
+        coeffA = (weight - 1.0) * deltaP;
+        curveP1 *= weight;
+      }
+    } else {
+      let edgeP = curveP2 - curveP1;
+      coeffB = edgeP - coeffC;
+      coeffA = (-3.0 * edgeP) + deltaP;
+    }
+    let coeffBScaled = coeffB * (numParametricSegments * 2.0);
+    let coeffCScaled = coeffC * (numParametricSegments * numParametricSegments);
+    var lastParametricEdgeID = 0.0;
+    let maxParametricEdgeID = min(numParametricSegments - 1.0, combinedEdgeID);
+    let negAbsRadsPerSegment = -abs(radsPerSegment);
+    let maxRotation0 = (1.0 + combinedEdgeID) * abs(radsPerSegment);
+    for (var exp = ${maxPatchResolveLevel - 1}; exp >= 0; exp--) {
+      let testParametricID = lastParametricEdgeID + exp2(f32(exp));
+      if (testParametricID <= maxParametricEdgeID) {
+        var testTan = fma(vec2<f32>(testParametricID), coeffA, coeffBScaled);
+        testTan = fma(vec2<f32>(testParametricID), testTan, coeffCScaled);
+        let cosRotationAtTest = dot(normalize(testTan), joinTan0);
+        let maxRotation = min(fma(testParametricID, negAbsRadsPerSegment, maxRotation0), 3.14159265359);
+        if (cosRotationAtTest >= cos(maxRotation)) {
+          lastParametricEdgeID = testParametricID;
         }
-        parametricT = lastParametricEdgeID / numParametricSegments;
-        let lastRadialEdgeID = combinedEdgeID - lastParametricEdgeID;
-        let angle0 = select(acos(clamp(joinTan0.x, -1.0, 1.0)), -acos(clamp(joinTan0.x, -1.0, 1.0)), joinTan0.y < 0.0);
-        let radialAngle = (lastRadialEdgeID * radsPerSegment) + angle0;
-        let radialTangent = vec2<f32>(cos(radialAngle), sin(radialAngle));
-        let radialNorm = vec2<f32>(-radialTangent.y, radialTangent.x);
-        let quadraticA = dot(radialNorm, coeffA);
-        let quadraticBOver2 = dot(radialNorm, coeffB);
-        let quadraticC = dot(radialNorm, coeffC);
-        let discrOver4 = max((quadraticBOver2 * quadraticBOver2) - (quadraticA * quadraticC), 0.0);
-        var rootQ = sqrt(discrOver4);
-        if (quadraticBOver2 > 0.0) {
-          rootQ = -rootQ;
-        }
-        rootQ -= quadraticBOver2;
-        let rootChoiceA = abs((rootQ * rootQ) + (-0.5 * rootQ * quadraticA));
-        let rootChoiceB = abs((quadraticA * quadraticC) + (-0.5 * rootQ * quadraticA));
-        let rootNumer = select(quadraticC, rootQ, rootChoiceA < rootChoiceB);
-        let rootDenom = select(rootQ, quadraticA, rootChoiceA < rootChoiceB);
-        var radialT = select(0.0, clamp(rootNumer / rootDenom, 0.0, 1.0), rootDenom != 0.0);
-        if (lastRadialEdgeID == 0.0) {
-          radialT = 0.0;
-        }
-        let finalT = max(parametricT, radialT);
-        var tangentAtT = radialTangent;
-        if (curveType < 2.5) {
-          if (curveType < 1.5) {
-            if (curveType < 0.5) {
-              let ab = mix(curveP0, curveP1, finalT);
-              let bc = mix(curveP1, curveP2, finalT);
-              let cd = mix(curveP2, curveP3, finalT);
-              let abc = mix(ab, bc, finalT);
-              let bcd = mix(bc, cd, finalT);
-              strokeCoord = mix(abc, bcd, finalT);
-              if (finalT != radialT) {
-                tangentAtT = robust_normalize_diff(bcd, abc);
-              }
-            } else {
-              let ab = mix(curveP0, curveP1, finalT);
-              let bc = mix(curveP1, curveP2, finalT);
-              strokeCoord = mix(ab, bc, finalT);
-              if (finalT != radialT) {
-                tangentAtT = robust_normalize_diff(bc, ab);
-              }
-            }
-          } else {
-            let weightedCurveP1 = curveP1 * weight;
-            let ab = mix(curveP0, weightedCurveP1, finalT);
-            let bc = mix(weightedCurveP1, curveP2, finalT);
-            let abc = mix(ab, bc, finalT);
-            let u = mix(1.0, weight, finalT);
-            let v = weight + 1.0 - u;
-            let uv = mix(u, v, finalT);
-            strokeCoord = abc / max(uv, 1e-5);
-            if (finalT != radialT) {
-              tangentAtT = robust_normalize_diff(bc * u, ab * v);
-            }
+      }
+    }
+    let parametricT = lastParametricEdgeID / numParametricSegments;
+    let lastRadialEdgeID = combinedEdgeID - lastParametricEdgeID;
+    let angle0Magnitude = acos(clamp(joinTan0.x, -1.0, 1.0));
+    let angle0 = select(angle0Magnitude, -angle0Magnitude, joinTan0.y < 0.0);
+    let radialAngle = fma(lastRadialEdgeID, radsPerSegment, angle0);
+    let radialTangent = vec2<f32>(cos(radialAngle), sin(radialAngle));
+    curveTangent = radialTangent;
+    let radialNorm = vec2<f32>(-radialTangent.y, radialTangent.x);
+    let quadraticA = dot(radialNorm, coeffA);
+    let quadraticBOver2 = dot(radialNorm, coeffB);
+    let quadraticC = dot(radialNorm, coeffC);
+    let discrOver4 = max((quadraticBOver2 * quadraticBOver2) - (quadraticA * quadraticC), 0.0);
+    var rootQ = sqrt(discrOver4);
+    if (quadraticBOver2 > 0.0) {
+      rootQ = -rootQ;
+    }
+    rootQ -= quadraticBOver2;
+    let rootSentinel = -0.5 * rootQ * quadraticA;
+    let useQaRoot = abs(fma(rootQ, rootQ, rootSentinel)) < abs(fma(quadraticA, quadraticC, rootSentinel));
+    let rootNumer = select(quadraticC, rootQ, useQaRoot);
+    let rootDenom = select(rootQ, quadraticA, useQaRoot);
+    var radialT = 0.0;
+    if (lastRadialEdgeID != 0.0) {
+      radialT = select(0.0, clamp(rootNumer / rootDenom, 0.0, 1.0), rootDenom != 0.0);
+    }
+    if (lastRadialEdgeID == 0.0) {
+      radialT = 0.0;
+    }
+    let finalT = max(parametricT, radialT);
+    if (curveType < 2.5) {
+      if (curveType < 1.5) {
+        if (curveType < 0.5) {
+          let ab = unchecked_mix_vec2(curveP0, curveP1, finalT);
+          let bc = unchecked_mix_vec2(curveP1, curveP2, finalT);
+          let cd = unchecked_mix_vec2(curveP2, curveP3, finalT);
+          let abc = unchecked_mix_vec2(ab, bc, finalT);
+          let bcd = unchecked_mix_vec2(bc, cd, finalT);
+          strokeCoord = unchecked_mix_vec2(abc, bcd, finalT);
+          if (finalT != radialT) {
+            curveTangent = robust_normalize_diff(bcd, abc);
           }
         } else {
-          let ab = mix(curveP0, curveP1, finalT);
-          let bc = mix(curveP1, curveP2, finalT);
-          let cd = mix(curveP2, curveP3, finalT);
-          let abc = mix(ab, bc, finalT);
-          let bcd = mix(bc, cd, finalT);
-          strokeCoord = mix(abc, bcd, finalT);
+          let ab = unchecked_mix_vec2(curveP0, curveP1, finalT);
+          let bc = unchecked_mix_vec2(curveP1, curveP2, finalT);
+          strokeCoord = unchecked_mix_vec2(ab, bc, finalT);
           if (finalT != radialT) {
-            tangentAtT = robust_normalize_diff(bcd, abc);
+            curveTangent = robust_normalize_diff(bc, ab);
           }
         }
-    curveTangent = tangentAtT;
+      } else {
+        let ab = unchecked_mix_vec2(curveP0, curveP1, finalT);
+        let bc = unchecked_mix_vec2(curveP1, curveP2, finalT);
+        let abc = unchecked_mix_vec2(ab, bc, finalT);
+        let u = unchecked_mix(1.0, weight, finalT);
+        let v = weight + 1.0 - u;
+        let uv = unchecked_mix(u, v, finalT);
+        strokeCoord = abc / max(uv, 1e-5);
+        if (finalT != radialT) {
+          curveTangent = robust_normalize_diff(bc * u, ab * v);
+        }
+      }
+    } else {
+      let ab = unchecked_mix_vec2(curveP0, curveP1, finalT);
+      let bc = unchecked_mix_vec2(curveP1, curveP2, finalT);
+      let cd = unchecked_mix_vec2(curveP2, curveP3, finalT);
+      let abc = unchecked_mix_vec2(ab, bc, finalT);
+      let bcd = unchecked_mix_vec2(bc, cd, finalT);
+      strokeCoord = unchecked_mix_vec2(abc, bcd, finalT);
+      if (finalT != radialT) {
+        curveTangent = robust_normalize_diff(bcd, abc);
+      }
+    }
   } else {
     curveTangent = select(joinTan0, joinTan1, isFinalEdge);
     strokeCoord = select(curveP0, curveP3, isFinalEdge);

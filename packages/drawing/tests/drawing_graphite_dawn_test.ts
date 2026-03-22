@@ -2037,6 +2037,40 @@ Deno.test('dawn command buffer isolates tessellated stroke patches into a depth-
   assertEquals(strokePatchPipeline?.depthStencil?.depthWriteEnabled, true);
 });
 
+Deno.test('dawn stroke patch shader keeps Skia-like combined-edge solve structure', () => {
+  const mock = createMockGpuContext();
+  const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
+  const recorder = createDrawingRecorder(sharedContext);
+  const binding = createOffscreenBinding(mock.context);
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [32, 96] },
+      { kind: 'cubicTo', control1: [48, 16], control2: [144, 16], to: [160, 96] },
+      { kind: 'lineTo', to: [160, 160] },
+    ),
+    { style: 'stroke', strokeWidth: 8, strokeJoin: 'round', strokeCap: 'round' },
+  );
+
+  encodeDawnCommandBuffer(sharedContext, finishDrawingRecorder(recorder), binding);
+
+  const strokeShader = mock.created.shaderModules.find((module) =>
+    module.label === 'drawing-stroke-patch-shader'
+  );
+  assertEquals(typeof strokeShader?.code, 'string');
+  if (typeof strokeShader?.code !== 'string') {
+    throw new Error('expected stroke patch shader source');
+  }
+  const strokeShaderSource = strokeShader.code;
+  assertEquals(
+    strokeShaderSource.includes('let testParametricID = lastParametricEdgeID + exp2(f32(exp));'),
+    true,
+  );
+  assertEquals(strokeShaderSource.includes('let rootSentinel = -0.5 * rootQ * quadraticA;'), true);
+  assertEquals(strokeShaderSource.includes('unchecked_mix_vec2'), true);
+});
+
 Deno.test('dawn resource provider reuses pipelines across command buffers', () => {
   const mock = createMockGpuContext();
   const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));

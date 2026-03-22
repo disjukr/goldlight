@@ -233,6 +233,8 @@ Deno.test('dawn shared context exposes resource provider over gpu device', () =>
   assertEquals(sharedContext.resourceProvider.resourceBudget, 1024);
   assertEquals(sharedContext.caps.backend, 'graphite-dawn');
   assertEquals(sharedContext.caps.supportsTimestampQuery, true);
+  assertEquals(sharedContext.rendererProvider.pathRendererStrategy, 'tessellation');
+  assertEquals(sharedContext.rendererProvider.renderers.length, 4);
   assertEquals(mock.created.bindGroupLayouts.length, 2);
   assertEquals(mock.created.buffers.length, 1);
   assertEquals(mock.created.textures.length, 1);

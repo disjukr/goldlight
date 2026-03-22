@@ -14,11 +14,7 @@ import type {
   DrawPathCommand,
   DrawShapeCommand,
 } from './types.ts';
-import {
-  type DrawingRendererKind,
-  selectPathFillRenderer,
-  selectPathStrokeRenderer,
-} from './renderer_provider.ts';
+import { type DrawingRendererKind, type DrawingRendererProvider } from './renderer_provider.ts';
 
 type FlattenedSubpath = Readonly<{
   points: readonly Point2D[];
@@ -2713,7 +2709,10 @@ const computeContourMidpoint = (points: readonly Point2D[]): Point2D => {
   return points[0]!;
 };
 
-const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDrawPreparation => {
+const preparePathFill = (
+  rendererProvider: DrawingRendererProvider,
+  command: DrawPathCommand | DrawShapeCommand,
+): DrawingDrawPreparation => {
   const subpaths = flattenSubpaths(command.path, identityMatrix2D);
   if (!subpaths) {
     return { supported: false, reason: 'path does not resolve to subpaths' };
@@ -2744,7 +2743,7 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
     const isSingleConvexContour = subpaths.length === 1 &&
       subpaths[0]!.closed &&
       isConvexPolygon(subpaths[0]!.points);
-    const renderer = selectPathFillRenderer({
+    const renderer = rendererProvider.getPathFillRenderer({
       fillRule: command.path.fillRule,
       patchCount: patches.length,
       hasCurves,
@@ -2843,7 +2842,7 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
     supported: true,
     draw: {
       kind: 'pathStroke',
-      renderer: selectPathStrokeRenderer(patches.map((patch) => patch.patch)),
+      renderer: rendererProvider.getPathStrokeRenderer(patches.map((patch) => patch.patch)),
       triangles: strokeTriangles,
       fringeVertices: preparedStroke.fringeVertices,
       patches,
@@ -2882,5 +2881,6 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
 };
 
 export const prepareDrawingPathCommand = (
+  rendererProvider: DrawingRendererProvider,
   command: DrawPathCommand | DrawShapeCommand,
-): DrawingDrawPreparation => preparePathFill(command);
+): DrawingDrawPreparation => preparePathFill(rendererProvider, command);

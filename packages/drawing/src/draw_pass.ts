@@ -319,7 +319,7 @@ export const prepareDrawingRecording = (
     }
 
     if (isDrawCommand(command)) {
-      const prepared = prepareDrawingPathCommand(command);
+      const prepared = prepareDrawingPathCommand(recording.rendererProvider, command);
       if (prepared.supported) {
         currentSteps.push({
           draw: prepared.draw,

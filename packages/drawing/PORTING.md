@@ -82,10 +82,11 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Missing: device feature negotiation policy
 - `DawnSharedContext` -> `src/shared_context.ts`
   - Status: `partial`
-  - What exists: shared backend state, caps, noop fragment shader, resource provider creation, and
-    backend-global bind group layouts
+  - What exists: shared backend state, caps, noop fragment shader, resource provider creation,
+    backend-global bind group layouts, and a context-owned renderer provider with a fixed path
+    rendering strategy
   - Missing: graphics pipeline factory/helpers, broader bind-group families, and threaded
-    resource-provider split
+    resource-provider split beyond a shared provider alias
 - `DawnResourceProvider` -> `src/resource_provider.ts`
   - Status: `partial`
   - What exists: simple resource allocation plus cached fill/stroke/clip pipelines, first
@@ -497,8 +498,13 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
   - Remaining delta: clip shaders are reduced to a solid-color modulation, deferred clip draws are
     metadata instead of full clip task objects, and the atlas path is a minimal clip-atlas manager
 - `RendererProvider` is still a small selector
-  - Local state: `src/renderer_provider.ts` chooses fill/stroke renderer variants
-  - Remaining delta: no context-wide renderer set comparable to Graphite's provider
+  - Local state: `src/renderer_provider.ts` now creates a context-owned provider with a fixed
+    tessellation strategy and a stable renderer set, and `src/shared_context.ts` /
+    `src/recording.ts` thread that provider through recording and draw preparation instead of doing
+    free functions at callsites
+  - Remaining delta: still only the tessellation family is modeled; there is no atlas/compute
+    strategy selection, shared RenderStep graph, or renderer-wide precompile iteration comparable to
+    Graphite
 - `Stroke tessellation` is structurally close but still not 1:1
   - Local state: `src/path_renderer.ts` now has iterator-like contour events, deferred first-patch
     rewrite, open-cap patch emission, Graphite-style replicated line patches, `chopAndWriteCubics`,
@@ -522,22 +528,30 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
 
 ## Work Order
 
-1. `P1` Widen `RendererProvider`
-   - Replace per-draw heuristics with a more Graphite-like context-wide renderer strategy
-   - Target files: `src/renderer_provider.ts`, `src/path_renderer.ts`, `src/shared_context.ts`
-2. `P1` Finish stroke tessellation parity
+1. `P1` Finish stroke tessellation parity
    - Port the remaining `tessellate_stroked_curve()` seam math, duplicated-edge handling, and
      `StrokeIterator` verb semantics so the current stroke implementation is no longer a reduced
      Graphite variant
    - Target files: `src/path_renderer.ts`, `src/resource_provider.ts`
-3. `P1` Raise `QueueManager` to Graphite submission semantics
+2. `P1` Raise `QueueManager` to Graphite submission semantics
    - Introduce explicit outstanding submissions and tighter command-buffer/resource completion
      ownership
    - Target files: `src/queue_manager.ts`, `src/command_buffer.ts`, `src/shared_context.ts`
-4. `P2` Finish `Caps`
+3. `P2` Finish `Caps`
    - Port remaining DawnCaps workaround logic, multiplanar/external format coverage, and binding
      requirement policy
    - Target files: `src/caps.ts`, `src/resource_provider.ts`
+
+## Recent Updates
+
+- 2026-03-23
+  - Files: `src/renderer_provider.ts`, `src/shared_context.ts`, `src/recording.ts`,
+    `src/draw_pass.ts`, `src/path_renderer.ts`, `tests/drawing_graphite_dawn_test.ts`
+  - Status transition: `RendererProvider` widened from a stateless selector to a context-owned
+    provider with a fixed path rendering strategy
+  - Remaining delta: only the tessellation strategy exists; Graphite's renderer inventory,
+    RenderStep ownership, and alternate atlas/compute strategies are still missing
+  - Validation: `deno test tests/drawing_graphite_dawn_test.ts`
 
 ## Update Rules
 

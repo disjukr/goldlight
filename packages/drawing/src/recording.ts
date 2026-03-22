@@ -1,10 +1,12 @@
 import type { Path2D } from '@rieul3d/geometry';
 import { cloneDrawingClipStackSnapshot } from './clip_stack.ts';
+import type { DrawingRendererProvider } from './renderer_provider.ts';
 import type { DawnSharedContext } from './shared_context.ts';
 import type { DrawingCommand, DrawingSubmission } from './types.ts';
 
 export type DrawingRecording = Readonly<{
   backend: DrawingSubmission['backend'];
+  rendererProvider: DrawingRendererProvider;
   recorderId: number;
   commandCount: number;
   commands: readonly DrawingCommand[];
@@ -53,6 +55,7 @@ export const createDrawingRecording = (
 
   return {
     backend: sharedContext.backend.kind,
+    rendererProvider: sharedContext.rendererProvider,
     recorderId,
     commandCount: clonedCommands.length,
     commands: Object.freeze(clonedCommands),

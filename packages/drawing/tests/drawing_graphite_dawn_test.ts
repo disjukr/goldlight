@@ -12,6 +12,7 @@ import {
 import {
   appendDrawingClipStackElement,
   createDrawingClipStackSnapshot,
+  clipDrawingRecorderShader,
   clipDrawingRecorderPath,
   clipDrawingRecorderRect,
   concatDrawingRecorderTransform,
@@ -841,6 +842,7 @@ Deno.test('drawing prepared recording preserves difference clips as stencil elem
     'drawing-clip-stencil-difference',
   ]);
   assertEquals(step?.draw.clip?.elements?.map((element) => element.op), ['intersect', 'difference']);
+  assertEquals(step?.draw.clip?.atlasClip, undefined);
 });
 
 Deno.test('drawing prepared recording preserves stroke patches when convex clips are present', () => {
@@ -882,7 +884,7 @@ Deno.test('drawing prepared recording preserves stroke patches when convex clips
   ]);
 });
 
-Deno.test('drawing prepared recording preserves multiple complex path clips for stencil replay', () => {
+Deno.test('drawing prepared recording collapses multiple complex path clips into an atlas clip', () => {
   const mock = createMockGpuContext();
   const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
   const recorder = drawingContext.createRecorder();
@@ -936,10 +938,45 @@ Deno.test('drawing prepared recording preserves multiple complex path clips for 
   if (draw?.kind !== 'pathFill') {
     throw new Error('expected pathFill draw');
   }
-  assertEquals(draw.usesStencil, true);
-  assertEquals(draw.clip?.elements?.length, 2);
-  assertEquals((draw.clip?.elements?.[0]?.triangles.length ?? 0) > 0, true);
-  assertEquals((draw.clip?.elements?.[1]?.triangles.length ?? 0) > 0, true);
+  assertEquals(draw.usesStencil, false);
+  assertEquals(draw.clip?.atlasClip !== undefined, true);
+  assertEquals((draw.clip?.deferredClipDraws?.length ?? 0) >= 2, true);
+  assertEquals((draw.clip?.atlasClip?.elements.length ?? 0) >= 2, true);
+  assertEquals((draw.clip?.atlasClip?.bounds.size.width ?? 0) > 0, true);
+});
+
+Deno.test('drawing prepared recording carries analytic and shader clip metadata', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  clipDrawingRecorderRect(recorder, createRect(12, 18, 40, 36));
+  clipDrawingRecorderShader(recorder, {
+    kind: 'solidColor',
+    color: [0.5, 0.75, 1, 0.5],
+  });
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [0, 0] },
+      { kind: 'lineTo', to: [96, 0] },
+      { kind: 'lineTo', to: [96, 96] },
+      { kind: 'lineTo', to: [0, 96] },
+      { kind: 'close' },
+    ),
+    { style: 'fill' },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const draw = prepared.passes[0]?.steps[0]?.draw;
+  assertEquals(draw?.kind, 'pathFill');
+  if (draw?.kind !== 'pathFill') {
+    throw new Error('expected pathFill draw');
+  }
+  assertEquals(draw.clip?.analyticClip?.kind, 'rect');
+  assertEquals(draw.clip?.analyticClip?.rect, createRect(12, 18, 40, 36));
+  assertEquals(draw.clip?.shader?.kind, 'solidColor');
+  assertEquals(draw.clip?.shader?.color, [0.5, 0.75, 1, 0.5]);
 });
 
 Deno.test('drawing prepared recording falls back for self-intersecting fill paths', () => {
@@ -1208,9 +1245,8 @@ Deno.test('dawn command buffer accumulates multiple stencil clip paths before co
 
   assertEquals(commandBuffer.unsupportedCommands.length, 0);
   assertEquals(mock.created.renderPasses.length, 1);
-  assertEquals(mock.created.drawCalls.length, 4);
-  assertEquals(mock.created.stencilReferences.slice(0, 2), [1, 2]);
-  assertEquals(mock.created.stencilReferences[mock.created.stencilReferences.length - 1], 2);
+  assertEquals(mock.created.drawCalls.length, 2);
+  assertEquals(mock.created.stencilReferences.length, 0);
 });
 
 Deno.test('dawn command buffer encodes stroke draws without stencil', () => {

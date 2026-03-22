@@ -2,6 +2,7 @@ import { type Point2D, type Rect, transformPoint2D } from '@rieul3d/geometry';
 import type {
   DrawingClip,
   DrawingClipRect,
+  DrawingClipShader,
   DrawingClipStackElement,
   DrawingClipStackSaveRecord,
   DrawingClipStackSnapshot,
@@ -15,15 +16,33 @@ export type DrawingPreparedClipElement = Readonly<{
   triangles: readonly Point2D[];
 }>;
 
+export type DrawingPreparedAnalyticClip = Readonly<{
+  kind: 'rect';
+  rect: DrawingClipRect;
+}>;
+
+export type DrawingPreparedAtlasClip = Readonly<{
+  bounds: Rect;
+  elements: readonly DrawingPreparedClipElement[];
+}>;
+
 export type DrawingPreparedClip = Readonly<{
   bounds?: Rect;
   elements?: readonly DrawingPreparedClipElement[];
+  deferredClipDraws?: readonly DrawingPreparedClipElement[];
+  analyticClip?: DrawingPreparedAnalyticClip;
+  atlasClip?: DrawingPreparedAtlasClip;
+  shader?: DrawingClipShader;
 }>;
 
 export type DrawingVisitedClipStack = Readonly<{
   saveRecord: DrawingClipStackSaveRecord;
   bounds?: Rect;
   stencilClip?: DrawingPreparedClip;
+  deferredClipDraws: readonly DrawingPreparedClipElement[];
+  analyticClip?: DrawingPreparedAnalyticClip;
+  atlasClip?: DrawingPreparedAtlasClip;
+  shader?: DrawingClipShader;
   effectiveElements: readonly DrawingClipStackElement[];
 }>;
 
@@ -61,6 +80,9 @@ const cloneBounds = (bounds: DrawingClipRect | Rect | undefined): DrawingClipRec
       size: { ...bounds.size },
     }
     : undefined;
+
+const cloneClipShader = (shader: DrawingClipShader | undefined): DrawingClipShader | undefined =>
+  shader ? { kind: shader.kind, color: [...shader.color] as typeof shader.color } : undefined;
 
 const isEmptyRect = (rect: Rect | undefined): boolean =>
   rect !== undefined && (rect.size.width <= 0 || rect.size.height <= 0);
@@ -167,6 +189,7 @@ export const createDrawingClipStackSnapshot = (
     deferredSaveCount: record.deferredSaveCount,
     state: record.state,
     bounds: cloneBounds(record.bounds),
+    clipShader: cloneClipShader(record.clipShader),
   }))),
 });
 
@@ -184,6 +207,7 @@ export const getCurrentDrawingClipSaveRecord = (
     elementCount: 0,
     deferredSaveCount: 0,
     state: 'wideOpen',
+    clipShader: undefined,
   };
 
 export const createDrawingClipSaveRecord = (
@@ -418,6 +442,20 @@ export const appendDrawingClipStackElement = (
   return createDrawingClipStackSnapshot(appendedElements, saveRecords);
 };
 
+export const setDrawingClipStackShader = (
+  clipStack: DrawingClipStackSnapshot,
+  shader: DrawingClipShader,
+): DrawingClipStackSnapshot => {
+  const writableClipStack = materializeDeferredSaveRecord(clipStack);
+  const current = getCurrentDrawingClipSaveRecord(writableClipStack);
+  const saveRecords = [...writableClipStack.saveRecords];
+  saveRecords[saveRecords.length - 1] = {
+    ...current,
+    clipShader: cloneClipShader(shader),
+  };
+  return createDrawingClipStackSnapshot(writableClipStack.elements, saveRecords);
+};
+
 export const visitDrawingClipStackForDraw = (
   clipStack: DrawingClipStackSnapshot,
   preparePathClip: (
@@ -466,15 +504,61 @@ export const visitDrawingClipStackForDraw = (
     }
   }
 
+  const analyticClip = activeElements.length === 1 &&
+      activeElements[0]!.clip.kind === 'rect' &&
+      activeElements[0]!.clip.op === 'intersect'
+    ? {
+      kind: 'rect' as const,
+      rect: cloneBounds(activeElements[0]!.clip.rect)!,
+    }
+    : undefined;
+  const atlasClip = !analyticClip &&
+      stencilElements.length > 1 &&
+      activeElements.some((element) => element.clip.kind === 'path')
+    ? {
+      bounds: bounds ?? computeBounds(stencilElements.flatMap((element) => element.triangles)),
+      elements: Object.freeze(stencilElements.map((element) => ({
+        op: element.op,
+        triangles: Object.freeze([...element.triangles]),
+      }))),
+    }
+    : undefined;
+  const stencilClip = atlasClip
+    ? undefined
+    : stencilElements.length > 0
+    ? {
+      bounds,
+      elements: Object.freeze(stencilElements),
+      deferredClipDraws: Object.freeze(stencilElements.map((element) => ({
+        op: element.op,
+        triangles: Object.freeze([...element.triangles]),
+      }))),
+      analyticClip,
+      shader: cloneClipShader(saveRecord.clipShader),
+    }
+    : analyticClip || saveRecord.clipShader
+    ? {
+      bounds,
+      deferredClipDraws: Object.freeze(stencilElements.map((element) => ({
+        op: element.op,
+        triangles: Object.freeze([...element.triangles]),
+      }))),
+      analyticClip,
+      shader: cloneClipShader(saveRecord.clipShader),
+    }
+    : undefined;
+
   return {
     saveRecord,
     bounds,
-    stencilClip: stencilElements.length > 0
-      ? {
-        bounds,
-        elements: Object.freeze(stencilElements),
-      }
-      : undefined,
+    stencilClip,
+    deferredClipDraws: Object.freeze(stencilElements.map((element) => ({
+      op: element.op,
+      triangles: Object.freeze([...element.triangles]),
+    }))),
+    analyticClip,
+    atlasClip,
+    shader: cloneClipShader(saveRecord.clipShader),
     effectiveElements: Object.freeze([...activeElements]),
   };
 };

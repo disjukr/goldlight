@@ -1,5 +1,5 @@
 import type { DrawingPreparedClipElement } from './clip_stack.ts';
-import type { Point2D } from '@rieul3d/geometry';
+import type { Point2D, Rect } from '@rieul3d/geometry';
 import { type DrawingPreparedRecording, prepareDrawingRecording } from './draw_pass.ts';
 import type { DrawingRecording } from './recording.ts';
 import type { DrawingPreparedPatch, DrawingPreparedVertex } from './path_renderer.ts';
@@ -15,6 +15,8 @@ export type DrawingPreparedStepResources = Readonly<{
   fringePipeline: GPURenderPipeline | null;
   stepPayloadBuffer: GPUBuffer;
   stepBindGroup: GPUBindGroup;
+  clipTextureView: GPUTextureView | null;
+  clipTextureBindGroup: GPUBindGroup;
   fillVertexBuffer: GPUBuffer | null;
   fillVertexCount: number;
   patchVertexBuffer: GPUBuffer | null;
@@ -48,6 +50,7 @@ export type DrawingPreparedCommandResources = Readonly<{
   viewportBindGroup: GPUBindGroup;
   identityStepPayloadBuffer: GPUBuffer;
   identityStepBindGroup: GPUBindGroup;
+  defaultClipTextureBindGroup: GPUBindGroup;
   fullscreenClipVertexBuffer: GPUBuffer;
   fullscreenClipVertexCount: number;
   tasks: readonly DrawingPreparedRenderPassTaskResources[];
@@ -64,7 +67,7 @@ export type DawnPreparedWork = Readonly<{
 const vertexBufferUsage = 0x0020;
 const uniformBufferUsage = 0x0040;
 const floatsPerVertex = 6;
-const stepPayloadFloats = 16;
+const stepPayloadFloats = 28;
 const wedgePatchFloats = 14;
 const curvePatchFloats = 12;
 const strokePatchFloats = 12;
@@ -151,6 +154,16 @@ const createStepPayloadBuffer = (
   transform: readonly [number, number, number, number, number, number],
   color: readonly [number, number, number, number],
   halfWidth: number,
+  clip: Readonly<{
+    hasAtlas: boolean;
+    atlasOrigin: Point2D;
+    atlasInvSize: Point2D;
+    hasAnalyticRect: boolean;
+    analyticOrigin: Point2D;
+    analyticSize: Point2D;
+    hasShader: boolean;
+    shaderColor: readonly [number, number, number, number];
+  }>,
 ): GPUBuffer => {
   const buffer = sharedContext.resourceProvider.createBuffer({
     label: 'drawing-step-payload',
@@ -172,9 +185,21 @@ const createStepPayloadBuffer = (
     color[2],
     color[3],
     halfWidth,
-    0,
-    0,
-    0,
+    clip.hasAtlas ? 1 : 0,
+    clip.hasAnalyticRect ? 1 : 0,
+    clip.hasShader ? 1 : 0,
+    clip.atlasOrigin[0],
+    clip.atlasOrigin[1],
+    clip.atlasInvSize[0],
+    clip.atlasInvSize[1],
+    clip.analyticOrigin[0],
+    clip.analyticOrigin[1],
+    clip.analyticSize[0],
+    clip.analyticSize[1],
+    clip.shaderColor[0],
+    clip.shaderColor[1],
+    clip.shaderColor[2],
+    clip.shaderColor[3],
   ]);
   buffer.unmap();
   return buffer;
@@ -321,7 +346,7 @@ const createClipStepResources = (
   counts: readonly number[];
   elements: readonly DrawingPreparedClipElement[];
 }> => {
-  const clipElements = step.draw.clip?.elements;
+  const clipElements = step.draw.clip?.deferredClipDraws ?? step.draw.clip?.elements;
   if (!clipElements || clipElements.length === 0) {
     return {
       buffers: Object.freeze([]),
@@ -362,11 +387,36 @@ const prepareStepResources = (
     sharedContext.resourceProvider.resolveGraphicsPipelineHandle(handle)
   );
   const clipResources = createClipStepResources(sharedContext, step);
+  const clipAtlasView = sharedContext.atlasProvider.getClipAtlasManager().findOrCreateEntry(
+    step.draw.clip?.atlasClip,
+  );
+  const clipTextureBindGroup = sharedContext.resourceProvider.createClipTextureBindGroup(clipAtlasView ?? undefined);
+  const clipPayload = {
+    hasAtlas: Boolean(step.draw.clip?.atlasClip),
+    atlasOrigin: step.draw.clip?.atlasClip?.bounds.origin ?? [0, 0],
+    atlasInvSize: step.draw.clip?.atlasClip
+      ? [
+        1 / Math.max(step.draw.clip.atlasClip.bounds.size.width, 1),
+        1 / Math.max(step.draw.clip.atlasClip.bounds.size.height, 1),
+      ] as readonly [number, number]
+      : [0, 0] as const,
+    hasAnalyticRect: Boolean(step.draw.clip?.analyticClip),
+    analyticOrigin: step.draw.clip?.analyticClip?.rect.origin ?? [0, 0],
+    analyticSize: step.draw.clip?.analyticClip
+      ? [
+        step.draw.clip.analyticClip.rect.size.width,
+        step.draw.clip.analyticClip.rect.size.height,
+      ] as readonly [number, number]
+      : [0, 0] as const,
+    hasShader: Boolean(step.draw.clip?.shader),
+    shaderColor: step.draw.clip?.shader?.color ?? [1, 1, 1, 1] as const,
+  };
   const stepPayloadBuffer = createStepPayloadBuffer(
     sharedContext,
     step.draw.transform,
     step.draw.color,
     step.draw.kind === 'pathStroke' ? step.draw.halfWidth : 0,
+    clipPayload,
   );
   const stepBindGroup = sharedContext.resourceProvider.createStepBindGroup(stepPayloadBuffer);
 
@@ -407,6 +457,8 @@ const prepareStepResources = (
       fringePipeline,
       stepPayloadBuffer,
       stepBindGroup,
+      clipTextureView: clipAtlasView,
+      clipTextureBindGroup,
       fillVertexBuffer: fillVertices ? createVertexBuffer(sharedContext, fillVertices) : null,
       fillVertexCount: fillVertices ? fillVertices.length / floatsPerVertex : 0,
       patchVertexBuffer: patchVertices && patchVertices.length > 0
@@ -455,6 +507,8 @@ const prepareStepResources = (
       : null,
     stepPayloadBuffer,
     stepBindGroup,
+    clipTextureView: clipAtlasView,
+    clipTextureBindGroup,
     fillVertexBuffer: createVertexBuffer(sharedContext, strokeVertices),
     fillVertexCount: strokeVertices.length / floatsPerVertex,
     patchVertexBuffer: patchVertices.length > 0 ? createVertexBuffer(sharedContext, patchVertices) : null,
@@ -500,10 +554,21 @@ export const prepareDawnResources = (
     [1, 0, 0, 1, 0, 0],
     [0, 0, 0, 0],
     0,
+    {
+      hasAtlas: false,
+      atlasOrigin: [0, 0],
+      atlasInvSize: [0, 0],
+      hasAnalyticRect: false,
+      analyticOrigin: [0, 0],
+      analyticSize: [0, 0],
+      hasShader: false,
+      shaderColor: [1, 1, 1, 1],
+    },
   );
   const identityStepBindGroup = sharedContext.resourceProvider.createStepBindGroup(
     identityStepPayloadBuffer,
   );
+  const defaultClipTextureBindGroup = sharedContext.resourceProvider.createClipTextureBindGroup();
   const fullscreenClipVertices = createFullscreenClipVertexData(sharedContext.backend.target);
   const fullscreenClipVertexBuffer = createVertexBuffer(sharedContext, fullscreenClipVertices);
 
@@ -512,6 +577,7 @@ export const prepareDawnResources = (
     viewportBindGroup,
     identityStepPayloadBuffer,
     identityStepBindGroup,
+    defaultClipTextureBindGroup,
     fullscreenClipVertexBuffer,
     fullscreenClipVertexCount: fullscreenClipVertices.length / floatsPerVertex,
     tasks: Object.freeze(tasks.tasks.map((task): DrawingPreparedRenderPassTaskResources => ({

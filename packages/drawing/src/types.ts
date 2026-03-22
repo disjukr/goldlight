@@ -24,6 +24,11 @@ export type DrawingClip = Readonly<
 
 export type DrawingClipStackState = 'empty' | 'wideOpen' | 'deviceRect' | 'complex';
 
+export type DrawingClipShader = Readonly<{
+  kind: 'solidColor';
+  color: readonly [number, number, number, number];
+}>;
+
 export type DrawingClipStackSaveRecord = Readonly<{
   startingElementIndex: number;
   oldestValidIndex: number;
@@ -31,6 +36,7 @@ export type DrawingClipStackSaveRecord = Readonly<{
   deferredSaveCount: number;
   state: DrawingClipStackState;
   bounds?: DrawingClipRect;
+  clipShader?: DrawingClipShader;
 }>;
 
 export type DrawingClipStackElement = Readonly<{

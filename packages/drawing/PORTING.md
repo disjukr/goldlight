@@ -439,12 +439,13 @@ These decisions directly affect the remaining work and are not settled yet.
   - First implementation now includes miter/bevel/round joins, butt/square/round caps, dash slicing,
     and hairline alpha scaling
 - Clip implementation
-  - Status: `started`
-  - First implementation uses recorded clip stacks, convex geometry clipping, scissor reduction, and
-    stencil masking for a remaining complex clip path
+  - Status: `partial`
+  - Save-record clip stacks, deferred save materialization, clip invalidation, deferred clip draw
+    metadata, clip shader payloads, analytic rect clips, and atlas-backed complex clips now exist
 - Atlas/text approach
-  - Status: `pending`
-  - Deferred until shapes are rendering
+  - Status: `started`
+  - Clip atlasing now exists through a shared clip atlas manager; general path/text atlas strategy
+    is still pending
 - Pipeline cache shape
   - Status: `pending`
   - Depends on command buffer and shader layout
@@ -476,17 +477,20 @@ These decisions directly affect the remaining work and are not settled yet.
 The remaining work should be judged against Skia Graphite/Dawn structure, not just current output.
 
 - `TaskList` / `RenderPassTask` layer is still missing
-  - Local state: `recording.ts`, `draw_pass.ts`, and `prepare_resources.ts` form a simplified
-    `Recording -> DrawPass -> prepareResources -> CommandBuffer` flow
-  - Remaining delta: no child-task graph, upload-task ownership, or render-pass task objects
+  - Local state: `src/task.ts`, `src/render_pass_task.ts`, and `src/prepare_resources.ts` now form
+    a first `Recording -> TaskList -> RenderPassTask -> DrawPass -> prepareResources ->
+    CommandBuffer` flow
+  - Remaining delta: no child-task graph or upload-task ownership
 - `DrawPass::prepareResources()` is still narrower than Skia
-  - Local state: pipeline descriptors and pre-encode resource preparation exist
-  - Remaining delta: passes do not yet own Skia-like sampled textures, pipeline handles, or richer
-    pass-local payload families
+  - Local state: prepared passes now own pipeline handles, resolved pipelines, sampled textures,
+    and step payloads before encode
+  - Remaining delta: payload families are still narrower than Graphite's recorder/task resource
+    model
 - `ClipStack` is structurally closer but still incomplete
   - Local state: save records, deferred save materialization, oldest-valid tracking, and
     rect-intersect invalidation/restore exist in `src/clip_stack.ts`
-  - Remaining delta: no clip shaders, deferred clip draws, analytic clip, or clip atlas path
+  - Remaining delta: clip shaders are reduced to a solid-color modulation, deferred clip draws are
+    metadata instead of full clip task objects, and the atlas path is a minimal clip-atlas manager
 - `RendererProvider` is still a small selector
   - Local state: `src/renderer_provider.ts` chooses fill/stroke renderer variants
   - Remaining delta: no context-wide renderer set comparable to Graphite's provider
@@ -500,27 +504,14 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
 
 ## Work Order
 
-1. `P0` Build a real `TaskList / RenderPassTask` layer
-   - Add task objects between `Recording` and `CommandBuffer`
-   - Move render-pass grouping and child-task ownership out of direct draw-pass iteration
-   - Target files: `src/recording.ts`, `src/draw_pass.ts`, `src/prepare_resources.ts`,
-     `src/command_buffer.ts`
-2. `P0` Expand `DrawPass::prepareResources()` ownership
-   - Make prepared passes own pipeline handles, resolved pipelines, sampled textures, and richer
-     pass-local payload objects before encode
-   - Target files: `src/draw_pass.ts`, `src/prepare_resources.ts`, `src/resource_provider.ts`
-3. `P0` Finish `ClipStack` semantics
-   - Add deferred clip draws, clip-shader plumbing, and analytic/atlas clip paths on top of the
-     current save-record structure
-   - Target files: `src/clip_stack.ts`, `src/path_renderer.ts`, `src/command_buffer.ts`
-4. `P1` Widen `RendererProvider`
+1. `P1` Widen `RendererProvider`
    - Replace per-draw heuristics with a more Graphite-like context-wide renderer strategy
    - Target files: `src/renderer_provider.ts`, `src/path_renderer.ts`, `src/shared_context.ts`
-5. `P1` Raise `QueueManager` to Graphite submission semantics
+2. `P1` Raise `QueueManager` to Graphite submission semantics
    - Introduce explicit outstanding submissions and tighter command-buffer/resource completion
      ownership
    - Target files: `src/queue_manager.ts`, `src/command_buffer.ts`, `src/shared_context.ts`
-6. `P2` Deepen `Caps`
+3. `P2` Deepen `Caps`
    - Port more of `DawnCaps` format policy, sample policy, and workaround logic
    - Target files: `src/caps.ts`, `src/resource_provider.ts`
 

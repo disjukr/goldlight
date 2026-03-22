@@ -3,6 +3,7 @@ import {
   cloneDrawingClipStackSnapshot,
   createDrawingClipStackSnapshot,
   pushDrawingClipStackSave,
+  setDrawingClipStackShader,
 } from './clip_stack.ts';
 import {
   createScaleMatrix2D,
@@ -18,6 +19,7 @@ import { type DawnSharedContext, registerDawnRecorder } from './shared_context.t
 import type {
   ClearCommand,
   DrawingClipOp,
+  DrawingClipShader,
   DrawingClipStackSnapshot,
   DrawingCommand,
   DrawingPaint,
@@ -180,6 +182,16 @@ export const clipDrawingRecorderPath = (
       path: clipPath as DrawingPath2D,
       transform: recorder.state.transform,
     }),
+  };
+};
+
+export const clipDrawingRecorderShader = (
+  recorder: DrawingRecorder,
+  shader: DrawingClipShader,
+): void => {
+  (recorder as MutableDrawingRecorder).state = {
+    ...recorder.state,
+    clipStack: setDrawingClipStackShader(recorder.state.clipStack, shader),
   };
 };
 

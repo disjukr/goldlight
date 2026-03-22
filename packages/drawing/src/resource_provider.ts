@@ -41,6 +41,7 @@ export type DawnResourceProvider = Readonly<{
   createSampler: (descriptor?: DrawingSamplerDescriptor) => GPUSampler;
   createViewportBindGroup: (buffer: GPUBuffer) => GPUBindGroup;
   createStepBindGroup: (buffer: GPUBuffer) => GPUBindGroup;
+  createClipTextureBindGroup: (textureView?: GPUTextureView) => GPUBindGroup;
   createGraphicsPipelineHandle: (descriptor: DrawingGraphicsPipelineDesc) => DrawingGraphicsPipelineHandle;
   resolveGraphicsPipelineHandle: (handle: DrawingGraphicsPipelineHandle) => GPURenderPipeline;
   findOrCreateGraphicsPipeline: (descriptor: DrawingGraphicsPipelineDesc) => GPURenderPipeline;
@@ -55,7 +56,8 @@ const noColorWrites = 0;
 const maxPatchResolveLevel = 6;
 const curveFillSegments = 1 << maxPatchResolveLevel;
 const strokePatchSegments = 1 << maxPatchResolveLevel;
-const stepUniformFloats = 16;
+const stepUniformFloats = 28;
+const textureBindingUsage = 0x04;
 
 const fillPathShaderSource = `
 struct ViewportUniform {
@@ -70,13 +72,19 @@ struct StepUniform {
   matrix1: vec4<f32>,
   color: vec4<f32>,
   params: vec4<f32>,
+  clipAtlas: vec4<f32>,
+  clipAnalytic: vec4<f32>,
+  clipShader: vec4<f32>,
 };
 
 @group(1) @binding(0) var<uniform> step: StepUniform;
+@group(2) @binding(0) var clipMaskSampler: sampler;
+@group(2) @binding(1) var clipMaskTexture: texture_2d<f32>;
 
 struct VertexOut {
   @builtin(position) position: vec4<f32>,
   @location(0) color: vec4<f32>,
+  @location(1) devicePosition: vec2<f32>,
 };
 
 fn local_to_device(position: vec2<f32>) -> vec2<f32> {
@@ -95,15 +103,33 @@ fn vs_main(
   @location(0) position: vec2<f32>,
   @location(1) color: vec4<f32>,
 ) -> VertexOut {
+  let devicePosition = local_to_device(position);
   var out: VertexOut;
-  out.position = device_to_ndc(local_to_device(position));
+  out.position = device_to_ndc(devicePosition);
   out.color = color;
+  out.devicePosition = devicePosition;
   return out;
 }
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
-  return in.color * step.color;
+  var clipCoverage = 1.0;
+  if (step.params.y > 0.5) {
+    let uv = (in.devicePosition - step.clipAtlas.xy) * step.clipAtlas.zw;
+    clipCoverage *= textureSample(clipMaskTexture, clipMaskSampler, uv).a;
+  }
+  if (step.params.z > 0.5) {
+    let local = in.devicePosition - step.clipAnalytic.xy;
+    let inside = local.x >= 0.0 && local.y >= 0.0 &&
+      local.x <= step.clipAnalytic.z && local.y <= step.clipAnalytic.w;
+    clipCoverage *= select(0.0, 1.0, inside);
+  }
+  var color = in.color * step.color;
+  if (step.params.w > 0.5) {
+    color *= step.clipShader;
+  }
+  color.a *= clipCoverage;
+  return color;
 }
 `;
 
@@ -123,13 +149,19 @@ struct StepUniform {
   matrix1: vec4<f32>,
   color: vec4<f32>,
   params: vec4<f32>,
+  clipAtlas: vec4<f32>,
+  clipAnalytic: vec4<f32>,
+  clipShader: vec4<f32>,
 };
 
 @group(1) @binding(0) var<uniform> step: StepUniform;
+@group(2) @binding(0) var clipMaskSampler: sampler;
+@group(2) @binding(1) var clipMaskTexture: texture_2d<f32>;
 
 struct VertexOut {
   @builtin(position) position: vec4<f32>,
   @location(0) color: vec4<f32>,
+  @location(1) devicePosition: vec2<f32>,
 };
 
 fn device_to_ndc(position: vec2<f32>) -> vec4<f32> {
@@ -197,15 +229,33 @@ fn vs_main(
   } else {
     local = b;
   }
+  let devicePosition = local_to_device(local);
   var out: VertexOut;
-  out.position = device_to_ndc(local_to_device(local));
+  out.position = device_to_ndc(devicePosition);
   out.color = step.color;
+  out.devicePosition = devicePosition;
   return out;
 }
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
-  return in.color;
+  var clipCoverage = 1.0;
+  if (step.params.y > 0.5) {
+    let uv = (in.devicePosition - step.clipAtlas.xy) * step.clipAtlas.zw;
+    clipCoverage *= textureSample(clipMaskTexture, clipMaskSampler, uv).a;
+  }
+  if (step.params.z > 0.5) {
+    let local = in.devicePosition - step.clipAnalytic.xy;
+    let inside = local.x >= 0.0 && local.y >= 0.0 &&
+      local.x <= step.clipAnalytic.z && local.y <= step.clipAnalytic.w;
+    clipCoverage *= select(0.0, 1.0, inside);
+  }
+  var color = in.color;
+  if (step.params.w > 0.5) {
+    color *= step.clipShader;
+  }
+  color.a *= clipCoverage;
+  return color;
 }
 `;
 
@@ -225,13 +275,19 @@ struct StepUniform {
   matrix1: vec4<f32>,
   color: vec4<f32>,
   params: vec4<f32>,
+  clipAtlas: vec4<f32>,
+  clipAnalytic: vec4<f32>,
+  clipShader: vec4<f32>,
 };
 
 @group(1) @binding(0) var<uniform> step: StepUniform;
+@group(2) @binding(0) var clipMaskSampler: sampler;
+@group(2) @binding(1) var clipMaskTexture: texture_2d<f32>;
 
 struct VertexOut {
   @builtin(position) position: vec4<f32>,
   @location(0) color: vec4<f32>,
+  @location(1) devicePosition: vec2<f32>,
 };
 
 fn device_to_ndc(position: vec2<f32>) -> vec4<f32> {
@@ -296,15 +352,33 @@ fn vs_main(
   } else {
     local = eval_patch(curveMeta.x, curveMeta.y, p0, p1, p2, p3, t1);
   }
+  let devicePosition = local_to_device(local);
   var out: VertexOut;
-  out.position = device_to_ndc(local_to_device(local));
+  out.position = device_to_ndc(devicePosition);
   out.color = step.color;
+  out.devicePosition = devicePosition;
   return out;
 }
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
-  return in.color;
+  var clipCoverage = 1.0;
+  if (step.params.y > 0.5) {
+    let uv = (in.devicePosition - step.clipAtlas.xy) * step.clipAtlas.zw;
+    clipCoverage *= textureSample(clipMaskTexture, clipMaskSampler, uv).a;
+  }
+  if (step.params.z > 0.5) {
+    let local = in.devicePosition - step.clipAnalytic.xy;
+    let inside = local.x >= 0.0 && local.y >= 0.0 &&
+      local.x <= step.clipAnalytic.z && local.y <= step.clipAnalytic.w;
+    clipCoverage *= select(0.0, 1.0, inside);
+  }
+  var color = in.color;
+  if (step.params.w > 0.5) {
+    color *= step.clipShader;
+  }
+  color.a *= clipCoverage;
+  return color;
 }
 `;
 
@@ -324,13 +398,19 @@ struct StepUniform {
   matrix1: vec4<f32>,
   color: vec4<f32>,
   params: vec4<f32>,
+  clipAtlas: vec4<f32>,
+  clipAnalytic: vec4<f32>,
+  clipShader: vec4<f32>,
 };
 
 @group(1) @binding(0) var<uniform> step: StepUniform;
+@group(2) @binding(0) var clipMaskSampler: sampler;
+@group(2) @binding(1) var clipMaskTexture: texture_2d<f32>;
 
 struct VertexOut {
   @builtin(position) position: vec4<f32>,
   @location(0) color: vec4<f32>,
+  @location(1) devicePosition: vec2<f32>,
 };
 
 fn device_to_ndc(position: vec2<f32>) -> vec4<f32> {
@@ -396,15 +476,33 @@ fn vs_main(
     let indices = array<u32, 6>(0u, 1u, 2u, 0u, 2u, 3u);
     local = corners[indices[quadVertex]];
   }
+  let devicePosition = local_to_device(local);
   var out: VertexOut;
-  out.position = device_to_ndc(local_to_device(local));
+  out.position = device_to_ndc(devicePosition);
   out.color = step.color;
+  out.devicePosition = devicePosition;
   return out;
 }
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
-  return in.color;
+  var clipCoverage = 1.0;
+  if (step.params.y > 0.5) {
+    let uv = (in.devicePosition - step.clipAtlas.xy) * step.clipAtlas.zw;
+    clipCoverage *= textureSample(clipMaskTexture, clipMaskSampler, uv).a;
+  }
+  if (step.params.z > 0.5) {
+    let local = in.devicePosition - step.clipAnalytic.xy;
+    let inside = local.x >= 0.0 && local.y >= 0.0 &&
+      local.x <= step.clipAnalytic.z && local.y <= step.clipAnalytic.w;
+    clipCoverage *= select(0.0, 1.0, inside);
+  }
+  var color = in.color;
+  if (step.params.w > 0.5) {
+    color *= step.clipShader;
+  }
+  color.a *= clipCoverage;
+  return color;
 }
 `;
 
@@ -497,6 +595,7 @@ export const createDawnResourceProvider = (
 ): DawnResourceProvider => {
   let viewportBindGroupLayout: GPUBindGroupLayout | null = null;
   let stepBindGroupLayout: GPUBindGroupLayout | null = null;
+  let clipTextureBindGroupLayout: GPUBindGroupLayout | null = null;
   let drawingPipelineLayout: GPUPipelineLayout | null = null;
   let stencilAttachment:
     | Readonly<{
@@ -510,6 +609,7 @@ export const createDawnResourceProvider = (
   const samplerCache = new Map<string, GPUSampler>();
   const shaderModuleCache = new Map<string, GPUShaderModule>();
   const graphicsPipelineCache = new Map<string, GPURenderPipeline>();
+  let defaultClipTextureView: GPUTextureView | null = null;
 
   const createVertexLayout = (): GPUVertexBufferLayout => ({
     arrayStride: floatBytes * floatsPerVertex,
@@ -602,6 +702,66 @@ export const createDawnResourceProvider = (
     return stepBindGroupLayout;
   };
 
+  const getClipTextureBindGroupLayout = (): GPUBindGroupLayout => {
+    if (clipTextureBindGroupLayout) {
+      return clipTextureBindGroupLayout;
+    }
+
+    clipTextureBindGroupLayout = backend.device.createBindGroupLayout({
+      label: 'drawing-clip-texture-bind-group-layout',
+      entries: [
+        {
+          binding: 0,
+          visibility: GPUShaderStage.FRAGMENT,
+          sampler: {
+            type: 'filtering',
+          },
+        },
+        {
+          binding: 1,
+          visibility: GPUShaderStage.FRAGMENT,
+          texture: {
+            sampleType: 'float',
+            viewDimension: '2d',
+            multisampled: false,
+          },
+        },
+      ],
+    });
+    return clipTextureBindGroupLayout;
+  };
+
+  const getDefaultClipTextureView = (): GPUTextureView => {
+    if (defaultClipTextureView) {
+      return defaultClipTextureView;
+    }
+
+    const texture = backend.device.createTexture({
+      label: 'drawing-default-clip-texture',
+      size: {
+        width: 1,
+        height: 1,
+        depthOrArrayLayers: 1,
+      },
+      format: 'rgba8unorm',
+      usage: textureBindingUsage | renderAttachmentUsage,
+    });
+    if (
+      'writeTexture' in backend.queue &&
+      typeof backend.queue.writeTexture === 'function'
+    ) {
+      const pixel = new Uint8Array([255, 255, 255, 255]);
+      backend.queue.writeTexture(
+        { texture },
+        pixel,
+        { bytesPerRow: 4, rowsPerImage: 1 },
+        { width: 1, height: 1, depthOrArrayLayers: 1 },
+      );
+    }
+    defaultClipTextureView = texture.createView();
+    return defaultClipTextureView;
+  };
+
   const getDrawingPipelineLayout = (): GPUPipelineLayout => {
     if (drawingPipelineLayout) {
       return drawingPipelineLayout;
@@ -609,7 +769,11 @@ export const createDawnResourceProvider = (
 
     drawingPipelineLayout = backend.device.createPipelineLayout({
       label: 'drawing-pipeline-layout',
-      bindGroupLayouts: [getViewportBindGroupLayout(), getStepBindGroupLayout()],
+      bindGroupLayouts: [
+        getViewportBindGroupLayout(),
+        getStepBindGroupLayout(),
+        getClipTextureBindGroupLayout(),
+      ],
     });
     return drawingPipelineLayout;
   };
@@ -763,6 +927,25 @@ export const createDawnResourceProvider = (
             buffer,
           },
         }],
+      }),
+    createClipTextureBindGroup: (textureView) =>
+      backend.device.createBindGroup({
+        label: 'drawing-clip-texture-bind-group',
+        layout: getClipTextureBindGroupLayout(),
+        entries: [
+          {
+            binding: 0,
+            resource: provider.createSampler({
+              label: 'drawing-clip-texture-sampler',
+              magFilter: 'linear',
+              minFilter: 'linear',
+            }),
+          },
+          {
+            binding: 1,
+            resource: textureView ?? getDefaultClipTextureView(),
+          },
+        ],
       }),
     createGraphicsPipelineHandle: (descriptor) => ({
       key: createGraphicsPipelineCacheKey(descriptor),

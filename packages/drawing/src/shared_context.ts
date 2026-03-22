@@ -1,14 +1,20 @@
+import { createDawnClipAtlasManager, type DawnClipAtlasManager } from './clip_atlas_manager.ts';
 import { createDawnCaps, type DawnCaps } from './caps.ts';
 import type { DrawingGraphicsPipelineDesc } from './draw_pass.ts';
 import { createDawnQueueManager, type DawnQueueManager } from './queue_manager.ts';
 import { createDawnResourceProvider, type DawnResourceProvider } from './resource_provider.ts';
 import type { DawnBackendContext } from './dawn_backend_context.ts';
 
+export type DawnAtlasProvider = Readonly<{
+  getClipAtlasManager: () => DawnClipAtlasManager;
+}>;
+
 export type DawnSharedContext = Readonly<{
   backend: DawnBackendContext;
   caps: DawnCaps;
   resourceProvider: DawnResourceProvider;
   threadSafeResourceProvider: DawnResourceProvider;
+  atlasProvider: DawnAtlasProvider;
   queueManager: DawnQueueManager;
   noopFragmentShader: GPUShaderModule;
   uniformBufferBindGroupLayout: GPUBindGroupLayout;
@@ -95,11 +101,15 @@ export const createDawnSharedContext = (
   const resourceProvider = createDawnResourceProvider(backend, {
     resourceBudget: options.resourceBudget,
   });
+  const clipAtlasManager = createDawnClipAtlasManager(backend, resourceProvider);
   return {
     backend,
     caps,
     resourceProvider,
     threadSafeResourceProvider: resourceProvider,
+    atlasProvider: {
+      getClipAtlasManager: () => clipAtlasManager,
+    },
     queueManager: createDawnQueueManager(backend),
     noopFragmentShader: createNoopFragmentShader(backend),
     uniformBufferBindGroupLayout: createUniformBufferBindGroupLayout(backend, caps),

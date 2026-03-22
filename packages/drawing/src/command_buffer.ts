@@ -99,6 +99,7 @@ const encodeStencilClips = (
 
   pass.setBindGroup(0, viewportBindGroup);
   pass.setBindGroup(1, commandResources.identityStepBindGroup);
+  pass.setBindGroup(2, commandResources.defaultClipTextureBindGroup);
   let clipPipelineIndex = 0;
   let clipReference = 0;
 
@@ -173,6 +174,7 @@ const encodePreparedFillStep = (
     pass.setPipeline(stencilPipeline);
     pass.setBindGroup(0, viewportBindGroup);
     pass.setBindGroup(1, resources.stepBindGroup);
+    pass.setBindGroup(2, resources.clipTextureBindGroup);
     if (usesPatchFill && resources.patchVertexBuffer && resources.patchInstanceCount > 0) {
       pass.setVertexBuffer(0, resources.patchVertexBuffer);
       pass.draw(resources.patchVertexCount, resources.patchInstanceCount);
@@ -185,6 +187,7 @@ const encodePreparedFillStep = (
       pass.setPipeline(coverPipeline);
       pass.setBindGroup(0, viewportBindGroup);
       pass.setBindGroup(1, resources.stepBindGroup);
+      pass.setBindGroup(2, resources.clipTextureBindGroup);
       pass.setVertexBuffer(0, resources.boundsCoverVertexBuffer);
       pass.draw(resources.boundsCoverVertexCount);
     }
@@ -193,6 +196,7 @@ const encodePreparedFillStep = (
       pass.setPipeline(resources.fringePipeline ?? resources.pipelines[0]!);
       pass.setBindGroup(0, viewportBindGroup);
       pass.setBindGroup(1, resources.stepBindGroup);
+      pass.setBindGroup(2, resources.clipTextureBindGroup);
       pass.setVertexBuffer(0, resources.fringeVertexBuffer);
       pass.draw(resources.fringeVertexCount);
     }
@@ -209,6 +213,7 @@ const encodePreparedFillStep = (
   }
   pass.setBindGroup(0, viewportBindGroup);
   pass.setBindGroup(1, resources.stepBindGroup);
+  pass.setBindGroup(2, resources.clipTextureBindGroup);
 
   if (usesPatchFill && resources.patchVertexBuffer && resources.patchInstanceCount > 0) {
     pass.setVertexBuffer(0, resources.patchVertexBuffer);
@@ -223,6 +228,7 @@ const encodePreparedFillStep = (
       pass.setPipeline(resources.fringePipeline ?? resources.pipelines[0]!);
       pass.setBindGroup(0, viewportBindGroup);
       pass.setBindGroup(1, resources.stepBindGroup);
+      pass.setBindGroup(2, resources.clipTextureBindGroup);
     }
     pass.setVertexBuffer(0, resources.fringeVertexBuffer);
     pass.draw(resources.fringeVertexCount);
@@ -251,6 +257,7 @@ const encodePreparedStrokeStep = (
   }
   pass.setBindGroup(0, viewportBindGroup);
   pass.setBindGroup(1, resources.stepBindGroup);
+  pass.setBindGroup(2, resources.clipTextureBindGroup);
 
   if (resources.patchVertexBuffer && resources.patchInstanceCount > 0) {
     pass.setVertexBuffer(0, resources.patchVertexBuffer);
@@ -264,6 +271,7 @@ const encodePreparedStrokeStep = (
     pass.setPipeline(resources.fringePipeline ?? resources.pipelines[0]!);
     pass.setBindGroup(0, viewportBindGroup);
     pass.setBindGroup(1, resources.stepBindGroup);
+    pass.setBindGroup(2, resources.clipTextureBindGroup);
     pass.setVertexBuffer(0, resources.fringeVertexBuffer);
     pass.draw(resources.fringeVertexCount);
   }

@@ -1803,7 +1803,23 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
         transform: command.transform,
         bounds: computeBounds(transformPoints(baseTriangles, command.transform)),
         clipRect: preparedClipStack.bounds,
-        clip: preparedClipStack.stencilClip,
+        clip: preparedClipStack.stencilClip
+          ? {
+            ...preparedClipStack.stencilClip,
+            deferredClipDraws: preparedClipStack.deferredClipDraws,
+            analyticClip: preparedClipStack.analyticClip,
+            atlasClip: preparedClipStack.atlasClip,
+            shader: preparedClipStack.shader,
+          }
+          : preparedClipStack.analyticClip || preparedClipStack.atlasClip || preparedClipStack.shader
+          ? {
+            bounds: preparedClipStack.bounds,
+            deferredClipDraws: preparedClipStack.deferredClipDraws,
+            analyticClip: preparedClipStack.analyticClip,
+            atlasClip: preparedClipStack.atlasClip,
+            shader: preparedClipStack.shader,
+          }
+          : undefined,
         usesStencil: Boolean(preparedClipStack.stencilClip?.elements?.length),
       },
     };
@@ -1828,7 +1844,23 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
       transform: command.transform,
       bounds: computeBounds(transformPoints(strokeTriangles, command.transform)),
       clipRect: preparedClipStack.bounds,
-      clip: preparedClipStack.stencilClip,
+      clip: preparedClipStack.stencilClip
+        ? {
+          ...preparedClipStack.stencilClip,
+          deferredClipDraws: preparedClipStack.deferredClipDraws,
+          analyticClip: preparedClipStack.analyticClip,
+          atlasClip: preparedClipStack.atlasClip,
+          shader: preparedClipStack.shader,
+        }
+        : preparedClipStack.analyticClip || preparedClipStack.atlasClip || preparedClipStack.shader
+        ? {
+          bounds: preparedClipStack.bounds,
+          deferredClipDraws: preparedClipStack.deferredClipDraws,
+          analyticClip: preparedClipStack.analyticClip,
+          atlasClip: preparedClipStack.atlasClip,
+          shader: preparedClipStack.shader,
+        }
+        : undefined,
       usesStencil: Boolean(preparedClipStack.stencilClip?.elements?.length),
     },
   };

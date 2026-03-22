@@ -671,17 +671,50 @@ const resolveSquareCapOffset = (
   anchor: Point2D,
   tangentControlPoint: Point2D,
   halfWidth: number,
+  transform: readonly [number, number, number, number, number, number],
+  isHairline: boolean,
 ): Point2D => {
   const tangent = normalize(subtract(anchor, tangentControlPoint)) ?? [1, 0];
-  return scale(tangent, halfWidth);
+  if (!isHairline) {
+    return scale(tangent, halfWidth);
+  }
+  const mapped = [
+    (transform[0] * tangent[0]) + (transform[2] * tangent[1]),
+    (transform[1] * tangent[0]) + (transform[3] * tangent[1]),
+  ] as Point2D;
+  const mappedLength = Math.hypot(mapped[0], mapped[1]);
+  if (mappedLength <= epsilon) {
+    return [1, 0];
+  }
+  return scale(tangent, 0.5 / mappedLength);
+};
+
+const resolveDegenerateSquareCapOffset = (
+  halfWidth: number,
+  transform: readonly [number, number, number, number, number, number],
+  isHairline: boolean,
+): Point2D => {
+  if (!isHairline) {
+    return [halfWidth, 0];
+  }
+  const determinant = (transform[0] * transform[3]) - (transform[2] * transform[1]);
+  if (determinant > epsilon) {
+    return [
+      transform[3] * (0.5 / determinant),
+      -transform[1] * (0.5 / determinant),
+    ];
+  }
+  return [1, 0];
 };
 
 const createSquareCapStartPatch = (
   anchor: Point2D,
   tangentControlPoint: Point2D,
   halfWidth: number,
+  transform: readonly [number, number, number, number, number, number],
+  isHairline: boolean,
 ): DrawingPreparedPatch => {
-  const offset = resolveSquareCapOffset(anchor, tangentControlPoint, halfWidth);
+  const offset = resolveSquareCapOffset(anchor, tangentControlPoint, halfWidth, transform, isHairline);
   return finalizePatch({
     kind: 'line',
     points: [subtract(anchor, offset), anchor],
@@ -692,8 +725,10 @@ const createSquareCapEndPatch = (
   anchor: Point2D,
   tangentControlPoint: Point2D,
   halfWidth: number,
+  transform: readonly [number, number, number, number, number, number],
+  isHairline: boolean,
 ): DrawingPreparedPatch => {
-  const offset = resolveSquareCapOffset(anchor, tangentControlPoint, halfWidth);
+  const offset = resolveSquareCapOffset(anchor, tangentControlPoint, halfWidth, transform, isHairline);
   return finalizePatch({
     kind: 'line',
     points: [anchor, add(anchor, offset)],
@@ -703,14 +738,19 @@ const createSquareCapEndPatch = (
 const createDegenerateSquareStrokePatch = (
   center: Point2D,
   halfWidth: number,
+  transform: readonly [number, number, number, number, number, number],
+  isHairline: boolean,
 ): DrawingPreparedPatch =>
-  finalizePatch({
+  {
+  const offset = resolveDegenerateSquareCapOffset(halfWidth, transform, isHairline);
+  return finalizePatch({
     kind: 'line',
     points: [
-      [center[0] - halfWidth, center[1]],
-      [center[0] + halfWidth, center[1]],
+      subtract(center, offset),
+      add(center, offset),
     ],
   });
+};
 
 const createSyntheticRoundStrokePatch = (
   center: Point2D,
@@ -835,6 +875,7 @@ const createPathFromFlattenedStrokeSubpaths = (
 const createPreparedStrokePatchesFromPath = (
   path: DrawingPath2D,
   strokeStyle: DrawingStrokeStyle,
+  transform: readonly [number, number, number, number, number, number],
 ): readonly DrawingPreparedStrokePatch[] => {
   const prepared: DrawingPreparedStrokePatch[] = [];
   let currentPoint: Point2D | null = null;
@@ -843,6 +884,7 @@ const createPreparedStrokePatchesFromPath = (
   let lastDegeneratePoint: Point2D | null = null;
   let contourUnits: DrawingStrokeContourSequenceItem[] = [];
   const cap = strokeStyle.cap;
+  const isHairline = strokeStyle.halfWidth < 0.5;
 
   const resetContour = (nextMoveTo: Point2D | null = null): void => {
     currentPoint = nextMoveTo;
@@ -946,6 +988,8 @@ const createPreparedStrokePatchesFromPath = (
       const squarePatch = createDegenerateSquareStrokePatch(
         lastDegeneratePoint,
         strokeStyle.halfWidth,
+        transform,
+        isHairline,
       );
       emitContourSequence([
         {
@@ -1006,18 +1050,36 @@ const createPreparedStrokePatchesFromPath = (
         : firstPatchItem.prepared.joinControlPoint;
       sequence.push({
         kind: 'basePatch',
-        patch: createSquareCapEndPatch(lastPoint, lastJoinControl, strokeStyle.halfWidth),
+        patch: createSquareCapEndPatch(
+          lastPoint,
+          lastJoinControl,
+          strokeStyle.halfWidth,
+          transform,
+          isHairline,
+        ),
       });
       sequence.push({
         kind: 'moveWithinContour',
         anchor: subtract(
           firstPoint,
-          resolveSquareCapOffset(firstPoint, firstJoinControl, strokeStyle.halfWidth),
+          resolveSquareCapOffset(
+            firstPoint,
+            firstJoinControl,
+            strokeStyle.halfWidth,
+            transform,
+            isHairline,
+          ),
         ),
       });
       sequence.push({
         kind: 'basePatch',
-        patch: createSquareCapStartPatch(firstPoint, firstJoinControl, strokeStyle.halfWidth),
+        patch: createSquareCapStartPatch(
+          firstPoint,
+          firstJoinControl,
+          strokeStyle.halfWidth,
+          transform,
+          isHairline,
+        ),
       });
     } else {
       sequence.push({
@@ -2973,6 +3035,7 @@ const preparePathFill = (
         ? createPathFromFlattenedStrokeSubpaths(dashedStrokeSubpaths, command.path.fillRule)
         : command.path,
       strokeStyle,
+      command.transform,
     )
     : Object.freeze([] as DrawingPreparedStrokePatch[]);
   const usesTessellatedStrokePatches = canUseTessellatedStrokePatches(

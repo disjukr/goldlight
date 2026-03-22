@@ -1667,6 +1667,35 @@ Deno.test('drawing prepared stroke patches treat empty closed contours as zero-l
   assertEquals(draw.patches[0]?.endCap, 'square');
 });
 
+Deno.test('drawing prepared stroke patches use inverse view scale for hairline square caps', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  concatDrawingRecorderTransform(recorder, [2, 1, 0, 3, 0, 0]);
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [200, 140] },
+      { kind: 'close' },
+    ),
+    { style: 'stroke', strokeWidth: 0.5, strokeCap: 'square', strokeJoin: 'round' },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const draw = prepared.passes[0]?.steps[0]?.draw;
+  assertEquals(draw?.kind, 'pathStroke');
+  if (draw?.kind !== 'pathStroke') {
+    throw new Error('expected pathStroke draw');
+  }
+  assertEquals(draw.patches.length, 1);
+  assertEquals(draw.patches[0]?.patch.kind, 'line');
+  assertAlmostEquals(draw.patches[0]!.patch.points[0]![0], 199.75);
+  assertAlmostEquals(draw.patches[0]!.patch.points[0]![1], 140.08333333333334);
+  assertAlmostEquals(draw.patches[0]!.patch.points[1]![0], 200.25);
+  assertAlmostEquals(draw.patches[0]!.patch.points[1]![1], 139.91666666666666);
+});
+
 Deno.test('drawing prepared recording reopens contours from the closed start point', () => {
   const mock = createMockGpuContext();
   const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));

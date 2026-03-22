@@ -604,10 +604,10 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
   - Files: `src/path_renderer.ts`, `tests/drawing_graphite_dawn_test.ts`
   - Status transition: square stroke caps and zero-length square-cap contours now expand into
     explicit line patches like Skia `StrokeIterator` / `fillSquareCapPoints()` instead of reduced
-    degenerate conic placeholders
-  - Remaining delta: hairline square caps still use the WebGPU-oriented local half-width fallback
-    instead of Skia's exact device-space inverse-view-matrix path, and round cap/join coverage is
-    still not analytic
+    degenerate conic placeholders, and hairline degenerate square caps now use the same inverse-2x2
+    half-pixel backprojection shape as Skia instead of a local half-width fallback
+  - Remaining delta: round cap/join coverage is still not analytic, and some non-square
+    `StrokeIterator` semantics are still event-driven instead of verb-for-verb
   - Validation: `deno test tests/drawing_graphite_dawn_test.ts`
 - 2026-03-23
   - Files: `src/path_renderer.ts`, `tests/drawing_graphite_dawn_test.ts`

@@ -156,6 +156,9 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Status: `partial`
   - Role: low-level resource creation, cached render pipelines, fill stencil/cover pipeline
     selection, stencil attachment reuse, canonical sampler reuse, and bind-group reuse
+  - Update 2026-03-23: stroke patch vertex replay now follows Skia's
+    `tessellate_stroked_curve()` branch structure more closely for degenerate conic square patches,
+    round/circle patches, and parametric segment selection
 - `src/recorder.ts`
   - Status: `partial`
   - Role: command recording API with transform and clip-stack state
@@ -478,6 +481,8 @@ These decisions directly affect the remaining work and are not settled yet.
 - Backend capability tests
   - Status: `partial`
   - Caps tests now cover format tables, resolve/transient policy, and provider-side usage validation
+  - Update 2026-03-23: full `packages/drawing/tests/drawing_graphite_dawn_test.ts` passes after
+    queue submission ownership and stroke patch shader alignment
 
 ## Current Structural Delta
 
@@ -517,7 +522,9 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
     `FindCubicConvex180Chops`-style cubic chop detection, and open-contour patch chaining that now
     keeps split curves connected to their true predecessor join control points;
     `src/resource_provider.ts` now uses triangle-strip stroke patch replay with `edgeID` /
-    `combinedEdgeID`-driven body tessellation
+    `combinedEdgeID`-driven body tessellation, and its WGSL branch structure now more directly
+    mirrors Skia's `tessellate_stroked_curve()` for degenerate square/circle patches and segment
+    counting
   - Remaining delta: `tessellate_stroked_curve()` seam math still has local safety branches,
     `StrokeIterator` is event-driven rather than a verb-for-verb port, cusp / duplicated-edge
     handling is still a reduced version of Skia's full implementation, and translucent round

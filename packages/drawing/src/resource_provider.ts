@@ -718,50 +718,69 @@ fn vs_main(
   }
   let affine = affine_matrix();
   let curveType = curveMeta.x;
-  let weight = curveMeta.y;
+  var weight = -1.0;
   var curveP0 = p0;
   var curveP1 = p1;
   var curveP2 = p2;
   var curveP3 = p3;
+  if (curveType >= 1.5 && curveType < 2.5) {
+    weight = curveMeta.y;
+    curveP3 = curveP2;
+  }
+  var strokeRadius = stroke.x;
   var joinType = stroke.y;
   let lastControlPoint = joinControlPoint;
   let maxScale = max_scale_factor(affine);
-  var numParametricSegments = 1.0;
-  if (curveType < 0.5) {
-    numParametricSegments = 1.0;
-  } else if (curveType < 2.5) {
-    numParametricSegments = wangs_formula_conic(curveP0, curveP1, curveP2, weight, affine);
+  var numParametricSegments: f32;
+  if (weight < 0.0) {
+    if (all(curveP0 == curveP1) && all(curveP2 == curveP3)) {
+      numParametricSegments = 1.0;
+    } else {
+      numParametricSegments = wangs_formula_cubic(curveP0, curveP1, curveP2, curveP3, affine);
+    }
   } else {
-    numParametricSegments = wangs_formula_cubic(curveP0, curveP1, curveP2, curveP3, affine);
+    if (all(curveP0 == curveP1) || all(curveP1 == curveP2)) {
+      numParametricSegments = 1.0;
+    } else {
+      numParametricSegments = wangs_formula_conic(curveP0, curveP1, curveP2, weight, affine);
+    }
+  }
+  let isHairline = strokeRadius == 0.0;
+  let numRadialSegmentsPerRadian = num_radial_segments_per_radian(
+    select(maxScale * strokeRadius, 0.5, isHairline),
+  );
+  if (isHairline) {
+    strokeRadius = 0.5;
   }
   var prevTan = robust_normalize_diff(curveP0, lastControlPoint);
-  var tan0 = patch_start_tangent(curveP0, curveP1, curveP2, curveP3);
-  var tan1 = patch_end_tangent(curveP0, curveP1, curveP2, curveP3);
+  var tan0 = robust_normalize_diff(select(select(curveP2, curveP3, all(curveP1 == curveP2)), curveP1, !all(curveP0 == curveP1)), curveP0);
+  var tan1 = robust_normalize_diff(curveP3, select(select(curveP1, curveP0, all(curveP2 == curveP1)), curveP2, !all(curveP3 == curveP2)));
   if (length(tan0) <= 1e-5) {
     joinType = 0.0;
-    if (curveType < 1.5 || curveType >= 2.5) {
+    if (weight < 0.0) {
       tan0 = vec2<f32>(1.0, 0.0);
       tan1 = vec2<f32>(-1.0, 0.0);
     } else {
+      weight = -1.0;
       tan0 = prevTan;
       tan1 = prevTan;
       if (length(prevTan) <= 1e-5) {
-        curveP2 = curveP0 + (stroke.x * vec2<f32>(1.0, 0.0));
+        curveP2 = curveP0 + (strokeRadius * vec2<f32>(1.0, 0.0));
         curveP3 = curveP2;
-        curveP0 = curveP0 - (stroke.x * vec2<f32>(1.0, 0.0));
+        curveP0 = curveP0 - (strokeRadius * vec2<f32>(1.0, 0.0));
         curveP1 = curveP0;
         prevTan = vec2<f32>(1.0, 0.0);
         tan0 = prevTan;
         tan1 = prevTan;
       } else {
         curveP1 = curveP0;
-        curveP2 = curveP0 + (stroke.x * prevTan);
+        curveP2 = curveP0 + (strokeRadius * prevTan);
         curveP3 = curveP2;
       }
     }
   }
   let maxEdges = f32(SEGMENTS);
-  var numEdgesInJoin = stroke_join_edges(joinType, prevTan, tan0, stroke.x);
+  var numEdgesInJoin = stroke_join_edges(joinType, prevTan, tan0, strokeRadius);
   if (joinType < 0.0) {
     numEdgesInJoin = min(numEdgesInJoin, maxEdges - 2.0);
   }
@@ -797,7 +816,7 @@ fn vs_main(
     }
   } else {
     let maxCombinedSegments = maxEdges - numEdgesInJoin - 1.0;
-    numRadialSegments = max(ceil(abs(rotation) * num_radial_segments_per_radian(maxScale * stroke.x)), 1.0);
+    numRadialSegments = max(ceil(abs(rotation) * numRadialSegmentsPerRadian), 1.0);
     numRadialSegments = min(numRadialSegments, maxCombinedSegments);
     numParametricSegments = min(numParametricSegments, maxCombinedSegments - numRadialSegments + 1.0);
   }
@@ -934,7 +953,7 @@ fn vs_main(
     strokeCoord = select(curveP0, curveP3, isFinalEdge);
   }
   let ortho = vec2<f32>(curveTangent.y, -curveTangent.x);
-  let local = strokeCoord + (ortho * stroke.x * strokeOutset);
+  let local = strokeCoord + (ortho * strokeRadius * strokeOutset);
   let devicePosition = local_to_device(local);
   var out: VertexOut;
   out.position = device_to_ndc(devicePosition);

@@ -1183,7 +1183,8 @@ Deno.test('drawing prepared stroke patches seed open contours from first tangent
   }
   assertEquals(draw.patches.length > 0, true);
   assertEquals(draw.patches[0]?.joinControlPoint, [20, 30]);
-  assertEquals(draw.patches[0]?.startCap, 'square');
+  assertEquals(draw.patches[0]?.startCap, 'none');
+  assertEquals(draw.patches.some((patch) => patch.syntheticKind === 'square'), true);
 });
 
 Deno.test('drawing prepared stroke patches rewrite closed contour first join control point', () => {
@@ -1212,6 +1213,31 @@ Deno.test('drawing prepared stroke patches rewrite closed contour first join con
   assertEquals(draw.patches[0]?.joinControlPoint, [40, 30]);
   assertEquals(draw.patches[0]?.startCap, 'none');
   assertEquals(draw.patches[0]?.contourStart, true);
+});
+
+Deno.test('drawing prepared stroke patches emit synthetic circle patches for round joins and caps', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [32, 96] },
+      { kind: 'lineTo', to: [96, 32] },
+      { kind: 'lineTo', to: [160, 96] },
+    ),
+    { style: 'stroke', strokeWidth: 12, strokeJoin: 'round', strokeCap: 'round' },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const draw = prepared.passes[0]?.steps[0]?.draw;
+  assertEquals(draw?.kind, 'pathStroke');
+  if (draw?.kind !== 'pathStroke') {
+    throw new Error('expected pathStroke draw');
+  }
+  assertEquals(draw.usesTessellatedStrokePatches, true);
+  assertEquals(draw.patches.some((patch) => patch.syntheticKind === 'circle'), true);
 });
 
 Deno.test('drawing prepared recording applies dash pattern to strokes', () => {

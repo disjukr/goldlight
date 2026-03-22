@@ -476,28 +476,58 @@ fn vs_main(
   let curveType = curveMeta.x;
   let weight = curveMeta.y;
   let flags = u32(max(curveMeta.w, 0.0));
+  let circlePatch = (flags & 64u) != 0u;
+  let squarePatch = (flags & 128u) != 0u;
   var a = eval_patch(curveType, weight, p0, p1, p2, p3, t0);
   var b = eval_patch(curveType, weight, p0, p1, p2, p3, t1);
   var local = p3;
   if (segmentIndex < activeSegments) {
-    var delta = b - a;
-    if (length(delta) <= 1e-5) {
-      delta = a - prevPoint;
+    if (circlePatch) {
+      let center = p0;
+      let angle0 = t0 * 6.28318530718;
+      let angle1 = t1 * 6.28318530718;
+      let edge0 = center + vec2<f32>(cos(angle0), sin(angle0)) * stroke.x;
+      let edge1 = center + vec2<f32>(cos(angle1), sin(angle1)) * stroke.x;
+      let fanVertices = array<vec2<f32>, 4>(center, edge0, edge1, center);
+      let fanIndices = array<u32, 6>(0u, 1u, 2u, 0u, 2u, 3u);
+      local = fanVertices[fanIndices[quadVertex]];
+    } else if (squarePatch) {
+      let center = p0;
+      var delta = center - prevPoint;
+      if (length(delta) <= 1e-5) {
+        delta = vec2<f32>(1.0, 0.0);
+      }
+      let tangent = normalize(delta);
+      let normal = vec2<f32>(-tangent.y, tangent.x) * stroke.x;
+      let extension = tangent * stroke.x;
+      let corners = array<vec2<f32>, 4>(
+        center + normal,
+        center - normal,
+        center - normal + extension,
+        center + normal + extension,
+      );
+      let indices = array<u32, 6>(0u, 1u, 2u, 0u, 2u, 3u);
+      local = corners[indices[quadVertex]];
+    } else {
+      var delta = b - a;
+      if (length(delta) <= 1e-5) {
+        delta = a - prevPoint;
+      }
+      let deltaLength = max(length(delta), 1e-5);
+      let tangent = delta / deltaLength;
+      let squareStart = (flags & 4u) != 0u;
+      let squareEnd = (flags & 8u) != 0u;
+      if (segmentIndex == 0u && squareStart) {
+        a -= tangent * stroke.x;
+      }
+      if (segmentIndex + 1u == activeSegments && squareEnd) {
+        b += tangent * stroke.x;
+      }
+      let normal = vec2<f32>(-delta.y / deltaLength, delta.x / deltaLength) * stroke.x;
+      let corners = array<vec2<f32>, 4>(a + normal, b + normal, b - normal, a - normal);
+      let indices = array<u32, 6>(0u, 1u, 2u, 0u, 2u, 3u);
+      local = corners[indices[quadVertex]];
     }
-    let deltaLength = max(length(delta), 1e-5);
-    let tangent = delta / deltaLength;
-    let squareStart = (flags & 4u) != 0u;
-    let squareEnd = (flags & 8u) != 0u;
-    if (segmentIndex == 0u && squareStart) {
-      a -= tangent * stroke.x;
-    }
-    if (segmentIndex + 1u == activeSegments && squareEnd) {
-      b += tangent * stroke.x;
-    }
-    let normal = vec2<f32>(-delta.y / deltaLength, delta.x / deltaLength) * stroke.x;
-    let corners = array<vec2<f32>, 4>(a + normal, b + normal, b - normal, a - normal);
-    let indices = array<u32, 6>(0u, 1u, 2u, 0u, 2u, 3u);
-    local = corners[indices[quadVertex]];
   }
   let devicePosition = local_to_device(local);
   var out: VertexOut;

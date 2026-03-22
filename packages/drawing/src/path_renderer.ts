@@ -1178,6 +1178,10 @@ const createPreparedStrokePatchesFromPath = (
         }
         if (!pointsEqual(currentPoint, contourStart)) {
           emitPatchDefinition({ kind: 'line', points: [currentPoint, contourStart] });
+        } else if (!deferredFirstPatch && !lastDegeneratePoint) {
+          // Match Skia StrokeIterator: a bare move/close contour is a zero-length contour at the
+          // move point, so round/square caps still emit geometry instead of disappearing.
+          lastDegeneratePoint = contourStart;
         }
         currentPoint = contourStart;
         pendingContourStart = contourStart;

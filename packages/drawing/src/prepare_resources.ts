@@ -439,12 +439,18 @@ const prepareStepResources = (
 
     const fringePipeline = step.draw.fringeVertices
       ? sharedContext.resourceProvider.findOrCreateGraphicsPipeline({
-        label: getStencilClipCount(step) > 0
+        label: step.usesFillStencil
+          ? 'drawing-path-fill-stencil-cover'
+          : getStencilClipCount(step) > 0
           ? 'drawing-path-fill-clip-cover'
           : 'drawing-path-fill-cover',
         shader: 'path',
         vertexLayout: 'device-vertex',
-        depthStencil: getStencilClipCount(step) > 0 ? 'clip-cover' : 'none',
+        depthStencil: step.usesFillStencil
+          ? 'fill-stencil-cover'
+          : getStencilClipCount(step) > 0
+          ? 'clip-cover'
+          : 'none',
         colorWriteDisabled: false,
       })
       : null;

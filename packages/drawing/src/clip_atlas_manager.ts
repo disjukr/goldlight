@@ -16,7 +16,7 @@ type DrawingClipAtlasEntry = {
 };
 
 const textureBindingUsage = 0x04;
-const copyDstUsage = 0x08;
+const copyDstUsage = 0x02;
 
 const pointInTriangle = (
   point: Point2D,

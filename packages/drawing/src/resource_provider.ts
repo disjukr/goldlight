@@ -50,6 +50,7 @@ export type DawnResourceProvider = Readonly<{
 }>;
 
 const renderAttachmentUsage = 0x10;
+const textureCopyDstUsage = 0x02;
 const floatBytes = Float32Array.BYTES_PER_ELEMENT;
 const floatsPerVertex = 6;
 const stencilFormat = 'depth24plus-stencil8';
@@ -222,7 +223,11 @@ fn vs_main(
       (t1 * t1 * t1 * p3);
   }
   if (segmentIndex >= activeSegments) {
-    local = triVertex == 0u ? fanPoint : p3;
+    if (triVertex == 0u) {
+      local = fanPoint;
+    } else {
+      local = p3;
+    }
   } else if (triVertex == 0u) {
     local = fanPoint;
   } else if (triVertex == 1u) {
@@ -752,7 +757,7 @@ export const createDawnResourceProvider = (
         depthOrArrayLayers: 1,
       },
       format: 'rgba8unorm',
-      usage: textureBindingUsage | renderAttachmentUsage,
+      usage: textureBindingUsage | renderAttachmentUsage | textureCopyDstUsage,
     });
     if (
       'writeTexture' in backend.queue &&

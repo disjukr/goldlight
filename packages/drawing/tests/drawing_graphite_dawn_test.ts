@@ -1263,7 +1263,7 @@ Deno.test('dawn command buffer uses stencil-cover fill path for patch-rendered n
   assertEquals(mock.created.renderPasses.length, 1);
   assertEquals(mock.created.renderPasses[0]?.depthStencilAttachment !== undefined, true);
   assertEquals(mock.created.drawCalls.length, 3);
-  assertEquals(mock.created.renderPipelines.length, 3);
+  assertEquals(mock.created.renderPipelines.length, 2);
 });
 
 Deno.test('dawn command buffer clips via clip path stencil replay with clip bounds', () => {

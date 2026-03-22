@@ -563,8 +563,8 @@ export const createDawnResourceProvider = (
         depthCompare: 'always',
         stencilReadMask: 0xff,
         stencilWriteMask: 0xff,
-        stencilFront: createStencilFaceState('increment-clamp'),
-        stencilBack: createStencilFaceState('increment-clamp'),
+        stencilFront: createStencilFaceState('replace'),
+        stencilBack: createStencilFaceState('replace'),
       },
     });
   };

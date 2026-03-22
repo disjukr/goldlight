@@ -540,10 +540,22 @@ fn strip_vertex_position(
   let delta = b - a;
   let deltaLength = max(length(delta), 1e-5);
   let normal = vec2<f32>(-delta.y / deltaLength, delta.x / deltaLength) * strokeRadius;
-  let edgeIndex = array<u32, 6>(0u, 1u, 2u, 0u, 2u, 3u)[quadVertex];
-  let edgePoint = select(a, b, edgeIndex == 1u || edgeIndex == 2u);
-  let edgeOutset = select(-1.0, 1.0, edgeIndex == 0u || edgeIndex == 1u);
+  let edgeIndex = strip_edge_index(quadVertex);
+  let edgePoint = strip_edge_point(a, b, edgeIndex);
+  let edgeOutset = strip_edge_outset(edgeIndex);
   return edgePoint + (normal * edgeOutset);
+}
+
+fn strip_edge_index(quadVertex: u32) -> u32 {
+  return array<u32, 6>(0u, 1u, 2u, 0u, 2u, 3u)[quadVertex];
+}
+
+fn strip_edge_point(a: vec2<f32>, b: vec2<f32>, edgeIndex: u32) -> vec2<f32> {
+  return select(a, b, edgeIndex == 1u || edgeIndex == 2u);
+}
+
+fn strip_edge_outset(edgeIndex: u32) -> f32 {
+  return select(-1.0, 1.0, edgeIndex == 0u || edgeIndex == 1u);
 }
 
 @vertex

@@ -86,6 +86,11 @@ type DrawingPatchDefinition =
     fanPoint?: Point2D;
   }>;
 
+type DrawingStrokePatchContour = Readonly<{
+  patches: readonly DrawingPreparedPatch[];
+  closed: boolean;
+}>;
+
 export type DrawingPreparedPathFill = Readonly<{
   kind: 'pathFill';
   renderer: DrawingRendererKind;
@@ -130,10 +135,10 @@ const maxCurveSubdivisionDepth = 8;
 const curveFlatnessTolerance = 0.75;
 const patchPrecision = 1 / Math.max(curveFlatnessTolerance, epsilon);
 const maxPatchResolveLevel = 6;
-const roundStrokeSegments = 12;
 const hairlineCoverageWidth = 1;
 const aaFringeWidth = 1;
 const cuspDerivativeEpsilon = 0.5;
+const tessellationPrecision = 4;
 
 const resolveFillColor = (paint: DrawingPaint): readonly [number, number, number, number] =>
   paint.color ?? defaultFillColor;
@@ -202,6 +207,12 @@ const distanceFromLine = (point: Point2D, start: Point2D, end: Point2D): number 
   }
   return Math.abs((dy * point[0]) - (dx * point[1]) + (end[0] * start[1]) - (end[1] * start[0])) /
     length;
+};
+
+const calcNumRadialSegmentsPerRadian = (approxStrokeRadius: number): number => {
+  const radius = Math.max(approxStrokeRadius, 0.5);
+  const cosTheta = 1 - ((1 / tessellationPrecision) / radius);
+  return 0.5 / Math.acos(Math.max(cosTheta, -1));
 };
 
 const approximateQuadraticSegments = (
@@ -386,25 +397,77 @@ const createPreparedStrokePatches = (
   if (patches.length === 0) {
     return Object.freeze([]);
   }
+  const contours = groupStrokePatchContours(patches);
   const prepared: DrawingPreparedStrokePatch[] = [];
-  let previousEnd = getPatchStartPoint(patches[0]!);
+  for (const contour of contours) {
+    prepared.push(...createPreparedStrokeContourPatches(contour, cap));
+  }
+  return Object.freeze(prepared);
+};
+
+const groupStrokePatchContours = (
+  patches: readonly DrawingPreparedPatch[],
+): readonly DrawingStrokePatchContour[] => {
+  if (patches.length === 0) {
+    return Object.freeze([]);
+  }
+  const contours: DrawingStrokePatchContour[] = [];
+  let current: DrawingPreparedPatch[] = [];
   for (let index = 0; index < patches.length; index += 1) {
     const patch = patches[index]!;
+    if (
+      current.length > 0 &&
+      !pointsEqual(getPatchEndPoint(current[current.length - 1]!), getPatchStartPoint(patch))
+    ) {
+      const first = current[0]!;
+      const last = current[current.length - 1]!;
+      contours.push({
+        patches: Object.freeze(current),
+        closed: pointsEqual(getPatchEndPoint(last), getPatchStartPoint(first)),
+      });
+      current = [];
+    }
+    current.push(patch);
+  }
+  if (current.length > 0) {
+    const first = current[0]!;
+    const last = current[current.length - 1]!;
+    contours.push({
+      patches: Object.freeze(current),
+      closed: pointsEqual(getPatchEndPoint(last), getPatchStartPoint(first)),
+    });
+  }
+  return Object.freeze(contours);
+};
+
+const createPreparedStrokeContourPatches = (
+  contour: DrawingStrokePatchContour,
+  cap: NonNullable<DrawingPaint['strokeCap']>,
+): readonly DrawingPreparedStrokePatch[] => {
+  if (contour.patches.length === 0) {
+    return Object.freeze([]);
+  }
+  const prepared: DrawingPreparedStrokePatch[] = [];
+  let previousEnd = contour.closed
+    ? getPatchEndPoint(contour.patches[contour.patches.length - 1]!)
+    : getPatchStartPoint(contour.patches[0]!);
+  for (let index = 0; index < contour.patches.length; index += 1) {
+    const patch = contour.patches[index]!;
     const start = getPatchStartPoint(patch);
     const end = getPatchEndPoint(patch);
-    const next = index + 1 < patches.length ? patches[index + 1]! : null;
-    const contourStart = index === 0 || !pointsEqual(start, previousEnd);
-    const contourEnd = !next || !pointsEqual(end, getPatchStartPoint(next));
+    const next = index + 1 < contour.patches.length ? contour.patches[index + 1]! : null;
+    const contourStart = index === 0;
+    const contourEnd = index + 1 === contour.patches.length;
     prepared.push({
       patch,
-      prevPoint: contourStart ? start : previousEnd,
-      joinControlPoint: contourStart ? start : previousEnd,
+      prevPoint: previousEnd,
+      joinControlPoint: previousEnd,
       contourStart,
       contourEnd,
-      startCap: contourStart ? cap : 'none',
-      endCap: contourEnd ? cap : 'none',
+      startCap: contourStart && !contour.closed ? cap : 'none',
+      endCap: contourEnd && !contour.closed ? cap : 'none',
     });
-    previousEnd = end;
+    previousEnd = next ? end : contour.closed ? getPatchStartPoint(contour.patches[0]!) : end;
   }
   return Object.freeze(prepared);
 };
@@ -1416,6 +1479,7 @@ const appendRoundFan = (
   center: Point2D,
   start: Point2D,
   end: Point2D,
+  approxStrokeRadius: number,
 ): void => {
   const startAngle = Math.atan2(start[1] - center[1], start[0] - center[0]);
   let endAngle = Math.atan2(end[1] - center[1], end[0] - center[0]);
@@ -1423,7 +1487,7 @@ const appendRoundFan = (
     endAngle += Math.PI * 2;
   }
   const span = endAngle - startAngle;
-  const steps = Math.max(2, Math.ceil((span / (Math.PI * 2)) * roundStrokeSegments));
+  const steps = Math.max(2, Math.ceil(span * calcNumRadialSegmentsPerRadian(approxStrokeRadius)));
   let previous = start;
   const radius = Math.hypot(start[0] - center[0], start[1] - center[1]);
   for (let index = 1; index <= steps; index += 1) {
@@ -1490,7 +1554,7 @@ const appendStrokeCap = (
   }
   const start = atStart ? right : left;
   const end = atStart ? left : right;
-  appendRoundFan(triangles, point, start, end);
+  appendRoundFan(triangles, point, start, end, halfWidth);
 };
 
 const appendStrokeJoin = (
@@ -1511,7 +1575,7 @@ const appendStrokeJoin = (
   const outerEnd = add(point, scale(outNormal, halfWidth * outerSign));
 
   if (join === 'round') {
-    appendRoundFan(triangles, point, outerStart, outerEnd);
+    appendRoundFan(triangles, point, outerStart, outerEnd, halfWidth);
     return;
   }
 

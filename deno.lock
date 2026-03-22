@@ -5,11 +5,13 @@
     "jsr:@disjukr/bdl@0.6.1": "0.6.1",
     "jsr:@disjukr/bdl@0.8.3": "0.8.3",
     "jsr:@divy/sdl2@0.15.0": "0.15.0",
+    "jsr:@img/png@0.1.1": "0.1.1",
     "jsr:@std/assert@^1.0.14": "1.0.19",
     "jsr:@std/fs@1": "1.0.23",
     "jsr:@std/internal@^1.0.10": "1.0.12",
     "jsr:@std/internal@^1.0.12": "1.0.12",
     "jsr:@std/internal@^1.0.9": "1.0.12",
+    "jsr:@std/media-types@1": "1.1.0",
     "jsr:@std/path@1": "1.1.4",
     "jsr:@std/path@^1.1.1": "1.1.2",
     "jsr:@std/path@^1.1.4": "1.1.4",
@@ -46,6 +48,9 @@
     "@divy/sdl2@0.15.0": {
       "integrity": "d85d212807604d41a116ce7c86449794168cf8a3a839d74c5083ddd986f679ae"
     },
+    "@img/png@0.1.1": {
+      "integrity": "baf66835e2dbfe069d23992b361cb5e5b003fb665366c13fbd0045597d5961d3"
+    },
     "@std/assert@1.0.19": {
       "integrity": "eaada96ee120cb980bc47e040f82814d786fe8162ecc53c91d8df60b8755991e",
       "dependencies": [
@@ -68,6 +73,9 @@
     },
     "@std/internal@1.0.12": {
       "integrity": "972a634fd5bc34b242024402972cd5143eac68d8dffaca5eaa4dba30ce17b027"
+    },
+    "@std/media-types@1.1.0": {
+      "integrity": "c9d093f0c05c3512932b330e3cc1fe1d627b301db33a4c2c2185c02471d6eaa4"
     },
     "@std/path@1.1.2": {
       "integrity": "c0b13b97dfe06546d5e16bf3966b1cadf92e1cc83e56ba5476ad8b498d9e3038",

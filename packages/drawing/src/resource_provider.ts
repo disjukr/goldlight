@@ -1,28 +1,6 @@
 import type { DawnBackendContext } from './dawn_backend_context.ts';
 import type { DrawingGraphicsPipelineDesc } from './draw_pass.ts';
 
-type LegacyPipelineKey =
-  | 'clip-stencil-write'
-  | 'clip-stencil-intersect'
-  | 'clip-stencil-difference'
-  | 'path-fill-stencil-evenodd'
-  | 'path-fill-stencil-nonzero'
-  | 'path-fill-patch-stencil-evenodd'
-  | 'path-fill-patch-stencil-nonzero'
-  | 'path-fill-curve-patch-stencil-evenodd'
-  | 'path-fill-curve-patch-stencil-nonzero'
-  | 'path-fill-cover'
-  | 'path-fill-stencil-cover'
-  | 'path-fill-patch-cover'
-  | 'path-fill-curve-patch-cover'
-  | 'path-fill-clip-cover'
-  | 'path-fill-patch-clip-cover'
-  | 'path-fill-curve-patch-clip-cover'
-  | 'path-stroke-cover'
-  | 'path-stroke-patch-cover'
-  | 'path-stroke-clip-cover'
-  | 'path-stroke-patch-clip-cover';
-
 export type DrawingBufferDescriptor = Readonly<{
   label?: string;
   size: number;
@@ -58,7 +36,6 @@ export type DawnResourceProvider = Readonly<{
   createSampler: (descriptor?: DrawingSamplerDescriptor) => GPUSampler;
   createViewportBindGroup: (buffer: GPUBuffer) => GPUBindGroup;
   findOrCreateGraphicsPipeline: (descriptor: DrawingGraphicsPipelineDesc) => GPURenderPipeline;
-  getPipeline: (key: LegacyPipelineKey) => GPURenderPipeline;
   getStencilAttachmentView: () => GPUTextureView;
 }>;
 
@@ -443,29 +420,6 @@ const createSamplerCacheKey = (
     descriptor.addressModeW,
   ].join('|');
 
-const legacyPipelineKeyByLabel: Readonly<Record<string, LegacyPipelineKey>> = {
-  'drawing-clip-stencil-write': 'clip-stencil-write',
-  'drawing-clip-stencil-intersect': 'clip-stencil-intersect',
-  'drawing-clip-stencil-difference': 'clip-stencil-difference',
-  'drawing-path-fill-stencil-evenodd': 'path-fill-stencil-evenodd',
-  'drawing-path-fill-stencil-nonzero': 'path-fill-stencil-nonzero',
-  'drawing-path-fill-patch-stencil-evenodd': 'path-fill-patch-stencil-evenodd',
-  'drawing-path-fill-patch-stencil-nonzero': 'path-fill-patch-stencil-nonzero',
-  'drawing-path-fill-curve-patch-stencil-evenodd': 'path-fill-curve-patch-stencil-evenodd',
-  'drawing-path-fill-curve-patch-stencil-nonzero': 'path-fill-curve-patch-stencil-nonzero',
-  'drawing-path-fill-cover': 'path-fill-cover',
-  'drawing-path-fill-stencil-cover': 'path-fill-stencil-cover',
-  'drawing-path-fill-patch-cover': 'path-fill-patch-cover',
-  'drawing-path-fill-curve-patch-cover': 'path-fill-curve-patch-cover',
-  'drawing-path-fill-clip-cover': 'path-fill-clip-cover',
-  'drawing-path-fill-patch-clip-cover': 'path-fill-patch-clip-cover',
-  'drawing-path-fill-curve-patch-clip-cover': 'path-fill-curve-patch-clip-cover',
-  'drawing-path-stroke-cover': 'path-stroke-cover',
-  'drawing-path-stroke-patch-cover': 'path-stroke-patch-cover',
-  'drawing-path-stroke-clip-cover': 'path-stroke-clip-cover',
-  'drawing-path-stroke-patch-clip-cover': 'path-stroke-patch-clip-cover',
-};
-
 export const createDawnResourceProvider = (
   backend: DawnBackendContext,
   options: Readonly<{
@@ -699,32 +653,6 @@ export const createDawnResourceProvider = (
     depthStencil: getDepthStencil(descriptor),
   });
 
-  const createLegacyPipelineDescriptor = (
-    key: LegacyPipelineKey,
-  ): DrawingGraphicsPipelineDesc => ({
-    label: Object.entries(legacyPipelineKeyByLabel).find(([, value]) => value === key)?.[0] ?? key,
-    shader:
-      key.includes('curve-patch') ? 'curve-patch'
-      : key.includes('stroke-patch') ? 'stroke-patch'
-      : key.includes('patch') ? 'wedge-patch'
-      : 'path',
-    vertexLayout:
-      key.includes('curve-patch') ? 'curve-patch-instance'
-      : key.includes('stroke-patch') ? 'stroke-patch-instance'
-      : key.includes('patch') ? 'wedge-patch-instance'
-      : 'device-vertex',
-    colorWriteDisabled: key.includes('stencil') && !key.includes('cover'),
-    depthStencil:
-      key === 'clip-stencil-write' ? 'clip-stencil-write'
-      : key === 'clip-stencil-intersect' ? 'clip-stencil-intersect'
-      : key === 'clip-stencil-difference' ? 'clip-stencil-difference'
-      : key.endsWith('clip-cover') ? 'clip-cover'
-      : key.endsWith('stencil-cover') ? 'fill-stencil-cover'
-      : key.endsWith('stencil-evenodd') ? 'fill-stencil-evenodd'
-      : key.endsWith('stencil-nonzero') ? 'fill-stencil-nonzero'
-      : 'none',
-  });
-
   const provider: DawnResourceProvider = {
     backend,
     resourceBudget: options.resourceBudget ?? Number.POSITIVE_INFINITY,
@@ -769,7 +697,6 @@ export const createDawnResourceProvider = (
       graphicsPipelineCache.set(key, pipeline);
       return pipeline;
     },
-    getPipeline: (key) => provider.findOrCreateGraphicsPipeline(createLegacyPipelineDescriptor(key)),
     getStencilAttachmentView: () => {
       const sampleCount = backend.target.kind === 'offscreen' ? backend.target.sampleCount : 1;
       if (

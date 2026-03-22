@@ -1695,7 +1695,6 @@ const applyDashPattern = (
 
 type PreparedClipStack = Readonly<{
   bounds?: Rect;
-  convexPolygons: readonly (readonly Point2D[])[];
   stencilClip?: DrawingPreparedClip;
 }>;
 
@@ -1730,7 +1729,6 @@ const createRectClipPolygon = (
 const prepareClipStack = (clips: readonly DrawingClip[]): PreparedClipStack | undefined => {
   if (clips.length === 0) return undefined;
 
-  const convexPolygons: Point2D[][] = [];
   let bounds: Rect | undefined;
   const stencilElements: DrawingPreparedClipElement[] = [];
 
@@ -1738,14 +1736,12 @@ const prepareClipStack = (clips: readonly DrawingClip[]): PreparedClipStack | un
     if (clip.kind === 'rect') {
       const polygon = createRectClipPolygon(clip.rect, clip.transform);
       if (clip.op === 'intersect') {
-        convexPolygons.push([...polygon]);
         bounds = intersectBounds(bounds, computeBounds(polygon));
-      } else {
-        stencilElements.push({
-          op: clip.op,
-          triangles: createPolygonTriangles(polygon),
-        });
       }
+      stencilElements.push({
+        op: clip.op,
+        triangles: createPolygonTriangles(polygon),
+      });
       continue;
     }
 
@@ -1757,16 +1753,6 @@ const prepareClipStack = (clips: readonly DrawingClip[]): PreparedClipStack | un
     const clipBounds = unionBounds(subpaths.map((subpath) => computeBounds(subpath.points)));
     if (clip.op === 'intersect') {
       bounds = intersectBounds(bounds, clipBounds);
-    }
-
-    if (
-      clip.op === 'intersect' &&
-      subpaths.length === 1 &&
-      subpaths[0]!.closed &&
-      isConvexPolygon(subpaths[0]!.points)
-    ) {
-      convexPolygons.push([...subpaths[0]!.points]);
-      continue;
     }
 
     const clipTriangles = prepareFillTriangles(subpaths, clip.path.fillRule);
@@ -1787,7 +1773,6 @@ const prepareClipStack = (clips: readonly DrawingClip[]): PreparedClipStack | un
 
   return {
     bounds,
-    convexPolygons: Object.freeze(convexPolygons.map((polygon) => Object.freeze(polygon))),
     stencilClip,
   };
 };
@@ -1827,24 +1812,6 @@ const computeContourMidpoint = (points: readonly Point2D[]): Point2D => {
     traversed += segmentLength;
   }
   return points[0]!;
-};
-
-const applyConvexClipStack = (
-  triangles: readonly Point2D[],
-  clipStack: PreparedClipStack | undefined,
-): readonly Point2D[] => {
-  if (!clipStack || clipStack.convexPolygons.length === 0) {
-    return triangles;
-  }
-
-  let clipped = triangles;
-  for (const polygon of clipStack.convexPolygons) {
-    clipped = clipTrianglesAgainstConvexPolygon(clipped, polygon);
-    if (clipped.length === 0) {
-      break;
-    }
-  }
-  return clipped;
 };
 
 const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDrawPreparation => {
@@ -1889,29 +1856,21 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
         baseTriangles = prepareFillTriangles(subpaths, command.path.fillRule) ?? [];
         break;
     }
-    const requiresExactConvexClipFallback = (preparedClipStack?.convexPolygons.length ?? 0) > 0 &&
-      renderer !== 'middle-out-fan';
-    const clippedFringeVertices = requiresExactConvexClipFallback
-      ? undefined
-      : buildFillFringe(subpaths, resolveFillColor(command.paint));
-    const triangles = applyConvexClipStack(
-      baseTriangles,
-      preparedClipStack,
-    );
-    if (!triangles) {
+    const fringeVertices = buildFillFringe(subpaths, resolveFillColor(command.paint));
+    if (!baseTriangles) {
       return { supported: false, reason: 'path fill triangulation failed' };
     }
     return {
       supported: true,
       draw: {
         kind: 'pathFill',
-        renderer: requiresExactConvexClipFallback ? 'middle-out-fan' : renderer,
-        triangles,
-        fringeVertices: clippedFringeVertices,
-        patches: requiresExactConvexClipFallback ? [] : patches,
+        renderer,
+        triangles: baseTriangles,
+        fringeVertices,
+        patches,
         fillRule: command.path.fillRule,
         color: resolveFillColor(command.paint),
-        bounds: computeBounds(triangles),
+        bounds: computeBounds(baseTriangles),
         clipRect: preparedClipStack?.bounds,
         clip: preparedClipStack?.stencilClip,
         usesStencil: Boolean(preparedClipStack?.stencilClip?.elements?.length),
@@ -1921,12 +1880,8 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
 
   const patches = preparePatches(command.path, command.transform, false);
   const preparedStroke = prepareStrokeTriangles(subpaths, command.paint);
-  const requiresExactConvexClipFallback = (preparedClipStack?.convexPolygons.length ?? 0) > 0;
-  const strokeTriangles = applyConvexClipStack(
-    preparedStroke?.triangles ?? [],
-    preparedClipStack,
-  );
-  if (!strokeTriangles) {
+  const strokeTriangles = preparedStroke?.triangles ?? [];
+  if (!preparedStroke) {
     return { supported: false, reason: 'path stroke expansion failed' };
   }
   return {
@@ -1935,8 +1890,8 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
       kind: 'pathStroke',
       renderer: selectPathStrokeRenderer(patches),
       triangles: strokeTriangles,
-      fringeVertices: requiresExactConvexClipFallback ? undefined : preparedStroke?.fringeVertices,
-      patches: requiresExactConvexClipFallback ? [] : patches,
+      fringeVertices: preparedStroke.fringeVertices,
+      patches,
       color: resolveStrokeColor(command.paint),
       halfWidth: Math.max(0.5, Math.max(command.paint.strokeWidth ?? 1, epsilon)) / 2,
       bounds: computeBounds(strokeTriangles),

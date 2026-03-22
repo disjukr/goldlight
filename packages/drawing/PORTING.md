@@ -639,10 +639,11 @@ When work is added in this package, update this document with:
 - `P0` Port `ClipStack` semantics instead of intersect-only clipping
   - Why high priority: clip behavior is still one of the largest remaining correctness and
     architecture deltas
-  - Current progress: `DrawingClip` now carries explicit clip ops and the Dawn path can replay
-    stencil clips with separate `write`, `intersect`, and `difference` stencil states
-  - To match Skia better: continue from this state toward save-record ordering and atlas/analytic
-    clip handling instead of the remaining convex/direct fallback paths
+  - Current progress: `src/clip_stack.ts` now owns clip-stack visitation, draw commands carry clip
+    stack snapshots with save records, and the Dawn path replays stencil clips with separate
+    `write`, `intersect`, and `difference` stencil states
+  - To match Skia better: continue from this state toward element invalidation/simplification,
+    deferred clip draws, and atlas/analytic clip handling
 - `P1` Introduce a closer `Recorder -> Recording -> prepareResources -> CommandBuffer` flow
   - Why high priority: recording/task preparation boundaries are still much simpler than Skia's
     pipeline

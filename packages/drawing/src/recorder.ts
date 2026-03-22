@@ -1,4 +1,11 @@
 import {
+  classifyDrawingClipState,
+  cloneDrawingClipStackSnapshot,
+  createDrawingClipSaveRecord,
+  createDrawingClipStackSnapshot,
+  getCurrentDrawingClipSaveRecord,
+} from './clip_stack.ts';
+import {
   createScaleMatrix2D,
   createTranslationMatrix2D,
   identityMatrix2D,
@@ -11,8 +18,8 @@ import { createDrawingRecording, type DrawingRecording } from './recording.ts';
 import { type DawnSharedContext, registerDawnRecorder } from './shared_context.ts';
 import type {
   ClearCommand,
-  DrawingClip,
   DrawingClipOp,
+  DrawingClipStackSnapshot,
   DrawingCommand,
   DrawingPaint,
   DrawingPath2D,
@@ -32,7 +39,7 @@ export type DrawingRecorder = Readonly<{
 
 export type DrawingRecorderState = Readonly<{
   transform: readonly [number, number, number, number, number, number];
-  clips: readonly DrawingClip[];
+  clipStack: DrawingClipStackSnapshot;
 }>;
 
 type MutableDrawingRecorder = {
@@ -43,27 +50,7 @@ type MutableDrawingRecorder = {
 
 const cloneState = (state: DrawingRecorderState): DrawingRecorderState => ({
   transform: [...state.transform] as typeof state.transform,
-  clips: state.clips.map((clip) =>
-    clip.kind === 'rect'
-      ? {
-        kind: 'rect',
-        op: clip.op,
-        rect: {
-          origin: [...clip.rect.origin] as typeof clip.rect.origin,
-        size: { ...clip.rect.size },
-        },
-        transform: [...clip.transform] as typeof clip.transform,
-      }
-      : {
-        kind: 'path',
-        op: clip.op,
-        path: {
-          verbs: clip.path.verbs.map((verb) => ({ ...verb })),
-          fillRule: clip.path.fillRule,
-        },
-        transform: [...clip.transform] as typeof clip.transform,
-      }
-  ),
+  clipStack: cloneDrawingClipStackSnapshot(state.clipStack),
 });
 
 export const createDrawingRecorder = (
@@ -74,7 +61,7 @@ export const createDrawingRecorder = (
   commands: [],
   state: {
     transform: identityMatrix2D,
-    clips: [],
+    clipStack: createDrawingClipStackSnapshot(),
   },
   stateStack: [],
 });
@@ -101,7 +88,7 @@ export const recordDrawPath = (
     path: path as DrawingPath2D,
     paint,
     transform: recorder.state.transform,
-    clips: recorder.state.clips,
+    clipStack: recorder.state.clipStack,
   };
   recorder.commands.push(command);
   return command;
@@ -118,20 +105,49 @@ export const recordDrawShape = (
     path: createDrawingPath2DFromShape(shape),
     paint,
     transform: recorder.state.transform,
-    clips: recorder.state.clips,
+    clipStack: recorder.state.clipStack,
   };
   recorder.commands.push(command);
   return command;
 };
 
 export const saveDrawingRecorder = (recorder: DrawingRecorder): void => {
-  (recorder as MutableDrawingRecorder).stateStack.push(cloneState(recorder.state));
+  const mutable = recorder as MutableDrawingRecorder;
+  mutable.stateStack.push(cloneState(recorder.state));
+  mutable.state = {
+    ...mutable.state,
+    clipStack: createDrawingClipStackSnapshot(
+      mutable.state.clipStack.elements,
+      [
+        ...mutable.state.clipStack.saveRecords,
+        createDrawingClipSaveRecord(mutable.state.clipStack),
+      ],
+    ),
+  };
 };
 
 export const restoreDrawingRecorder = (recorder: DrawingRecorder): void => {
   const mutable = recorder as MutableDrawingRecorder;
   const restored = mutable.stateStack.pop();
-  mutable.state = restored ?? { transform: identityMatrix2D, clips: [] };
+  mutable.state = restored ?? { transform: identityMatrix2D, clipStack: createDrawingClipStackSnapshot() };
+};
+
+const appendClip = (
+  clipStack: DrawingClipStackSnapshot,
+  clip: DrawingClipStackSnapshot['elements'][number],
+): DrawingClipStackSnapshot => {
+  const elements = [...clipStack.elements, clip];
+  const saveRecords = [...clipStack.saveRecords];
+  const current = getCurrentDrawingClipSaveRecord(clipStack);
+  saveRecords[saveRecords.length - 1] = {
+    ...current,
+    elementCount: elements.length,
+    state: classifyDrawingClipState(elements),
+    bounds: clip.kind === 'rect' && clip.op === 'intersect'
+      ? clip.rect
+      : current.bounds,
+  };
+  return createDrawingClipStackSnapshot(elements, saveRecords);
 };
 
 export const concatDrawingRecorderTransform = (
@@ -167,15 +183,12 @@ export const clipDrawingRecorderRect = (
 ): void => {
   (recorder as MutableDrawingRecorder).state = {
     ...recorder.state,
-    clips: [
-      ...recorder.state.clips,
-      {
-        kind: 'rect',
-        op,
-        rect: clipRect,
-        transform: recorder.state.transform,
-      },
-    ],
+    clipStack: appendClip(recorder.state.clipStack, {
+      kind: 'rect',
+      op,
+      rect: clipRect,
+      transform: recorder.state.transform,
+    }),
   };
 };
 
@@ -186,15 +199,12 @@ export const clipDrawingRecorderPath = (
 ): void => {
   (recorder as MutableDrawingRecorder).state = {
     ...recorder.state,
-    clips: [
-      ...recorder.state.clips,
-      {
-        kind: 'path',
-        op,
-        path: clipPath as DrawingPath2D,
-        transform: recorder.state.transform,
-      },
-    ],
+    clipStack: appendClip(recorder.state.clipStack, {
+      kind: 'path',
+      op,
+      path: clipPath as DrawingPath2D,
+      transform: recorder.state.transform,
+    }),
   };
 };
 
@@ -205,7 +215,7 @@ export const resetDrawingRecorder = (
   mutable.commands.length = 0;
   mutable.state = {
     transform: identityMatrix2D,
-    clips: [],
+    clipStack: createDrawingClipStackSnapshot(),
   };
   mutable.stateStack.length = 0;
 };

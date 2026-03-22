@@ -1,5 +1,6 @@
 export * from './src/caps.ts';
 export * from './src/command_buffer.ts';
+export * from './src/clip_stack.ts';
 export * from './src/context.ts';
 export * from './src/dawn_backend_context.ts';
 export * from './src/draw_pass.ts';

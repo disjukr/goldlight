@@ -22,6 +22,19 @@ export type DrawingClip = Readonly<
   }
 >;
 
+export type DrawingClipStackState = 'empty' | 'wideOpen' | 'deviceRect' | 'complex';
+
+export type DrawingClipStackSaveRecord = Readonly<{
+  elementCount: number;
+  state: DrawingClipStackState;
+  bounds?: DrawingClipRect;
+}>;
+
+export type DrawingClipStackSnapshot = Readonly<{
+  elements: readonly DrawingClip[];
+  saveRecords: readonly DrawingClipStackSaveRecord[];
+}>;
+
 export type DrawingBackendKind = 'graphite-dawn';
 
 export type DrawingPaint = Readonly<{
@@ -45,7 +58,7 @@ export type DrawPathCommand = Readonly<{
   path: DrawingPath2D;
   paint: DrawingPaint;
   transform: DrawingMatrix2D;
-  clips: readonly DrawingClip[];
+  clipStack: DrawingClipStackSnapshot;
 }>;
 
 export type DrawShapeCommand = Readonly<{
@@ -54,7 +67,7 @@ export type DrawShapeCommand = Readonly<{
   path: DrawingPath2D;
   paint: DrawingPaint;
   transform: DrawingMatrix2D;
-  clips: readonly DrawingClip[];
+  clipStack: DrawingClipStackSnapshot;
 }>;
 
 export type DrawingCommand = ClearCommand | DrawPathCommand | DrawShapeCommand;

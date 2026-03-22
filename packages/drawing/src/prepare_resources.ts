@@ -1,11 +1,8 @@
+import type { DrawingPreparedClipElement } from './clip_stack.ts';
 import type { Point2D } from '@rieul3d/geometry';
 import { type DrawingPreparedRecording, prepareDrawingRecording } from './draw_pass.ts';
 import type { DrawingRecording } from './recording.ts';
-import type {
-  DrawingPreparedClipElement,
-  DrawingPreparedPatch,
-  DrawingPreparedVertex,
-} from './path_renderer.ts';
+import type { DrawingPreparedPatch, DrawingPreparedVertex } from './path_renderer.ts';
 import type { DawnSharedContext } from './shared_context.ts';
 
 export type DrawingPreparedStepResources = Readonly<{

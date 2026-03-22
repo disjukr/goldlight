@@ -1,4 +1,5 @@
 import type { Path2D } from '@rieul3d/geometry';
+import { cloneDrawingClipStackSnapshot } from './clip_stack.ts';
 import type { DawnSharedContext } from './shared_context.ts';
 import type { DrawingCommand, DrawingSubmission } from './types.ts';
 
@@ -29,24 +30,7 @@ const cloneCommand = (command: DrawingCommand): DrawingCommand => {
         path: clonePath(command.path)!,
         paint: { ...command.paint },
         transform: [...command.transform] as typeof command.transform,
-        clips: command.clips.map((clip) =>
-          clip.kind === 'rect'
-            ? {
-              kind: 'rect',
-              op: clip.op,
-              rect: {
-                origin: [...clip.rect.origin] as typeof clip.rect.origin,
-                size: { ...clip.rect.size },
-              },
-              transform: [...clip.transform] as typeof clip.transform,
-            }
-            : {
-              kind: 'path',
-              op: clip.op,
-              path: clonePath(clip.path)!,
-              transform: [...clip.transform] as typeof clip.transform,
-            }
-        ),
+        clipStack: cloneDrawingClipStackSnapshot(command.clipStack),
       };
     case 'drawShape':
       return {
@@ -55,24 +39,7 @@ const cloneCommand = (command: DrawingCommand): DrawingCommand => {
         path: clonePath(command.path)!,
         paint: { ...command.paint },
         transform: [...command.transform] as typeof command.transform,
-        clips: command.clips.map((clip) =>
-          clip.kind === 'rect'
-            ? {
-              kind: 'rect',
-              op: clip.op,
-              rect: {
-                origin: [...clip.rect.origin] as typeof clip.rect.origin,
-                size: { ...clip.rect.size },
-              },
-              transform: [...clip.transform] as typeof clip.transform,
-            }
-            : {
-              kind: 'path',
-              op: clip.op,
-              path: clonePath(clip.path)!,
-              transform: [...clip.transform] as typeof clip.transform,
-            }
-        ),
+        clipStack: cloneDrawingClipStackSnapshot(command.clipStack),
       };
   }
 };

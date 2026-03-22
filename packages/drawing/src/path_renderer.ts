@@ -1,7 +1,10 @@
 import { identityMatrix2D, type PathFillRule2D, type Point2D, type Rect, transformPoint2D } from '@rieul3d/geometry';
+import {
+  type DrawingPreparedClip,
+  type DrawingPreparedClipElement,
+  visitDrawingClipStackForDraw,
+} from './clip_stack.ts';
 import type {
-  DrawingClip,
-  DrawingClipOp,
   DrawingClipRect,
   DrawingPaint,
   DrawingPath2D,
@@ -22,16 +25,6 @@ type FlattenedSubpath = Readonly<{
 export type DrawingPreparedVertex = Readonly<{
   point: Point2D;
   color: readonly [number, number, number, number];
-}>;
-
-export type DrawingPreparedClip = Readonly<{
-  bounds?: Rect;
-  elements?: readonly DrawingPreparedClipElement[];
-}>;
-
-export type DrawingPreparedClipElement = Readonly<{
-  op: DrawingClipOp;
-  triangles: readonly Point2D[];
 }>;
 
 type DrawingPreparedPatchBase = Readonly<{
@@ -1695,94 +1688,10 @@ const applyDashPattern = (
   return Object.freeze(dashed);
 };
 
-type PreparedClipStack = Readonly<{
-  bounds?: Rect;
-  stencilClip?: DrawingPreparedClip;
-}>;
-
-const createPolygonTriangles = (polygon: readonly Point2D[]): readonly Point2D[] => {
-  if (polygon.length < 3) {
-    return Object.freeze([]) as readonly Point2D[];
-  }
-
-  const triangles: Point2D[] = [];
-  for (let index = 1; index < polygon.length - 1; index += 1) {
-    triangles.push(polygon[0]!, polygon[index]!, polygon[index + 1]!);
-  }
-  return Object.freeze(triangles);
-};
-
 const transformPoints = (
   points: readonly Point2D[],
   transform: readonly [number, number, number, number, number, number],
 ): readonly Point2D[] => Object.freeze(points.map((point) => transformPoint2D(point, transform)));
-
-const createRectClipPolygon = (
-  clipRect: DrawingClipRect,
-  transform: readonly [number, number, number, number, number, number],
-): readonly Point2D[] => {
-  const x0 = clipRect.origin[0];
-  const y0 = clipRect.origin[1];
-  const x1 = x0 + clipRect.size.width;
-  const y1 = y0 + clipRect.size.height;
-  return Object.freeze([
-    transformPoint2D([x0, y0], transform),
-    transformPoint2D([x1, y0], transform),
-    transformPoint2D([x1, y1], transform),
-    transformPoint2D([x0, y1], transform),
-  ]);
-};
-
-const prepareClipStack = (clips: readonly DrawingClip[]): PreparedClipStack | undefined => {
-  if (clips.length === 0) return undefined;
-
-  let bounds: Rect | undefined;
-  const stencilElements: DrawingPreparedClipElement[] = [];
-
-  for (const clip of clips) {
-    if (clip.kind === 'rect') {
-      const polygon = createRectClipPolygon(clip.rect, clip.transform);
-      if (clip.op === 'intersect') {
-        bounds = intersectBounds(bounds, computeBounds(polygon));
-      }
-      stencilElements.push({
-        op: clip.op,
-        triangles: createPolygonTriangles(polygon),
-      });
-      continue;
-    }
-
-    const subpaths = flattenSubpaths(clip.path, clip.transform);
-    if (!subpaths || subpaths.length === 0) {
-      continue;
-    }
-
-    const clipBounds = unionBounds(subpaths.map((subpath) => computeBounds(subpath.points)));
-    if (clip.op === 'intersect') {
-      bounds = intersectBounds(bounds, clipBounds);
-    }
-
-    const clipTriangles = prepareFillTriangles(subpaths, clip.path.fillRule);
-    if (clipTriangles && clipTriangles.length > 0) {
-      stencilElements.push({
-        op: clip.op,
-        triangles: Object.freeze([...clipTriangles]),
-      });
-    }
-  }
-
-  const stencilClip = stencilElements.length > 0
-    ? {
-      bounds,
-      elements: Object.freeze(stencilElements),
-    }
-    : undefined;
-
-  return {
-    bounds,
-    stencilClip,
-  };
-};
 
 const computeContourMidpoint = (points: readonly Point2D[]): Point2D => {
   if (points.length === 0) {
@@ -1827,7 +1736,21 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
     return { supported: false, reason: 'path does not resolve to subpaths' };
   }
 
-  const preparedClipStack = prepareClipStack(command.clips);
+  const preparedClipStack = visitDrawingClipStackForDraw(
+    command.clipStack,
+    (path, transform) => {
+      const subpaths = flattenSubpaths(path, transform);
+      if (!subpaths || subpaths.length === 0) {
+        return null;
+      }
+      return {
+        bounds: unionBounds(subpaths.map((subpath) => computeBounds(subpath.points))),
+        triangles: prepareFillTriangles(subpaths, path.fillRule) ?? undefined,
+      };
+    },
+    (bounds, candidate) => candidate ? intersectBounds(bounds, candidate) : bounds,
+    computeBounds,
+  );
   const style = command.paint.style ?? 'fill';
   if (style === 'fill') {
     const patches = preparePatches(command.path, identityMatrix2D, true);
@@ -1879,9 +1802,9 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
         color: resolveFillColor(command.paint),
         transform: command.transform,
         bounds: computeBounds(transformPoints(baseTriangles, command.transform)),
-        clipRect: preparedClipStack?.bounds,
-        clip: preparedClipStack?.stencilClip,
-        usesStencil: Boolean(preparedClipStack?.stencilClip?.elements?.length),
+        clipRect: preparedClipStack.bounds,
+        clip: preparedClipStack.stencilClip,
+        usesStencil: Boolean(preparedClipStack.stencilClip?.elements?.length),
       },
     };
   }
@@ -1904,9 +1827,9 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
       halfWidth: Math.max(0.5, Math.max(command.paint.strokeWidth ?? 1, epsilon)) / 2,
       transform: command.transform,
       bounds: computeBounds(transformPoints(strokeTriangles, command.transform)),
-      clipRect: preparedClipStack?.bounds,
-      clip: preparedClipStack?.stencilClip,
-      usesStencil: Boolean(preparedClipStack?.stencilClip?.elements?.length),
+      clipRect: preparedClipStack.bounds,
+      clip: preparedClipStack.stencilClip,
+      usesStencil: Boolean(preparedClipStack.stencilClip?.elements?.length),
     },
   };
 };

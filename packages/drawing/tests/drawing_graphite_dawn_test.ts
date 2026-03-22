@@ -308,15 +308,16 @@ Deno.test('drawing recorder records transform and clip state into draw commands'
     throw new Error('expected draw path commands');
   }
   assertEquals(first.transform, [2, 0, 0, 3, 10, 12]);
-  assertEquals(first.clips.length, 1);
-  assertEquals(first.clips[0]?.kind, 'rect');
-  if (first.clips[0]?.kind !== 'rect') {
+  assertEquals(first.clipStack.elements.length, 1);
+  assertEquals(first.clipStack.elements[0]?.kind, 'rect');
+  if (first.clipStack.elements[0]?.kind !== 'rect') {
     throw new Error('expected rect clip');
   }
-  assertEquals(first.clips[0].op, 'intersect');
-  assertEquals(first.clips[0].rect, createRect(20, 30, 40, 50));
+  assertEquals(first.clipStack.saveRecords.length, 2);
+  assertEquals(first.clipStack.elements[0].op, 'intersect');
+  assertEquals(first.clipStack.elements[0].rect, createRect(20, 30, 40, 50));
   assertEquals(second.transform, identityMatrix2D);
-  assertEquals(second.clips.length, 0);
+  assertEquals(second.clipStack.elements.length, 0);
   assertEquals(first.path.verbs[0], { kind: 'moveTo', to: [1, 1] });
 });
 

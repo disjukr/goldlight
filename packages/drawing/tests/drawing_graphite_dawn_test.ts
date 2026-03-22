@@ -1184,7 +1184,7 @@ Deno.test('drawing prepared stroke patches seed open contours from first tangent
   }
   assertEquals(draw.patches.length > 0, true);
   assertEquals(draw.patches[0]?.joinControlPoint, [20, 30]);
-  assertEquals(draw.patches[0]?.startCap, 'none');
+  assertEquals(draw.patches[0]?.startCap, 'round');
   assertEquals(draw.usesTessellatedStrokePatches, true);
 });
 

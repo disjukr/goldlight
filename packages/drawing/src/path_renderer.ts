@@ -583,8 +583,8 @@ const createPreparedStrokeContourPatches = (
       joinControlPoint: previousJoinControlPoint,
       contourStart,
       contourEnd,
-      startCap: 'none',
-      endCap: 'none',
+      startCap: !contour.closed && contourStart ? cap : 'none',
+      endCap: !contour.closed && contourEnd ? cap : 'none',
     });
     previousJoinControlPoint = next
       ? getPatchOutgoingJoinControlPoint(patch)
@@ -601,7 +601,7 @@ const createPreparedStrokeContourPatches = (
     joinControlPoint: contour.closed
       ? getPatchOutgoingJoinControlPoint(lastPatch)
       : deferredJoinControlPoint,
-    startCap: 'none',
+    startCap: !contour.closed ? cap : 'none',
   };
   return Object.freeze(prepared);
 };
@@ -2054,32 +2054,12 @@ const canUseTessellatedStrokePatches = (
   subpaths: readonly FlattenedSubpath[],
   paint: DrawingPaint,
 ): boolean => {
-  const allDegeneratePointContours = subpaths.length > 0 &&
-    subpaths.every((subpath) => subpath.points.length === 1);
-  if (allDegeneratePointContours) {
-    return true;
-  }
-  const cap = paint.strokeCap ?? 'butt';
-  const join = paint.strokeJoin ?? 'miter';
-  const lineOnlyPatches = patches.every((patch) => patch.patch.kind === 'line');
-  if (join === 'bevel' || join === 'miter') {
-    return cap !== 'round' &&
-      lineOnlyPatches &&
-      subpaths.every((subpath) => subpath.points.length >= 2 || subpath.points.length === 1);
-  }
-  if (join === 'round') {
-    return subpaths.every((subpath) => subpath.points.length >= 2 || subpath.points.length === 1);
-  }
-  if (lineOnlyPatches) {
-    return subpaths.every((subpath) => subpath.points.length >= 2 || subpath.points.length === 1);
-  }
-  return cap === 'butt' &&
-    subpaths.every((subpath) => !subpath.closed && subpath.points.length === 2);
+  return patches.length > 0 &&
+    subpaths.length > 0 &&
+    subpaths.every((subpath) => subpath.points.length >= 1);
 };
 
 const shouldPrepareStrokePatches = (paint: DrawingPaint): boolean => {
-  const cap = paint.strokeCap ?? 'butt';
-  const join = paint.strokeJoin ?? 'miter';
   return true;
 };
 

@@ -490,17 +490,10 @@ const tryCreateSyntheticJoinPatch = (
     };
   }
   if (strokeStyle.joinLimit > 0) {
-    const miterPoint = lineIntersection(outerStart, inDirection, outerEnd, outDirection);
-    if (!miterPoint) {
-      return null;
-    }
-    const miterLength = Math.hypot(miterPoint[0] - point[0], miterPoint[1] - point[1]) /
-      halfWidth;
-    const limitedMiter = miterLength <= strokeStyle.joinLimit ? miterPoint : outerEnd;
     return {
       patch: {
         kind: 'cubic',
-        points: [point, outerStart, limitedMiter, outerEnd],
+        points: [point, outerStart, outerEnd, point],
         resolveLevel: 0,
       },
       prevPoint: outerStart,
@@ -2188,6 +2181,7 @@ const computeStrokeBounds = (
 };
 
 const canUseTessellatedStrokePatches = (
+  patches: readonly DrawingPreparedStrokePatch[],
   subpaths: readonly FlattenedSubpath[],
   paint: DrawingPaint,
 ): boolean => {
@@ -2197,6 +2191,12 @@ const canUseTessellatedStrokePatches = (
   const cap = paint.strokeCap ?? 'butt';
   const join = paint.strokeJoin ?? 'miter';
   if (join === 'round') {
+    return subpaths.every((subpath) => subpath.points.length >= 2 || subpath.points.length === 1);
+  }
+  const lineOnlyPatches = patches.every((patch) =>
+    patch.syntheticKind !== undefined || patch.patch.kind === 'line'
+  );
+  if (lineOnlyPatches) {
     return subpaths.every((subpath) => subpath.points.length >= 2 || subpath.points.length === 1);
   }
   if (cap === 'square') {
@@ -2353,7 +2353,11 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
     strokeStyle.cap,
     strokeStyle,
   );
-  const usesTessellatedStrokePatches = canUseTessellatedStrokePatches(subpaths, command.paint);
+  const usesTessellatedStrokePatches = canUseTessellatedStrokePatches(
+    patches,
+    subpaths,
+    command.paint,
+  );
   const preparedStroke = prepareStrokeTriangles(strokeContours, command.paint);
   const strokedBounds = computeStrokeBounds(
     applyDashPattern(subpaths, command.paint),

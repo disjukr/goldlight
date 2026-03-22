@@ -56,6 +56,7 @@ const floatsPerVertex = 6;
 const stencilFormat = 'depth24plus-stencil8';
 const noColorWrites = 0;
 const maxPatchResolveLevel = 6;
+const tessellationPrecision = 4;
 const curveFillSegments = 1 << maxPatchResolveLevel;
 const strokePatchSegments = 1 << maxPatchResolveLevel;
 const stepUniformFloats = 28;
@@ -334,6 +335,23 @@ fn eval_patch(
     (t * t * t * p3);
 }
 
+fn cosine_between_unit_vectors(a: vec2<f32>, b: vec2<f32>) -> f32 {
+  return clamp(dot(a, b), -1.0, 1.0);
+}
+
+fn miter_extent(cosTheta: f32, miterLimit: f32) -> f32 {
+  let x = fma(cosTheta, 0.5, 0.5);
+  if (x * miterLimit * miterLimit >= 1.0) {
+    return inverseSqrt(max(x, 1e-5));
+  }
+  return sqrt(max(x, 0.0));
+}
+
+fn num_radial_segments_per_radian(approxDevStrokeRadius: f32) -> f32 {
+  let radius = max(approxDevStrokeRadius, 0.5);
+  return 0.5 / acos(max(1.0 - (1.0 / ${tessellationPrecision}) / radius, -1.0));
+}
+
 @vertex
 fn vs_main(
   @builtin(vertex_index) vertexIndex: u32,
@@ -457,6 +475,23 @@ fn eval_patch(
     (t * t * t * p3);
 }
 
+fn cosine_between_unit_vectors(a: vec2<f32>, b: vec2<f32>) -> f32 {
+  return clamp(dot(a, b), -1.0, 1.0);
+}
+
+fn miter_extent(cosTheta: f32, miterLimit: f32) -> f32 {
+  let x = fma(cosTheta, 0.5, 0.5);
+  if (x * miterLimit * miterLimit >= 1.0) {
+    return inverseSqrt(max(x, 1e-5));
+  }
+  return sqrt(max(x, 0.0));
+}
+
+fn num_radial_segments_per_radian(approxDevStrokeRadius: f32) -> f32 {
+  let radius = max(approxDevStrokeRadius, 0.5);
+  return 0.5 / acos(max(1.0 - (1.0 / ${tessellationPrecision}) / radius, -1.0));
+}
+
 @vertex
 fn vs_main(
   @builtin(vertex_index) vertexIndex: u32,
@@ -470,9 +505,7 @@ fn vs_main(
 ) -> VertexOut {
   let quadVertex = vertexIndex % 6u;
   let segmentIndex = vertexIndex / 6u;
-  let activeSegments = max(1u, 1u << u32(clamp(curveMeta.z, 0.0, MAX_RESOLVE_LEVEL)));
-  let t0 = f32(segmentIndex) / f32(activeSegments);
-  let t1 = f32(min(segmentIndex + 1u, activeSegments)) / f32(activeSegments);
+  var activeSegments = max(1u, 1u << u32(clamp(curveMeta.z, 0.0, MAX_RESOLVE_LEVEL)));
   let curveType = curveMeta.x;
   let weight = curveMeta.y;
   let flags = u32(max(curveMeta.w, 0.0));
@@ -480,6 +513,11 @@ fn vs_main(
   let squarePatch = (flags & 128u) != 0u;
   let bevelPatch = (flags & 256u) != 0u;
   let miterPatch = (flags & 512u) != 0u;
+  if (circlePatch) {
+    activeSegments = max(8u, u32(ceil(6.28318530718 * num_radial_segments_per_radian(stroke.x))));
+  }
+  let t0 = f32(segmentIndex) / f32(activeSegments);
+  let t1 = f32(min(segmentIndex + 1u, activeSegments)) / f32(activeSegments);
   var a = eval_patch(curveType, weight, p0, p1, p2, p3, t0);
   var b = eval_patch(curveType, weight, p0, p1, p2, p3, t1);
   var local = p3;
@@ -496,18 +534,27 @@ fn vs_main(
     } else if (squarePatch) {
       let center = p0;
       var delta = center - prevPoint;
-      if (length(delta) <= 1e-5) {
+      let isolatedSquare = length(delta) <= 1e-5;
+      if (isolatedSquare) {
         delta = vec2<f32>(1.0, 0.0);
       }
       let tangent = normalize(delta);
       let normal = vec2<f32>(-tangent.y, tangent.x) * stroke.x;
       let extension = tangent * stroke.x;
-      let corners = array<vec2<f32>, 4>(
+      var corners = array<vec2<f32>, 4>(
         center + normal,
         center - normal,
         center - normal + extension,
         center + normal + extension,
       );
+      if (isolatedSquare) {
+        corners = array<vec2<f32>, 4>(
+          center + normal - extension,
+          center - normal - extension,
+          center - normal + extension,
+          center + normal + extension,
+        );
+      }
       let indices = array<u32, 6>(0u, 1u, 2u, 0u, 2u, 3u);
       local = corners[indices[quadVertex]];
     } else if (bevelPatch) {
@@ -515,7 +562,15 @@ fn vs_main(
       let indices = array<u32, 6>(0u, 1u, 2u, 0u, 2u, 3u);
       local = triangle[indices[quadVertex]];
     } else if (miterPatch) {
-      let quad = array<vec2<f32>, 4>(p0, p1, p2, p3);
+      let startDir = normalize(p1 - p0);
+      let endDir = normalize(p2 - p0);
+      let cosTheta = cosine_between_unit_vectors(startDir, endDir);
+      let miterScale = miter_extent(cosTheta, max(stroke.y, 1.0));
+      let bisectorDelta = startDir + endDir;
+      let hasBisector = length(bisectorDelta) > 1e-5;
+      let bisector = select(vec2<f32>(0.0, 0.0), normalize(bisectorDelta), hasBisector);
+      let miterPoint = select(p2, p0 + (bisector * stroke.x * miterScale), hasBisector);
+      let quad = array<vec2<f32>, 4>(p0, p1, miterPoint, p2);
       let indices = array<u32, 6>(0u, 1u, 2u, 0u, 2u, 3u);
       local = quad[indices[quadVertex]];
     } else {

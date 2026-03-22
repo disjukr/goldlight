@@ -1264,7 +1264,26 @@ Deno.test('drawing prepared stroke patches emit synthetic join patches for bevel
     return draw.patches.map((patch) => patch.syntheticKind).filter(Boolean);
   };
 
-  assertEquals(prepareJoinKinds('bevel').includes('bevel'), true);
+  const bevelKinds = prepareJoinKinds('bevel');
+  assertEquals(bevelKinds.includes('bevel'), true);
+  const bevelRecorder = drawingContext.createRecorder();
+  recordDrawPath(
+    bevelRecorder,
+    createPath2D(
+      { kind: 'moveTo', to: [32, 96] },
+      { kind: 'lineTo', to: [96, 32] },
+      { kind: 'lineTo', to: [160, 96] },
+    ),
+    { style: 'stroke', strokeWidth: 12, strokeJoin: 'bevel', strokeCap: 'butt' },
+  );
+  const bevelPrepared = prepareDrawingRecording(finishDrawingRecorder(bevelRecorder));
+  const bevelDraw = bevelPrepared.passes[0]?.steps[0]?.draw;
+  assertEquals(bevelDraw?.kind, 'pathStroke');
+  if (bevelDraw?.kind !== 'pathStroke') {
+    throw new Error('expected pathStroke draw');
+  }
+  assertEquals(bevelDraw.usesTessellatedStrokePatches, true);
+
   assertEquals(prepareJoinKinds('miter').includes('miter'), true);
 });
 
@@ -1628,8 +1647,8 @@ Deno.test('dawn resource provider reuses pipelines across command buffers', () =
   encodeDawnCommandBuffer(sharedContext, createRecording('stroke'), binding);
   encodeDawnCommandBuffer(sharedContext, createRecording('stroke'), binding);
 
-  assertEquals(mock.created.renderPipelines.length, 2);
-  assertEquals(mock.created.shaderModules.length, 2);
+  assertEquals(mock.created.renderPipelines.length, 3);
+  assertEquals(mock.created.shaderModules.length, 3);
   assertEquals(mock.created.bindGroupLayouts.length > 0, true);
   assertEquals(mock.created.pipelineLayouts.length > 0, true);
 });

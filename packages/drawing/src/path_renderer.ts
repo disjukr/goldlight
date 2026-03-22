@@ -1370,7 +1370,11 @@ const findConicCuspT = (
   const coeffA = scale(delta, weight - 1);
   const coeffB = subtract(delta, scale(tan0, 2 * weight));
   const coeffC = scale(tan0, weight);
-  return solveQuadraticMidTangent(dot(bisector, coeffA), dot(bisector, coeffB), dot(bisector, coeffC));
+  return solveQuadraticMidTangent(
+    dot(bisector, coeffA),
+    dot(bisector, coeffB),
+    dot(bisector, coeffC),
+  );
 };
 
 const findCuspTBySampling = (

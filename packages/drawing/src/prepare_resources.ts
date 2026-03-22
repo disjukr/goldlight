@@ -339,7 +339,12 @@ const createStrokePatchInstanceData = (
     data[offset++] = toCurveType(patch.patch);
     data[offset++] = patch.patch.kind === 'conic' ? patch.patch.weight : 1;
     data[offset++] = Math.min(maxPatchResolveLevel, Math.max(0, patch.patch.resolveLevel));
-    data[offset++] = 0;
+    data[offset++] = (patch.contourStart ? 1 : 0) +
+      (patch.contourEnd ? 2 : 0) +
+      (patch.startCap === 'square' ? 4 : 0) +
+      (patch.endCap === 'square' ? 8 : 0) +
+      (patch.startCap === 'round' ? 16 : 0) +
+      (patch.endCap === 'round' ? 32 : 0);
   }
   return data;
 };

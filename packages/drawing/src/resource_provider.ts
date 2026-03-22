@@ -475,8 +475,9 @@ fn vs_main(
   let t1 = f32(min(segmentIndex + 1u, activeSegments)) / f32(activeSegments);
   let curveType = curveMeta.x;
   let weight = curveMeta.y;
-  let a = eval_patch(curveType, weight, p0, p1, p2, p3, t0);
-  let b = eval_patch(curveType, weight, p0, p1, p2, p3, t1);
+  let flags = u32(max(curveMeta.w, 0.0));
+  var a = eval_patch(curveType, weight, p0, p1, p2, p3, t0);
+  var b = eval_patch(curveType, weight, p0, p1, p2, p3, t1);
   var local = p3;
   if (segmentIndex < activeSegments) {
     var delta = b - a;
@@ -484,6 +485,15 @@ fn vs_main(
       delta = a - prevPoint;
     }
     let deltaLength = max(length(delta), 1e-5);
+    let tangent = delta / deltaLength;
+    let squareStart = (flags & 4u) != 0u;
+    let squareEnd = (flags & 8u) != 0u;
+    if (segmentIndex == 0u && squareStart) {
+      a -= tangent * stroke.x;
+    }
+    if (segmentIndex + 1u == activeSegments && squareEnd) {
+      b += tangent * stroke.x;
+    }
     let normal = vec2<f32>(-delta.y / deltaLength, delta.x / deltaLength) * stroke.x;
     let corners = array<vec2<f32>, 4>(a + normal, b + normal, b - normal, a - normal);
     let indices = array<u32, 6>(0u, 1u, 2u, 0u, 2u, 3u);

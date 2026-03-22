@@ -1793,7 +1793,7 @@ const canUseTessellatedStrokePatches = (
   if ((paint.dashArray?.length ?? 0) > 0) {
     return false;
   }
-  if ((paint.strokeCap ?? 'butt') !== 'butt') {
+  if (!['butt', 'square'].includes(paint.strokeCap ?? 'butt')) {
     return false;
   }
   return subpaths.every((subpath) => !subpath.closed && subpath.points.length === 2);

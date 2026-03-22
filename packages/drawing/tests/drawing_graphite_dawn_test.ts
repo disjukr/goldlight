@@ -1160,8 +1160,12 @@ Deno.test('drawing prepared recording expands stroke geometry', () => {
   const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
   const draw = prepared.passes[0]?.steps[0]?.draw;
   assertEquals(draw?.kind, 'pathStroke');
-  assertEquals(draw?.renderer, 'tessellated-strokes');
-  assertEquals((draw?.triangles.length ?? 0) > 12, true);
+  if (draw?.kind !== 'pathStroke') {
+    throw new Error('expected pathStroke draw');
+  }
+  assertEquals(draw.renderer, 'tessellated-strokes');
+  assertEquals(draw.patches.length > 0, true);
+  assertEquals(draw.usesTessellatedStrokePatches, true);
 });
 
 Deno.test('drawing prepared recording expands stroke joins and caps', () => {
@@ -1182,7 +1186,11 @@ Deno.test('drawing prepared recording expands stroke joins and caps', () => {
   const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
   const draw = prepared.passes[0]?.steps[0]?.draw;
   assertEquals(draw?.kind, 'pathStroke');
-  assertEquals((draw?.triangles.length ?? 0) > 18, true);
+  if (draw?.kind !== 'pathStroke') {
+    throw new Error('expected pathStroke draw');
+  }
+  assertEquals(draw.patches.length > 0, true);
+  assertEquals(draw.usesTessellatedStrokePatches, true);
 });
 
 Deno.test('drawing prepared stroke patches seed open contours from first tangent control point', () => {
@@ -1455,11 +1463,10 @@ Deno.test('drawing prepared recording applies dash pattern to strokes', () => {
   const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
   const draw = prepared.passes[0]?.steps[0]?.draw;
   assertEquals(draw?.kind, 'pathStroke');
-  assertEquals((draw?.triangles.length ?? 0) > 0, true);
-  assertEquals((draw?.triangles.length ?? 0) < 72, true);
   if (draw?.kind !== 'pathStroke') {
     throw new Error('expected pathStroke draw');
   }
+  assertEquals(draw.patches.length > 0, true);
   assertEquals(draw.usesTessellatedStrokePatches, true);
 });
 
@@ -1674,7 +1681,7 @@ Deno.test('dawn command buffer encodes stroke draws without stencil', () => {
   assertEquals(mock.created.drawCalls.length, 1);
 });
 
-Deno.test('dawn command buffer batches consecutive non-stencil draws into one render pass', () => {
+Deno.test('dawn command buffer isolates tessellated stroke patches into a depth-tested render pass', () => {
   const mock = createMockGpuContext();
   const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
   const recorder = createDrawingRecorder(sharedContext);
@@ -1709,10 +1716,18 @@ Deno.test('dawn command buffer batches consecutive non-stencil draws into one re
     binding,
   );
 
-  assertEquals(commandBuffer.passCount, 1);
-  assertEquals(mock.created.renderPasses.length, 1);
+  assertEquals(commandBuffer.passCount, 2);
+  assertEquals(mock.created.renderPasses.length, 2);
   assertEquals(mock.created.drawCalls.length, 3);
   assertEquals(mock.created.stencilReferences, []);
+  assertEquals(mock.created.renderPasses[0]?.depthStencilAttachment, undefined);
+  assertEquals(mock.created.renderPasses[1]?.depthStencilAttachment !== undefined, true);
+
+  const strokePatchPipeline = mock.created.renderPipelines.find((pipeline) =>
+    pipeline.label === 'drawing-path-stroke-patch-cover'
+  );
+  assertEquals(strokePatchPipeline?.depthStencil?.depthCompare, 'less');
+  assertEquals(strokePatchPipeline?.depthStencil?.depthWriteEnabled, true);
 });
 
 Deno.test('dawn resource provider reuses pipelines across command buffers', () => {

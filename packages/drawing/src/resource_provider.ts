@@ -457,10 +457,6 @@ struct VertexOut {
   @builtin(position) position: vec4<f32>,
   @location(0) color: vec4<f32>,
   @location(1) devicePosition: vec2<f32>,
-  @location(2) localPosition: vec2<f32>,
-  @location(3) capCenter: vec2<f32>,
-  @location(4) capVector: vec2<f32>,
-  @location(5) capMode: f32,
 };
 
 fn device_to_ndc(position: vec2<f32>) -> vec4<f32> {
@@ -723,9 +719,6 @@ fn vs_main(
   let affine = affine_matrix();
   let curveType = curveMeta.x;
   let weight = curveMeta.y;
-  let flags = u32(max(curveMeta.w, 0.0));
-  let roundStart = (flags & 16u) != 0u;
-  let roundEnd = (flags & 32u) != 0u;
   var curveP0 = p0;
   var curveP1 = p1;
   var curveP2 = p2;
@@ -747,13 +740,8 @@ fn vs_main(
   if (length(tan0) <= 1e-5) {
     joinType = 0.0;
     if (curveType < 1.5 || curveType >= 2.5) {
-      if (length(prevTan) > 1e-5) {
-        tan0 = prevTan;
-        tan1 = -prevTan;
-      } else {
-        tan0 = vec2<f32>(1.0, 0.0);
-        tan1 = vec2<f32>(-1.0, 0.0);
-      }
+      tan0 = vec2<f32>(1.0, 0.0);
+      tan1 = vec2<f32>(-1.0, 0.0);
     } else {
       tan0 = prevTan;
       tan1 = prevTan;
@@ -779,12 +767,12 @@ fn vs_main(
   }
   var joinTan0 = tan0;
   var joinTan1 = tan1;
-  var turn = cross_length_2d(tan0, tan1);
+  var turn = cross_length_2d(curveP2 - curveP0, curveP3 - curveP1);
   var strokeOutset = sign(edgeID);
   var combinedEdgeID = abs(edgeID) - numEdgesInJoin;
   if (combinedEdgeID < 0.0) {
     joinTan1 = joinTan0;
-    if (distance(lastControlPoint, curveP0) > 1e-5) {
+    if (!all(lastControlPoint == curveP0)) {
       joinTan0 = prevTan;
     }
     turn = cross_length_2d(joinTan0, joinTan1);
@@ -952,18 +940,6 @@ fn vs_main(
   out.position = device_to_ndc(devicePosition);
   out.color = step.color;
   out.devicePosition = devicePosition;
-  out.localPosition = local;
-  out.capCenter = curveP0;
-  out.capVector = prevTan;
-  out.capMode = select(
-    0.0,
-    1.0,
-    (roundStart || roundEnd) &&
-      distance(curveP0, curveP1) <= 1e-5 &&
-      distance(curveP0, curveP2) <= 1e-5 &&
-      distance(curveP0, curveP3) <= 1e-5 &&
-      length(prevTan) > 1e-5,
-  );
   return out;
 }
 
@@ -983,12 +959,6 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
   var color = in.color;
   if (step.params.w > 0.5) {
     color *= step.clipShader;
-  }
-  if (in.capMode > 0.5) {
-    let capLocal = in.localPosition - in.capCenter;
-    if (dot(capLocal, in.capVector) < 0.0) {
-      color.a = 0.0;
-    }
   }
   color.a *= clipCoverage;
   return color;
@@ -1026,6 +996,22 @@ const createStencilCoverState = (): GPUDepthStencilState => ({
   stencilWriteMask: 0x00,
   stencilFront: createStencilFaceState('keep', 'not-equal'),
   stencilBack: createStencilFaceState('keep', 'not-equal'),
+});
+
+const createDirectDepthLessState = (): GPUDepthStencilState => ({
+  format: stencilFormat,
+  depthWriteEnabled: true,
+  depthCompare: 'less',
+});
+
+const createClipCoverDepthLessState = (): GPUDepthStencilState => ({
+  format: stencilFormat,
+  depthWriteEnabled: true,
+  depthCompare: 'less',
+  stencilReadMask: 0xff,
+  stencilWriteMask: 0x00,
+  stencilFront: createStencilFaceState('keep', 'equal'),
+  stencilBack: createStencilFaceState('keep', 'equal'),
 });
 
 const createPathShaderModule = (backend: DawnBackendContext): GPUShaderModule =>
@@ -1351,6 +1337,10 @@ export const createDawnResourceProvider = (
         stencilFront: createStencilFaceState('keep', 'equal'),
         stencilBack: createStencilFaceState('keep', 'equal'),
       }
+      : descriptor.depthStencil === 'clip-cover-depth-less'
+      ? createClipCoverDepthLessState()
+      : descriptor.depthStencil === 'direct-depth-less'
+      ? createDirectDepthLessState()
       : descriptor.depthStencil === 'fill-stencil-evenodd'
       ? createFillStencilFaceState('invert', 'invert')
       : descriptor.depthStencil === 'fill-stencil-nonzero'

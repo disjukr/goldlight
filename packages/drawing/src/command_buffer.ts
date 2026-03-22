@@ -314,7 +314,7 @@ export const encodePreparedDawnCommandBuffer = (
   let passCount = 0;
   const hasStencilSteps = preparedWork.tasks.tasks.some((task) =>
     task.drawPasses.some((passInfo) =>
-      passInfo.steps.some((step) => step.usesStencil || step.usesFillStencil)
+      passInfo.steps.some((step) => step.usesStencil || step.usesFillStencil || step.usesDepth)
     )
   );
   const stencilView = hasStencilSteps
@@ -349,7 +349,7 @@ export const encodePreparedDawnCommandBuffer = (
       let stepIndex = 0;
       while (stepIndex < passInfo.steps.length) {
         const step = passInfo.steps[stepIndex]!;
-        if (step.usesStencil || step.usesFillStencil) {
+        if (step.usesStencil || step.usesFillStencil || step.usesDepth) {
           const pass = encoder.beginRenderPass(
             createRenderPassDescriptor(
               colorView,
@@ -380,7 +380,8 @@ export const encodePreparedDawnCommandBuffer = (
         while (
           stepIndex < passInfo.steps.length &&
           !passInfo.steps[stepIndex]!.usesStencil &&
-          !passInfo.steps[stepIndex]!.usesFillStencil
+          !passInfo.steps[stepIndex]!.usesFillStencil &&
+          !passInfo.steps[stepIndex]!.usesDepth
         ) {
           encodePreparedStep(
             pass,

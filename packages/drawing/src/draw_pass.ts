@@ -24,10 +24,12 @@ export type DrawingVertexLayoutKey =
 
 export type DrawingDepthStencilKey =
   | 'none'
+  | 'direct-depth-less'
   | 'clip-stencil-write'
   | 'clip-stencil-intersect'
   | 'clip-stencil-difference'
   | 'clip-cover'
+  | 'clip-cover-depth-less'
   | 'fill-stencil-evenodd'
   | 'fill-stencil-nonzero'
   | 'fill-stencil-cover';
@@ -52,6 +54,7 @@ export type DrawingPreparedStep = Readonly<{
   clipBounds?: Rect;
   usesStencil: boolean;
   usesFillStencil: boolean;
+  usesDepth: boolean;
 }>;
 
 export type DrawingDrawPass = Readonly<{
@@ -213,7 +216,7 @@ const getPipelineDescsForDraw = (
           'drawing-path-stroke-patch-clip-cover',
           'stroke-patch',
           'stroke-patch-instance',
-          'clip-cover',
+          'clip-cover-depth-less',
           false,
           'triangle-strip',
         )]
@@ -221,7 +224,7 @@ const getPipelineDescsForDraw = (
           'drawing-path-stroke-patch-cover',
           'stroke-patch',
           'stroke-patch-instance',
-          'none',
+          'direct-depth-less',
           false,
           'triangle-strip',
         )];
@@ -329,6 +332,9 @@ export const prepareDrawingRecording = (
           usesFillStencil: prepared.draw.kind === 'pathFill' &&
             prepared.draw.renderer !== 'middle-out-fan' &&
             !prepared.draw.clip?.elements?.length,
+          usesDepth: prepared.draw.kind === 'pathStroke' &&
+            prepared.draw.usesTessellatedStrokePatches &&
+            prepared.draw.patches.length > 0,
         });
       } else {
         currentUnsupportedDraws.push(command);

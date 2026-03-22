@@ -13,7 +13,7 @@ import {
 } from '@rieul3d/drawing';
 
 const outputWidth = 680;
-const outputHeight = 820;
+const outputHeight = 940;
 const supersampleScale = 2;
 
 const downsampleRgba = (
@@ -250,6 +250,55 @@ export const renderStrokesSnapshot = async (): Promise<
       strokeJoin: 'round',
       strokeCap: 'round',
       color: [0.13, 0.45, 0.36, 0.85],
+    },
+  );
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [500, 748] },
+      { kind: 'lineTo', to: [542, 878] },
+      { kind: 'lineTo', to: [430, 796] },
+      { kind: 'lineTo', to: [570, 796] },
+      { kind: 'lineTo', to: [458, 878] },
+      { kind: 'close' },
+    ),
+    {
+      style: 'stroke',
+      strokeWidth: 18,
+      strokeJoin: 'miter',
+      strokeCap: 'butt',
+      color: [0.66, 0.22, 0.72, 0.5],
+    },
+  );
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [110, 850] },
+      { kind: 'lineTo', to: [300, 760] },
+    ),
+    {
+      style: 'stroke',
+      strokeWidth: 26,
+      strokeJoin: 'round',
+      strokeCap: 'round',
+      color: [0.18, 0.43, 0.82, 0.45],
+    },
+  );
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [110, 760] },
+      { kind: 'lineTo', to: [300, 850] },
+    ),
+    {
+      style: 'stroke',
+      strokeWidth: 26,
+      strokeJoin: 'round',
+      strokeCap: 'round',
+      color: [0.9, 0.36, 0.18, 0.45],
     },
   );
 

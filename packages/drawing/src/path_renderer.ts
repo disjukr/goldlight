@@ -589,15 +589,6 @@ const subdivideStrokePreparedPatch = (
     : Object.freeze([normalizedPatch]);
 };
 
-const prepareStrokePatches = (
-  path: DrawingPath2D,
-): readonly DrawingPreparedPatch[] =>
-  Object.freeze(
-    preparePatches(path, identityMatrix2D, false).flatMap((patch) =>
-      subdivideStrokePreparedPatch(patch)
-    ),
-  );
-
 const getPatchStartPoint = (patch: DrawingPreparedPatch): Point2D => {
   switch (patch.kind) {
     case 'line':
@@ -681,7 +672,6 @@ const createDegenerateSquareStrokePatch = (
 
 const createDegenerateRoundStrokePatch = (
   center: Point2D,
-  joinTo: Point2D = center,
 ): DrawingPreparedStrokePatch => ({
   patch: {
     kind: 'cubic',
@@ -689,8 +679,8 @@ const createDegenerateRoundStrokePatch = (
     resolveLevel: Math.min(maxPatchResolveLevel, 4),
     wangsFormulaP4: 1,
   },
-  prevPoint: joinTo,
-  joinControlPoint: joinTo,
+  prevPoint: center,
+  joinControlPoint: center,
   contourStart: true,
   contourEnd: true,
   startCap: 'round',
@@ -883,22 +873,14 @@ const createPreparedStrokeContourPatches = (
   }
 
   if (cap === 'round') {
-    appendPreparedPatch(
-      createDegenerateRoundStrokePatch(lastEnd, getPatchOutgoingJoinControlPoint(lastPatch)).patch,
-      getPatchOutgoingJoinControlPoint(lastPatch),
-      {
-      startCap: 'none',
-      endCap: 'round',
-      },
-    );
-    appendPreparedPatch(
-      createDegenerateRoundStrokePatch(firstStart, getPatchFirstControlPoint(firstPatch)).patch,
-      getPatchFirstControlPoint(firstPatch),
-      {
+    appendPreparedPatch(createDegenerateRoundStrokePatch(lastEnd).patch, lastEnd, {
       startCap: 'round',
-      endCap: 'none',
-      },
-    );
+      endCap: 'round',
+    });
+    appendPreparedPatch(createDegenerateRoundStrokePatch(firstStart).patch, firstStart, {
+      startCap: 'round',
+      endCap: 'round',
+    });
   } else if (cap === 'square') {
     appendPreparedPatch(
       createDegenerateSquareStrokePatch(lastEnd, joinControlPoint).patch,
@@ -916,6 +898,257 @@ const createPreparedStrokeContourPatches = (
     startCap: cap,
     endCap: cap,
   });
+  return Object.freeze(prepared);
+};
+
+const createPreparedStrokePatchesFromPath = (
+  path: DrawingPath2D,
+  cap: NonNullable<DrawingPaint['strokeCap']>,
+): readonly DrawingPreparedStrokePatch[] => {
+  const prepared: DrawingPreparedStrokePatch[] = [];
+  let currentPoint: Point2D | null = null;
+  let contourStart: Point2D | null = null;
+  let deferredFirstPatch: DrawingPreparedPatch | null = null;
+  let lastJoinControlPoint: Point2D | null = null;
+  let lastControlPoint: Point2D | null = null;
+  let lastDegeneratePoint: Point2D | null = null;
+
+  const resetContour = (nextMoveTo: Point2D | null = null): void => {
+    currentPoint = nextMoveTo;
+    contourStart = nextMoveTo;
+    deferredFirstPatch = null;
+    lastJoinControlPoint = null;
+    lastControlPoint = nextMoveTo;
+    lastDegeneratePoint = null;
+  };
+
+  const appendImmediatePatch = (patch: DrawingPreparedStrokePatch): void => {
+    prepared.push(patch);
+  };
+
+  const emitPatch = (patch: DrawingPreparedPatch): void => {
+    if (!deferredFirstPatch) {
+      deferredFirstPatch = patch;
+      lastJoinControlPoint = getPatchOutgoingJoinControlPoint(patch);
+      lastControlPoint = getPatchEndPoint(patch);
+      return;
+    }
+    prepared.push({
+      patch,
+      prevPoint: lastJoinControlPoint!,
+      joinControlPoint: lastJoinControlPoint!,
+      contourStart: false,
+      contourEnd: false,
+      startCap: 'none',
+      endCap: 'none',
+    });
+    lastJoinControlPoint = getPatchOutgoingJoinControlPoint(patch);
+    lastControlPoint = getPatchEndPoint(patch);
+  };
+
+  const emitPatchDefinition = (patch: DrawingPatchDefinition): void => {
+    const finalized = finalizePatch(patch);
+    for (const subdivided of subdivideStrokePreparedPatch(finalized)) {
+      emitPatch(subdivided);
+    }
+  };
+
+  const flushOpenContour = (): void => {
+    if (deferredFirstPatch && contourStart) {
+      if (cap === 'round') {
+        appendImmediatePatch(createDegenerateRoundStrokePatch(lastControlPoint ?? contourStart));
+        appendImmediatePatch(createDegenerateRoundStrokePatch(contourStart));
+      } else if (cap === 'square') {
+        appendImmediatePatch(
+          createDegenerateSquareStrokePatch(
+            lastControlPoint ?? contourStart,
+            lastJoinControlPoint ?? (lastControlPoint ?? contourStart),
+          ),
+        );
+        appendImmediatePatch(
+          createDegenerateSquareStrokePatch(
+            contourStart,
+            getPatchFirstControlPoint(deferredFirstPatch),
+          ),
+        );
+      }
+      prepared.push({
+        patch: deferredFirstPatch,
+        prevPoint: contourStart,
+        joinControlPoint: contourStart,
+        contourStart: true,
+        contourEnd: true,
+        startCap: cap,
+        endCap: cap,
+      });
+    } else if (lastDegeneratePoint) {
+      if (cap === 'round') {
+        appendImmediatePatch(createDegenerateRoundStrokePatch(lastDegeneratePoint));
+      } else if (cap === 'square') {
+        appendImmediatePatch(
+          createDegenerateSquareStrokePatch(lastDegeneratePoint, lastDegeneratePoint),
+        );
+      }
+    }
+    resetContour();
+  };
+
+  const flushClosedContour = (): void => {
+    if (deferredFirstPatch) {
+      prepared.push({
+        patch: deferredFirstPatch,
+        prevPoint: lastJoinControlPoint ?? contourStart ?? getPatchStartPoint(deferredFirstPatch),
+        joinControlPoint: lastJoinControlPoint ?? contourStart ??
+          getPatchStartPoint(deferredFirstPatch),
+        contourStart: true,
+        contourEnd: true,
+        startCap: 'none',
+        endCap: 'none',
+      });
+    } else if (lastDegeneratePoint) {
+      if (cap === 'round') {
+        appendImmediatePatch(createDegenerateRoundStrokePatch(lastDegeneratePoint));
+      } else if (cap === 'square') {
+        appendImmediatePatch(
+          createDegenerateSquareStrokePatch(lastDegeneratePoint, lastDegeneratePoint),
+        );
+      }
+    }
+    resetContour();
+  };
+
+  for (const verb of path.verbs) {
+    switch (verb.kind) {
+      case 'moveTo': {
+        flushOpenContour();
+        const to = transformPoint2D(verb.to, identityMatrix2D);
+        resetContour(to);
+        break;
+      }
+      case 'lineTo': {
+        if (!currentPoint) break;
+        const to = transformPoint2D(verb.to, identityMatrix2D);
+        if (pointsEqual(currentPoint, to)) {
+          lastDegeneratePoint = to;
+          currentPoint = to;
+          break;
+        }
+        emitPatchDefinition({ kind: 'line', points: [currentPoint, to] });
+        currentPoint = to;
+        lastDegeneratePoint = null;
+        break;
+      }
+      case 'quadTo': {
+        if (!currentPoint) break;
+        const control = transformPoint2D(verb.control, identityMatrix2D);
+        const to = transformPoint2D(verb.to, identityMatrix2D);
+        if (pointsEqual(currentPoint, control) && pointsEqual(control, to)) {
+          lastDegeneratePoint = to;
+          currentPoint = to;
+          break;
+        }
+        const cuspT = findQuadraticCuspT(currentPoint, control, to);
+        if (cuspT !== null) {
+          const [left] = splitQuadraticAt(currentPoint, control, to, cuspT);
+          const cuspPoint = left[2];
+          appendImmediatePatch(createDegenerateRoundStrokePatch(cuspPoint));
+          emitPatchDefinition({ kind: 'line', points: [currentPoint, cuspPoint] });
+          emitPatchDefinition({ kind: 'line', points: [cuspPoint, to] });
+        } else {
+          emitPatchDefinition({ kind: 'quadratic', points: [currentPoint, control, to] });
+        }
+        currentPoint = to;
+        lastDegeneratePoint = null;
+        break;
+      }
+      case 'conicTo': {
+        if (!currentPoint) break;
+        const control = transformPoint2D(verb.control, identityMatrix2D);
+        const to = transformPoint2D(verb.to, identityMatrix2D);
+        if (pointsEqual(currentPoint, control) && pointsEqual(control, to)) {
+          lastDegeneratePoint = to;
+          currentPoint = to;
+          break;
+        }
+        const cuspT = findCuspTBySampling((t) =>
+          derivativeConic(currentPoint!, control, to, verb.weight, t)
+        );
+        if (cuspT !== null) {
+          const cusp = evaluateConic(currentPoint, control, to, verb.weight, cuspT);
+          appendImmediatePatch(createDegenerateRoundStrokePatch(cusp));
+          emitPatchDefinition({ kind: 'line', points: [currentPoint, cusp] });
+          emitPatchDefinition({ kind: 'line', points: [cusp, to] });
+        } else {
+          emitPatchDefinition({
+            kind: 'conic',
+            points: [currentPoint, control, to],
+            weight: verb.weight,
+          });
+        }
+        currentPoint = to;
+        lastDegeneratePoint = null;
+        break;
+      }
+      case 'cubicTo': {
+        if (!currentPoint) break;
+        const control1 = transformPoint2D(verb.control1, identityMatrix2D);
+        const control2 = transformPoint2D(verb.control2, identityMatrix2D);
+        const to = transformPoint2D(verb.to, identityMatrix2D);
+        if (
+          pointsEqual(currentPoint, control1) &&
+          pointsEqual(control1, control2) &&
+          pointsEqual(control2, to)
+        ) {
+          lastDegeneratePoint = to;
+          currentPoint = to;
+          break;
+        }
+        const chops = findCubicConvex180Chops(currentPoint, control1, control2, to);
+        if (chops.ts.length > 0) {
+          const chopped = splitCubicAtMany(currentPoint, control1, control2, to, chops.ts);
+          for (let index = 0; index < chopped.length; index += 1) {
+            emitPatchDefinition({ kind: 'cubic', points: chopped[index]! });
+            if (chops.areCusps && index + 1 < chopped.length) {
+              appendImmediatePatch(createDegenerateRoundStrokePatch(chopped[index]![3]));
+            }
+          }
+        } else {
+          emitPatchDefinition({ kind: 'cubic', points: [currentPoint, control1, control2, to] });
+        }
+        currentPoint = to;
+        lastDegeneratePoint = null;
+        break;
+      }
+      case 'arcTo': {
+        if (!currentPoint) break;
+        const arcPatches = createArcConicPatches(
+          verb.center,
+          verb.radius,
+          verb.startAngle,
+          verb.endAngle,
+          verb.counterClockwise ?? false,
+          identityMatrix2D,
+        );
+        for (const arcPatch of arcPatches) {
+          emitPatchDefinition(arcPatch);
+        }
+        currentPoint = arcPatches.at(-1)?.points[2] ?? currentPoint;
+        lastDegeneratePoint = null;
+        break;
+      }
+      case 'close': {
+        if (!currentPoint || !contourStart) break;
+        if (!pointsEqual(currentPoint, contourStart)) {
+          emitPatchDefinition({ kind: 'line', points: [currentPoint, contourStart] });
+        }
+        currentPoint = contourStart;
+        flushClosedContour();
+        break;
+      }
+    }
+  }
+
+  flushOpenContour();
   return Object.freeze(prepared);
 };
 
@@ -2577,19 +2810,20 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
   }
 
   const strokeStyle = resolveStrokeStyle(command.paint);
+  const strokeColor = resolveStrokeColor(command.paint);
   const dashedStrokeSubpaths = applyDashPattern(subpaths, command.paint);
   const strokeContours = createStrokeContourRecords(dashedStrokeSubpaths);
   const lineOnlyStrokeContours = strokeContours.every((contour) =>
     contour.points.length <= 2 || contour.points.every((_, index) => index < 2)
   );
   const patches = shouldPrepareStrokePatches(command.paint)
-    ? createPreparedStrokePatches(
-      strokeContours,
-      (command.paint.dashArray?.length ?? 0) > 0 || lineOnlyStrokeContours
-        ? createLinePatchesFromContours(strokeContours)
-        : prepareStrokePatches(command.path),
-      strokeStyle.cap,
-    )
+    ? (command.paint.dashArray?.length ?? 0) > 0 || lineOnlyStrokeContours
+      ? createPreparedStrokePatches(
+        strokeContours,
+        createLinePatchesFromContours(strokeContours),
+        strokeStyle.cap,
+      )
+      : createPreparedStrokePatchesFromPath(command.path, strokeStyle.cap)
     : Object.freeze([] as DrawingPreparedStrokePatch[]);
   const usesTessellatedStrokePatches = canUseTessellatedStrokePatches(
     patches,
@@ -2614,7 +2848,7 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
       fringeVertices: preparedStroke.fringeVertices,
       patches,
       usesTessellatedStrokePatches,
-      color: resolveStrokeColor(command.paint),
+      color: strokeColor,
       strokeStyle,
       transform: command.transform,
       bounds: computeBounds(transformPoints([

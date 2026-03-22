@@ -7,6 +7,7 @@ What it shows:
 - miter, bevel, and round joins
 - butt, square, and round caps
 - a stroked cubic path
+- overlapping translucent strokes
 
 ## Run
 

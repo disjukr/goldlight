@@ -21,7 +21,7 @@ const asMutableQueueManager = (
   lastSubmittedRecorderId: number | null;
   supportsSubmittedWorkDone: boolean;
   pendingCompletions: Promise<void>[];
-  } =>
+} =>
   queueManager as unknown as {
     submittedCount: number;
     completedCount: number;
@@ -68,7 +68,9 @@ export const submitToDawnQueueManager = (
       mutable.inFlightCount = Math.max(0, mutable.inFlightCount - 1);
     })
     .finally(() => {
-      mutable.pendingCompletions = mutable.pendingCompletions.filter((pending) => pending !== completion);
+      mutable.pendingCompletions = mutable.pendingCompletions.filter((pending) =>
+        pending !== completion
+      );
     });
   mutable.pendingCompletions = [...mutable.pendingCompletions, completion];
 };

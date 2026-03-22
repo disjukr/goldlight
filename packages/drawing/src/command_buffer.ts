@@ -343,9 +343,7 @@ const encodePreparedFillStep = (
     step.draw.color,
     sharedContext.backend.target,
   );
-  const fillVertexBuffer = fillVertices
-    ? createVertexBuffer(sharedContext, fillVertices)
-    : null;
+  const fillVertexBuffer = fillVertices ? createVertexBuffer(sharedContext, fillVertices) : null;
   const patchVertices = step.draw.renderer === 'stencil-tessellated-wedges'
     ? createWedgePatchInstanceData(
       step.draw.patches,
@@ -496,7 +494,9 @@ export const encodeDawnCommandBuffer = (
   const resolveView = acquireColorResolveView(binding);
   const unsupportedCommands: DrawingCommand[] = [...prepared.unsupportedCommands];
   let passCount = 0;
-  const hasStencilSteps = prepared.passes.some((passInfo) => passInfo.steps.some((step) => step.usesStencil));
+  const hasStencilSteps = prepared.passes.some((passInfo) =>
+    passInfo.steps.some((step) => step.usesStencil)
+  );
   const stencilView = hasStencilSteps
     ? sharedContext.resourceProvider.getStencilAttachmentView()
     : undefined;
@@ -526,7 +526,13 @@ export const encodeDawnCommandBuffer = (
       const step = passInfo.steps[stepIndex]!;
       if (step.usesStencil) {
         const pass = encoder.beginRenderPass(
-          createRenderPassDescriptor(colorView, resolveView, passInfo.clearColor, colorLoadOp, stencilView),
+          createRenderPassDescriptor(
+            colorView,
+            resolveView,
+            passInfo.clearColor,
+            colorLoadOp,
+            stencilView,
+          ),
         );
         encodePreparedStep(pass, sharedContext, step);
         pass.end();

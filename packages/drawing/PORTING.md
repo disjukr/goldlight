@@ -242,8 +242,8 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
   - Current state: clip stack is recorded explicitly, rect clips and convex path clips are
     intersected through prepared geometry, and multiple complex path clips now accumulate through
     stencil replay before the color pass
-  - Missing: full nested arbitrary clip-path coverage beyond intersect-only semantics and
-    Skia-like clip stack ordering rules
+  - Missing: full nested arbitrary clip-path coverage beyond intersect-only semantics and Skia-like
+    clip stack ordering rules
 - Transform stack
   - Status: `started`
   - Current state: recorder save/restore and per-draw transform state exist without mutating stored
@@ -460,8 +460,8 @@ These decisions directly affect the remaining work and are not settled yet.
 - no bind group cache
 - `command_buffer` still does per-draw render pass replay for stencil clears instead of a richer
   DrawPass command stream
-- non-stencil steps can now batch, but stencil-heavy recordings still fragment replay more than
-  Skia Graphite
+- non-stencil steps can now batch, but stencil-heavy recordings still fragment replay more than Skia
+  Graphite
 - draw-pass preparation still does not batch or pre-resolve resource/pipeline state like Skia
   `DrawPass::prepareResources()`
 - `queue_manager` currently treats `tick()` as coarse completion rather than using explicit GPU
@@ -525,11 +525,14 @@ When work is added in this package, update this document with:
   - Files changed: `src/path_renderer.ts`, `src/draw_pass.ts`, `src/command_buffer.ts`,
     `src/resource_provider.ts`, `src/queue_manager.ts`, `tests/drawing_graphite_dawn_test.ts`,
     `tests/render_basic_paths_snapshot_test.ts`
-  - Status transition: clip path replay from `single complex stencil clip` to `stacked complex
-    stencil clips`, non-stencil replay from `per-step render pass` to `batched render pass`, and
-    queue completion from `tick-only coarse completion` to `submitted-work callback with fallback`,
-    with command-buffer submit now routed through queue tracking and rejected callbacks cleaned up
+  - Status transition: clip path replay from `single complex stencil clip` to
+    `stacked complex
+    stencil clips`, non-stencil replay from `per-step render pass` to
+    `batched render pass`, and queue completion from `tick-only coarse completion` to
+    `submitted-work callback with fallback`, with command-buffer submit now routed through queue
+    tracking and rejected callbacks cleaned up
   - Remaining gaps: clip ops are still intersect-only, and stencil-heavy replay is still more
     granular than Skia Graphite
-  - Validation: `deno test packages/drawing/tests/drawing_graphite_dawn_test.ts`; `deno test
+  - Validation: `deno test packages/drawing/tests/drawing_graphite_dawn_test.ts`;
+    `deno test
     packages/drawing/tests/render_basic_paths_snapshot_test.ts`

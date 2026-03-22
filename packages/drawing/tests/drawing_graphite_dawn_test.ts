@@ -1032,7 +1032,10 @@ Deno.test('submitDawnCommandBuffer routes submissions through queue manager trac
 
   assertEquals(sharedContext.queueManager.submittedCount, 1);
   assertEquals(sharedContext.queueManager.inFlightCount, 1);
-  assertEquals(sharedContext.queueManager.lastSubmittedRecorderId, commandBuffer.recording.recorderId);
+  assertEquals(
+    sharedContext.queueManager.lastSubmittedRecorderId,
+    commandBuffer.recording.recorderId,
+  );
 });
 
 Deno.test('dawn queue manager falls back to coarse tick completion without submitted-work callback', async () => {

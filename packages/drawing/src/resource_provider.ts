@@ -711,8 +711,6 @@ fn vs_main(
         joinTan0 = prevTan;
       }
       turn = cross_length_2d(joinTan0, joinTan1);
-    } else if (is_exact_start_edge(segmentIndex, activeSegments)) {
-      strokeOutset = restrict_join_stroke_outset(strokeOutset, turn, joinTan0, joinTan1);
     }
     let cosTheta = cosine_between_unit_vectors(joinTan0, joinTan1);
     var rotation = acos(cosTheta);

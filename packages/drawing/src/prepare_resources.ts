@@ -6,6 +6,7 @@ import type { DrawingPreparedPatch, DrawingPreparedVertex } from './path_rendere
 import type { DrawingGraphicsPipelineHandle } from './resource_provider.ts';
 import type { DawnSharedContext } from './shared_context.ts';
 import { createDrawingTaskList, type DrawingTaskList } from './task.ts';
+import type { DrawingStrokeStyle } from './types.ts';
 
 export type DrawingPreparedStepResources = Readonly<{
   pipelineHandles: readonly DrawingGraphicsPipelineHandle[];
@@ -153,7 +154,7 @@ const createStepPayloadBuffer = (
   sharedContext: DawnSharedContext,
   transform: readonly [number, number, number, number, number, number],
   color: readonly [number, number, number, number],
-  halfWidth: number,
+  strokeStyle: DrawingStrokeStyle | null,
   clip: Readonly<{
     hasAtlas: boolean;
     atlasOrigin: Point2D;
@@ -184,7 +185,7 @@ const createStepPayloadBuffer = (
     color[1],
     color[2],
     color[3],
-    halfWidth,
+    strokeStyle?.halfWidth ?? 0,
     clip.hasAtlas ? 1 : 0,
     clip.hasAnalyticRect ? 1 : 0,
     clip.hasShader ? 1 : 0,
@@ -415,7 +416,7 @@ const prepareStepResources = (
     sharedContext,
     step.draw.transform,
     step.draw.color,
-    step.draw.kind === 'pathStroke' ? step.draw.halfWidth : 0,
+    step.draw.kind === 'pathStroke' ? step.draw.strokeStyle : null,
     clipPayload,
   );
   const stepBindGroup = sharedContext.resourceProvider.createStepBindGroup(stepPayloadBuffer);
@@ -490,7 +491,9 @@ const prepareStepResources = (
   }
 
   const strokeVertices = createVertexModulationData(step.draw.triangles, [1, 1, 1, 1]);
-  const patchVertices = createStrokePatchInstanceData(step.draw.patches);
+  const patchVertices = step.draw.usesTessellatedStrokePatches
+    ? createStrokePatchInstanceData(step.draw.patches)
+    : new Float32Array(0);
   const fringeVertices = step.draw.fringeVertices
     ? createColoredDeviceSpaceVertexData(step.draw.fringeVertices)
     : null;
@@ -559,7 +562,7 @@ export const prepareDawnResources = (
     sharedContext,
     [1, 0, 0, 1, 0, 0],
     [0, 0, 0, 0],
-    0,
+    null,
     {
       hasAtlas: false,
       atlasOrigin: [0, 0],

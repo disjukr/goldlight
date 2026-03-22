@@ -8,6 +8,7 @@ import type {
   DrawingClipRect,
   DrawingPaint,
   DrawingPath2D,
+  DrawingStrokeStyle,
   DrawPathCommand,
   DrawShapeCommand,
 } from './types.ts';
@@ -96,8 +97,9 @@ export type DrawingPreparedPathStroke = Readonly<{
   triangles: readonly Point2D[];
   fringeVertices?: readonly DrawingPreparedVertex[];
   patches: readonly DrawingPreparedPatch[];
+  usesTessellatedStrokePatches: boolean;
   color: readonly [number, number, number, number];
-  halfWidth: number;
+  strokeStyle: DrawingStrokeStyle;
   transform: readonly [number, number, number, number, number, number];
   bounds: Rect;
   clipRect?: DrawingClipRect;
@@ -134,6 +136,17 @@ const resolveStrokeColor = (paint: DrawingPaint): readonly [number, number, numb
   }
   const coverage = Math.max(0, strokeWidth / hairlineCoverageWidth);
   return [color[0], color[1], color[2], color[3] * coverage];
+};
+
+const resolveStrokeStyle = (paint: DrawingPaint): DrawingStrokeStyle => {
+  const strokeWidth = Math.max(paint.strokeWidth ?? 1, epsilon);
+  const halfWidth = Math.max(0.5, strokeWidth) / 2;
+  const join = paint.strokeJoin ?? 'miter';
+  return {
+    halfWidth,
+    joinLimit: join === 'round' ? -1 : join === 'bevel' ? 0 : Math.max(1, paint.miterLimit ?? 4),
+    cap: paint.strokeCap ?? 'butt',
+  };
 };
 
 const pointsEqual = (left: Point2D, right: Point2D): boolean =>
@@ -1460,17 +1473,17 @@ const appendStrokeJoin = (
 const prepareStrokeTriangles = (
   subpaths: readonly FlattenedSubpath[],
   paint: DrawingPaint,
-):
+): 
   | Readonly<{
     triangles: readonly Point2D[];
     fringeVertices?: readonly DrawingPreparedVertex[];
   }>
   | null => {
-  const strokeWidth = Math.max(paint.strokeWidth ?? 1, epsilon);
-  const halfWidth = Math.max(0.5, strokeWidth) / 2;
-  const join = paint.strokeJoin ?? 'miter';
-  const cap = paint.strokeCap ?? 'butt';
-  const miterLimit = Math.max(1, paint.miterLimit ?? 4);
+  const strokeStyle = resolveStrokeStyle(paint);
+  const halfWidth = strokeStyle.halfWidth;
+  const cap = strokeStyle.cap;
+  const join = strokeStyle.joinLimit < 0 ? 'round' : strokeStyle.joinLimit === 0 ? 'bevel' : 'miter';
+  const miterLimit = Math.max(1, strokeStyle.joinLimit);
   const triangles: Point2D[] = [];
   const fringeVertices: DrawingPreparedVertex[] = [];
   const color = resolveStrokeColor(paint);
@@ -1688,6 +1701,38 @@ const applyDashPattern = (
   return Object.freeze(dashed);
 };
 
+const computeStrokeBounds = (
+  subpaths: readonly FlattenedSubpath[],
+  halfWidth: number,
+): Rect => {
+  const points = subpaths.flatMap((subpath) => subpath.points);
+  if (points.length === 0) {
+    return { origin: [0, 0], size: { width: 0, height: 0 } };
+  }
+  const bounds = computeBounds(points);
+  const outset = halfWidth + aaFringeWidth;
+  return {
+    origin: [bounds.origin[0] - outset, bounds.origin[1] - outset],
+    size: {
+      width: bounds.size.width + (2 * outset),
+      height: bounds.size.height + (2 * outset),
+    },
+  };
+};
+
+const canUseTessellatedStrokePatches = (
+  subpaths: readonly FlattenedSubpath[],
+  paint: DrawingPaint,
+): boolean => {
+  if ((paint.dashArray?.length ?? 0) > 0) {
+    return false;
+  }
+  if ((paint.strokeCap ?? 'butt') !== 'butt') {
+    return false;
+  }
+  return subpaths.every((subpath) => !subpath.closed && subpath.points.length === 2);
+};
+
 const transformPoints = (
   points: readonly Point2D[],
   transform: readonly [number, number, number, number, number, number],
@@ -1825,8 +1870,11 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
     };
   }
 
+  const strokeStyle = resolveStrokeStyle(command.paint);
   const patches = preparePatches(command.path, identityMatrix2D, false);
+  const usesTessellatedStrokePatches = canUseTessellatedStrokePatches(subpaths, command.paint);
   const preparedStroke = prepareStrokeTriangles(subpaths, command.paint);
+  const strokedBounds = computeStrokeBounds(applyDashPattern(subpaths, command.paint), strokeStyle.halfWidth);
   const strokeTriangles = preparedStroke?.triangles ?? [];
   if (!preparedStroke) {
     return { supported: false, reason: 'path stroke expansion failed' };
@@ -1839,10 +1887,17 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
       triangles: strokeTriangles,
       fringeVertices: preparedStroke.fringeVertices,
       patches,
+      usesTessellatedStrokePatches,
       color: resolveStrokeColor(command.paint),
-      halfWidth: Math.max(0.5, Math.max(command.paint.strokeWidth ?? 1, epsilon)) / 2,
+      strokeStyle,
       transform: command.transform,
-      bounds: computeBounds(transformPoints(strokeTriangles, command.transform)),
+      bounds: computeBounds(transformPoints([
+        strokedBounds.origin,
+        [
+          strokedBounds.origin[0] + strokedBounds.size.width,
+          strokedBounds.origin[1] + strokedBounds.size.height,
+        ] as Point2D,
+      ], command.transform)),
       clipRect: preparedClipStack.bounds,
       clip: preparedClipStack.stencilClip
         ? {

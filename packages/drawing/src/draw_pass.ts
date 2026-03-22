@@ -191,7 +191,7 @@ const getPipelineDescsForDraw = (
       return [createPipelineDesc('drawing-path-fill-patch-cover', 'wedge-patch', 'wedge-patch-instance')];
     }
     case 'pathStroke':
-      if (draw.patches.length === 0) {
+      if (!draw.usesTessellatedStrokePatches || draw.patches.length === 0) {
         return usesStencilClip
           ? [createPipelineDesc(
               'drawing-path-stroke-clip-cover',

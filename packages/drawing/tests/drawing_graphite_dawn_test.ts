@@ -988,9 +988,10 @@ Deno.test('drawing prepared recording preserves stroke patches when convex clips
     throw new Error('expected pathStroke draw');
   }
   assertEquals(draw.patches.length > 0, true);
+  assertEquals(draw.usesTessellatedStrokePatches, false);
   assertEquals((draw.fringeVertices?.length ?? 0) > 0, true);
   assertEquals(prepared.passes[0]?.steps[0]?.pipelineDescs.map((pipeline) => pipeline.label), [
-    'drawing-path-stroke-patch-clip-cover',
+    'drawing-path-stroke-clip-cover',
   ]);
 });
 
@@ -1383,7 +1384,7 @@ Deno.test('dawn command buffer encodes stroke draws without stencil', () => {
 
   assertEquals(commandBuffer.unsupportedCommands.length, 0);
   assertEquals(mock.created.renderPasses.length, 1);
-  assertEquals(mock.created.renderPipelines.length, 2);
+  assertEquals(mock.created.renderPipelines.length, 1);
   assertEquals(mock.created.drawCalls.length, 2);
 });
 
@@ -1456,8 +1457,8 @@ Deno.test('dawn resource provider reuses pipelines across command buffers', () =
   encodeDawnCommandBuffer(sharedContext, createRecording('stroke'), binding);
   encodeDawnCommandBuffer(sharedContext, createRecording('stroke'), binding);
 
-  assertEquals(mock.created.renderPipelines.length, 3);
-  assertEquals(mock.created.shaderModules.length, 3);
+  assertEquals(mock.created.renderPipelines.length, 2);
+  assertEquals(mock.created.shaderModules.length, 2);
   assertEquals(mock.created.bindGroupLayouts.length > 0, true);
   assertEquals(mock.created.pipelineLayouts.length > 0, true);
 });

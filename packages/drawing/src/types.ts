@@ -63,6 +63,12 @@ export type DrawingPaint = Readonly<{
   dashOffset?: number;
 }>;
 
+export type DrawingStrokeStyle = Readonly<{
+  halfWidth: number;
+  joinLimit: number;
+  cap: 'butt' | 'square' | 'round';
+}>;
+
 export type ClearCommand = Readonly<{
   kind: 'clear';
   color: readonly [number, number, number, number];

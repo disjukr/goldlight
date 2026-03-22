@@ -32,12 +32,15 @@ export type DrawingDepthStencilKey =
   | 'fill-stencil-nonzero'
   | 'fill-stencil-cover';
 
+export type DrawingPrimitiveTopology = 'triangle-list' | 'triangle-strip';
+
 export type DrawingGraphicsPipelineDesc = Readonly<{
   label: string;
   shader: DrawingShaderKey;
   vertexLayout: DrawingVertexLayoutKey;
   colorWriteDisabled: boolean;
   depthStencil: DrawingDepthStencilKey;
+  topology: DrawingPrimitiveTopology;
 }>;
 
 export type DrawingPreparedStep = Readonly<{
@@ -79,12 +82,14 @@ const createPipelineDesc = (
   vertexLayout: DrawingVertexLayoutKey,
   depthStencil: DrawingDepthStencilKey = 'none',
   colorWriteDisabled = false,
+  topology: DrawingPrimitiveTopology = 'triangle-list',
 ): DrawingGraphicsPipelineDesc => ({
   label,
   shader,
   vertexLayout,
   depthStencil,
   colorWriteDisabled,
+  topology,
 });
 
 const getPipelineDescsForDraw = (
@@ -207,8 +212,17 @@ const getPipelineDescsForDraw = (
             'stroke-patch',
             'stroke-patch-instance',
             'clip-cover',
+            false,
+            'triangle-strip',
           )]
-        : [createPipelineDesc('drawing-path-stroke-patch-cover', 'stroke-patch', 'stroke-patch-instance')];
+        : [createPipelineDesc(
+            'drawing-path-stroke-patch-cover',
+            'stroke-patch',
+            'stroke-patch-instance',
+            'none',
+            false,
+            'triangle-strip',
+          )];
   }
 };
 

@@ -2188,6 +2188,9 @@ const canUseTessellatedStrokePatches = (
   subpaths: readonly FlattenedSubpath[],
   paint: DrawingPaint,
 ): boolean => {
+  if (patches.some((patch) => patch.syntheticKind !== undefined)) {
+    return false;
+  }
   const cap = paint.strokeCap ?? 'butt';
   const join = paint.strokeJoin ?? 'miter';
   if (join === 'bevel' || join === 'miter' || cap === 'square') {

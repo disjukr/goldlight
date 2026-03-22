@@ -602,7 +602,7 @@ fn strip_vertex_position(
 }
 
 fn strip_edge_index(quadVertex: u32) -> u32 {
-  return array<u32, 6>(0u, 1u, 2u, 0u, 2u, 3u)[quadVertex];
+  return array<u32, 6>(0u, 1u, 2u, 1u, 2u, 3u)[quadVertex];
 }
 
 fn strip_signed_edge(edgeIndex: u32) -> f32 {
@@ -648,13 +648,38 @@ fn restrict_join_stroke_outset(
   return select(max(strokeOutset, 0.0), min(strokeOutset, 0.0), turn < 0.0);
 }
 
-fn combined_edge_index(segmentIndex: u32, activeSegments: u32, quadVertex: u32) -> f32 {
-  var edgeIndex = f32(segmentIndex);
-  let edgeSign = strip_signed_edge(strip_edge_index(quadVertex));
-  if (segmentIndex + 1u >= activeSegments) {
+fn signed_edge_id(segmentIndex: u32, activeSegments: u32, quadVertex: u32) -> f32 {
+  let stripVertexID = strip_edge_index(quadVertex);
+  var edgeIndex = f32(segmentIndex + (stripVertexID >> 1u));
+  if (edgeIndex > f32(max(activeSegments, 1u) - 1u)) {
     edgeIndex = f32(max(activeSegments, 1u) - 1u);
   }
-  return edgeIndex * edgeSign;
+  if ((stripVertexID & 1u) != 0u) {
+    edgeIndex = -edgeIndex;
+  }
+  return edgeIndex;
+}
+
+fn stroke_outset_from_edge_id(edgeID: f32) -> f32 {
+  return sign(edgeID);
+}
+
+fn is_exact_start_edge(segmentIndex: u32, activeSegments: u32) -> bool {
+  return segmentIndex == 0u;
+}
+
+fn is_exact_end_edge(segmentIndex: u32, activeSegments: u32) -> bool {
+  return segmentIndex + 1u >= activeSegments;
+}
+
+fn uses_exact_start_endpoint(segmentIndex: u32, activeSegments: u32, stripEdgeIndex: u32) -> bool {
+  return is_exact_start_edge(segmentIndex, activeSegments) &&
+    (stripEdgeIndex == 0u || stripEdgeIndex == 3u);
+}
+
+fn uses_exact_end_endpoint(segmentIndex: u32, activeSegments: u32, stripEdgeIndex: u32) -> bool {
+  return is_exact_end_edge(segmentIndex, activeSegments) &&
+    (stripEdgeIndex == 1u || stripEdgeIndex == 2u);
 }
 
 @vertex
@@ -668,10 +693,8 @@ fn vs_main(
   @location(5) stroke: vec2<f32>,
   @location(6) curveMeta: vec4<f32>,
 ) -> VertexOut {
-  let quadVertex = vertexIndex % 6u;
-  let segmentIndex = vertexIndex / 6u;
-  let stripEdgeIndex = strip_edge_index(quadVertex);
-  let signedEdge = strip_signed_edge(stripEdgeIndex);
+  let stripVertex = vertexIndex & 1u;
+  let segmentIndex = vertexIndex >> 1u;
   var activeSegments = max(1u, 1u << u32(clamp(curveMeta.z, 0.0, MAX_RESOLVE_LEVEL)));
   let curveType = curveMeta.x;
   let weight = curveMeta.y;
@@ -688,7 +711,10 @@ fn vs_main(
     activeSegments = max(8u, u32(ceil(6.28318530718 * num_radial_segments_per_radian(stroke.x))));
   }
   let numEdgesInJoin = stroke_join_edges(joinType, prevTan, tan0, stroke.x);
-  let combinedEdge = combined_edge_index(segmentIndex, activeSegments, quadVertex);
+  var edgeID = f32(segmentIndex);
+  if (stripVertex != 0u) {
+    edgeID = -edgeID;
+  }
   let t0 = f32(segmentIndex) / f32(activeSegments);
   let t1 = f32(min(segmentIndex + 1u, activeSegments)) / f32(activeSegments);
   var a = eval_patch(curveType, weight, p0, p1, p2, p3, t0);
@@ -696,54 +722,13 @@ fn vs_main(
   var local = p3;
   if (segmentIndex < activeSegments) {
     if (circlePatch) {
-      let center = p0;
-      let angle0 = t0 * 6.28318530718;
-      let angle1 = t1 * 6.28318530718;
-      let edge0 = center + vec2<f32>(cos(angle0), sin(angle0)) * stroke.x;
-      let edge1 = center + vec2<f32>(cos(angle1), sin(angle1)) * stroke.x;
-      let fanVertices = array<vec2<f32>, 4>(center, edge0, edge1, center);
-      let fanIndices = array<u32, 6>(0u, 1u, 2u, 0u, 2u, 3u);
-      local = fanVertices[fanIndices[quadVertex]];
+      local = p0;
     } else if (squarePatch) {
-      let center = p0;
-      let isolatedSquare = distance(center, joinControlPoint) <= 1e-5;
-      let tangent = select(
-        robust_normalize_diff(center, joinControlPoint),
-        vec2<f32>(1.0, 0.0),
-        isolatedSquare,
-      );
-      let normal = vec2<f32>(-tangent.y, tangent.x) * stroke.x;
-      let extension = tangent * stroke.x;
-      var corners = array<vec2<f32>, 4>(
-        center + normal,
-        center - normal,
-        center - normal + extension,
-        center + normal + extension,
-      );
-      if (isolatedSquare) {
-        corners = array<vec2<f32>, 4>(
-          center + normal - extension,
-          center - normal - extension,
-          center - normal + extension,
-          center + normal + extension,
-        );
-      }
-      let indices = array<u32, 6>(0u, 1u, 2u, 0u, 2u, 3u);
-      local = corners[indices[quadVertex]];
+      local = p0;
     } else if (bevelPatch) {
-      let triangle = array<vec2<f32>, 4>(p0, p1, p2, p0);
-      let indices = array<u32, 6>(0u, 1u, 2u, 0u, 2u, 3u);
-      local = triangle[indices[quadVertex]];
+      local = p0;
     } else if (miterPatch) {
-      let cosTheta = cosine_between_unit_vectors(prevTan, tan0);
-      let miterScale = miter_extent(cosTheta, max(joinType, 1.0));
-      let bisectorDelta = prevTan + tan0;
-      let hasBisector = length(bisectorDelta) > 1e-5;
-      let bisector = select(vec2<f32>(0.0, 0.0), normalize(bisectorDelta), hasBisector);
-      let miterPoint = select(p2, p0 + (bisector * stroke.x * miterScale), hasBisector);
-      let quad = array<vec2<f32>, 4>(p0, p1, miterPoint, p2);
-      let indices = array<u32, 6>(0u, 1u, 2u, 0u, 2u, 3u);
-      local = quad[indices[quadVertex]];
+      local = p0;
     } else {
       var delta = b - a;
       if (length(delta) <= 1e-5) {
@@ -753,34 +738,150 @@ fn vs_main(
       let squareEnd = (flags & 8u) != 0u;
       let tangent = robust_normalize_diff(b, a);
       let turn = cross_length_2d(tan0, tan1);
-      var strokeOutset = 1.0;
+      var strokeOutset = stroke_outset_from_edge_id(edgeID);
       let hasJoinControlPoint = distance(joinControlPoint, p0) > 1e-5;
-      if (segmentIndex == 0u && hasJoinControlPoint) {
+      if (is_exact_start_edge(segmentIndex, activeSegments) && hasJoinControlPoint) {
         strokeOutset = restrict_join_stroke_outset(strokeOutset, turn, tan0, tan1);
       }
-      if (segmentIndex == 0u && squareStart) {
+      if (is_exact_start_edge(segmentIndex, activeSegments) && squareStart) {
         a -= tangent * stroke.x;
       }
-      if (segmentIndex + 1u == activeSegments && squareEnd) {
+      if (is_exact_end_edge(segmentIndex, activeSegments) && squareEnd) {
         b += tangent * stroke.x;
       }
-      if (curveType < 0.5) {
-        local = strip_vertex_position(a, b, stroke.x, quadVertex, strokeOutset);
+      var curveP0 = p0;
+      var curveP1 = p1;
+      var curveP2 = p2;
+      var curveP3 = p3;
+      var joinTan0 = tan0;
+      var joinTan1 = tan1;
+      var curveTurn = cross_length_2d(curveP2 - curveP0, curveP3 - curveP1);
+      var combinedEdgeID = abs(edgeID) - numEdgesInJoin;
+      if (combinedEdgeID < 0.0) {
+        joinTan1 = joinTan0;
+        if (hasJoinControlPoint) {
+          joinTan0 = prevTan;
+        }
+        curveTurn = cross_length_2d(joinTan0, joinTan1);
+      }
+      let cosTheta = cosine_between_unit_vectors(joinTan0, joinTan1);
+      var rotation = acos(cosTheta);
+      if (curveTurn < 0.0) {
+        rotation = -rotation;
+      }
+      var numParametricSegments = f32(activeSegments);
+      var numRadialSegments: f32;
+      if (combinedEdgeID < 0.0) {
+        numRadialSegments = numEdgesInJoin - 2.0;
+        numParametricSegments = 1.0;
+        curveP1 = curveP0;
+        curveP2 = curveP0;
+        curveP3 = curveP0;
+        combinedEdgeID += numRadialSegments + 1.0;
+        if (combinedEdgeID < 0.0) {
+          combinedEdgeID = 0.0;
+        } else if (!tangents_nearly_parallel(curveTurn, joinTan0, joinTan1) || dot(joinTan0, joinTan1) < 0.0) {
+          strokeOutset = select(max(strokeOutset, 0.0), min(strokeOutset, 0.0), curveTurn < 0.0);
+        }
       } else {
-      var tangent0 = eval_patch_tangent(curveType, weight, p0, p1, p2, p3, t0);
-      var tangent1 = eval_patch_tangent(curveType, weight, p0, p1, p2, p3, t1);
-      if (length(tangent0) <= 1e-5) {
-        tangent0 = select(tan0, tangent, segmentIndex == 0u);
+        let maxCombinedSegments = max(f32(activeSegments) - numEdgesInJoin - 1.0, 1.0);
+        numRadialSegments = max(ceil(abs(rotation) * num_radial_segments_per_radian(stroke.x)), 1.0);
+        numRadialSegments = min(numRadialSegments, maxCombinedSegments);
+        numParametricSegments = min(numParametricSegments, maxCombinedSegments - numRadialSegments + 1.0);
       }
-      if (length(tangent1) <= 1e-5) {
-        tangent1 = select(tan1, tangent, segmentIndex + 1u >= activeSegments);
+      let radsPerSegment = rotation / max(numRadialSegments, 1.0);
+      let numCombinedSegments = numParametricSegments + numRadialSegments - 1.0;
+      let isFinalEdge = combinedEdgeID >= numCombinedSegments;
+      if (combinedEdgeID > numCombinedSegments) {
+        strokeOutset = 0.0;
       }
-      let edgePoint = strip_edge_point(a, b, stripEdgeIndex);
-      let edgeUsesEnd = stripEdgeIndex == 1u || stripEdgeIndex == 2u;
-      let edgeTangent = select(tangent0, tangent1, edgeUsesEnd);
-      let ortho = vec2<f32>(edgeTangent.y, -edgeTangent.x);
-      local = edgePoint + (ortho * stroke.x * signedEdge * strokeOutset);
+      if (abs(edgeID) == 2.0 && joinType > 0.0) {
+        strokeOutset *= miter_extent(cosTheta, joinType);
       }
+      var strokeCoord: vec2<f32>;
+      var curveTangent: vec2<f32>;
+      if (combinedEdgeID != 0.0 && !isFinalEdge) {
+        var parametricT = combinedEdgeID / max(numCombinedSegments, 1.0);
+        if (curveType >= 1.5) {
+          var coeffA: vec2<f32>;
+          var coeffB: vec2<f32>;
+          var coeffC = curveP1 - curveP0;
+          let deltaP = curveP3 - curveP0;
+          if (curveType < 2.5) {
+            coeffC *= weight;
+            coeffB = (0.5 * deltaP) - coeffC;
+            coeffA = (weight - 1.0) * deltaP;
+          } else {
+            let edgeP = curveP2 - curveP1;
+            coeffB = edgeP - coeffC;
+            coeffA = (-3.0 * edgeP) + deltaP;
+          }
+          let coeffBScaled = coeffB * (numParametricSegments * 2.0);
+          let coeffCScaled = coeffC * (numParametricSegments * numParametricSegments);
+          var lastParametricEdgeID = 0.0;
+          let maxParametricEdgeID = min(numParametricSegments - 1.0, combinedEdgeID);
+          let negAbsRadsPerSegment = -abs(radsPerSegment);
+          let maxRotation0 = (1.0 + combinedEdgeID) * abs(radsPerSegment);
+          var exp = 32.0;
+          loop {
+            if (exp < 1.0) {
+              break;
+            }
+            let testParametricID = lastParametricEdgeID + exp;
+            if (testParametricID <= maxParametricEdgeID) {
+              var testTan = (coeffA * testParametricID) + coeffBScaled;
+              testTan = (testTan * testParametricID) + coeffCScaled;
+              let testTanLength = length(testTan);
+              if (testTanLength > 1e-5) {
+                let cosRotationAtTest = dot(testTan / testTanLength, joinTan0);
+                let maxRotation = min((testParametricID * negAbsRadsPerSegment) + maxRotation0, 3.14159265359);
+                if (cosRotationAtTest >= cos(maxRotation)) {
+                  lastParametricEdgeID = testParametricID;
+                }
+              }
+            }
+            exp *= 0.5;
+          }
+          parametricT = lastParametricEdgeID / max(numParametricSegments, 1.0);
+          let lastRadialEdgeID = combinedEdgeID - lastParametricEdgeID;
+          let angle0 = select(acos(clamp(joinTan0.x, -1.0, 1.0)), -acos(clamp(joinTan0.x, -1.0, 1.0)), joinTan0.y < 0.0);
+          let radialAngle = (lastRadialEdgeID * radsPerSegment) + angle0;
+          let radialTangent = vec2<f32>(cos(radialAngle), sin(radialAngle));
+          let radialNorm = vec2<f32>(-radialTangent.y, radialTangent.x);
+          let quadraticA = dot(radialNorm, coeffA);
+          let quadraticBOver2 = dot(radialNorm, coeffB);
+          let quadraticC = dot(radialNorm, coeffC);
+          let discrOver4 = max((quadraticBOver2 * quadraticBOver2) - (quadraticA * quadraticC), 0.0);
+          var rootQ = sqrt(discrOver4);
+          if (quadraticBOver2 > 0.0) {
+            rootQ = -rootQ;
+          }
+          rootQ -= quadraticBOver2;
+          let rootChoiceA = abs((rootQ * rootQ) + (-0.5 * rootQ * quadraticA));
+          let rootChoiceB = abs((quadraticA * quadraticC) + (-0.5 * rootQ * quadraticA));
+          let rootNumer = select(quadraticC, rootQ, rootChoiceA < rootChoiceB);
+          let rootDenom = select(rootQ, quadraticA, rootChoiceA < rootChoiceB);
+          let radialT = select(0.0, clamp(rootNumer / rootDenom, 0.0, 1.0), lastRadialEdgeID != 0.0 && abs(rootDenom) > 1e-5);
+          let finalT = max(parametricT, radialT);
+          let pointAtT = eval_patch(curveType, weight, curveP0, curveP1, curveP2, curveP3, finalT);
+          var tangentAtT = radialTangent;
+          if (finalT != radialT) {
+            tangentAtT = eval_patch_tangent(curveType, weight, curveP0, curveP1, curveP2, curveP3, finalT);
+          }
+          strokeCoord = pointAtT;
+          curveTangent = tangentAtT;
+        } else {
+          let safeCombinedSegments = max(numCombinedSegments, 1.0);
+          let curveT = clamp(combinedEdgeID / safeCombinedSegments, 0.0, 1.0);
+          strokeCoord = eval_patch(curveType, weight, curveP0, curveP1, curveP2, curveP3, curveT);
+          curveTangent = eval_patch_tangent(curveType, weight, curveP0, curveP1, curveP2, curveP3, curveT);
+        }
+      } else {
+        curveTangent = select(joinTan0, joinTan1, isFinalEdge);
+        strokeCoord = select(curveP0, curveP3, isFinalEdge);
+      }
+      let ortho = vec2<f32>(curveTangent.y, -curveTangent.x);
+      local = strokeCoord + (ortho * stroke.x * strokeOutset);
     }
   }
   let devicePosition = local_to_device(local);
@@ -1183,6 +1284,7 @@ export const createDawnResourceProvider = (
       descriptor.shader,
       descriptor.vertexLayout,
       descriptor.depthStencil,
+      descriptor.topology,
       descriptor.colorWriteDisabled ? '1' : '0',
       backend.target.format,
       sampleCount,
@@ -1208,7 +1310,7 @@ export const createDawnResourceProvider = (
       }],
     },
     primitive: {
-      topology: 'triangle-list',
+      topology: descriptor.topology,
       cullMode: 'none',
       frontFace: descriptor.colorWriteDisabled ? 'ccw' : undefined,
     },

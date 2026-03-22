@@ -80,7 +80,7 @@ const maxPatchResolveLevel = 6;
 const patchSegmentCount = 1 << maxPatchResolveLevel;
 const wedgePatchVertexCount = patchSegmentCount * 3;
 const curvePatchVertexCount = patchSegmentCount * 3;
-const strokePatchVertexCount = patchSegmentCount * 6;
+const strokePatchVertexCount = patchSegmentCount * 2;
 
 const createVertexModulationData = (
   triangles: readonly (readonly [number, number])[],
@@ -471,6 +471,7 @@ const prepareStepResources = (
           ? 'clip-cover'
           : 'none',
         colorWriteDisabled: false,
+        topology: 'triangle-list',
       })
       : null;
 
@@ -532,6 +533,7 @@ const prepareStepResources = (
         vertexLayout: 'device-vertex',
         depthStencil: getStencilClipCount(step) > 0 ? 'clip-cover' : 'none',
         colorWriteDisabled: false,
+        topology: 'triangle-list',
       })
       : null,
     stepPayloadBuffer,

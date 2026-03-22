@@ -734,12 +734,12 @@ fn vs_main(
         strokeOutset = select(max(strokeOutset, 0.0), min(strokeOutset, 0.0), turn < 0.0);
       }
     } else {
-      let maxCombinedSegments = max(maxEdges - numEdgesInJoin - 1.0, 1.0);
+      let maxCombinedSegments = maxEdges - numEdgesInJoin - 1.0;
       numRadialSegments = max(ceil(abs(rotation) * num_radial_segments_per_radian(stroke.x)), 1.0);
       numRadialSegments = min(numRadialSegments, maxCombinedSegments);
       numParametricSegments = min(numParametricSegments, maxCombinedSegments - numRadialSegments + 1.0);
     }
-    let radsPerSegment = rotation / max(numRadialSegments, 1.0);
+    let radsPerSegment = rotation / numRadialSegments;
     let numCombinedSegments = numParametricSegments + numRadialSegments - 1.0;
     let isFinalEdge = combinedEdgeID >= numCombinedSegments;
     if (combinedEdgeID > numCombinedSegments) {

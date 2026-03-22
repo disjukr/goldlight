@@ -10,6 +10,8 @@ import {
   withPath2DFillRule,
 } from '@rieul3d/geometry';
 import {
+  appendDrawingClipStackElement,
+  createDrawingClipStackSnapshot,
   clipDrawingRecorderPath,
   clipDrawingRecorderRect,
   concatDrawingRecorderTransform,
@@ -36,6 +38,9 @@ import {
   submitToDawnQueueManager,
   tickDawnQueueManager,
   translateDrawingRecorder,
+  popDrawingClipStackSave,
+  pushDrawingClipStackSave,
+  visitDrawingClipStackForDraw,
 } from '@rieul3d/drawing';
 
 const createMockGpuContext = () => {
@@ -309,16 +314,98 @@ Deno.test('drawing recorder records transform and clip state into draw commands'
   }
   assertEquals(first.transform, [2, 0, 0, 3, 10, 12]);
   assertEquals(first.clipStack.elements.length, 1);
-  assertEquals(first.clipStack.elements[0]?.kind, 'rect');
-  if (first.clipStack.elements[0]?.kind !== 'rect') {
+  assertEquals(first.clipStack.elements[0]?.clip.kind, 'rect');
+  if (first.clipStack.elements[0]?.clip.kind !== 'rect') {
     throw new Error('expected rect clip');
   }
   assertEquals(first.clipStack.saveRecords.length, 2);
-  assertEquals(first.clipStack.elements[0].op, 'intersect');
-  assertEquals(first.clipStack.elements[0].rect, createRect(20, 30, 40, 50));
+  assertEquals(first.clipStack.elements[0].clip.op, 'intersect');
+  assertEquals(first.clipStack.elements[0].clip.rect, createRect(20, 30, 40, 50));
   assertEquals(second.transform, identityMatrix2D);
   assertEquals(second.clipStack.elements.length, 0);
   assertEquals(first.path.verbs[0], { kind: 'moveTo', to: [1, 1] });
+});
+
+Deno.test('clip stack defers save-record materialization until a clip mutates it', () => {
+  const saved = pushDrawingClipStackSave(createDrawingClipStackSnapshot());
+
+  assertEquals(saved.saveRecords.length, 1);
+  assertEquals(saved.saveRecords[0]?.deferredSaveCount, 1);
+
+  const materialized = appendDrawingClipStackElement(saved, {
+    kind: 'rect',
+    op: 'intersect',
+    rect: createRect(8, 12, 24, 28),
+    transform: identityMatrix2D,
+  });
+
+  assertEquals(materialized.saveRecords.length, 2);
+  assertEquals(materialized.saveRecords[0]?.deferredSaveCount, 0);
+  assertEquals(materialized.saveRecords[1]?.startingElementIndex, 0);
+  assertEquals(materialized.saveRecords[1]?.state, 'deviceRect');
+
+  const restored = popDrawingClipStackSave(materialized);
+  assertEquals(restored.saveRecords.length, 1);
+  assertEquals(restored.elements.length, 0);
+});
+
+Deno.test('clip stack invalidates superseded rect intersects within the active save record', () => {
+  let clipStack = createDrawingClipStackSnapshot();
+  clipStack = appendDrawingClipStackElement(clipStack, {
+    kind: 'rect',
+    op: 'intersect',
+    rect: createRect(0, 0, 96, 96),
+    transform: identityMatrix2D,
+  });
+  clipStack = appendDrawingClipStackElement(clipStack, {
+    kind: 'rect',
+    op: 'intersect',
+    rect: createRect(16, 20, 32, 28),
+    transform: identityMatrix2D,
+  });
+
+  assertEquals(clipStack.elements.length, 2);
+  assertEquals(clipStack.elements[0]?.invalidatedByIndex, 0);
+  assertEquals(clipStack.saveRecords[0]?.oldestValidIndex, 1);
+  assertEquals(clipStack.saveRecords[0]?.bounds, createRect(16, 20, 32, 28));
+
+  const visited = visitDrawingClipStackForDraw(
+    clipStack,
+    () => null,
+    (bounds, candidate) => {
+      if (!candidate) {
+        return bounds;
+      }
+      if (!bounds) {
+        return candidate;
+      }
+      const x0 = Math.max(bounds.origin[0], candidate.origin[0]);
+      const y0 = Math.max(bounds.origin[1], candidate.origin[1]);
+      const x1 = Math.min(bounds.origin[0] + bounds.size.width, candidate.origin[0] + candidate.size.width);
+      const y1 = Math.min(bounds.origin[1] + bounds.size.height, candidate.origin[1] + candidate.size.height);
+      return createRect(x0, y0, Math.max(0, x1 - x0), Math.max(0, y1 - y0));
+    },
+    (points) => {
+      let minX = Number.POSITIVE_INFINITY;
+      let minY = Number.POSITIVE_INFINITY;
+      let maxX = Number.NEGATIVE_INFINITY;
+      let maxY = Number.NEGATIVE_INFINITY;
+      for (const point of points) {
+        minX = Math.min(minX, point[0]);
+        minY = Math.min(minY, point[1]);
+        maxX = Math.max(maxX, point[0]);
+        maxY = Math.max(maxY, point[1]);
+      }
+      return createRect(minX, minY, Math.max(0, maxX - minX), Math.max(0, maxY - minY));
+    },
+  );
+
+  assertEquals(visited.effectiveElements.length, 1);
+  assertEquals(visited.effectiveElements[0]?.clip.kind, 'rect');
+  if (visited.effectiveElements[0]?.clip.kind !== 'rect') {
+    throw new Error('expected rect clip');
+  }
+  assertEquals(visited.effectiveElements[0].clip.rect, createRect(16, 20, 32, 28));
 });
 
 Deno.test('drawing recorder supports explicit transform concatenation', () => {

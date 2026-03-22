@@ -1,9 +1,8 @@
 import {
-  classifyDrawingClipState,
+  appendDrawingClipStackElement,
   cloneDrawingClipStackSnapshot,
-  createDrawingClipSaveRecord,
   createDrawingClipStackSnapshot,
-  getCurrentDrawingClipSaveRecord,
+  pushDrawingClipStackSave,
 } from './clip_stack.ts';
 import {
   createScaleMatrix2D,
@@ -116,13 +115,7 @@ export const saveDrawingRecorder = (recorder: DrawingRecorder): void => {
   mutable.stateStack.push(cloneState(recorder.state));
   mutable.state = {
     ...mutable.state,
-    clipStack: createDrawingClipStackSnapshot(
-      mutable.state.clipStack.elements,
-      [
-        ...mutable.state.clipStack.saveRecords,
-        createDrawingClipSaveRecord(mutable.state.clipStack),
-      ],
-    ),
+    clipStack: pushDrawingClipStackSave(mutable.state.clipStack),
   };
 };
 
@@ -130,24 +123,6 @@ export const restoreDrawingRecorder = (recorder: DrawingRecorder): void => {
   const mutable = recorder as MutableDrawingRecorder;
   const restored = mutable.stateStack.pop();
   mutable.state = restored ?? { transform: identityMatrix2D, clipStack: createDrawingClipStackSnapshot() };
-};
-
-const appendClip = (
-  clipStack: DrawingClipStackSnapshot,
-  clip: DrawingClipStackSnapshot['elements'][number],
-): DrawingClipStackSnapshot => {
-  const elements = [...clipStack.elements, clip];
-  const saveRecords = [...clipStack.saveRecords];
-  const current = getCurrentDrawingClipSaveRecord(clipStack);
-  saveRecords[saveRecords.length - 1] = {
-    ...current,
-    elementCount: elements.length,
-    state: classifyDrawingClipState(elements),
-    bounds: clip.kind === 'rect' && clip.op === 'intersect'
-      ? clip.rect
-      : current.bounds,
-  };
-  return createDrawingClipStackSnapshot(elements, saveRecords);
 };
 
 export const concatDrawingRecorderTransform = (
@@ -183,7 +158,7 @@ export const clipDrawingRecorderRect = (
 ): void => {
   (recorder as MutableDrawingRecorder).state = {
     ...recorder.state,
-    clipStack: appendClip(recorder.state.clipStack, {
+    clipStack: appendDrawingClipStackElement(recorder.state.clipStack, {
       kind: 'rect',
       op,
       rect: clipRect,
@@ -199,7 +174,7 @@ export const clipDrawingRecorderPath = (
 ): void => {
   (recorder as MutableDrawingRecorder).state = {
     ...recorder.state,
-    clipStack: appendClip(recorder.state.clipStack, {
+    clipStack: appendDrawingClipStackElement(recorder.state.clipStack, {
       kind: 'path',
       op,
       path: clipPath as DrawingPath2D,

@@ -25,13 +25,22 @@ export type DrawingClip = Readonly<
 export type DrawingClipStackState = 'empty' | 'wideOpen' | 'deviceRect' | 'complex';
 
 export type DrawingClipStackSaveRecord = Readonly<{
+  startingElementIndex: number;
+  oldestValidIndex: number;
   elementCount: number;
+  deferredSaveCount: number;
   state: DrawingClipStackState;
   bounds?: DrawingClipRect;
 }>;
 
+export type DrawingClipStackElement = Readonly<{
+  clip: DrawingClip;
+  saveRecordIndex: number;
+  invalidatedByIndex?: number;
+}>;
+
 export type DrawingClipStackSnapshot = Readonly<{
-  elements: readonly DrawingClip[];
+  elements: readonly DrawingClipStackElement[];
   saveRecords: readonly DrawingClipStackSaveRecord[];
 }>;
 

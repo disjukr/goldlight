@@ -640,10 +640,12 @@ When work is added in this package, update this document with:
   - Why high priority: clip behavior is still one of the largest remaining correctness and
     architecture deltas
   - Current progress: `src/clip_stack.ts` now owns clip-stack visitation, draw commands carry clip
-    stack snapshots with save records, and the Dawn path replays stencil clips with separate
-    `write`, `intersect`, and `difference` stencil states
-  - To match Skia better: continue from this state toward element invalidation/simplification,
-    deferred clip draws, and atlas/analytic clip handling
+    stack snapshots with save records, save records now track `oldestValidIndex` and
+    `deferredSaveCount`, rect-intersect simplification invalidates superseded elements, and the
+    Dawn path replays stencil clips with separate `write`, `intersect`, and `difference` stencil
+    states
+  - To match Skia better: continue from this state toward deferred clip draws, clip shaders,
+    atlas/analytic clip handling, and richer save-record simplification across non-rect elements
 - `P1` Introduce a closer `Recorder -> Recording -> prepareResources -> CommandBuffer` flow
   - Why high priority: recording/task preparation boundaries are still much simpler than Skia's
     pipeline
@@ -677,6 +679,17 @@ When work is added in this package, update this document with:
   - To match Skia better: add completion callbacks/fences comparable to Graphite queue tracking
 
 ## Recent Updates
+
+- 2026-03-22
+  - Files changed: `src/clip_stack.ts`, `src/recorder.ts`, `src/types.ts`,
+    `tests/drawing_graphite_dawn_test.ts`
+  - Status transition: clip-stack structure `partial` -> `partial` with save-record-owned
+    `deferredSaveCount`, `oldestValidIndex`, element invalidation/restore, and direct tests for
+    deferred save materialization and rect-intersect simplification
+  - Remaining gaps: clip shaders, deferred clip draws, atlas/analytic clip handling, and broader
+    non-rect simplification still do not match Skia Graphite
+  - Validation: `deno check packages/drawing/mod.ts`;
+    `deno test packages/drawing/tests/drawing_graphite_dawn_test.ts`
 
 - 2026-03-22
   - Files changed: `src/draw_pass.ts`, `src/resource_provider.ts`, `src/command_buffer.ts`,

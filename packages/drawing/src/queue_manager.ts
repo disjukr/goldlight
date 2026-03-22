@@ -15,6 +15,7 @@ export type DawnOutstandingSubmission = Readonly<{
   state: DawnSubmissionState;
   completionPromise: Promise<void> | null;
   error: string | null;
+  resourcesReleased: boolean;
 }>;
 
 export type DawnQueueManager = Readonly<{
@@ -34,6 +35,7 @@ type MutableDawnOutstandingSubmission = {
   state: DawnSubmissionState;
   completionPromise: Promise<void> | null;
   error: string | null;
+  resourcesReleased: boolean;
 };
 
 type MutableDawnQueueManager = {
@@ -84,11 +86,25 @@ const createOutstandingSubmission = (
   state: 'pending',
   completionPromise: null,
   error: null,
+  resourcesReleased: false,
 });
 
 const isSubmissionFinished = (
   submission: DawnOutstandingSubmission,
 ): boolean => submission.state !== 'pending';
+
+const releaseSubmissionResources = (
+  submission: DawnOutstandingSubmission,
+): void => {
+  const mutable = asMutableSubmission(submission);
+  if (mutable.resourcesReleased) {
+    return;
+  }
+  mutable.resourcesReleased = true;
+  for (const buffer of submission.commandBuffer.ownedBuffers) {
+    buffer.destroy?.();
+  }
+};
 
 const markSubmissionFinished = (
   queueManager: DawnQueueManager,
@@ -96,6 +112,7 @@ const markSubmissionFinished = (
 ): void => {
   const mutable = asMutableSubmission(submission);
   mutable.state = submission.error === null ? 'finished' : 'failed';
+  releaseSubmissionResources(submission);
   completeSubmittedWork(queueManager, submission.serial, submission.recorderId);
 };
 
@@ -178,6 +195,7 @@ export const submitToDawnQueueManager = (
     mutableSubmission.error = message;
     mutableSubmission.state = 'failed';
     mutable.lastError = message;
+    releaseSubmissionResources(submission);
     return submission;
   }
 

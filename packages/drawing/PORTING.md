@@ -546,10 +546,11 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
     translucent round cap/join coverage still needs Graphite-like analytic evaluation instead of
     flat color fill
 - `QueueManager` submission model is still simplified
-  - Local state: queue submission, ordered outstanding submission ownership, completion draining,
-    and a `checkForFinishedWork`-style sync path now exist in `src/queue_manager.ts`
-  - Remaining delta: no Graphite-style finish-proc ownership, command-buffer reuse, async resource
-    ownership, `WaitAny`-style batching, or resource/fence correlation
+  - Local state: queue submission, ordered outstanding submission ownership, completion draining, a
+    `checkForFinishedWork`-style sync path, and submission-owned transient buffer cleanup now exist
+    in `src/queue_manager.ts`, `src/command_buffer.ts`, and `src/prepare_resources.ts`
+  - Remaining delta: no Graphite-style finish-proc ownership, command-buffer reuse, `WaitAny`-style
+    batching, or resource/fence correlation
 - `Caps` still trails DawnCaps depth
   - Local state: `src/caps.ts` now owns a richer format table, color-type metadata,
     resolve/transient/MSRTSS policy, resource-binding requirements, and provider-facing usage checks
@@ -607,7 +608,16 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
     `GpuWorkSubmission` ownership model with explicit submission state and `checkForFinishedWork`
     semantics
   - Remaining delta: completion is still promise/tick based in WebGPU terms, without Graphite's
-    `WaitAny` path, finish-proc/resource ownership, fence correlation, or command-buffer recycling
+    `WaitAny` path, finish-proc ownership, fence correlation, or command-buffer recycling
+  - Validation: `deno test tests/drawing_graphite_dawn_test.ts`
+- 2026-03-23
+  - Files: `src/prepare_resources.ts`, `src/command_buffer.ts`, `src/queue_manager.ts`,
+    `tests/drawing_graphite_dawn_test.ts`
+  - Status transition: per-recording viewport, payload, geometry, and clip buffers are now owned by
+    the encoded Dawn submission and released when the submission finishes or submit fails, bringing
+    WebGPU transient resource lifetime closer to Graphite's submission-owned cleanup model
+  - Remaining delta: finish-proc ownership, command-buffer reuse, async mapped-resource ownership,
+    and `WaitAny`-style completion batching are still missing
   - Validation: `deno test tests/drawing_graphite_dawn_test.ts`
 - 2026-03-23
   - Files: `src/resource_provider.ts`, `tests/drawing_graphite_dawn_test.ts`

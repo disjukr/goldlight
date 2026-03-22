@@ -59,6 +59,7 @@ export type DrawingPreparedCommandResources = Readonly<{
   defaultClipTextureBindGroup: GPUBindGroup;
   fullscreenClipVertexBuffer: GPUBuffer;
   fullscreenClipVertexCount: number;
+  ownedBuffers: readonly GPUBuffer[];
   tasks: readonly DrawingPreparedRenderPassTaskResources[];
 }>;
 
@@ -734,6 +735,44 @@ const preparePassResources = (
   };
 };
 
+const collectOwnedBuffers = (
+  tasks: readonly DrawingPreparedRenderPassTaskResources[],
+  globals: Readonly<{
+    viewportTransformBuffer: GPUBuffer;
+    identityStepPayloadBuffer: GPUBuffer;
+    fullscreenClipVertexBuffer: GPUBuffer;
+  }>,
+): readonly GPUBuffer[] => {
+  const buffers: GPUBuffer[] = [
+    globals.viewportTransformBuffer,
+    globals.identityStepPayloadBuffer,
+    globals.fullscreenClipVertexBuffer,
+  ];
+
+  for (const task of tasks) {
+    for (const pass of task.passes) {
+      for (const step of pass.steps) {
+        buffers.push(step.stepPayloadBuffer);
+        if (step.fillVertexBuffer) {
+          buffers.push(step.fillVertexBuffer);
+        }
+        if (step.patchVertexBuffer) {
+          buffers.push(step.patchVertexBuffer);
+        }
+        if (step.fringeVertexBuffer) {
+          buffers.push(step.fringeVertexBuffer);
+        }
+        if (step.boundsCoverVertexBuffer) {
+          buffers.push(step.boundsCoverVertexBuffer);
+        }
+        buffers.push(...step.clipVertexBuffers);
+      }
+    }
+  }
+
+  return Object.freeze(buffers);
+};
+
 export const prepareDawnResources = (
   sharedContext: DawnSharedContext,
   tasks: DrawingTaskList,
@@ -764,6 +803,14 @@ export const prepareDawnResources = (
   const defaultClipTextureBindGroup = sharedContext.resourceProvider.createClipTextureBindGroup();
   const fullscreenClipVertices = createFullscreenClipVertexData(sharedContext.backend.target);
   const fullscreenClipVertexBuffer = createVertexBuffer(sharedContext, fullscreenClipVertices);
+  const taskResources = Object.freeze(
+    tasks.tasks.map((task): DrawingPreparedRenderPassTaskResources => ({
+      kind: 'renderPass',
+      passes: Object.freeze(
+        task.drawPasses.map((passInfo) => preparePassResources(sharedContext, passInfo)),
+      ),
+    })),
+  );
 
   return {
     viewportTransformBuffer,
@@ -773,12 +820,12 @@ export const prepareDawnResources = (
     defaultClipTextureBindGroup,
     fullscreenClipVertexBuffer,
     fullscreenClipVertexCount: fullscreenClipVertices.length / floatsPerVertex,
-    tasks: Object.freeze(tasks.tasks.map((task): DrawingPreparedRenderPassTaskResources => ({
-      kind: 'renderPass',
-      passes: Object.freeze(
-        task.drawPasses.map((passInfo) => preparePassResources(sharedContext, passInfo)),
-      ),
-    }))),
+    ownedBuffers: collectOwnedBuffers(taskResources, {
+      viewportTransformBuffer,
+      identityStepPayloadBuffer,
+      fullscreenClipVertexBuffer,
+    }),
+    tasks: taskResources,
   };
 };
 

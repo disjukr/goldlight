@@ -48,6 +48,7 @@ import {
 
 const createMockGpuContext = () => {
   const buffers: GPUBufferDescriptor[] = [];
+  const destroyedBuffers: GPUBufferDescriptor[] = [];
   const textures: GPUTextureDescriptor[] = [];
   const samplers: GPUSamplerDescriptor[] = [];
   const renderPasses: GPURenderPassDescriptor[] = [];
@@ -71,6 +72,7 @@ const createMockGpuContext = () => {
   return {
     created: {
       buffers,
+      destroyedBuffers,
       textures,
       samplers,
       renderPasses,
@@ -113,6 +115,9 @@ const createMockGpuContext = () => {
             descriptor,
             getMappedRange: () => range,
             unmap: () => undefined,
+            destroy: () => {
+              destroyedBuffers.push(descriptor);
+            },
           } as unknown as GPUBuffer;
         },
         createTexture: (descriptor: GPUTextureDescriptor) => {
@@ -1971,6 +1976,7 @@ Deno.test('dawn queue manager tracks explicit submitted-work completion', async 
   assertEquals(queueManager.completedCount, 1);
   assertEquals(queueManager.inFlightCount, 0);
   assertEquals(queueManager.outstandingSubmissions.length, 0);
+  assertEquals(mock.created.destroyedBuffers.length > 0, true);
 });
 
 Deno.test('submitDawnCommandBuffer routes submissions through queue manager tracking', () => {
@@ -2036,6 +2042,7 @@ Deno.test('dawn queue manager falls back to coarse tick completion without submi
   assertEquals(queueManager.outstandingSubmissions.length, 0);
   assertEquals(queueManager.lastCompletedRecorderId, commandBuffer.recording.recorderId);
   assertEquals(queueManager.outstandingSubmissions.length, 0);
+  assertEquals(mock.created.destroyedBuffers.length > 0, true);
 });
 
 Deno.test('dawn queue manager clears pending completion when submitted-work callback rejects', async () => {
@@ -2136,6 +2143,7 @@ Deno.test('dawn queue manager records submit failures without enqueuing work', (
   assertEquals(queueManager.inFlightCount, 0);
   assertEquals(queueManager.outstandingSubmissions.length, 0);
   assertEquals(queueManager.lastError, 'submit failed');
+  assertEquals(mock.created.destroyedBuffers.length > 0, true);
 });
 
 Deno.test('drawing context increments recorder ids through shared context', () => {

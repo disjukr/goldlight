@@ -23,6 +23,7 @@ export type DawnCommandBuffer = Readonly<{
   commandBuffer: GPUCommandBuffer;
   passCount: number;
   unsupportedCommands: readonly DrawingCommand[];
+  ownedBuffers: readonly GPUBuffer[];
 }>;
 
 const toGpuColor = (color: readonly [number, number, number, number]): GPUColor => ({
@@ -410,6 +411,7 @@ export const encodePreparedDawnCommandBuffer = (
     commandBuffer: encoder.finish(),
     passCount,
     unsupportedCommands: Object.freeze(unsupportedCommands),
+    ownedBuffers: preparedWork.resources.ownedBuffers,
   };
 };
 

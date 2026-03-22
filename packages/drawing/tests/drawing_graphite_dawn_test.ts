@@ -1268,6 +1268,65 @@ Deno.test('drawing prepared stroke patches emit synthetic join patches for bevel
   assertEquals(prepareJoinKinds('miter').includes('miter'), true);
 });
 
+Deno.test('drawing prepared stroke patches emit synthetic cap patches for degenerate contours', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+
+  const prepareCapKinds = (strokeCap: 'round' | 'square') => {
+    const recorder = drawingContext.createRecorder();
+    recordDrawPath(
+      recorder,
+      createPath2D(
+        { kind: 'moveTo', to: [96, 96] },
+        { kind: 'lineTo', to: [96, 96] },
+      ),
+      { style: 'stroke', strokeWidth: 12, strokeCap, strokeJoin: 'round' },
+    );
+    const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+    const draw = prepared.passes[0]?.steps[0]?.draw;
+    assertEquals(draw?.kind, 'pathStroke');
+    if (draw?.kind !== 'pathStroke') {
+      throw new Error('expected pathStroke draw');
+    }
+    return {
+      usesTessellatedStrokePatches: draw.usesTessellatedStrokePatches,
+      syntheticKinds: draw.patches.map((patch) => patch.syntheticKind).filter(Boolean),
+    };
+  };
+
+  const round = prepareCapKinds('round');
+  assertEquals(round.usesTessellatedStrokePatches, true);
+  assertEquals(round.syntheticKinds.includes('circle'), true);
+
+  const square = prepareCapKinds('square');
+  assertEquals(square.usesTessellatedStrokePatches, true);
+  assertEquals(square.syntheticKinds.includes('square'), true);
+});
+
+Deno.test('drawing prepared stroke patches emit cusp circles for turnaround curves', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [32, 96] },
+      { kind: 'cubicTo', control1: [96, 32], control2: [96, 160], to: [160, 96] },
+    ),
+    { style: 'stroke', strokeWidth: 10, strokeJoin: 'round', strokeCap: 'round' },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const draw = prepared.passes[0]?.steps[0]?.draw;
+  assertEquals(draw?.kind, 'pathStroke');
+  if (draw?.kind !== 'pathStroke') {
+    throw new Error('expected pathStroke draw');
+  }
+  assertEquals(draw.usesTessellatedStrokePatches, true);
+  assertEquals(draw.patches.some((patch) => patch.syntheticKind === 'circle'), true);
+});
+
 Deno.test('drawing prepared recording applies dash pattern to strokes', () => {
   const mock = createMockGpuContext();
   const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));

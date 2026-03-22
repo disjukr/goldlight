@@ -197,9 +197,8 @@ stack that fits this repository's TypeScript and WebGPU architecture.
     from Wang-like formulas, and fill patches preserve contour fan points instead of degrading
     curved wedges into line-only triangles
   - Update 2026-03-23: synthetic round stroke helper patches now preserve Skia
-    `PatchWriter::writeCircle()` semantics instead of reusing the metadata shape of true
-    zero-length round-cap contours, so only genuine degenerate stroked subpaths carry round-cap
-    contour markers
+    `PatchWriter::writeCircle()` semantics instead of reusing the metadata shape of true zero-length
+    round-cap contours, so only genuine degenerate stroked subpaths carry round-cap contour markers
   - Update 2026-03-23: stroke patch preparation now finishes open/closed contours through a
     `StrokeIterator`-like sequence with deferred first-patch replay and explicit `moveWithinContour`
     barriers instead of the previous ad hoc contour flush

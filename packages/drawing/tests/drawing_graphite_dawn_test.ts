@@ -1586,12 +1586,17 @@ Deno.test('drawing prepared stroke patches emit synthetic cap patches for degene
     return {
       usesTessellatedStrokePatches: draw.usesTessellatedStrokePatches,
       patchCount: draw.patches.length,
+      firstPatch: draw.patches[0],
     };
   };
 
   const round = prepareCapKinds('round');
   assertEquals(round.usesTessellatedStrokePatches, true);
   assertEquals(round.patchCount > 0, true);
+  assertEquals(round.firstPatch?.startCap, 'round');
+  assertEquals(round.firstPatch?.endCap, 'round');
+  assertEquals(round.firstPatch?.contourStart, true);
+  assertEquals(round.firstPatch?.contourEnd, true);
 
   const square = prepareCapKinds('square');
   assertEquals(square.usesTessellatedStrokePatches, true);

@@ -1084,7 +1084,7 @@ const createPreparedStrokePatchesFromPath = (
           currentPoint = to;
           break;
         }
-        const cuspT = findConicCuspT(currentPoint, control, to, verb.weight);
+        const cuspT = findConicCuspT(from, control, to, verb.weight);
         if (cuspT !== null) {
           const cusp = evaluateConic(from, control, to, verb.weight, cuspT);
           appendPreparedSequencePatch(createDegenerateRoundStrokePatch(cusp));
@@ -1176,10 +1176,6 @@ const createPreparedStrokePatchesFromPath = (
         }
         if (!pointsEqual(currentPoint, contourStart)) {
           emitPatchDefinition({ kind: 'line', points: [currentPoint, contourStart] });
-        } else if (!deferredFirstPatch && !lastDegeneratePoint) {
-          // Match Skia StrokeIterator: a bare move/close contour is a zero-length contour at the
-          // move point, so round/square caps still emit geometry instead of disappearing.
-          lastDegeneratePoint = contourStart;
         }
         currentPoint = contourStart;
         pendingContourStart = contourStart;
@@ -2130,7 +2126,7 @@ const preparePatches = (
         const from = currentPoint!;
         const control = transformPoint2D(verb.control, transform);
         const to = transformPoint2D(verb.to, transform);
-        const cuspT = findConicCuspT(currentPoint, control, to, verb.weight);
+        const cuspT = findConicCuspT(from, control, to, verb.weight);
         if (cuspT !== null) {
           const cusp = evaluateConic(from, control, to, verb.weight, cuspT);
           pushPatch({ kind: 'line', points: [from, cusp] });

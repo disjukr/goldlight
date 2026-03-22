@@ -28,6 +28,11 @@ export type DrawingSamplerDescriptor = Readonly<{
   addressModeW?: GPUAddressMode;
 }>;
 
+export type DrawingGraphicsPipelineHandle = Readonly<{
+  key: string;
+  descriptor: DrawingGraphicsPipelineDesc;
+}>;
+
 export type DawnResourceProvider = Readonly<{
   backend: DawnBackendContext;
   resourceBudget: number;
@@ -36,6 +41,8 @@ export type DawnResourceProvider = Readonly<{
   createSampler: (descriptor?: DrawingSamplerDescriptor) => GPUSampler;
   createViewportBindGroup: (buffer: GPUBuffer) => GPUBindGroup;
   createStepBindGroup: (buffer: GPUBuffer) => GPUBindGroup;
+  createGraphicsPipelineHandle: (descriptor: DrawingGraphicsPipelineDesc) => DrawingGraphicsPipelineHandle;
+  resolveGraphicsPipelineHandle: (handle: DrawingGraphicsPipelineHandle) => GPURenderPipeline;
   findOrCreateGraphicsPipeline: (descriptor: DrawingGraphicsPipelineDesc) => GPURenderPipeline;
   getStencilAttachmentView: () => GPUTextureView;
 }>;
@@ -757,6 +764,22 @@ export const createDawnResourceProvider = (
           },
         }],
       }),
+    createGraphicsPipelineHandle: (descriptor) => ({
+      key: createGraphicsPipelineCacheKey(descriptor),
+      descriptor,
+    }),
+    resolveGraphicsPipelineHandle: (handle) => {
+      const existing = graphicsPipelineCache.get(handle.key);
+      if (existing) {
+        return existing;
+      }
+
+      const pipeline = backend.device.createRenderPipeline(
+        createGraphicsPipelineDescriptor(handle.descriptor),
+      );
+      graphicsPipelineCache.set(handle.key, pipeline);
+      return pipeline;
+    },
     createSampler: (descriptor = {}) => {
       const normalized = canonicalizeSamplerDescriptor(descriptor);
       const key = createSamplerCacheKey(normalized);
@@ -773,17 +796,7 @@ export const createDawnResourceProvider = (
       return sampler;
     },
     findOrCreateGraphicsPipeline: (descriptor) => {
-      const key = createGraphicsPipelineCacheKey(descriptor);
-      const existing = graphicsPipelineCache.get(key);
-      if (existing) {
-        return existing;
-      }
-
-      const pipeline = backend.device.createRenderPipeline(
-        createGraphicsPipelineDescriptor(descriptor),
-      );
-      graphicsPipelineCache.set(key, pipeline);
-      return pipeline;
+      return provider.resolveGraphicsPipelineHandle(provider.createGraphicsPipelineHandle(descriptor));
     },
     getStencilAttachmentView: () => {
       const sampleCount = backend.target.kind === 'offscreen' ? backend.target.sampleCount : 1;

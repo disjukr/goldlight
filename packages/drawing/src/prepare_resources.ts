@@ -3,10 +3,13 @@ import type { Point2D } from '@rieul3d/geometry';
 import { type DrawingPreparedRecording, prepareDrawingRecording } from './draw_pass.ts';
 import type { DrawingRecording } from './recording.ts';
 import type { DrawingPreparedPatch, DrawingPreparedVertex } from './path_renderer.ts';
+import type { DrawingGraphicsPipelineHandle } from './resource_provider.ts';
 import type { DawnSharedContext } from './shared_context.ts';
 import { createDrawingTaskList, type DrawingTaskList } from './task.ts';
 
 export type DrawingPreparedStepResources = Readonly<{
+  pipelineHandles: readonly DrawingGraphicsPipelineHandle[];
+  clipPipelineHandles: readonly DrawingGraphicsPipelineHandle[];
   pipelines: readonly GPURenderPipeline[];
   clipPipelines: readonly GPURenderPipeline[];
   fringePipeline: GPURenderPipeline | null;
@@ -27,6 +30,10 @@ export type DrawingPreparedStepResources = Readonly<{
 }>;
 
 export type DrawingPreparedPassResources = Readonly<{
+  pipelineHandles: readonly DrawingGraphicsPipelineHandle[];
+  clipPipelineHandles: readonly DrawingGraphicsPipelineHandle[];
+  resolvedPipelines: readonly GPURenderPipeline[];
+  resolvedClipPipelines: readonly GPURenderPipeline[];
   sampledTextures: readonly GPUTextureView[];
   steps: readonly DrawingPreparedStepResources[];
 }>;
@@ -342,11 +349,17 @@ const prepareStepResources = (
   sharedContext: DawnSharedContext,
   step: DrawingPreparedRecording['passes'][number]['steps'][number],
 ): DrawingPreparedStepResources => {
-  const pipelines = step.pipelineDescs.map((descriptor) =>
-    sharedContext.resourceProvider.findOrCreateGraphicsPipeline(descriptor)
+  const pipelineHandles = step.pipelineDescs.map((descriptor) =>
+    sharedContext.resourceProvider.createGraphicsPipelineHandle(descriptor)
   );
-  const clipPipelines = step.clipPipelineDescs.map((descriptor) =>
-    sharedContext.resourceProvider.findOrCreateGraphicsPipeline(descriptor)
+  const clipPipelineHandles = step.clipPipelineDescs.map((descriptor) =>
+    sharedContext.resourceProvider.createGraphicsPipelineHandle(descriptor)
+  );
+  const pipelines = pipelineHandles.map((handle) =>
+    sharedContext.resourceProvider.resolveGraphicsPipelineHandle(handle)
+  );
+  const clipPipelines = clipPipelineHandles.map((handle) =>
+    sharedContext.resourceProvider.resolveGraphicsPipelineHandle(handle)
   );
   const clipResources = createClipStepResources(sharedContext, step);
   const stepPayloadBuffer = createStepPayloadBuffer(
@@ -387,6 +400,8 @@ const prepareStepResources = (
       : null;
 
     return {
+      pipelineHandles: Object.freeze(pipelineHandles),
+      clipPipelineHandles: Object.freeze(clipPipelineHandles),
       pipelines: Object.freeze(pipelines),
       clipPipelines: Object.freeze(clipPipelines),
       fringePipeline,
@@ -423,6 +438,8 @@ const prepareStepResources = (
     : null;
 
   return {
+    pipelineHandles: Object.freeze(pipelineHandles),
+    clipPipelineHandles: Object.freeze(clipPipelineHandles),
     pipelines: Object.freeze(pipelines),
     clipPipelines: Object.freeze(clipPipelines),
     fringePipeline: step.draw.fringeVertices
@@ -450,6 +467,23 @@ const prepareStepResources = (
     clipVertexBuffers: clipResources.buffers,
     clipVertexCounts: clipResources.counts,
     clipElements: clipResources.elements,
+  };
+};
+
+const preparePassResources = (
+  sharedContext: DawnSharedContext,
+  passInfo: DrawingPreparedRecording['passes'][number],
+): DrawingPreparedPassResources => {
+  const steps = passInfo.steps.map((step) => prepareStepResources(sharedContext, step));
+  const pipelineHandles = steps.flatMap((step) => step.pipelineHandles);
+  const clipPipelineHandles = steps.flatMap((step) => step.clipPipelineHandles);
+  return {
+    pipelineHandles: Object.freeze(pipelineHandles),
+    clipPipelineHandles: Object.freeze(clipPipelineHandles),
+    resolvedPipelines: Object.freeze(steps.flatMap((step) => step.pipelines)),
+    resolvedClipPipelines: Object.freeze(steps.flatMap((step) => step.clipPipelines)),
+    sampledTextures: Object.freeze([]),
+    steps: Object.freeze(steps),
   };
 };
 
@@ -482,10 +516,7 @@ export const prepareDawnResources = (
     fullscreenClipVertexCount: fullscreenClipVertices.length / floatsPerVertex,
     tasks: Object.freeze(tasks.tasks.map((task): DrawingPreparedRenderPassTaskResources => ({
       kind: 'renderPass',
-      passes: Object.freeze(task.drawPasses.map((passInfo) => ({
-        sampledTextures: Object.freeze([]),
-        steps: Object.freeze(passInfo.steps.map((step) => prepareStepResources(sharedContext, step))),
-      }))),
+      passes: Object.freeze(task.drawPasses.map((passInfo) => preparePassResources(sharedContext, passInfo))),
     }))),
   };
 };

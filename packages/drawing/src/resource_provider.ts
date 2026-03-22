@@ -492,6 +492,60 @@ fn num_radial_segments_per_radian(approxDevStrokeRadius: f32) -> f32 {
   return 0.5 / acos(max(1.0 - (1.0 / ${tessellationPrecision}) / radius, -1.0));
 }
 
+fn robust_normalize_diff(a: vec2<f32>, b: vec2<f32>) -> vec2<f32> {
+  let delta = a - b;
+  let deltaLength = length(delta);
+  if (deltaLength <= 1e-5) {
+    return vec2<f32>(0.0, 0.0);
+  }
+  return delta / deltaLength;
+}
+
+fn patch_start_tangent(
+  p0: vec2<f32>,
+  p1: vec2<f32>,
+  p2: vec2<f32>,
+  p3: vec2<f32>,
+) -> vec2<f32> {
+  if (distance(p0, p1) > 1e-5) {
+    return robust_normalize_diff(p1, p0);
+  }
+  if (distance(p0, p2) > 1e-5) {
+    return robust_normalize_diff(p2, p0);
+  }
+  return robust_normalize_diff(p3, p0);
+}
+
+fn patch_end_tangent(
+  p0: vec2<f32>,
+  p1: vec2<f32>,
+  p2: vec2<f32>,
+  p3: vec2<f32>,
+) -> vec2<f32> {
+  if (distance(p3, p2) > 1e-5) {
+    return robust_normalize_diff(p3, p2);
+  }
+  if (distance(p3, p1) > 1e-5) {
+    return robust_normalize_diff(p3, p1);
+  }
+  return robust_normalize_diff(p3, p0);
+}
+
+fn strip_vertex_position(
+  a: vec2<f32>,
+  b: vec2<f32>,
+  strokeRadius: f32,
+  quadVertex: u32,
+) -> vec2<f32> {
+  let delta = b - a;
+  let deltaLength = max(length(delta), 1e-5);
+  let normal = vec2<f32>(-delta.y / deltaLength, delta.x / deltaLength) * strokeRadius;
+  let edgeIndex = array<u32, 6>(0u, 1u, 2u, 0u, 2u, 3u)[quadVertex];
+  let edgePoint = select(a, b, edgeIndex == 1u || edgeIndex == 2u);
+  let edgeOutset = select(-1.0, 1.0, edgeIndex == 0u || edgeIndex == 1u);
+  return edgePoint + (normal * edgeOutset);
+}
+
 @vertex
 fn vs_main(
   @builtin(vertex_index) vertexIndex: u32,
@@ -499,7 +553,7 @@ fn vs_main(
   @location(1) p1: vec2<f32>,
   @location(2) p2: vec2<f32>,
   @location(3) p3: vec2<f32>,
-  @location(4) prevPoint: vec2<f32>,
+  @location(4) joinControlPoint: vec2<f32>,
   @location(5) stroke: vec2<f32>,
   @location(6) curveMeta: vec4<f32>,
 ) -> VertexOut {
@@ -513,6 +567,10 @@ fn vs_main(
   let squarePatch = (flags & 128u) != 0u;
   let bevelPatch = (flags & 256u) != 0u;
   let miterPatch = (flags & 512u) != 0u;
+  let joinType = stroke.y;
+  let prevTan = robust_normalize_diff(p0, joinControlPoint);
+  let tan0 = patch_start_tangent(p0, p1, p2, p3);
+  let tan1 = patch_end_tangent(p0, p1, p2, p3);
   if (circlePatch) {
     activeSegments = max(8u, u32(ceil(6.28318530718 * num_radial_segments_per_radian(stroke.x))));
   }
@@ -533,12 +591,12 @@ fn vs_main(
       local = fanVertices[fanIndices[quadVertex]];
     } else if (squarePatch) {
       let center = p0;
-      var delta = center - prevPoint;
-      let isolatedSquare = length(delta) <= 1e-5;
-      if (isolatedSquare) {
-        delta = vec2<f32>(1.0, 0.0);
-      }
-      let tangent = normalize(delta);
+      let isolatedSquare = distance(center, joinControlPoint) <= 1e-5;
+      let tangent = select(
+        robust_normalize_diff(center, joinControlPoint),
+        vec2<f32>(1.0, 0.0),
+        isolatedSquare,
+      );
       let normal = vec2<f32>(-tangent.y, tangent.x) * stroke.x;
       let extension = tangent * stroke.x;
       var corners = array<vec2<f32>, 4>(
@@ -562,11 +620,9 @@ fn vs_main(
       let indices = array<u32, 6>(0u, 1u, 2u, 0u, 2u, 3u);
       local = triangle[indices[quadVertex]];
     } else if (miterPatch) {
-      let startDir = normalize(p1 - p0);
-      let endDir = normalize(p2 - p0);
-      let cosTheta = cosine_between_unit_vectors(startDir, endDir);
-      let miterScale = miter_extent(cosTheta, max(stroke.y, 1.0));
-      let bisectorDelta = startDir + endDir;
+      let cosTheta = cosine_between_unit_vectors(prevTan, tan0);
+      let miterScale = miter_extent(cosTheta, max(joinType, 1.0));
+      let bisectorDelta = prevTan + tan0;
       let hasBisector = length(bisectorDelta) > 1e-5;
       let bisector = select(vec2<f32>(0.0, 0.0), normalize(bisectorDelta), hasBisector);
       let miterPoint = select(p2, p0 + (bisector * stroke.x * miterScale), hasBisector);
@@ -576,22 +632,18 @@ fn vs_main(
     } else {
       var delta = b - a;
       if (length(delta) <= 1e-5) {
-        delta = a - prevPoint;
+        delta = a - joinControlPoint;
       }
-      let deltaLength = max(length(delta), 1e-5);
-      let tangent = delta / deltaLength;
       let squareStart = (flags & 4u) != 0u;
       let squareEnd = (flags & 8u) != 0u;
+      let tangent = robust_normalize_diff(b, a);
       if (segmentIndex == 0u && squareStart) {
         a -= tangent * stroke.x;
       }
       if (segmentIndex + 1u == activeSegments && squareEnd) {
         b += tangent * stroke.x;
       }
-      let normal = vec2<f32>(-delta.y / deltaLength, delta.x / deltaLength) * stroke.x;
-      let corners = array<vec2<f32>, 4>(a + normal, b + normal, b - normal, a - normal);
-      let indices = array<u32, 6>(0u, 1u, 2u, 0u, 2u, 3u);
-      local = corners[indices[quadVertex]];
+      local = strip_vertex_position(a, b, stroke.x, quadVertex);
     }
   }
   let devicePosition = local_to_device(local);

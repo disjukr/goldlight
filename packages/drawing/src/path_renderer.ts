@@ -89,12 +89,45 @@ type DrawingPatchDefinition =
 type DrawingStrokePatchContour = Readonly<{
   patches: readonly DrawingPreparedPatch[];
   closed: boolean;
+  record: DrawingStrokeContourRecord;
+}>;
+
+type DrawingStrokeContourEvent = Readonly<{
+  patch: DrawingPreparedPatch;
+  contourStart: boolean;
+  contourEnd: boolean;
+  startCap: 'none' | 'butt' | 'square' | 'round';
+  endCap: 'none' | 'butt' | 'square' | 'round';
+}>;
+
+type DrawingStrokeIteratorContourState = Readonly<{
+  deferredFirstPatch: DrawingStrokeContourEvent;
+  leadingPatches: readonly DrawingStrokeContourEvent[];
+  bodyPatches: readonly DrawingStrokeContourEvent[];
+  trailingPatches: readonly DrawingStrokeContourEvent[];
+  joinBarrier: 'join' | 'moveWithinContour';
 }>;
 
 type DrawingStrokeContourRecord = Readonly<{
   points: readonly Point2D[];
   closed: boolean;
+  segments: readonly DrawingStrokeSegmentRecord[];
   degeneratePoint?: Point2D;
+  firstPoint?: Point2D;
+  lastPoint?: Point2D;
+  startTangent?: Point2D;
+  endTangent?: Point2D;
+}>;
+
+type DrawingStrokeSegmentRecord = Readonly<{
+  start: Point2D;
+  end: Point2D;
+  direction: Point2D;
+  normal: Point2D;
+  leftStart: Point2D;
+  rightStart: Point2D;
+  leftEnd: Point2D;
+  rightEnd: Point2D;
 }>;
 
 export type DrawingPreparedPathFill = Readonly<{
@@ -487,6 +520,15 @@ const createDegenerateRoundStrokePatch = (
   endCap: 'round',
 });
 
+const createStrokeLinePatch = (
+  from: Point2D,
+  to: Point2D,
+): DrawingPreparedPatch => ({
+  kind: 'line',
+  points: [from, to],
+  resolveLevel: 0,
+});
+
 const createPreparedStrokePatches = (
   contours: readonly DrawingStrokeContourRecord[],
   patches: readonly DrawingPreparedPatch[],
@@ -553,6 +595,7 @@ const groupStrokePatchContours = (
       grouped.push({
         patches: Object.freeze(contourPatches),
         closed: contour.closed,
+        record: contour,
       });
     }
   }
@@ -571,38 +614,113 @@ const createPreparedStrokeContourPatches = (
   const firstPatch = contour.patches[0]!;
   const deferredJoinControlPoint = getPatchFirstControlPoint(firstPatch);
   const lastPatch = contour.patches[contour.patches.length - 1]!;
+  const halfWidth = strokeStyle.halfWidth;
+  const firstStart = contour.record.firstPoint ?? getPatchStartPoint(firstPatch);
+  const lastEnd = contour.record.lastPoint ?? getPatchEndPoint(lastPatch);
+  const firstTangent = contour.record.startTangent ?? getPatchIncomingTangent(firstPatch);
+  const lastTangent = contour.record.endTangent ?? getPatchOutgoingTangent(lastPatch);
+  const hasPrependedSquareCap = !contour.closed && cap === 'square' && Boolean(firstTangent);
+  const hasAppendedSquareCap = !contour.closed && cap === 'square' && Boolean(lastTangent);
+  const iteratorState: DrawingStrokeIteratorContourState = (() => {
+    const leadingPatches: DrawingStrokeContourEvent[] = [];
+    const bodyPatches: DrawingStrokeContourEvent[] = [];
+    const trailingPatches: DrawingStrokeContourEvent[] = [];
+    if (hasPrependedSquareCap && firstTangent) {
+      leadingPatches.push({
+        patch: createStrokeLinePatch(add(firstStart, scale(firstTangent, -halfWidth)), firstStart),
+        contourStart: true,
+        contourEnd: false,
+        startCap: 'none',
+        endCap: 'none',
+      });
+    }
+    const deferredFirstPatch: DrawingStrokeContourEvent = {
+      patch: firstPatch,
+      contourStart: !hasPrependedSquareCap,
+      contourEnd: !hasAppendedSquareCap && contour.patches.length === 1,
+      startCap: !contour.closed && !hasPrependedSquareCap ? cap : 'none',
+      endCap: !contour.closed && !hasAppendedSquareCap && contour.patches.length === 1 ? cap : 'none',
+    };
+    for (let index = 1; index < contour.patches.length; index += 1) {
+      bodyPatches.push({
+        patch: contour.patches[index]!,
+        contourStart: false,
+        contourEnd: !hasAppendedSquareCap && index + 1 === contour.patches.length,
+        startCap: 'none',
+        endCap: !contour.closed && !hasAppendedSquareCap && index + 1 === contour.patches.length
+          ? cap
+          : 'none',
+      });
+    }
+    if (hasAppendedSquareCap && lastTangent) {
+      trailingPatches.push({
+        patch: createStrokeLinePatch(lastEnd, add(lastEnd, scale(lastTangent, halfWidth))),
+        contourStart: false,
+        contourEnd: true,
+        startCap: 'none',
+        endCap: 'none',
+      });
+    }
+    return {
+      deferredFirstPatch,
+      leadingPatches: Object.freeze(leadingPatches),
+      bodyPatches: Object.freeze(bodyPatches),
+      trailingPatches: Object.freeze(trailingPatches),
+      joinBarrier: contour.closed ? 'join' : 'moveWithinContour',
+    };
+  })();
   let previousJoinControlPoint = deferredJoinControlPoint;
-  for (let index = 0; index < contour.patches.length; index += 1) {
-    const patch = contour.patches[index]!;
-    const next = index + 1 < contour.patches.length ? contour.patches[index + 1]! : null;
-    const contourStart = index === 0;
-    const contourEnd = index + 1 === contour.patches.length;
+  for (const event of iteratorState.leadingPatches) {
     prepared.push({
-      patch,
+      patch: event.patch,
       prevPoint: previousJoinControlPoint,
       joinControlPoint: previousJoinControlPoint,
-      contourStart,
-      contourEnd,
-      startCap: !contour.closed && contourStart ? cap : 'none',
-      endCap: !contour.closed && contourEnd ? cap : 'none',
+      contourStart: event.contourStart,
+      contourEnd: event.contourEnd,
+      startCap: event.startCap,
+      endCap: event.endCap,
     });
-    previousJoinControlPoint = next
-      ? getPatchOutgoingJoinControlPoint(patch)
-      : contour.closed
-      ? getPatchOutgoingJoinControlPoint(patch)
-      : deferredJoinControlPoint;
+    previousJoinControlPoint = getPatchOutgoingJoinControlPoint(event.patch);
   }
-  const rewrittenFirstPatch = prepared[0]!;
-  prepared[0] = {
-    ...rewrittenFirstPatch,
-    prevPoint: contour.closed
-      ? getPatchOutgoingJoinControlPoint(lastPatch)
-      : deferredJoinControlPoint,
-    joinControlPoint: contour.closed
-      ? getPatchOutgoingJoinControlPoint(lastPatch)
-      : deferredJoinControlPoint,
-    startCap: !contour.closed ? cap : 'none',
-  };
+  const deferredFirstJoinControlPoint = iteratorState.joinBarrier === 'join'
+    ? getPatchOutgoingJoinControlPoint(lastPatch)
+    : iteratorState.leadingPatches.length > 0
+    ? previousJoinControlPoint
+    : deferredJoinControlPoint;
+  prepared.push({
+    patch: iteratorState.deferredFirstPatch.patch,
+    prevPoint: deferredFirstJoinControlPoint,
+    joinControlPoint: deferredFirstJoinControlPoint,
+    contourStart: iteratorState.deferredFirstPatch.contourStart,
+    contourEnd: iteratorState.deferredFirstPatch.contourEnd,
+    startCap: iteratorState.deferredFirstPatch.startCap,
+    endCap: iteratorState.deferredFirstPatch.endCap,
+  });
+  previousJoinControlPoint = getPatchOutgoingJoinControlPoint(iteratorState.deferredFirstPatch.patch);
+  for (const event of iteratorState.bodyPatches) {
+    prepared.push({
+      patch: event.patch,
+      prevPoint: previousJoinControlPoint,
+      joinControlPoint: previousJoinControlPoint,
+      contourStart: event.contourStart,
+      contourEnd: event.contourEnd,
+      startCap: event.startCap,
+      endCap: event.endCap,
+    });
+    previousJoinControlPoint = getPatchOutgoingJoinControlPoint(event.patch);
+  }
+  for (const event of iteratorState.trailingPatches) {
+    prepared.push({
+      patch: event.patch,
+      prevPoint: previousJoinControlPoint,
+      joinControlPoint: previousJoinControlPoint,
+      contourStart: event.contourStart,
+      contourEnd: event.contourEnd,
+      startCap: event.startCap,
+      endCap: event.endCap,
+    });
+    previousJoinControlPoint = getPatchOutgoingJoinControlPoint(event.patch);
+  }
   return Object.freeze(prepared);
 };
 
@@ -1762,6 +1880,60 @@ const appendStrokeJoin = (
   appendTriangle(triangles, point, outerStart, outerEnd);
 };
 
+const buildStrokeSegmentRecords = (
+  points: readonly Point2D[],
+  closed: boolean,
+  halfWidth: number,
+): DrawingStrokeSegmentRecord[] => {
+  const segmentData: DrawingStrokeSegmentRecord[] = [];
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const start = points[index]!;
+    const end = points[index + 1]!;
+    const direction = normalize(subtract(end, start));
+    if (!direction) {
+      continue;
+    }
+    const normal = perpendicular(direction);
+    const leftStart = add(start, scale(normal, halfWidth));
+    const rightStart = add(start, scale(normal, -halfWidth));
+    const leftEnd = add(end, scale(normal, halfWidth));
+    const rightEnd = add(end, scale(normal, -halfWidth));
+    segmentData.push({
+      start,
+      end,
+      direction,
+      normal,
+      leftStart,
+      rightStart,
+      leftEnd,
+      rightEnd,
+    });
+  }
+  if (closed && points.length > 2) {
+    const start = points[points.length - 1]!;
+    const end = points[0]!;
+    const direction = normalize(subtract(end, start));
+    if (direction) {
+      const normal = perpendicular(direction);
+      const leftStart = add(start, scale(normal, halfWidth));
+      const rightStart = add(start, scale(normal, -halfWidth));
+      const leftEnd = add(end, scale(normal, halfWidth));
+      const rightEnd = add(end, scale(normal, -halfWidth));
+      segmentData.push({
+        start,
+        end,
+        direction,
+        normal,
+        leftStart,
+        rightStart,
+        leftEnd,
+        rightEnd,
+      });
+    }
+  }
+  return segmentData;
+};
+
 const prepareStrokeTriangles = (
   contours: readonly DrawingStrokeContourRecord[],
   paint: DrawingPaint,
@@ -1788,60 +1960,33 @@ const prepareStrokeTriangles = (
       }
       continue;
     }
-    const segmentData = [];
-    for (let index = 0; index < subpath.points.length - 1; index += 1) {
-      const start = subpath.points[index]!;
-      const end = subpath.points[index + 1]!;
-      const direction = normalize(subtract(end, start));
-      if (!direction) continue;
-      const normal = perpendicular(direction);
-      const leftStart = add(start, scale(normal, halfWidth));
-      const rightStart = add(start, scale(normal, -halfWidth));
-      const leftEnd = add(end, scale(normal, halfWidth));
-      const rightEnd = add(end, scale(normal, -halfWidth));
-      appendQuad(triangles, leftStart, leftEnd, rightEnd, rightStart);
-      const leftOuterStart = add(start, scale(normal, halfWidth + aaFringeWidth));
-      const leftOuterEnd = add(end, scale(normal, halfWidth + aaFringeWidth));
-      const rightOuterStart = add(start, scale(normal, -(halfWidth + aaFringeWidth)));
-      const rightOuterEnd = add(end, scale(normal, -(halfWidth + aaFringeWidth)));
+    const segmentData = subpath.segments;
+    for (const segment of segmentData) {
+      appendQuad(
+        triangles,
+        segment.leftStart,
+        segment.leftEnd,
+        segment.rightEnd,
+        segment.rightStart,
+      );
+      const leftOuterStart = add(segment.start, scale(segment.normal, halfWidth + aaFringeWidth));
+      const leftOuterEnd = add(segment.end, scale(segment.normal, halfWidth + aaFringeWidth));
+      const rightOuterStart = add(segment.start, scale(segment.normal, -(halfWidth + aaFringeWidth)));
+      const rightOuterEnd = add(segment.end, scale(segment.normal, -(halfWidth + aaFringeWidth)));
       appendColoredQuad(
         fringeVertices,
-        { point: leftStart, color },
-        { point: leftEnd, color },
+        { point: segment.leftStart, color },
+        { point: segment.leftEnd, color },
         { point: leftOuterEnd, color: transparent },
         { point: leftOuterStart, color: transparent },
       );
       appendColoredQuad(
         fringeVertices,
-        { point: rightEnd, color },
-        { point: rightStart, color },
+        { point: segment.rightEnd, color },
+        { point: segment.rightStart, color },
         { point: rightOuterStart, color: transparent },
         { point: rightOuterEnd, color: transparent },
       );
-      segmentData.push({ start, end, direction, normal, leftStart, rightStart, leftEnd, rightEnd });
-    }
-    if (subpath.closed && subpath.points.length > 2) {
-      const start = subpath.points[subpath.points.length - 1]!;
-      const end = subpath.points[0]!;
-      const direction = normalize(subtract(end, start));
-      if (direction) {
-        const normal = perpendicular(direction);
-        const leftStart = add(start, scale(normal, halfWidth));
-        const rightStart = add(start, scale(normal, -halfWidth));
-        const leftEnd = add(end, scale(normal, halfWidth));
-        const rightEnd = add(end, scale(normal, -halfWidth));
-        appendQuad(triangles, leftStart, leftEnd, rightEnd, rightStart);
-        segmentData.push({
-          start,
-          end,
-          direction,
-          normal,
-          leftStart,
-          rightStart,
-          leftEnd,
-          rightEnd,
-        });
-      }
     }
     if (segmentData.length === 0) continue;
     if (subpath.closed) {
@@ -2001,28 +2146,37 @@ const applyDashPattern = (
 const createStrokeContourRecords = (
   subpaths: readonly FlattenedSubpath[],
 ): readonly DrawingStrokeContourRecord[] =>
-  Object.freeze(subpaths.map((subpath) => ({
-    points: subpath.points,
-    closed: subpath.closed,
-    degeneratePoint: subpath.points.length === 1 ? subpath.points[0] : undefined,
-  })));
+  Object.freeze(subpaths.map((subpath) => {
+    const segments = buildStrokeSegmentRecords(subpath.points, subpath.closed, 0.5);
+    const firstPoint = subpath.points[0];
+    const lastPoint = subpath.points[subpath.points.length - 1];
+    let startTangent: Point2D | undefined;
+    let endTangent: Point2D | undefined;
+    if (segments.length > 0) {
+      startTangent = segments[0]!.direction;
+      endTangent = segments[segments.length - 1]!.direction;
+    }
+    return {
+      points: subpath.points,
+      closed: subpath.closed,
+      segments: Object.freeze(segments),
+      degeneratePoint: subpath.points.length === 1 ? subpath.points[0] : undefined,
+      firstPoint,
+      lastPoint,
+      startTangent,
+      endTangent,
+    };
+  }));
 
 const createLinePatchesFromContours = (
   contours: readonly DrawingStrokeContourRecord[],
 ): readonly DrawingPreparedPatch[] => {
   const patches: DrawingPreparedPatch[] = [];
   for (const contour of contours) {
-    for (let index = 1; index < contour.points.length; index += 1) {
+    for (const segment of contour.segments) {
       patches.push({
         kind: 'line',
-        points: [contour.points[index - 1]!, contour.points[index]!],
-        resolveLevel: 0,
-      });
-    }
-    if (contour.closed && contour.points.length > 2) {
-      patches.push({
-        kind: 'line',
-        points: [contour.points[contour.points.length - 1]!, contour.points[0]!],
+        points: [segment.start, segment.end],
         resolveLevel: 0,
       });
     }

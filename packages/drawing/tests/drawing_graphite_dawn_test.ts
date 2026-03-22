@@ -24,6 +24,7 @@ import {
   createDrawingPath2DFromShape,
   createDrawingRecorder,
   createDrawingRendererProvider,
+  checkForFinishedDawnQueueManager,
   encodeDawnCommandBuffer,
   encodePreparedDawnCommandBuffer,
   finishDrawingRecorder,
@@ -1928,6 +1929,7 @@ Deno.test('dawn queue manager tracks explicit submitted-work completion', async 
   assertEquals(queueManager.supportsSubmittedWorkDone, true);
   assertEquals(queueManager.outstandingSubmissions.length, 1);
   assertEquals(queueManager.outstandingSubmissions[0]?.serial, 1);
+  assertEquals(queueManager.outstandingSubmissions[0]?.state, 'pending');
   assertEquals(
     queueManager.outstandingSubmissions[0]?.recorderId,
     commandBuffer.recording.recorderId,
@@ -1960,6 +1962,7 @@ Deno.test('submitDawnCommandBuffer routes submissions through queue manager trac
   assertEquals(sharedContext.queueManager.submittedCount, 1);
   assertEquals(sharedContext.queueManager.inFlightCount, 1);
   assertEquals(sharedContext.queueManager.outstandingSubmissions.length, 1);
+  assertEquals(sharedContext.queueManager.outstandingSubmissions[0]?.state, 'pending');
   assertEquals(
     sharedContext.queueManager.lastSubmittedRecorderId,
     commandBuffer.recording.recorderId,
@@ -2033,8 +2036,77 @@ Deno.test('dawn queue manager clears pending completion when submitted-work call
   assertEquals(queueManager.completedCount, 1);
   assertEquals(queueManager.inFlightCount, 0);
   assertEquals(queueManager.outstandingSubmissions.length, 0);
-  assertEquals(queueManager.pendingCompletions.length, 0);
+  assertEquals(queueManager.lastError, 'device lost');
+});
+
+Deno.test('dawn queue manager can sync to the last outstanding submission like graphite', async () => {
+  const mock = createMockGpuContext();
+  const backend = createDawnBackendContext(mock.context, {
+    tick: () => {
+      mock.ticks.push(1);
+    },
+  });
+  const queueManager = createDawnQueueManager(backend);
+  const sharedContext = createDawnSharedContext(backend);
+  const binding = createOffscreenBinding(mock.context);
+
+  const submitClear = () => {
+    const recorder = createDrawingRecorder(sharedContext);
+    recordClear(recorder, [0, 0, 0, 1]);
+    const commandBuffer = encodeDawnCommandBuffer(
+      sharedContext,
+      finishDrawingRecorder(recorder),
+      binding,
+    );
+    submitToDawnQueueManager(queueManager, commandBuffer);
+  };
+
+  submitClear();
+  submitClear();
+
+  assertEquals(queueManager.outstandingSubmissions.length, 2);
+  mock.created.submissionDoneResolvers.shift()?.();
+  mock.created.submissionDoneResolvers.shift()?.();
+
+  await checkForFinishedDawnQueueManager(queueManager, {
+    syncToCpu: true,
+  });
+
+  assertEquals(queueManager.completedCount, 2);
+  assertEquals(queueManager.inFlightCount, 0);
   assertEquals(queueManager.outstandingSubmissions.length, 0);
+});
+
+Deno.test('dawn queue manager records submit failures without enqueuing work', () => {
+  const mock = createMockGpuContext();
+  const backend = createDawnBackendContext({
+    ...mock.context,
+    queue: {
+      ...mock.context.queue,
+      submit: () => {
+        throw new Error('submit failed');
+      },
+    } as unknown as GPUQueue,
+  });
+  const queueManager = createDawnQueueManager(backend);
+  const sharedContext = createDawnSharedContext(backend);
+  const recorder = createDrawingRecorder(sharedContext);
+  const binding = createOffscreenBinding(mock.context);
+
+  recordClear(recorder, [0, 0, 0, 1]);
+  const commandBuffer = encodeDawnCommandBuffer(
+    sharedContext,
+    finishDrawingRecorder(recorder),
+    binding,
+  );
+  const submission = submitToDawnQueueManager(queueManager, commandBuffer);
+
+  assertEquals(submission.state, 'failed');
+  assertEquals(submission.error, 'submit failed');
+  assertEquals(queueManager.submittedCount, 0);
+  assertEquals(queueManager.inFlightCount, 0);
+  assertEquals(queueManager.outstandingSubmissions.length, 0);
+  assertEquals(queueManager.lastError, 'submit failed');
 });
 
 Deno.test('drawing context increments recorder ids through shared context', () => {

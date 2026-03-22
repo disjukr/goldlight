@@ -63,8 +63,9 @@ stack that fits this repository's TypeScript and WebGPU architecture.
     submission-scoped outstanding work objects, and follow submission completion through
     `queue.onSubmittedWorkDone()` when available.
   - Current state: command-buffer submission routes through the queue manager, each submit now owns
-    an explicit outstanding submission object until completion, callback-based completion drains
-    submissions in order, and coarse fallback still exists when callbacks are unavailable.
+    an explicit outstanding submission object until completion, callback-based completion now drains
+    submissions through a `checkForFinishedWork`-style path with explicit sync-to-last-submission
+    waits, and coarse fallback still exists when callbacks are unavailable.
 - Path rendering
   - Status: `partial`
   - Flattened contours can be pushed through direct tessellated fills, convex clip-stack clipping,
@@ -131,8 +132,8 @@ stack that fits this repository's TypeScript and WebGPU architecture.
     ownership for each submitted command buffer, submission-scoped completion via
     `queue.onSubmittedWorkDone()`, coarse fallback when callbacks are unavailable, and cleanup when
     callbacks reject
-  - Missing: richer GPU fence/error handling, `WaitAny`-style batching, finish-proc ownership, and
-    per-resource completion tracking
+  - Missing: richer GPU fence/error handling, `WaitAny`-style batching, finish-proc ownership,
+    async resource ownership, and per-resource completion tracking
 - `GraphicsPipeline` / caches -> `src/pipeline*.ts`
   - Status: `pending`
   - Missing: pipeline creation and reuse
@@ -179,7 +180,8 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Role: prepared render-pass partitioning between recording and backend encoding
 - `src/queue_manager.ts`
   - Status: `partial`
-  - Role: queue submission and submission-scoped outstanding-work tracking
+  - Role: queue submission plus Graphite-like outstanding submission ownership and completion
+    draining
 - `src/recording.ts`
   - Status: `started`
   - Role: immutable recorded command package
@@ -434,8 +436,8 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
   - Command buffer submission helper exists for encoded clears and first fill draws
 - Async work completion
   - Status: `partial`
-  - Tick and in-flight submission tracking exist, and completion now follows GPU queue submission
-    promises when the backend exposes them
+  - Tick and in-flight submission tracking exist, and completion now follows submission-owned GPU
+    queue promises when the backend exposes them, including explicit sync-to-last-submission waits
 
 ## Rendering Strategy Decisions
 
@@ -540,10 +542,10 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
     translucent round cap/join coverage still needs Graphite-like analytic evaluation instead of
     flat color fill
 - `QueueManager` submission model is still simplified
-  - Local state: queue submission, ordered outstanding submission ownership, and completion draining
-    exist in `src/queue_manager.ts`
-  - Remaining delta: no Graphite-style finish-proc ownership, command-buffer reuse, or
-    resource/fence correlation
+  - Local state: queue submission, ordered outstanding submission ownership, completion draining,
+    and a `checkForFinishedWork`-style sync path now exist in `src/queue_manager.ts`
+  - Remaining delta: no Graphite-style finish-proc ownership, command-buffer reuse, async resource
+    ownership, `WaitAny`-style batching, or resource/fence correlation
 - `Caps` still trails DawnCaps depth
   - Local state: `src/caps.ts` now owns a richer format table, color-type metadata,
     resolve/transient/MSRTSS policy, resource-binding requirements, and provider-facing usage checks
@@ -597,10 +599,11 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
   - Validation: `deno test tests/drawing_graphite_dawn_test.ts`
 - 2026-03-23
   - Files: `src/queue_manager.ts`, `tests/drawing_graphite_dawn_test.ts`
-  - Status transition: `QueueManager` grew explicit outstanding submission ownership instead of only
-    tracking aggregate counters
+  - Status transition: `QueueManager` moved from counter-only tracking to a more Graphite-like
+    `GpuWorkSubmission` ownership model with explicit submission state and `checkForFinishedWork`
+    semantics
   - Remaining delta: completion is still promise/tick based in WebGPU terms, without Graphite's
-    `WaitAny` path, fence/resource correlation, or command-buffer recycling
+    `WaitAny` path, finish-proc/resource ownership, fence correlation, or command-buffer recycling
   - Validation: `deno test tests/drawing_graphite_dawn_test.ts`
 
 ## Update Rules

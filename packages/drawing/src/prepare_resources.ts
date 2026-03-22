@@ -4,6 +4,7 @@ import { type DrawingPreparedRecording, prepareDrawingRecording } from './draw_p
 import type { DrawingRecording } from './recording.ts';
 import type { DrawingPreparedPatch, DrawingPreparedVertex } from './path_renderer.ts';
 import type { DawnSharedContext } from './shared_context.ts';
+import { createDrawingTaskList, type DrawingTaskList } from './task.ts';
 
 export type DrawingPreparedStepResources = Readonly<{
   pipelines: readonly GPURenderPipeline[];
@@ -26,7 +27,13 @@ export type DrawingPreparedStepResources = Readonly<{
 }>;
 
 export type DrawingPreparedPassResources = Readonly<{
+  sampledTextures: readonly GPUTextureView[];
   steps: readonly DrawingPreparedStepResources[];
+}>;
+
+export type DrawingPreparedRenderPassTaskResources = Readonly<{
+  kind: 'renderPass';
+  passes: readonly DrawingPreparedPassResources[];
 }>;
 
 export type DrawingPreparedCommandResources = Readonly<{
@@ -36,13 +43,14 @@ export type DrawingPreparedCommandResources = Readonly<{
   identityStepBindGroup: GPUBindGroup;
   fullscreenClipVertexBuffer: GPUBuffer;
   fullscreenClipVertexCount: number;
-  passes: readonly DrawingPreparedPassResources[];
+  tasks: readonly DrawingPreparedRenderPassTaskResources[];
 }>;
 
 export type DawnPreparedWork = Readonly<{
   backend: 'graphite-dawn';
   recording: DrawingRecording;
   prepared: DrawingPreparedRecording;
+  tasks: DrawingTaskList;
   resources: DrawingPreparedCommandResources;
 }>;
 
@@ -447,7 +455,7 @@ const prepareStepResources = (
 
 export const prepareDawnResources = (
   sharedContext: DawnSharedContext,
-  prepared: DrawingPreparedRecording,
+  tasks: DrawingTaskList,
 ): DrawingPreparedCommandResources => {
   const viewportTransformBuffer = createViewportTransformBuffer(sharedContext);
   const viewportBindGroup = sharedContext.resourceProvider.createViewportBindGroup(
@@ -472,8 +480,12 @@ export const prepareDawnResources = (
     identityStepBindGroup,
     fullscreenClipVertexBuffer,
     fullscreenClipVertexCount: fullscreenClipVertices.length / floatsPerVertex,
-    passes: Object.freeze(prepared.passes.map((passInfo) => ({
-      steps: Object.freeze(passInfo.steps.map((step) => prepareStepResources(sharedContext, step))),
+    tasks: Object.freeze(tasks.tasks.map((task): DrawingPreparedRenderPassTaskResources => ({
+      kind: 'renderPass',
+      passes: Object.freeze(task.drawPasses.map((passInfo) => ({
+        sampledTextures: Object.freeze([]),
+        steps: Object.freeze(passInfo.steps.map((step) => prepareStepResources(sharedContext, step))),
+      }))),
     }))),
   };
 };
@@ -483,10 +495,12 @@ export const prepareDawnRecording = (
   recording: DrawingRecording,
 ): DawnPreparedWork => {
   const prepared = prepareDrawingRecording(recording);
+  const tasks = createDrawingTaskList(prepared);
   return {
     backend: 'graphite-dawn',
     recording,
     prepared,
-    resources: prepareDawnResources(sharedContext, prepared),
+    tasks,
+    resources: prepareDawnResources(sharedContext, tasks),
   };
 };

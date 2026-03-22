@@ -511,8 +511,10 @@ Deno.test('dawn preparation separates recording, draw-pass preparation, and reso
 
   assertEquals(preparedWork.recording.commandCount, 1);
   assertEquals(preparedWork.prepared.passes.length, 1);
-  assertEquals(preparedWork.resources.passes.length, 1);
-  assertEquals(preparedWork.resources.passes[0]?.steps.length, 1);
+  assertEquals(preparedWork.tasks.tasks.length, 1);
+  assertEquals(preparedWork.resources.tasks.length, 1);
+  assertEquals(preparedWork.resources.tasks[0]?.passes.length, 1);
+  assertEquals(preparedWork.resources.tasks[0]?.passes[0]?.steps.length, 1);
   assertEquals(commandBuffer.prepared, preparedWork.prepared);
 });
 

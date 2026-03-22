@@ -13,4 +13,6 @@ export * from './src/recorder.ts';
 export * from './src/renderer_provider.ts';
 export * from './src/resource_provider.ts';
 export * from './src/shared_context.ts';
+export * from './src/render_pass_task.ts';
+export * from './src/task.ts';
 export * from './src/types.ts';

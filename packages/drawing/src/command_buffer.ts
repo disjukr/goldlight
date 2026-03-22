@@ -304,87 +304,93 @@ export const encodePreparedDawnCommandBuffer = (
   const resolveView = acquireColorResolveView(binding);
   const unsupportedCommands: DrawingCommand[] = [...preparedWork.prepared.unsupportedCommands];
   let passCount = 0;
-  const hasStencilSteps = preparedWork.prepared.passes.some((passInfo) =>
-    passInfo.steps.some((step) => step.usesStencil || step.usesFillStencil)
+  const hasStencilSteps = preparedWork.tasks.tasks.some((task) =>
+    task.drawPasses.some((passInfo) =>
+      passInfo.steps.some((step) => step.usesStencil || step.usesFillStencil)
+    )
   );
   const stencilView = hasStencilSteps
     ? sharedContext.resourceProvider.getStencilAttachmentView()
     : undefined;
 
-  for (let passIndex = 0; passIndex < preparedWork.prepared.passes.length; passIndex += 1) {
-    const passInfo = preparedWork.prepared.passes[passIndex]!;
-    const passResources = preparedWork.resources.passes[passIndex]!;
-    if (passInfo.steps.length === 0) {
-      const pass = encoder.beginRenderPass({
-        colorAttachments: [
-          {
-            view: colorView,
-            resolveTarget: resolveView,
-            clearValue: toGpuColor(passInfo.clearColor),
-            loadOp: passInfo.loadOp,
-            storeOp: 'store',
-          },
-        ],
-      });
-      unsupportedCommands.push(...passInfo.unsupportedDraws);
-      pass.end();
-      passCount += 1;
-      continue;
-    }
-
-    let colorLoadOp = passInfo.loadOp;
-    let stepIndex = 0;
-    while (stepIndex < passInfo.steps.length) {
-      const step = passInfo.steps[stepIndex]!;
-      if (step.usesStencil || step.usesFillStencil) {
-        const pass = encoder.beginRenderPass(
-          createRenderPassDescriptor(
-            colorView,
-            resolveView,
-            passInfo.clearColor,
-            colorLoadOp,
-            stencilView,
-          ),
-        );
-        encodePreparedStep(
-          pass,
-          step,
-          passResources.steps[stepIndex]!,
-          preparedWork.resources,
-          sharedContext.backend.target,
-          preparedWork.resources.viewportBindGroup,
-        );
+  for (let taskIndex = 0; taskIndex < preparedWork.tasks.tasks.length; taskIndex += 1) {
+    const task = preparedWork.tasks.tasks[taskIndex]!;
+    const taskResources = preparedWork.resources.tasks[taskIndex]!;
+    for (let passIndex = 0; passIndex < task.drawPasses.length; passIndex += 1) {
+      const passInfo = task.drawPasses[passIndex]!;
+      const passResources = taskResources.passes[passIndex]!;
+      if (passInfo.steps.length === 0) {
+        const pass = encoder.beginRenderPass({
+          colorAttachments: [
+            {
+              view: colorView,
+              resolveTarget: resolveView,
+              clearValue: toGpuColor(passInfo.clearColor),
+              loadOp: passInfo.loadOp,
+              storeOp: 'store',
+            },
+          ],
+        });
+        unsupportedCommands.push(...passInfo.unsupportedDraws);
         pass.end();
         passCount += 1;
-        colorLoadOp = 'load';
-        stepIndex += 1;
         continue;
       }
 
-      const pass = encoder.beginRenderPass(
-        createRenderPassDescriptor(colorView, resolveView, passInfo.clearColor, colorLoadOp),
-      );
-      while (
-        stepIndex < passInfo.steps.length &&
-        !passInfo.steps[stepIndex]!.usesStencil &&
-        !passInfo.steps[stepIndex]!.usesFillStencil
-      ) {
-        encodePreparedStep(
-          pass,
-          passInfo.steps[stepIndex]!,
-          passResources.steps[stepIndex]!,
-          preparedWork.resources,
-          sharedContext.backend.target,
-          preparedWork.resources.viewportBindGroup,
-        );
-        stepIndex += 1;
-      }
-      pass.end();
-      passCount += 1;
-      colorLoadOp = 'load';
-    }
+      let colorLoadOp = passInfo.loadOp;
+      let stepIndex = 0;
+      while (stepIndex < passInfo.steps.length) {
+        const step = passInfo.steps[stepIndex]!;
+        if (step.usesStencil || step.usesFillStencil) {
+          const pass = encoder.beginRenderPass(
+            createRenderPassDescriptor(
+              colorView,
+              resolveView,
+              passInfo.clearColor,
+              colorLoadOp,
+              stencilView,
+            ),
+          );
+          encodePreparedStep(
+            pass,
+            step,
+            passResources.steps[stepIndex]!,
+            preparedWork.resources,
+            sharedContext.backend.target,
+            preparedWork.resources.viewportBindGroup,
+          );
+          pass.end();
+          passCount += 1;
+          colorLoadOp = 'load';
+          stepIndex += 1;
+          continue;
+        }
 
-    unsupportedCommands.push(...passInfo.unsupportedDraws);
+        const pass = encoder.beginRenderPass(
+          createRenderPassDescriptor(colorView, resolveView, passInfo.clearColor, colorLoadOp),
+        );
+        while (
+          stepIndex < passInfo.steps.length &&
+          !passInfo.steps[stepIndex]!.usesStencil &&
+          !passInfo.steps[stepIndex]!.usesFillStencil
+        ) {
+          encodePreparedStep(
+            pass,
+            passInfo.steps[stepIndex]!,
+            passResources.steps[stepIndex]!,
+            preparedWork.resources,
+            sharedContext.backend.target,
+            preparedWork.resources.viewportBindGroup,
+          );
+          stepIndex += 1;
+        }
+        pass.end();
+        passCount += 1;
+        colorLoadOp = 'load';
+      }
+
+      unsupportedCommands.push(...passInfo.unsupportedDraws);
+    }
   }
 
   return {

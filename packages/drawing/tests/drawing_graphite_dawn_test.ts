@@ -1365,6 +1365,10 @@ Deno.test('drawing prepared recording applies dash pattern to strokes', () => {
   assertEquals(draw?.kind, 'pathStroke');
   assertEquals((draw?.triangles.length ?? 0) > 0, true);
   assertEquals((draw?.triangles.length ?? 0) < 72, true);
+  if (draw?.kind !== 'pathStroke') {
+    throw new Error('expected pathStroke draw');
+  }
+  assertEquals(draw.usesTessellatedStrokePatches, true);
 });
 
 Deno.test('drawing prepared recording scales hairline alpha coverage', () => {

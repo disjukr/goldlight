@@ -1915,27 +1915,7 @@ const prepareStrokeTriangles = (
   const color = resolveStrokeColor(paint);
   const transparent: readonly [number, number, number, number] = [color[0], color[1], color[2], 0];
 
-  const dashedContours = applyDashPattern(
-    contours.map((contour) => ({ points: contour.points, closed: contour.closed })),
-    paint,
-  );
-  const normalizedContours: DrawingStrokeContourRecord[] = dashedContours.map((contour) => ({
-    points: contour.points,
-    closed: contour.closed,
-  }));
-  if (!paint.dashArray || paint.dashArray.length === 0) {
-    for (const contour of contours) {
-      if ((contour.points.length < 2) && contour.degeneratePoint) {
-        normalizedContours.push({
-          points: contour.points,
-          closed: contour.closed,
-          degeneratePoint: contour.degeneratePoint,
-        });
-      }
-    }
-  }
-
-  for (const subpath of normalizedContours) {
+  for (const subpath of contours) {
     if (subpath.points.length < 2) {
       if (subpath.degeneratePoint) {
         appendDegenerateStrokeCap(triangles, subpath.degeneratePoint, halfWidth, cap);
@@ -2161,6 +2141,29 @@ const createStrokeContourRecords = (
     degeneratePoint: subpath.points.length === 1 ? subpath.points[0] : undefined,
   })));
 
+const createLinePatchesFromContours = (
+  contours: readonly DrawingStrokeContourRecord[],
+): readonly DrawingPreparedPatch[] => {
+  const patches: DrawingPreparedPatch[] = [];
+  for (const contour of contours) {
+    for (let index = 1; index < contour.points.length; index += 1) {
+      patches.push({
+        kind: 'line',
+        points: [contour.points[index - 1]!, contour.points[index]!],
+        resolveLevel: 0,
+      });
+    }
+    if (contour.closed && contour.points.length > 2) {
+      patches.push({
+        kind: 'line',
+        points: [contour.points[contour.points.length - 1]!, contour.points[0]!],
+        resolveLevel: 0,
+      });
+    }
+  }
+  return Object.freeze(patches);
+};
+
 const computeStrokeBounds = (
   subpaths: readonly FlattenedSubpath[],
   halfWidth: number,
@@ -2185,9 +2188,6 @@ const canUseTessellatedStrokePatches = (
   subpaths: readonly FlattenedSubpath[],
   paint: DrawingPaint,
 ): boolean => {
-  if ((paint.dashArray?.length ?? 0) > 0) {
-    return false;
-  }
   const cap = paint.strokeCap ?? 'butt';
   const join = paint.strokeJoin ?? 'miter';
   if (join === 'round') {
@@ -2346,21 +2346,28 @@ const preparePathFill = (command: DrawPathCommand | DrawShapeCommand): DrawingDr
   }
 
   const strokeStyle = resolveStrokeStyle(command.paint);
-  const strokeContours = createStrokeContourRecords(subpaths);
+  const dashedStrokeSubpaths = applyDashPattern(subpaths, command.paint);
+  const strokeContours = createStrokeContourRecords(dashedStrokeSubpaths);
+  const lineOnlyStrokeContours = strokeContours.every((contour) =>
+    contour.points.length <= 2 || contour.points.every((_, index) => index < 2)
+  );
+  const strokePatchSource = (command.paint.dashArray?.length ?? 0) > 0 || lineOnlyStrokeContours
+    ? createLinePatchesFromContours(strokeContours)
+    : preparePatches(command.path, identityMatrix2D, false);
   const patches = createPreparedStrokePatches(
     strokeContours,
-    preparePatches(command.path, identityMatrix2D, false),
+    strokePatchSource,
     strokeStyle.cap,
     strokeStyle,
   );
   const usesTessellatedStrokePatches = canUseTessellatedStrokePatches(
     patches,
-    subpaths,
+    dashedStrokeSubpaths,
     command.paint,
   );
   const preparedStroke = prepareStrokeTriangles(strokeContours, command.paint);
   const strokedBounds = computeStrokeBounds(
-    applyDashPattern(subpaths, command.paint),
+    dashedStrokeSubpaths,
     strokeStyle.halfWidth,
   );
   const strokeTriangles = preparedStroke?.triangles ?? [];

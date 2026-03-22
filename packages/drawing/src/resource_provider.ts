@@ -594,38 +594,6 @@ fn eval_patch_tangent(
   return robust_normalize_diff(tangent, vec2<f32>(0.0, 0.0));
 }
 
-fn strip_vertex_position(
-  a: vec2<f32>,
-  b: vec2<f32>,
-  strokeRadius: f32,
-  quadVertex: u32,
-  strokeOutset: f32,
-) -> vec2<f32> {
-  let delta = b - a;
-  let deltaLength = max(length(delta), 1e-5);
-  let normal = vec2<f32>(-delta.y / deltaLength, delta.x / deltaLength) * strokeRadius;
-  let edgeIndex = strip_edge_index(quadVertex);
-  let edgePoint = strip_edge_point(a, b, edgeIndex);
-  let edgeOutset = strip_edge_outset(edgeIndex) * strokeOutset;
-  return edgePoint + (normal * edgeOutset);
-}
-
-fn strip_edge_index(quadVertex: u32) -> u32 {
-  return array<u32, 6>(0u, 1u, 2u, 1u, 2u, 3u)[quadVertex];
-}
-
-fn strip_signed_edge(edgeIndex: u32) -> f32 {
-  return select(-1.0, 1.0, edgeIndex == 0u || edgeIndex == 1u);
-}
-
-fn strip_edge_point(a: vec2<f32>, b: vec2<f32>, edgeIndex: u32) -> vec2<f32> {
-  return select(a, b, edgeIndex == 1u || edgeIndex == 2u);
-}
-
-fn strip_edge_outset(edgeIndex: u32) -> f32 {
-  return strip_signed_edge(edgeIndex);
-}
-
 fn cross_length_2d(a: vec2<f32>, b: vec2<f32>) -> f32 {
   return (a.x * b.y) - (a.y * b.x);
 }
@@ -657,18 +625,6 @@ fn restrict_join_stroke_outset(
   return select(max(strokeOutset, 0.0), min(strokeOutset, 0.0), turn < 0.0);
 }
 
-fn signed_edge_id(segmentIndex: u32, activeSegments: u32, quadVertex: u32) -> f32 {
-  let stripVertexID = strip_edge_index(quadVertex);
-  var edgeIndex = f32(segmentIndex + (stripVertexID >> 1u));
-  if (edgeIndex > f32(max(activeSegments, 1u) - 1u)) {
-    edgeIndex = f32(max(activeSegments, 1u) - 1u);
-  }
-  if ((stripVertexID & 1u) != 0u) {
-    edgeIndex = -edgeIndex;
-  }
-  return edgeIndex;
-}
-
 fn stroke_outset_from_edge_id(edgeID: f32) -> f32 {
   return sign(edgeID);
 }
@@ -679,16 +635,6 @@ fn is_exact_start_edge(segmentIndex: u32, activeSegments: u32) -> bool {
 
 fn is_exact_end_edge(segmentIndex: u32, activeSegments: u32) -> bool {
   return segmentIndex + 1u >= activeSegments;
-}
-
-fn uses_exact_start_endpoint(segmentIndex: u32, activeSegments: u32, stripEdgeIndex: u32) -> bool {
-  return is_exact_start_edge(segmentIndex, activeSegments) &&
-    (stripEdgeIndex == 0u || stripEdgeIndex == 3u);
-}
-
-fn uses_exact_end_endpoint(segmentIndex: u32, activeSegments: u32, stripEdgeIndex: u32) -> bool {
-  return is_exact_end_edge(segmentIndex, activeSegments) &&
-    (stripEdgeIndex == 1u || stripEdgeIndex == 2u);
 }
 
 @vertex
@@ -702,8 +648,11 @@ fn vs_main(
   @location(5) stroke: vec2<f32>,
   @location(6) curveMeta: vec4<f32>,
 ) -> VertexOut {
-  let stripVertex = vertexIndex & 1u;
-  let segmentIndex = vertexIndex >> 1u;
+  var edgeID = f32(vertexIndex >> 1u);
+  if ((vertexIndex & 1u) != 0u) {
+    edgeID = -edgeID;
+  }
+  let segmentIndex = u32(abs(edgeID));
   var activeSegments = max(1u, 1u << u32(clamp(curveMeta.z, 0.0, MAX_RESOLVE_LEVEL)));
   let curveType = curveMeta.x;
   let weight = curveMeta.y;
@@ -715,7 +664,8 @@ fn vs_main(
   var curveP2 = p2;
   var curveP3 = p3;
   var joinType = stroke.y;
-  var prevTan = robust_normalize_diff(curveP0, joinControlPoint);
+  let lastControlPoint = joinControlPoint;
+  var prevTan = robust_normalize_diff(curveP0, lastControlPoint);
   var tan0 = patch_start_tangent(curveP0, curveP1, curveP2, curveP3);
   var tan1 = patch_end_tangent(curveP0, curveP1, curveP2, curveP3);
   if (length(tan0) <= 1e-5) {
@@ -746,49 +696,27 @@ fn vs_main(
   if (joinType < 0.0) {
     numEdgesInJoin = min(numEdgesInJoin, maxEdges - 2.0);
   }
-  var edgeID = f32(segmentIndex);
-  if (stripVertex != 0u) {
-    edgeID = -edgeID;
-  }
-  let t0 = f32(segmentIndex) / f32(activeSegments);
-  let t1 = f32(min(segmentIndex + 1u, activeSegments)) / f32(activeSegments);
-  var a = eval_patch(curveType, weight, curveP0, curveP1, curveP2, curveP3, t0);
-  var b = eval_patch(curveType, weight, curveP0, curveP1, curveP2, curveP3, t1);
   var local = curveP3;
   if (segmentIndex < activeSegments) {
-    var delta = b - a;
-    if (length(delta) <= 1e-5) {
-      delta = a - joinControlPoint;
-    }
     let squareStart = (flags & 4u) != 0u;
     let squareEnd = (flags & 8u) != 0u;
-    let tangent = robust_normalize_diff(b, a);
-    let turn = cross_length_2d(tan0, tan1);
-    var strokeOutset = stroke_outset_from_edge_id(edgeID);
-    let hasJoinControlPoint = distance(joinControlPoint, curveP0) > 1e-5;
-    if (is_exact_start_edge(segmentIndex, activeSegments) && hasJoinControlPoint) {
-      strokeOutset = restrict_join_stroke_outset(strokeOutset, turn, tan0, tan1);
-    }
-    if (is_exact_start_edge(segmentIndex, activeSegments) && squareStart) {
-      a -= tangent * stroke.x;
-    }
-    if (is_exact_end_edge(segmentIndex, activeSegments) && squareEnd) {
-      b += tangent * stroke.x;
-    }
     var joinTan0 = tan0;
     var joinTan1 = tan1;
-    var curveTurn = cross_length_2d(curveP2 - curveP0, curveP3 - curveP1);
+    var turn = cross_length_2d(tan0, tan1);
+    var strokeOutset = stroke_outset_from_edge_id(edgeID);
     var combinedEdgeID = abs(edgeID) - numEdgesInJoin;
     if (combinedEdgeID < 0.0) {
       joinTan1 = joinTan0;
-      if (hasJoinControlPoint) {
+      if (distance(lastControlPoint, curveP0) > 1e-5) {
         joinTan0 = prevTan;
       }
-      curveTurn = cross_length_2d(joinTan0, joinTan1);
+      turn = cross_length_2d(joinTan0, joinTan1);
+    } else if (is_exact_start_edge(segmentIndex, activeSegments)) {
+      strokeOutset = restrict_join_stroke_outset(strokeOutset, turn, joinTan0, joinTan1);
     }
     let cosTheta = cosine_between_unit_vectors(joinTan0, joinTan1);
     var rotation = acos(cosTheta);
-    if (curveTurn < 0.0) {
+    if (turn < 0.0) {
       rotation = -rotation;
     }
     var numParametricSegments = f32(activeSegments);
@@ -802,8 +730,8 @@ fn vs_main(
       combinedEdgeID += numRadialSegments + 1.0;
       if (combinedEdgeID < 0.0) {
         combinedEdgeID = 0.0;
-      } else if (!tangents_nearly_parallel(curveTurn, joinTan0, joinTan1) || dot(joinTan0, joinTan1) < 0.0) {
-        strokeOutset = select(max(strokeOutset, 0.0), min(strokeOutset, 0.0), curveTurn < 0.0);
+      } else if (!tangents_nearly_parallel(turn, joinTan0, joinTan1) || dot(joinTan0, joinTan1) < 0.0) {
+        strokeOutset = select(max(strokeOutset, 0.0), min(strokeOutset, 0.0), turn < 0.0);
       }
     } else {
       let maxCombinedSegments = max(maxEdges - numEdgesInJoin - 1.0, 1.0);
@@ -945,6 +873,14 @@ fn vs_main(
     } else {
       curveTangent = select(joinTan0, joinTan1, isFinalEdge);
       strokeCoord = select(curveP0, curveP3, isFinalEdge);
+    }
+    if (combinedEdgeID >= 0.0) {
+      if (is_exact_start_edge(segmentIndex, activeSegments) && squareStart) {
+        strokeCoord -= curveTangent * stroke.x;
+      }
+      if (is_exact_end_edge(segmentIndex, activeSegments) && squareEnd) {
+        strokeCoord += curveTangent * stroke.x;
+      }
     }
     let ortho = vec2<f32>(curveTangent.y, -curveTangent.x);
     local = strokeCoord + (ortho * stroke.x * strokeOutset);

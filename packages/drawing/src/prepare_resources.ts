@@ -503,7 +503,6 @@ const createStrokePatchInstanceData = (
     data[offset++] = Math.min(maxPatchResolveLevel, Math.max(0, patch.patch.resolveLevel));
     data[offset++] = (patch.contourStart ? 1 : 0) +
       (patch.contourEnd ? 2 : 0) +
-      (patch.smoothJoin ? 64 : 0) +
       (patch.startCap === 'square' ? 4 : 0) +
       (patch.endCap === 'square' ? 8 : 0) +
       (patch.startCap === 'round' ? 16 : 0) +

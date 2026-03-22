@@ -741,7 +741,6 @@ fn vs_main(
   let roundEnd = (flags & 32u) != 0u;
   let contourStart = (flags & 1u) != 0u;
   let contourEnd = (flags & 2u) != 0u;
-  let smoothJoin = (flags & 64u) != 0u;
   var curveP0 = p0;
   var curveP1 = p1;
   var curveP2 = p2;
@@ -786,7 +785,7 @@ fn vs_main(
   }
   let maxEdges = f32(SEGMENTS);
   var numEdgesInJoin = stroke_join_edges(joinType, prevTan, tan0, stroke.x);
-  if (contourStart || smoothJoin) {
+  if (contourStart) {
     numEdgesInJoin = 0.0;
     prevTan = tan0;
   }

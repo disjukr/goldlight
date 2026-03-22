@@ -66,7 +66,6 @@ export type DrawingPreparedStrokePatch = Readonly<{
   joinControlPoint: Point2D;
   contourStart: boolean;
   contourEnd: boolean;
-  smoothJoin: boolean;
   startCap: 'none' | 'butt' | 'square' | 'round';
   endCap: 'none' | 'butt' | 'square' | 'round';
 }>;
@@ -104,7 +103,6 @@ type DrawingStrokeContourEvent = Readonly<{
   patch: DrawingPreparedPatch;
   contourStart: boolean;
   contourEnd: boolean;
-  smoothJoin: boolean;
   startCap: 'none' | 'butt' | 'square' | 'round';
   endCap: 'none' | 'butt' | 'square' | 'round';
   joinControlPoint?: Point2D;
@@ -695,19 +693,6 @@ const isCuspLikeStrokeTurn = (
   return cosine < -0.95;
 };
 
-const isSmoothStrokeContinuation = (
-  previousPatch: DrawingPreparedPatch,
-  currentPatch: DrawingPreparedPatch,
-): boolean => {
-  const outgoing = getPatchOutgoingTangent(previousPatch);
-  const incoming = getPatchIncomingTangent(currentPatch);
-  if (!outgoing || !incoming) {
-    return false;
-  }
-  const cosine = (outgoing[0] * incoming[0]) + (outgoing[1] * incoming[1]);
-  return cosine > 0.995;
-};
-
 const createDegenerateSquareStrokePatch = (
   center: Point2D,
   joinTo: Point2D,
@@ -723,7 +708,6 @@ const createDegenerateSquareStrokePatch = (
   joinControlPoint: joinTo,
   contourStart: false,
   contourEnd: false,
-  smoothJoin: false,
   startCap: 'none',
   endCap: 'none',
 });
@@ -741,7 +725,6 @@ const createDegenerateRoundStrokePatch = (
   joinControlPoint: center,
   contourStart: true,
   contourEnd: true,
-  smoothJoin: false,
   startCap: 'round',
   endCap: 'round',
 });
@@ -925,7 +908,6 @@ const createPreparedStrokeContourPatches = (
         patch: createDegenerateRoundStrokePatch(firstStart).patch,
         contourStart: false,
         contourEnd: false,
-        smoothJoin: false,
         startCap: 'round',
         endCap: 'round',
         joinControlPoint: firstStart,
@@ -934,7 +916,6 @@ const createPreparedStrokeContourPatches = (
         patch: createDegenerateRoundStrokePatch(lastEnd).patch,
         contourStart: false,
         contourEnd: false,
-        smoothJoin: false,
         startCap: 'round',
         endCap: 'round',
         joinControlPoint: lastEnd,
@@ -945,7 +926,6 @@ const createPreparedStrokeContourPatches = (
         patch: createStrokeLinePatch(add(firstStart, scale(firstTangent, -halfWidth)), firstStart),
         contourStart: true,
         contourEnd: false,
-        smoothJoin: false,
         startCap: 'none',
         endCap: 'none',
       });
@@ -954,7 +934,6 @@ const createPreparedStrokeContourPatches = (
       patch: firstPatch,
       contourStart: !hasPrependedSquareCap,
       contourEnd: !hasAppendedSquareCap && contour.patches.length === 1,
-      smoothJoin: false,
       startCap: !contour.closed && !hasPrependedSquareCap && cap !== 'round' ? cap : 'none',
       endCap:
         !contour.closed && !hasAppendedSquareCap && contour.patches.length === 1 && cap !== 'round'
@@ -966,7 +945,6 @@ const createPreparedStrokeContourPatches = (
         patch: contour.patches[index]!,
         contourStart: false,
         contourEnd: !hasAppendedSquareCap && index + 1 === contour.patches.length,
-        smoothJoin: isSmoothStrokeContinuation(contour.patches[index - 1]!, contour.patches[index]!),
         startCap: 'none',
         endCap: !contour.closed && !hasAppendedSquareCap && index + 1 === contour.patches.length &&
             cap !== 'round'
@@ -979,7 +957,6 @@ const createPreparedStrokeContourPatches = (
         patch: createStrokeLinePatch(lastEnd, add(lastEnd, scale(lastTangent, halfWidth))),
         contourStart: false,
         contourEnd: true,
-        smoothJoin: false,
         startCap: 'none',
         endCap: 'none',
       });
@@ -1046,7 +1023,6 @@ const createPreparedStrokeContourPatches = (
           joinControlPoint,
           contourStart: event.contourStart,
           contourEnd: event.contourEnd,
-          smoothJoin: event.smoothJoin,
           startCap: event.startCap,
           endCap: event.endCap,
         });

@@ -550,12 +550,16 @@ fn strip_edge_index(quadVertex: u32) -> u32 {
   return array<u32, 6>(0u, 1u, 2u, 0u, 2u, 3u)[quadVertex];
 }
 
+fn strip_signed_edge(edgeIndex: u32) -> f32 {
+  return select(-1.0, 1.0, edgeIndex == 0u || edgeIndex == 1u);
+}
+
 fn strip_edge_point(a: vec2<f32>, b: vec2<f32>, edgeIndex: u32) -> vec2<f32> {
   return select(a, b, edgeIndex == 1u || edgeIndex == 2u);
 }
 
 fn strip_edge_outset(edgeIndex: u32) -> f32 {
-  return select(-1.0, 1.0, edgeIndex == 0u || edgeIndex == 1u);
+  return strip_signed_edge(edgeIndex);
 }
 
 @vertex
@@ -571,6 +575,8 @@ fn vs_main(
 ) -> VertexOut {
   let quadVertex = vertexIndex % 6u;
   let segmentIndex = vertexIndex / 6u;
+  let stripEdgeIndex = strip_edge_index(quadVertex);
+  let signedEdge = strip_signed_edge(stripEdgeIndex);
   var activeSegments = max(1u, 1u << u32(clamp(curveMeta.z, 0.0, MAX_RESOLVE_LEVEL)));
   let curveType = curveMeta.x;
   let weight = curveMeta.y;
@@ -655,7 +661,10 @@ fn vs_main(
       if (segmentIndex + 1u == activeSegments && squareEnd) {
         b += tangent * stroke.x;
       }
-      local = strip_vertex_position(a, b, stroke.x, quadVertex);
+      let deltaLength = max(length(b - a), 1e-5);
+      let normal = vec2<f32>(-(b.y - a.y) / deltaLength, (b.x - a.x) / deltaLength) * stroke.x;
+      let edgePoint = strip_edge_point(a, b, stripEdgeIndex);
+      local = edgePoint + (normal * signedEdge);
     }
   }
   let devicePosition = local_to_device(local);

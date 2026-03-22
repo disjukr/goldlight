@@ -531,6 +531,48 @@ fn patch_end_tangent(
   return robust_normalize_diff(p3, p0);
 }
 
+fn eval_patch_tangent(
+  curveType: f32,
+  weight: f32,
+  p0: vec2<f32>,
+  p1: vec2<f32>,
+  p2: vec2<f32>,
+  p3: vec2<f32>,
+  t: f32,
+) -> vec2<f32> {
+  if (curveType < 0.5) {
+    return robust_normalize_diff(p1, p0);
+  }
+  if (curveType < 1.5) {
+    let tangent =
+      (2.0 * (1.0 - t) * (p1 - p0)) +
+      (2.0 * t * (p2 - p1));
+    return robust_normalize_diff(tangent, vec2<f32>(0.0, 0.0));
+  }
+  if (curveType < 2.5) {
+    let oneMinusT = 1.0 - t;
+    let numerator =
+      (oneMinusT * oneMinusT * p0) +
+      (2.0 * weight * oneMinusT * t * p1) +
+      (t * t * p2);
+    let denom = (oneMinusT * oneMinusT) + (2.0 * weight * oneMinusT * t) + (t * t);
+    let numeratorDeriv =
+      (-2.0 * oneMinusT * p0) +
+      (2.0 * weight * (1.0 - 2.0 * t) * p1) +
+      (2.0 * t * p2);
+    let denomDeriv = (-2.0 * oneMinusT) + (2.0 * weight * (1.0 - 2.0 * t)) + (2.0 * t);
+    let safeDenom = max(denom, 1e-5);
+    let tangent = ((numeratorDeriv * safeDenom) - (numerator * denomDeriv)) / (safeDenom * safeDenom);
+    return robust_normalize_diff(tangent, vec2<f32>(0.0, 0.0));
+  }
+  let oneMinusT = 1.0 - t;
+  let tangent =
+    (3.0 * oneMinusT * oneMinusT * (p1 - p0)) +
+    (6.0 * oneMinusT * t * (p2 - p1)) +
+    (3.0 * t * t * (p3 - p2));
+  return robust_normalize_diff(tangent, vec2<f32>(0.0, 0.0));
+}
+
 fn strip_vertex_position(
   a: vec2<f32>,
   b: vec2<f32>,
@@ -560,6 +602,10 @@ fn strip_edge_point(a: vec2<f32>, b: vec2<f32>, edgeIndex: u32) -> vec2<f32> {
 
 fn strip_edge_outset(edgeIndex: u32) -> f32 {
   return strip_signed_edge(edgeIndex);
+}
+
+fn cross_length_2d(a: vec2<f32>, b: vec2<f32>) -> f32 {
+  return (a.x * b.y) - (a.y * b.x);
 }
 
 fn stroke_join_edges(joinType: f32, prevTan: vec2<f32>, tan0: vec2<f32>, strokeRadius: f32) -> f32 {
@@ -681,11 +727,23 @@ fn vs_main(
       if (segmentIndex + 1u == activeSegments && squareEnd) {
         b += tangent * stroke.x;
       }
-      let deltaLength = max(length(b - a), 1e-5);
-      let normal = vec2<f32>(-(b.y - a.y) / deltaLength, (b.x - a.x) / deltaLength) * stroke.x;
+      if (curveType < 0.5) {
+        local = strip_vertex_position(a, b, stroke.x, quadVertex);
+      } else {
+      var tangent0 = eval_patch_tangent(curveType, weight, p0, p1, p2, p3, t0);
+      var tangent1 = eval_patch_tangent(curveType, weight, p0, p1, p2, p3, t1);
+      if (length(tangent0) <= 1e-5) {
+        tangent0 = select(tan0, tangent, segmentIndex == 0u);
+      }
+      if (length(tangent1) <= 1e-5) {
+        tangent1 = select(tan1, tangent, segmentIndex + 1u >= activeSegments);
+      }
       let edgePoint = strip_edge_point(a, b, stripEdgeIndex);
-      let joinBias = select(0.0, min(numEdgesInJoin, 4.0) / 4.0, abs(combinedEdge) < numEdgesInJoin);
-      local = edgePoint + (normal * signedEdge * (1.0 - (0.5 * joinBias)));
+      let edgeUsesEnd = stripEdgeIndex == 1u || stripEdgeIndex == 2u;
+      let edgeTangent = select(tangent0, tangent1, edgeUsesEnd);
+      let ortho = vec2<f32>(edgeTangent.y, -edgeTangent.x);
+      local = edgePoint + (ortho * stroke.x * signedEdge);
+      }
     }
   }
   let devicePosition = local_to_device(local);

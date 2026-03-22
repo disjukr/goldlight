@@ -13,13 +13,18 @@ export type DrawingRendererKind =
 export type DrawingRendererProvider = Readonly<{
   pathRendererStrategy: DrawingPathRendererStrategy;
   renderers: readonly DrawingRendererKind[];
+  convexTessellatedWedges: () => DrawingRendererKind;
+  stencilTessellatedWedges: (fillRule: PathFillRule2D) => DrawingRendererKind;
+  stencilTessellatedCurves: (fillRule: PathFillRule2D) => DrawingRendererKind;
+  tessellatedStrokes: () => DrawingRendererKind;
   getPathFillRenderer: (
     options: Readonly<{
       fillRule: PathFillRule2D;
       patchCount: number;
-      hasCurves: boolean;
       hasWedges: boolean;
       isSingleConvexContour: boolean;
+      verbCount: number;
+      drawBoundsArea: number;
     }>,
   ) => DrawingRendererKind;
   getPathStrokeRenderer: (patches: readonly DrawingPreparedPatch[]) => DrawingRendererKind;
@@ -33,6 +38,9 @@ const kTessellationRenderers = Object.freeze(
     'tessellated-strokes',
   ] as const satisfies readonly DrawingRendererKind[],
 );
+
+const preferredWedgeVerbThreshold = 50;
+const preferredWedgeAreaThreshold = 256 * 256;
 
 export const isDrawingPatchFillRenderer = (
   renderer: DrawingRendererKind,
@@ -59,18 +67,33 @@ export const createDrawingRendererProvider = (
     throw new Error(`Unsupported drawing path renderer strategy: ${pathRendererStrategy}`);
   }
 
+  const convexTessellatedWedges = (): DrawingRendererKind => 'convex-tessellated-wedges';
+  const stencilTessellatedWedges = (_fillRule: PathFillRule2D): DrawingRendererKind =>
+    'stencil-tessellated-wedges';
+  const stencilTessellatedCurves = (_fillRule: PathFillRule2D): DrawingRendererKind =>
+    'stencil-tessellated-curves';
+  const tessellatedStrokes = (): DrawingRendererKind => 'tessellated-strokes';
+
   return {
     pathRendererStrategy,
     renderers: kTessellationRenderers,
+    convexTessellatedWedges,
+    stencilTessellatedWedges,
+    stencilTessellatedCurves,
+    tessellatedStrokes,
     getPathFillRenderer: (options) => {
-      if (options.isSingleConvexContour && options.patchCount > 0) {
-        return 'convex-tessellated-wedges';
+      if (options.isSingleConvexContour && options.hasWedges && options.patchCount > 0) {
+        return convexTessellatedWedges();
       }
-      if (options.hasWedges && options.patchCount > 0) {
-        return 'stencil-tessellated-wedges';
+
+      const preferWedges = options.verbCount < preferredWedgeVerbThreshold ||
+        options.drawBoundsArea <= preferredWedgeAreaThreshold;
+      if (preferWedges && options.hasWedges && options.patchCount > 0) {
+        return stencilTessellatedWedges(options.fillRule);
       }
-      return 'stencil-tessellated-curves';
+
+      return stencilTessellatedCurves(options.fillRule);
     },
-    getPathStrokeRenderer: (_patches) => 'tessellated-strokes',
+    getPathStrokeRenderer: (_patches) => tessellatedStrokes(),
   };
 };

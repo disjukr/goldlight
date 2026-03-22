@@ -2709,19 +2709,18 @@ const preparePathFill = (
   const style = command.paint.style ?? 'fill';
   if (style === 'fill') {
     const patches = preparePatches(command.path, identityMatrix2D, true);
-    const hasCurves = patches.some((patch) =>
-      patch.kind === 'quadratic' || patch.kind === 'conic' || patch.kind === 'cubic'
-    );
     const hasWedges = patches.some((patch) => patch.fanPoint !== undefined);
     const isSingleConvexContour = subpaths.length === 1 &&
       subpaths[0]!.closed &&
       isConvexPolygon(subpaths[0]!.points);
+    const fillBounds = unionBounds(subpaths.map((subpath) => computeBounds(subpath.points)));
     const renderer = rendererProvider.getPathFillRenderer({
       fillRule: command.path.fillRule,
       patchCount: patches.length,
-      hasCurves,
       hasWedges,
       isSingleConvexContour,
+      verbCount: command.path.verbs.length,
+      drawBoundsArea: fillBounds.size.width * fillBounds.size.height,
     });
 
     let baseTriangles: readonly Point2D[] = [];

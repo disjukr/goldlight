@@ -243,6 +243,48 @@ Deno.test('dawn shared context exposes resource provider over gpu device', () =>
   assertEquals(mock.created.samplers.length, 1);
 });
 
+Deno.test('drawing renderer provider follows graphite wedge versus curve heuristics', () => {
+  const mock = createMockGpuContext();
+  const provider = createDrawingRendererProvider(
+    createDawnCaps(createDawnBackendContext(mock.context)),
+  );
+
+  assertEquals(provider.convexTessellatedWedges(), 'convex-tessellated-wedges');
+  assertEquals(
+    provider.getPathFillRenderer({
+      fillRule: 'nonzero',
+      patchCount: 8,
+      hasWedges: true,
+      isSingleConvexContour: true,
+      verbCount: 12,
+      drawBoundsArea: 4096,
+    }),
+    'convex-tessellated-wedges',
+  );
+  assertEquals(
+    provider.getPathFillRenderer({
+      fillRule: 'nonzero',
+      patchCount: 80,
+      hasWedges: true,
+      isSingleConvexContour: false,
+      verbCount: 60,
+      drawBoundsArea: 512 * 512,
+    }),
+    'stencil-tessellated-curves',
+  );
+  assertEquals(
+    provider.getPathFillRenderer({
+      fillRule: 'evenodd',
+      patchCount: 12,
+      hasWedges: true,
+      isSingleConvexContour: false,
+      verbCount: 20,
+      drawBoundsArea: 128 * 128,
+    }),
+    'stencil-tessellated-wedges',
+  );
+});
+
 Deno.test('prepareDawnRecording uses the shared-context renderer provider', () => {
   const mock = createMockGpuContext();
   const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));

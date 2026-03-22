@@ -187,8 +187,8 @@ stack that fits this repository's TypeScript and WebGPU architecture.
     curved wedges into line-only triangles
 - `src/renderer_provider.ts`
   - Status: `started`
-  - Role: first renderer selection layer for middle-out fan, tessellated wedges, tessellated curves,
-    and tessellated strokes
+  - Role: context-wide renderer set and Graphite-like fill/stroke selection for convex tessellated
+    wedges, tessellated wedges, tessellated curves, and tessellated strokes
 - `tests/`
   - Status: `started`
   - Role: package-local tests for drawing, including snapshot regression
@@ -502,7 +502,9 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
     tessellation strategy and a stable renderer set, `src/shared_context.ts` / `src/recording.ts`
     thread that provider through recording and draw preparation instead of doing free functions at
     callsites, and convex fills now map to a dedicated `convex-tessellated-wedges` renderer instead
-    of exposing `middle-out-fan` as a standalone renderer kind
+    of exposing `middle-out-fan` as a standalone renderer kind; fill selection now also follows
+    `Device::chooseMSAARenderer()`-style wedge-vs-curve heuristics from path verb count and draw
+    bounds area
   - Remaining delta: still only the tessellation family is modeled; there is no atlas/compute
     strategy selection, shared RenderStep graph, or renderer-wide precompile iteration comparable to
     Graphite
@@ -547,6 +549,13 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
 
 ## Recent Updates
 
+- 2026-03-23
+  - Files: `src/renderer_provider.ts`, `src/path_renderer.ts`, `tests/drawing_graphite_dawn_test.ts`
+  - Status transition: `RendererProvider` now applies Graphite-like wedge-versus-curve heuristics
+    from path complexity and draw bounds instead of always preferring wedges when fan patches exist
+  - Remaining delta: only tessellation renderers exist, and the provider still exposes renderer
+    kinds instead of full RenderStep-backed renderer objects
+  - Validation: `deno test tests/drawing_graphite_dawn_test.ts`
 - 2026-03-23
   - Files: `src/renderer_provider.ts`, `src/draw_pass.ts`, `src/path_renderer.ts`,
     `src/prepare_resources.ts`, `src/command_buffer.ts`, `tests/drawing_graphite_dawn_test.ts`

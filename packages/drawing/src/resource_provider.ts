@@ -803,7 +803,7 @@ fn vs_main(
           }
           exp *= 0.5;
         }
-        parametricT = lastParametricEdgeID / max(numParametricSegments, 1.0);
+        parametricT = lastParametricEdgeID / numParametricSegments;
         let lastRadialEdgeID = combinedEdgeID - lastParametricEdgeID;
         let angle0 = select(acos(clamp(joinTan0.x, -1.0, 1.0)), -acos(clamp(joinTan0.x, -1.0, 1.0)), joinTan0.y < 0.0);
         let radialAngle = (lastRadialEdgeID * radsPerSegment) + angle0;
@@ -822,7 +822,7 @@ fn vs_main(
         let rootChoiceB = abs((quadraticA * quadraticC) + (-0.5 * rootQ * quadraticA));
         let rootNumer = select(quadraticC, rootQ, rootChoiceA < rootChoiceB);
         let rootDenom = select(rootQ, quadraticA, rootChoiceA < rootChoiceB);
-        let radialT = select(0.0, clamp(rootNumer / rootDenom, 0.0, 1.0), lastRadialEdgeID != 0.0 && abs(rootDenom) > 1e-5);
+        let radialT = select(0.0, clamp(rootNumer / rootDenom, 0.0, 1.0), lastRadialEdgeID != 0.0 && rootDenom != 0.0);
         let finalT = max(parametricT, radialT);
         var tangentAtT = radialTangent;
         if (curveType < 2.5) {
@@ -846,9 +846,9 @@ fn vs_main(
               }
             }
           } else {
-            let weightedP1 = curveP1 * weight;
-            let ab = mix(curveP0, weightedP1, finalT);
-            let bc = mix(weightedP1, curveP2, finalT);
+            let weightedCurveP1 = curveP1 * weight;
+            let ab = mix(curveP0, weightedCurveP1, finalT);
+            let bc = mix(weightedCurveP1, curveP2, finalT);
             let abc = mix(ab, bc, finalT);
             let u = mix(1.0, weight, finalT);
             let v = weight + 1.0 - u;

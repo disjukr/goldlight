@@ -581,8 +581,8 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
   - Status transition: hairline stroke tessellation now follows Graphite's order of operations by
     applying the affine 2x2 to patch control points and join control points before tessellating,
     then adding translation only after device-space stroking
-  - Remaining delta: join seam/root solving is still a reduced WGSL transcription and round
-    join/cap coverage remains flat-color instead of analytic
+  - Remaining delta: join seam/root solving is still a reduced WGSL transcription and round join/cap
+    coverage remains flat-color instead of analytic
   - Validation: `deno test tests/drawing_graphite_dawn_test.ts`
 - 2026-03-23
   - Files: `src/prepare_resources.ts`, `src/resource_provider.ts`,
@@ -590,8 +590,8 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
   - Status transition: stroke step payloads now carry the same CPU-derived `maxScale` that Skia's
     `TessellateStrokesRenderStep` writes into uniforms, and the WGSL stroke tessellator now uses
     that value instead of recomputing a looser column-length approximation in shader code
-  - Remaining delta: the rest of `tessellate_stroked_curve()` still has reduced seam-safety
-    branches and flat-color round join/cap coverage
+  - Remaining delta: the rest of `tessellate_stroked_curve()` still has reduced seam-safety branches
+    and flat-color round join/cap coverage
   - Validation: `deno test tests/drawing_graphite_dawn_test.ts`
 - 2026-03-23
   - Files: `src/renderer_provider.ts`, `src/path_renderer.ts`, `src/draw_pass.ts`,

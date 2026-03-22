@@ -689,18 +689,6 @@ fn tangents_nearly_parallel(turn: f32, tan0: vec2<f32>, tan1: vec2<f32>) -> bool
   return abs(turn) * inverseSqrt(tangentScale) < sinEpsilon;
 }
 
-fn restrict_join_stroke_outset(
-  strokeOutset: f32,
-  turn: f32,
-  tan0: vec2<f32>,
-  tan1: vec2<f32>,
-) -> f32 {
-  if (tangents_nearly_parallel(turn, tan0, tan1) && dot(tan0, tan1) >= 0.0) {
-    return strokeOutset;
-  }
-  return select(max(strokeOutset, 0.0), min(strokeOutset, 0.0), turn < 0.0);
-}
-
 @vertex
 fn vs_main(
   @builtin(vertex_index) vertexIndex: u32,

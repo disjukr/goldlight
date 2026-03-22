@@ -132,8 +132,8 @@ stack that fits this repository's TypeScript and WebGPU architecture.
     ownership for each submitted command buffer, submission-scoped completion via
     `queue.onSubmittedWorkDone()`, coarse fallback when callbacks are unavailable, and cleanup when
     callbacks reject
-  - Missing: richer GPU fence/error handling, `WaitAny`-style batching, finish-proc ownership,
-    async resource ownership, and per-resource completion tracking
+  - Missing: richer GPU fence/error handling, `WaitAny`-style batching, finish-proc ownership, async
+    resource ownership, and per-resource completion tracking
 - `GraphicsPipeline` / caches -> `src/pipeline*.ts`
   - Status: `pending`
   - Missing: pipeline creation and reuse

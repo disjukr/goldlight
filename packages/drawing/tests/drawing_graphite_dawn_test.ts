@@ -11,6 +11,7 @@ import {
 } from '@rieul3d/geometry';
 import {
   appendDrawingClipStackElement,
+  checkForFinishedDawnQueueManager,
   clipDrawingRecorderPath,
   clipDrawingRecorderRect,
   clipDrawingRecorderShader,
@@ -24,7 +25,6 @@ import {
   createDrawingPath2DFromShape,
   createDrawingRecorder,
   createDrawingRendererProvider,
-  checkForFinishedDawnQueueManager,
   encodeDawnCommandBuffer,
   encodePreparedDawnCommandBuffer,
   finishDrawingRecorder,
@@ -364,7 +364,7 @@ Deno.test('dawn stroke shader keeps graphite duplicated-edge seam handling', () 
     .find((code) =>
       typeof code === 'string' &&
       code.includes('combinedEdgeID = max(combinedEdgeID, 0.0);') &&
-      code.includes('if (lastRadialEdgeID == 0.0) {'),
+      code.includes('if (lastRadialEdgeID == 0.0) {')
     );
 
   assertEquals(typeof strokeShaderCode, 'string');

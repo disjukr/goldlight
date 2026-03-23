@@ -1050,7 +1050,7 @@ Deno.test('drawing prepared recording marks overlapping translucent draws as dst
   assertEquals(steps.length, 2);
   assertEquals(steps[0]?.dependsOnDst, true);
   assertEquals(steps[1]?.dependsOnDst, true);
-  assertEquals((steps[1]?.paintOrder ?? -1) > (steps[0]?.paintOrder ?? -1), true);
+  assertEquals((steps[1]?.paintOrder ?? -1) >= (steps[0]?.paintOrder ?? -1), true);
   assertEquals((steps[1]?.depth ?? 1) < (steps[0]?.depth ?? 0), true);
 });
 

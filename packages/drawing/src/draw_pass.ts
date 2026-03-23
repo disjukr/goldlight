@@ -91,6 +91,7 @@ const defaultClearColor: readonly [number, number, number, number] = [0, 0, 0, 0
 const noIntersectionPaintOrder = 0;
 const unassignedStencilIndex = 0xffff;
 const lastDepthIndex = 0xffff;
+const firstLayerOrder = 1;
 
 const isDrawCommand = (command: DrawingCommand): command is DrawingDrawCommand =>
   command.kind === 'drawPath' || command.kind === 'drawShape';
@@ -143,40 +144,134 @@ const getPipelineSortKey = (step: DrawingPreparedStep): string =>
   step.clipPipelineDescs.map((descriptor) => descriptor.label).join('|') + '//' +
   step.pipelineDescs.map((descriptor) => descriptor.label).join('|');
 
-const assignPaintOrder = (
+type MutablePreparedStep = {
+  -readonly [K in keyof DrawingPreparedStep]: DrawingPreparedStep[K];
+};
+
+type DrawingLayer = {
+  order: number;
+  steps: MutablePreparedStep[];
+};
+
+const stepsOverlap = (left: DrawingPreparedStep, right: DrawingPreparedStep): boolean =>
+  rectsIntersect(left.drawBounds, right.drawBounds);
+
+const stepsHaveCompatibleBinding = (left: DrawingPreparedStep, right: DrawingPreparedStep): boolean =>
+  getPipelineSortKey(left) === getPipelineSortKey(right) &&
+  left.usesStencil === right.usesStencil &&
+  left.usesFillStencil === right.usesFillStencil &&
+  left.usesDepth === right.usesDepth;
+
+const canInsertIntoLayer = (
+  layer: DrawingLayer,
+  step: DrawingPreparedStep,
+): Readonly<{
+  acceptable: boolean;
+  compatible: boolean;
+  incompatibleOverlap: boolean;
+}> => {
+  let compatible = false;
+  for (const existing of layer.steps) {
+    if (!stepsOverlap(existing, step)) {
+      continue;
+    }
+    if (!stepsHaveCompatibleBinding(existing, step)) {
+      return {
+        acceptable: false,
+        compatible: false,
+        incompatibleOverlap: true,
+      };
+    }
+    compatible = true;
+  }
+  return {
+    acceptable: true,
+    compatible,
+    incompatibleOverlap: false,
+  };
+};
+
+const insertStepIntoLayer = (
+  layer: DrawingLayer,
+  step: MutablePreparedStep,
+): void => {
+  let insertIndex = layer.steps.length;
+  const stepKey = getPipelineSortKey(step);
+  for (let index = 0; index < layer.steps.length; index += 1) {
+    const existing = layer.steps[index]!;
+    const existingKey = getPipelineSortKey(existing);
+    if (existingKey > stepKey) {
+      insertIndex = index;
+      break;
+    }
+  }
+  layer.steps.splice(insertIndex, 0, step);
+};
+
+const assignLayeredOrder = (
   pass: DrawingDrawPass,
 ): DrawingDrawPass => {
-  const recordedDraws: Array<{
-    bounds: Rect;
-    paintOrder: number;
-  }> = [];
-  const steps = pass.steps.map((step, originalOrder) => {
-    const dependsOnDst = stepDependsOnDst(step);
-    let paintOrder = noIntersectionPaintOrder;
+  const layers: DrawingLayer[] = [];
+  let nextLayerOrder = firstLayerOrder;
+  const preparedSteps = pass.steps.map((step, originalOrder) => ({
+    ...step,
+    depthIndex: originalOrder + 1,
+    depth: depthAsFloat(originalOrder + 1),
+    originalOrder,
+    paintOrder: noIntersectionPaintOrder,
+    stencilIndex: step.usesStencil || step.usesFillStencil ? originalOrder : unassignedStencilIndex,
+    dependsOnDst: stepDependsOnDst(step),
+  }));
+
+  for (const step of preparedSteps) {
+    const dependsOnDst = step.dependsOnDst;
+    let targetLayer: DrawingLayer | null = null;
+
     if (dependsOnDst) {
-      for (const recorded of recordedDraws) {
-        if (rectsIntersect(recorded.bounds, step.drawBounds)) {
-          paintOrder = Math.max(paintOrder, recorded.paintOrder + 1);
+      for (let index = layers.length - 1; index >= 0; index -= 1) {
+        const layer = layers[index]!;
+        const verdict = canInsertIntoLayer(layer, step);
+        if (verdict.acceptable) {
+          targetLayer = layer;
+          if (verdict.compatible) {
+            break;
+          }
+          continue;
+        }
+        if (verdict.incompatibleOverlap) {
+          break;
+        }
+      }
+    } else {
+      for (const layer of layers) {
+        const verdict = canInsertIntoLayer(layer, step);
+        if (verdict.acceptable) {
+          targetLayer = layer;
+          if (verdict.compatible) {
+            break;
+          }
         }
       }
     }
-    recordedDraws.push({
-      bounds: step.drawBounds,
-      paintOrder,
-    });
-    return {
-      ...step,
-      depthIndex: originalOrder + 1,
-      depth: depthAsFloat(originalOrder + 1),
-      originalOrder,
-      paintOrder,
-      stencilIndex: step.usesStencil || step.usesFillStencil ? originalOrder : unassignedStencilIndex,
-      dependsOnDst,
-    };
-  });
+
+    if (!targetLayer) {
+      targetLayer = {
+        order: nextLayerOrder++,
+        steps: [],
+      };
+      layers.push(targetLayer);
+    }
+
+    step.paintOrder = targetLayer.order - firstLayerOrder;
+    insertStepIntoLayer(targetLayer, step);
+  }
+
+  const orderedSteps = layers.flatMap((layer) => layer.steps)
+    .map((step) => Object.freeze(step) as DrawingPreparedStep);
+
   return {
     ...pass,
-    steps: Object.freeze(steps),
+    steps: Object.freeze(orderedSteps),
   };
 };
 
@@ -487,17 +582,7 @@ export const prepareDrawingRecording = (
 
   flushPass();
 
-  const passesWithPaintOrder = passes.map(assignPaintOrder);
-  const passesWithDepth = passesWithPaintOrder.map((pass) => ({
-    ...pass,
-    steps: Object.freeze([...pass.steps]
-      .sort((left, right) =>
-        left.paintOrder - right.paintOrder ||
-        left.stencilIndex - right.stencilIndex ||
-        getPipelineSortKey(left).localeCompare(getPipelineSortKey(right)) ||
-        left.originalOrder - right.originalOrder
-      )),
-  }));
+  const passesWithDepth = passes.map(assignLayeredOrder);
 
   return {
     backend: recording.backend,

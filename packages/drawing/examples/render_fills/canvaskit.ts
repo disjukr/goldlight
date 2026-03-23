@@ -1,5 +1,11 @@
 import CanvasKitModule from 'npm:canvaskit-wasm@^0.40.0';
-import { createPath2D, createRect, createRectPath2D, type Point2D } from '@rieul3d/geometry';
+import {
+  createPath2D,
+  createRect,
+  createRectPath2D,
+  type Point2D,
+  withPath2DFillRule,
+} from '@rieul3d/geometry';
 
 const outputWidth = 720;
 const outputHeight = 980;
@@ -148,6 +154,86 @@ const createKitePath = (
   );
 };
 
+const createWobblyDiamondPath = (
+  center: Point2D,
+  width: number,
+  height: number,
+) => {
+  const left = center[0] - width / 2;
+  const right = center[0] + width / 2;
+  const top = center[1] - height / 2;
+  const bottom = center[1] + height / 2;
+  return createPath2D(
+    { kind: 'moveTo', to: [center[0], top] },
+    {
+      kind: 'cubicTo',
+      control1: [center[0] + width * 0.22, top + height * 0.08],
+      control2: [right + width * 0.06, center[1] - height * 0.12],
+      to: [right, center[1] - height * 0.02],
+    },
+    {
+      kind: 'cubicTo',
+      control1: [right - width * 0.06, center[1] + height * 0.2],
+      control2: [center[0] + width * 0.3, bottom + height * 0.04],
+      to: [center[0] + width * 0.08, bottom],
+    },
+    {
+      kind: 'cubicTo',
+      control1: [center[0] - width * 0.12, bottom - height * 0.02],
+      control2: [left + width * 0.22, center[1] + height * 0.32],
+      to: [left, center[1] + height * 0.1],
+    },
+    {
+      kind: 'cubicTo',
+      control1: [left + width * 0.18, center[1] - height * 0.18],
+      control2: [center[0] - width * 0.16, top + height * 0.14],
+      to: [center[0], top],
+    },
+    { kind: 'close' },
+  );
+};
+
+const createConcaveKitePath = (
+  center: Point2D,
+  width: number,
+  height: number,
+) => {
+  const left = center[0] - width / 2;
+  const right = center[0] + width / 2;
+  const top = center[1] - height / 2;
+  const bottom = center[1] + height / 2;
+  return createPath2D(
+    { kind: 'moveTo', to: [center[0], top] },
+    {
+      kind: 'quadTo',
+      control: [right + width * 0.04, center[1] - height * 0.22],
+      to: [right, center[1] - height * 0.06],
+    },
+    {
+      kind: 'cubicTo',
+      control1: [right - width * 0.26, center[1] + height * 0.08],
+      control2: [center[0] + width * 0.08, center[1] + height * 0.02],
+      to: [center[0] + width * 0.12, center[1] + height * 0.16],
+    },
+    {
+      kind: 'quadTo',
+      control: [center[0] - width * 0.04, bottom + height * 0.04],
+      to: [center[0] - width * 0.18, bottom],
+    },
+    {
+      kind: 'quadTo',
+      control: [left - width * 0.08, center[1] + height * 0.04],
+      to: [left, center[1] - height * 0.02],
+    },
+    {
+      kind: 'quadTo',
+      control: [center[0] - width * 0.08, center[1] - height * 0.24],
+      to: [center[0], top],
+    },
+    { kind: 'close' },
+  );
+};
+
 const createTrianglePath = (
   a: Point2D,
   b: Point2D,
@@ -159,6 +245,104 @@ const createTrianglePath = (
   { kind: 'close' },
 );
 
+const createSelfIntersectingStarPath = (
+  center: Point2D,
+  radius: number,
+) => {
+  const points: Point2D[] = [];
+  for (let index = 0; index < 5; index += 1) {
+    const angle = (-Math.PI / 2) + ((index * Math.PI * 2) / 5);
+    points.push([
+      center[0] + (Math.cos(angle) * radius),
+      center[1] + (Math.sin(angle) * radius),
+    ]);
+  }
+
+  return withPath2DFillRule(
+    createPath2D(
+      { kind: 'moveTo', to: points[0]! },
+      { kind: 'lineTo', to: points[2]! },
+      { kind: 'lineTo', to: points[4]! },
+      { kind: 'lineTo', to: points[1]! },
+      { kind: 'lineTo', to: points[3]! },
+      { kind: 'close' },
+    ),
+    'evenodd',
+  );
+};
+
+const createDiamondCutoutRectPath = (
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  holeRadiusX: number,
+  holeRadiusY: number,
+) => {
+  const center: Point2D = [x + width / 2, y + height / 2];
+  return createPath2D(
+    ...createRectPath2D(createRect(x, y, width, height)).verbs,
+    { kind: 'moveTo', to: [center[0], center[1] - holeRadiusY] },
+    { kind: 'lineTo', to: [center[0] - holeRadiusX, center[1]] },
+    { kind: 'lineTo', to: [center[0], center[1] + holeRadiusY] },
+    { kind: 'lineTo', to: [center[0] + holeRadiusX, center[1]] },
+    { kind: 'close' },
+  );
+};
+
+const createFigureEightPath = (
+  center: Point2D,
+  width: number,
+  height: number,
+) => {
+  const left = center[0] - width / 2;
+  const right = center[0] + width / 2;
+  const top = center[1] - height / 2;
+  const bottom = center[1] + height / 2;
+  return createPath2D(
+    { kind: 'moveTo', to: [left, center[1] - height * 0.18] },
+    {
+      kind: 'cubicTo',
+      control1: [left + width * 0.22, top],
+      control2: [center[0] - width * 0.08, top],
+      to: [center[0], center[1]],
+    },
+    {
+      kind: 'cubicTo',
+      control1: [center[0] + width * 0.08, bottom],
+      control2: [right - width * 0.22, bottom],
+      to: [right, center[1] + height * 0.18],
+    },
+    {
+      kind: 'cubicTo',
+      control1: [right - width * 0.18, top + height * 0.02],
+      control2: [center[0] + width * 0.1, top + height * 0.08],
+      to: [center[0], center[1]],
+    },
+    {
+      kind: 'cubicTo',
+      control1: [center[0] - width * 0.12, bottom - height * 0.08],
+      control2: [left + width * 0.18, bottom - height * 0.02],
+      to: [left, center[1] - height * 0.18],
+    },
+    { kind: 'close' },
+  );
+};
+
+const createNestedDiamondPath = (
+  center: Point2D,
+  width: number,
+  height: number,
+  innerScale = 0.52,
+) =>
+  createPath2D(
+    ...createRoundedDiamondPath(center, width / 2, height / 2).verbs,
+    ...createRoundedDiamondPath(
+      center,
+      (width * innerScale) / 2,
+      (height * innerScale) / 2,
+    ).verbs,
+  );
 export const renderFillsCanvasKitSnapshot = async (): Promise<
   Readonly<{
     png: Uint8Array;
@@ -189,19 +373,22 @@ export const renderFillsCanvasKitSnapshot = async (): Promise<
 
   drawFill(createRectPath2D(createRect(44, 44, 632, 892)), [0.14, 0.15, 0.18, 1]);
   drawFill(createTrianglePath([92, 226], [182, 88], [274, 226]), [0.91, 0.37, 0.23, 1]);
-  drawFill(createKitePath([370, 156], 186, 134), [0.98, 0.8, 0.33, 1]);
+  drawFill(createWobblyDiamondPath([370, 156], 186, 134), [0.98, 0.8, 0.33, 1]);
   drawFill(createRoundedDiamondPath([558, 160], 88, 72), [0.22, 0.58, 0.47, 1]);
 
-  drawFill(createRectPath2D(createRect(84, 304, 170, 152)), [0.19, 0.54, 0.79, 0.94]);
+  drawFill(createDiamondCutoutRectPath(84, 304, 170, 152, 34, 42), [0.19, 0.54, 0.79, 0.94]);
+  drawFill(createSelfIntersectingStarPath([336, 350], 72), [0.64, 0.38, 0.84, 0.92]);
   canvas.save();
   canvas.translate(58, 326);
-  drawFill(createTrianglePath([0, 0], [88, 0], [0, 118]), [0.78, 0.46, 0.82, 0.72]);
+  drawFill(createTrianglePath([0, 0], [146, 0], [0, 118]), [0.78, 0.46, 0.82, 0.72]);
   canvas.restore();
-  drawFill(createKitePath([528, 382], 120, 142), [0.9, 0.59, 0.18, 1]);
+  drawFill(createConcaveKitePath([528, 382], 120, 142), [0.9, 0.59, 0.18, 1]);
 
   drawFill(createTrianglePath([94, 714], [152, 614], [212, 714]), [0.95, 0.46, 0.28, 0.54]);
   drawFill(createTrianglePath([152, 736], [278, 606], [322, 742]), [0.2, 0.47, 0.9, 0.42]);
   drawFill(createRoundedDiamondPath([252, 690], 104, 114), [0.13, 0.65, 0.52, 0.4]);
+  drawFill(createNestedDiamondPath([482, 834], 124, 92), [0.96, 0.73, 0.36, 0.88]);
+  drawFill(withPath2DFillRule(createNestedDiamondPath([608, 834], 124, 92), 'evenodd'), [0.48, 0.77, 0.86, 0.88]);
 
   canvas.save();
   canvas.translate(370, 556);

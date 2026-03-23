@@ -83,14 +83,14 @@ stack that fits this repository's TypeScript and WebGPU architecture.
 - `DawnBackendContext` -> `src/dawn_backend_context.ts`
   - Status: `started`
   - What exists: wraps adapter/device/queue/tick
-  - Missing: device feature negotiation policy
+  - Missing: richer backend validation, adapter-selection policy, and explicit device-loss recovery
 - `DawnSharedContext` -> `src/shared_context.ts`
   - Status: `partial`
   - What exists: shared backend state, caps, noop fragment shader, resource provider creation,
     backend-global bind group layouts, and a context-owned renderer provider with a fixed path
     rendering strategy
-  - Missing: graphics pipeline factory/helpers, broader bind-group families, and threaded
-    resource-provider split beyond a shared provider alias
+  - Missing: Skia-style global cache/shader dictionary plumbing, broader bind-group families, and a
+    real threaded resource-provider split beyond the shared provider alias
 - `DawnResourceProvider` -> `src/resource_provider.ts`
   - Status: `partial`
   - What exists: simple resource allocation plus cached fill/stroke/clip pipelines, first
@@ -98,12 +98,14 @@ stack that fits this repository's TypeScript and WebGPU architecture.
     stencil-cover separation, stencil attachment reuse, multisample-aware pipelines, sampler
     canonicalization/reuse, cached uniform/texture bind groups, cached viewport bind-group layout,
     and shared viewport pipeline layout
-  - Missing: wrapped resources, broader cache policy, intrinsic/uniform data upload plumbing, and
-    generalized pipeline keys
+  - Missing: wrapped/backend resources, intrinsic-constant style upload management, broader cache
+    policy, and more generalized pipeline/bind-group keys
 - `Context` -> `src/context.ts`
-  - Status: `started`
-  - What exists: context factory and recorder creation
-  - Missing: submit pipeline and global backend orchestration
+  - Status: `partial`
+  - What exists: context factory, shared-context creation, recorder creation, and queue-manager
+    ticking
+  - Missing: Skia-style submit/insert orchestration, internal recorder paths, and broader context
+    lifecycle APIs
 - `Recorder` -> `src/recorder.ts`
   - Status: `started`
   - What exists: abstract command collection plus save/restore, per-draw transform, and clip-stack
@@ -112,8 +114,9 @@ stack that fits this repository's TypeScript and WebGPU architecture.
 - `DawnCaps` -> `src/caps.ts`
   - Status: `partial`
   - What exists: device feature collection, limit probing, storage-buffer gating, row-alignment
-    policy, and initial format/sample policy
-  - Missing: richer format table coverage and backend-specific fallback/workaround policy
+    policy, richer format/sample policy, and runtime capability policy derived from actual device
+    and queue surface
+  - Missing: multiplanar/external-format nuance and deeper backend-specific workaround policy
 - `DawnCommandBuffer` -> `src/command_buffer.ts`
   - Status: `partial`
   - What exists: clear plus direct fill replay, first patch-instance fill/stroke replay, convex-clip
@@ -136,12 +139,13 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Missing: richer GPU fence/error handling, `WaitAny`-style batching, finish-proc ownership, async
     resource ownership, and per-resource completion tracking
 - `GraphicsPipeline` / caches -> `src/pipeline*.ts`
-  - Status: `pending`
-  - Missing: pipeline creation and reuse
+  - Status: `partial`
+  - What exists: render-pipeline creation and reuse currently live inside `src/resource_provider.ts`
+  - Missing: a separate Graphite-like pipeline/cache layer and broader key specialization
 - `Recording` -> `src/recording.ts`
-  - Status: `started`
-  - What exists: immutable recorded work snapshot
-  - Missing: pass partitioning and backend execution metadata
+  - Status: `partial`
+  - What exists: immutable recorded work snapshot that now feeds prepared pass/task generation
+  - Missing: richer backend execution metadata comparable to Graphite recording internals
 
 ## Local Files
 
@@ -158,12 +162,6 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Status: `partial`
   - Role: low-level resource creation, cached render pipelines, fill stencil/cover pipeline
     selection, stencil attachment reuse, canonical sampler reuse, and bind-group reuse
-  - Update 2026-03-23: stroke patch vertex replay now follows Skia's `tessellate_stroked_curve()`
-    branch structure more closely for degenerate conic square patches, round/circle patches, and
-    parametric segment selection
-  - Update 2026-03-23: duplicated-edge join seaming and `lastRadialEdgeID == 0` stabilization now
-    follow Skia's stroke tessellation shader more literally, reducing local seam-specific drift in
-    the WGSL vertex path
 - `src/recorder.ts`
   - Status: `partial`
   - Role: command recording API with transform and clip-stack state
@@ -194,26 +192,6 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - Role: adaptive curve flattening, conic/arc flattening, cusp splitting, patch preparation,
     triangulation, scanline fallback, convex clip-stack clipping, clip preparation, and stroke
     expansion strategy
-  - Update 2026-03-22: fill/stroke patches now carry Skia-style per-patch resolve levels derived
-    from Wang-like formulas, and fill patches preserve contour fan points instead of degrading
-    curved wedges into line-only triangles
-  - Update 2026-03-23: synthetic round stroke helper patches now preserve Skia
-    `PatchWriter::writeCircle()` semantics instead of reusing the metadata shape of true zero-length
-    round-cap contours, so only genuine degenerate stroked subpaths carry round-cap contour markers
-  - Update 2026-03-23: stroke patch preparation now finishes open/closed contours through a
-    `StrokeIterator`-like sequence with deferred first-patch replay and explicit `moveWithinContour`
-    barriers instead of the previous ad hoc contour flush
-  - Update 2026-03-23: explicit `close` on otherwise empty stroke contours now emits the same
-    zero-length round/square cap geometry that Skia `StrokeIterator` produces
-  - Update 2026-03-23: subpath flattening plus fill/stroke patch prep now preserve the contour start
-    point after `close`, matching Skia/Canvas current-point semantics for verbs that follow a closed
-    contour
-  - Update 2026-03-23: cubic 180-degree chop handling now follows Skia's cusp branches more closely
-    by pinning one-cusp cubic controls onto the cusp point and converting two-cusp chops into
-    circle-plus-line fallback instead of always replaying chopped cubics
-  - Update 2026-03-23: dashed and line-only stroke patch preparation now synthesize a stroke path
-    and reuse the same `StrokeIterator`-like patch writer path instead of keeping a separate
-    simplified contour patch assembler
 - `src/renderer_provider.ts`
   - Status: `started`
   - Role: context-wide renderer set and Graphite-like fill/stroke selection for convex tessellated
@@ -305,8 +283,11 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
   - Current state: recorder state stack exists for transform and clip stack
   - Missing: broader paint and clip state capture
 - Paint blending
-  - Status: `pending`
-  - Missing: blend mode model
+  - Status: `started`
+  - Current state: `DrawingBlendMode`, arithmetic custom blender coefficients, dst-read fallback
+    routing, and first WGSL/manual advanced blend execution now exist
+  - Missing: Graphite-style paint-param keying, backend-native advanced-blend integration, and
+    tighter blend/pipeline specialization
 - Anti-aliasing
   - Status: `started`
   - Current state: pipeline multisample count follows target sample count, the basic snapshot
@@ -387,12 +368,15 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
   - Current state: canonical descriptor reuse now caches identical samplers
   - Missing: broader backend cache eviction/purge policy
 - Bind groups
-  - Status: `started`
-  - Current state: shared-context bind group layouts now exist to match Skia's backend-global setup
-  - Missing: actual bind group allocation/cache wired into draw encoding
+  - Status: `partial`
+  - Current state: shared-context layouts plus viewport/step/clip bind-group allocation are wired
+    into draw encoding, with some provider-side reuse
+  - Missing: broader bind-group caching and resource-key specialization
 - Shader modules
-  - Status: `pending`
-  - Missing: shader lifecycle
+  - Status: `started`
+  - Current state: path/fill/stroke WGSL shader modules are created and cached in the resource
+    provider
+  - Missing: broader shader lifecycle management and specialization comparable to Graphite
 - Pipelines
   - Status: `partial`
   - Current state: direct fill, clip stencil, clip-aware cover, evenodd/nonzero fill stencil,
@@ -400,17 +384,19 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
     resource provider
   - Missing: generalized render pipeline creation and keying beyond viewport-only bindings
 - Global cache
-  - Status: `started`
-  - Current state: path pipelines and stencil attachments are reused through the resource provider
-  - Missing: broader shared backend caches
+  - Status: `partial`
+  - Current state: path pipelines, samplers, shader modules, and stencil attachments are reused in
+    the resource provider
+  - Missing: a true shared-context global cache and broader backend cache ownership
 - Resource budget
   - Status: `started`
   - Current state: number is stored
   - Missing: enforcement
 - Resource destruction
-  - Status: `pending`
-  - Current state: implicit only
-  - Missing: lifecycle policy
+  - Status: `started`
+  - Current state: submission-owned transient buffers are explicitly destroyed on completion; most
+    longer-lived resources still rely on implicit device lifetime
+  - Missing: broader lifecycle and purge policy for cached resources
 
 ## Rendering Pipeline Progress
 
@@ -434,8 +420,9 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
   - Vertex generation exists for direct fills, patch-instance wedges/curves/strokes, clip-aware
     fills, complex clip replay, and expanded strokes
 - GPU upload
-  - Status: `started`
-  - Simple per-draw vertex buffer upload exists for stencil and cover passes
+  - Status: `partial`
+  - Simple per-draw vertex/instance/uniform buffer upload exists for stencil, cover, patch, and
+    viewport payloads
 - Render pass setup
   - Status: `started`
   - Recording can be partitioned into prepared draw passes, and draw replay now covers direct
@@ -447,8 +434,9 @@ Geometry that is reusable across packages should live in `@rieul3d/geometry`, no
   - Basic fill, clip, and stroke pipelines exist for first path draws, are reused across command
     buffers, and now bind viewport uniforms explicitly instead of baking clip-space vertices on CPU
 - Draw submission
-  - Status: `started`
-  - Command buffer submission helper exists for encoded clears and first fill draws
+  - Status: `partial`
+  - Command buffer submission helpers exist for prepared recordings, path fills/strokes, and queue
+    manager tracked completion
 - Async work completion
   - Status: `partial`
   - Tick and in-flight submission tracking exist, and completion now follows submission-owned GPU
@@ -463,15 +451,10 @@ These decisions directly affect the remaining work and are not settled yet.
   - Status: `started`
   - First implementation triangulates simple contours directly, carries curve/wedge patch metadata,
     and falls back to scanline tessellation for problematic contours
-  - Update 2026-03-22: wedge and curve patch metadata now preserve enough control-point data for
-    GPU-side curve evaluation with per-patch resolve levels, closer to Skia
 - First stroke strategy
   - Status: `started`
   - First implementation now includes miter/bevel/round joins, butt/square/round caps, dash slicing,
     and hairline alpha scaling
-  - Update 2026-03-22: stroke patch replay now uses triangle-strip `vertexID` semantics, open round
-    caps are emitted as point-stroke patches, line endpoint replication matches Graphite, and stroke
-    cubics now go through Graphite-like chopping paths instead of a single high-resolve patch
 - Clip implementation
   - Status: `partial`
   - Save-record clip stacks, deferred save materialization, clip invalidation, deferred clip draw
@@ -481,8 +464,10 @@ These decisions directly affect the remaining work and are not settled yet.
   - Clip atlasing now exists through a shared clip atlas manager; general path/text atlas strategy
     is still pending
 - Pipeline cache shape
-  - Status: `pending`
-  - Depends on command buffer and shader layout
+  - Status: `started`
+  - First cache shape exists in `src/resource_provider.ts` for shader modules, samplers, and render
+    pipelines
+  - Missing: Graphite-style cross-context/global cache ownership and richer keys
 
 ## Tests And Verification
 
@@ -505,8 +490,6 @@ These decisions directly affect the remaining work and are not settled yet.
 - Backend capability tests
   - Status: `partial`
   - Caps tests now cover format tables, resolve/transient policy, and provider-side usage validation
-  - Update 2026-03-23: full `packages/drawing/tests/drawing_graphite_dawn_test.ts` passes after
-    queue submission ownership and stroke patch shader alignment
 
 ## Current Structural Delta
 
@@ -537,10 +520,6 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
     of exposing `middle-out-fan` as a standalone renderer kind; fill selection now also follows
     `Device::chooseMSAARenderer()`-style wedge-vs-curve heuristics from path verb count and draw
     bounds area
-  - Update 2026-03-23: the provider now owns fill-rule-specific stencil wedge/curve singleton
-    renderers and explicit renderer metadata (`kind`, patch mode, stencil/depth usage), and the
-    draw/prepare path consumes that metadata instead of re-deriving behavior from renderer-kind
-    strings
   - Remaining delta: still only the tessellation family is modeled; there is no atlas/compute
     strategy selection, shared RenderStep graph, or renderer-wide precompile iteration comparable to
     Graphite
@@ -562,23 +541,39 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
     verb-for-verb port, cusp handling is still a reduced version of Skia's full writer path in a few
     places, and translucent round cap/join coverage still needs Graphite-like analytic evaluation
     instead of flat color fill
-  - Update 2026-03-23: synthetic round helper patches are now separated from true degenerate
-    round-cap contours, removing a metadata mismatch that would have conflicted with later analytic
-    round cap/join coverage porting
-  - Update 2026-03-23: square caps now materialize as explicit line patches in the contour sequence,
-    closer to Skia `StrokeIterator` / `fillSquareCapPoints()` and avoiding the old degenerate-conic
-    placeholder path
 - `QueueManager` submission model is still simplified
   - Local state: queue submission, ordered outstanding submission ownership, completion draining, a
     `checkForFinishedWork`-style sync path, submission-owned transient buffer cleanup, and
     Graphite-like finish callback attachment on the latest outstanding work now exist in
     `src/queue_manager.ts`, `src/command_buffer.ts`, and `src/prepare_resources.ts`
-  - Update 2026-03-23: ordinary `tick()` no longer waits for all outstanding submissions to settle;
-    it now mirrors Graphite's non-blocking `checkForFinishedWork(kNo)` shape by draining only the
-    already-finished front of the queue, while the explicit sync path still waits for the newest
-    outstanding submission
   - Remaining delta: no command-buffer reuse, `WaitAny`-style batching, async mapped-resource
     ownership, or resource/fence correlation
+- `SharedContext` is still missing major Graphite shared infrastructure
+  - Local state: `src/shared_context.ts` owns caps, a renderer provider, a queue manager, one
+    resource provider instance, the noop fragment shader, and the backend-global bind-group layouts
+    needed by current 2D replay
+  - Remaining delta: no `SharedContext`-level global cache, shader-code dictionary, pipeline
+    callback plumbing, distinct thread-safe resource-provider object, or `deviceTick(Context*)` path
+    that couples backend ticking to async completion draining the way Skia `DawnSharedContext` does
+- `Context` is still far narrower than Skia Graphite `Context`
+  - Local state: `src/context.ts` creates a shared context, exposes recorder creation, and forwards
+    `tick()` to the queue manager
+  - Remaining delta: no context-owned resource provider, no finish-initialization path for static
+    GPU setup, no public `insertRecording()` / `submit()` orchestration split, no internal recorder
+    path, and no cleanup/readback/backend-texture management APIs comparable to Skia `Context.cpp`
+- `DawnResourceProvider` still lacks several backend-specific Graphite facilities
+  - Local state: `src/resource_provider.ts` can allocate buffers/textures/samplers, reuse graphics
+    pipelines, reuse canonical samplers, create bind groups needed by draw replay, and provide the
+    stencil attachment used by current passes
+  - Remaining delta: no wrapped/backend texture import or deletion path, no intrinsic-constant
+    buffer manager, no uniform/texture bind-group LRU keyed by bound resources, no discardable MSAA
+    load texture path, and no blit-with-draw helper like Skia `DawnResourceProvider`
+- `QueueManager` is still command-buffer centric instead of task/finish-info centric
+  - Local state: `src/queue_manager.ts` stages one encoded command buffer, submits it, tracks
+    ordered outstanding submissions, and exposes latest-submission finish callbacks
+  - Remaining delta: no `addTask()` / `addRecording()` / `addFinishInfo()` layering, no backend
+    command-buffer factory ownership, and no native `WaitAny` / `AsyncWait` polling split like Skia
+    `DawnQueueManager`
 - `Caps` still trails DawnCaps depth
   - Local state: `src/caps.ts` now owns a richer format table, color-type metadata,
     resolve/transient/MSRTSS policy, resource-binding requirements, provider-facing usage checks,
@@ -597,160 +592,6 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
    - Port remaining DawnCaps workaround logic, multiplanar/external format coverage, and binding
      requirement policy
    - Target files: `src/caps.ts`, `src/resource_provider.ts`
-
-## Recent Updates
-
-- 2026-03-23
-  - Files: `src/path_renderer.ts`, `tests/drawing_graphite_dawn_test.ts`
-  - Status transition: square stroke caps and zero-length square-cap contours now expand into
-    explicit line patches like Skia `StrokeIterator` / `fillSquareCapPoints()` instead of reduced
-    degenerate conic placeholders, and hairline degenerate square caps now use the same inverse-2x2
-    half-pixel backprojection shape as Skia instead of a local half-width fallback
-  - Remaining delta: round cap/join coverage is still not analytic, and some non-square
-    `StrokeIterator` semantics are still event-driven instead of verb-for-verb
-  - Validation: `deno test tests/drawing_graphite_dawn_test.ts`
-- 2026-03-23
-  - Files: `src/path_renderer.ts`, `tests/drawing_graphite_dawn_test.ts`
-  - Status transition: synthetic round stroke circles now mirror Skia `PatchWriter::writeCircle()`
-    semantics, while true zero-length stroked subpaths remain the only patches that advertise
-    round-cap contour metadata
-  - Remaining delta: analytic round cap/join coverage and fuller verb-for-verb `StrokeIterator`
-    parity still remain
-  - Validation: `deno test tests/drawing_graphite_dawn_test.ts`
-- 2026-03-23
-  - Files: `src/resource_provider.ts`, `tests/drawing_graphite_dawn_test.ts`
-  - Status transition: hairline stroke tessellation now follows Graphite's order of operations by
-    applying the affine 2x2 to patch control points and join control points before tessellating,
-    then adding translation only after device-space stroking
-  - Remaining delta: join seam/root solving is still a reduced WGSL transcription and round join/cap
-    coverage remains flat-color instead of analytic
-  - Validation: `deno test tests/drawing_graphite_dawn_test.ts`
-- 2026-03-23
-  - Files: `src/prepare_resources.ts`, `src/resource_provider.ts`,
-    `tests/drawing_graphite_dawn_test.ts`
-  - Status transition: stroke step payloads now carry the same CPU-derived `maxScale` that Skia's
-    `TessellateStrokesRenderStep` writes into uniforms, and the WGSL stroke tessellator now uses
-    that value instead of recomputing a looser column-length approximation in shader code
-  - Remaining delta: the rest of `tessellate_stroked_curve()` still has reduced seam-safety branches
-    and flat-color round join/cap coverage
-  - Validation: `deno test tests/drawing_graphite_dawn_test.ts`
-- 2026-03-23
-  - Files: `src/path_renderer.ts`, `tests/drawing_graphite_dawn_test.ts`
-  - Status transition: explicit close-only contours now stroke as zero-length round/square caps,
-    matching Skia `StrokeIterator` instead of dropping the contour
-  - Remaining delta: duplicated-edge seam math and fuller verb-for-verb iterator parity still remain
-  - Validation: `deno test tests/drawing_graphite_dawn_test.ts`
-- 2026-03-23
-  - Files: `src/path_renderer.ts`, `tests/drawing_graphite_dawn_test.ts`
-  - Status transition: `close` now preserves the contour start as the post-close current point
-    across subpath flattening and patch preparation, so later verbs reopen from the same place as
-    Skia/Canvas instead of failing or being dropped
-  - Remaining delta: duplicated-edge seam math and fuller verb-for-verb iterator parity still remain
-  - Validation: `deno test tests/drawing_graphite_dawn_test.ts`
-- 2026-03-23
-  - Files: `src/renderer_provider.ts`, `src/path_renderer.ts`, `src/draw_pass.ts`,
-    `src/prepare_resources.ts`, `tests/drawing_graphite_dawn_test.ts`
-  - Status transition: `RendererProvider` now owns Graphite-like singleton renderer objects with
-    fill-rule-specific stencil variants, and prepared draws/resource setup consume renderer metadata
-    instead of string-only renderer kinds
-  - Remaining delta: the provider still does not own a Graphite-style `RenderStep` graph, and only
-    the tessellation renderer family needed for Dawn-backed 2D drawing is modeled
-  - Validation: `deno test tests/drawing_graphite_dawn_test.ts`
-- 2026-03-23
-  - Files: `src/renderer_provider.ts`, `src/path_renderer.ts`, `tests/drawing_graphite_dawn_test.ts`
-  - Status transition: `RendererProvider` now applies Graphite-like wedge-versus-curve heuristics
-    from path complexity and draw bounds instead of always preferring wedges when fan patches exist
-  - Remaining delta: only tessellation renderers exist, and the provider still exposes renderer
-    kinds instead of full RenderStep-backed renderer objects
-  - Validation: `deno test tests/drawing_graphite_dawn_test.ts`
-- 2026-03-23
-  - Files: `src/renderer_provider.ts`, `src/draw_pass.ts`, `src/path_renderer.ts`,
-    `src/prepare_resources.ts`, `src/command_buffer.ts`, `tests/drawing_graphite_dawn_test.ts`
-  - Status transition: convex fill renderer selection now matches Graphite's
-    `convexTessellatedWedges()` shape instead of using `middle-out-fan` as a top-level renderer
-  - Remaining delta: the tessellation strategy still lacks Graphite's shared `RenderStep` ownership
-    model and the atlas/compute strategy families
-  - Validation: `deno test tests/drawing_graphite_dawn_test.ts`
-- 2026-03-23
-  - Files: `src/renderer_provider.ts`, `src/shared_context.ts`, `src/recording.ts`,
-    `src/draw_pass.ts`, `src/path_renderer.ts`, `tests/drawing_graphite_dawn_test.ts`
-  - Status transition: `RendererProvider` widened from a stateless selector to a context-owned
-    provider with a fixed path rendering strategy
-  - Remaining delta: only the tessellation strategy exists; Graphite's renderer inventory,
-    RenderStep ownership, and alternate atlas/compute strategies are still missing
-  - Validation: `deno test tests/drawing_graphite_dawn_test.ts`
-- 2026-03-23
-  - Files: `src/queue_manager.ts`, `tests/drawing_graphite_dawn_test.ts`
-  - Status transition: ordinary queue ticks now keep unfinished submissions pending instead of
-    implicitly awaiting every outstanding completion promise, so `checkForFinishedWork(kNo)` is
-    structurally closer to Skia's non-blocking front-drain behavior
-  - Remaining delta: WebGPU still lacks Graphite's `WaitAny`-backed polling path, command-buffer
-    reuse, and explicit fence/resource correlation
-  - Validation: `deno test tests/drawing_graphite_dawn_test.ts`
-- 2026-03-23
-  - Files: `src/queue_manager.ts`, `tests/drawing_graphite_dawn_test.ts`
-  - Status transition: `QueueManager` moved from counter-only tracking to a more Graphite-like
-    `GpuWorkSubmission` ownership model with explicit submission state and `checkForFinishedWork`
-    semantics
-  - Remaining delta: completion is still promise/tick based in WebGPU terms, without Graphite's
-    `WaitAny` path, finish-proc ownership, fence correlation, or command-buffer recycling
-  - Validation: `deno test tests/drawing_graphite_dawn_test.ts`
-- 2026-03-23
-  - Files: `src/prepare_resources.ts`, `src/command_buffer.ts`, `src/queue_manager.ts`,
-    `tests/drawing_graphite_dawn_test.ts`
-  - Status transition: per-recording viewport, payload, geometry, and clip buffers are now owned by
-    the encoded Dawn submission and released when the submission finishes or submit fails, bringing
-    WebGPU transient resource lifetime closer to Graphite's submission-owned cleanup model
-  - Remaining delta: command-buffer reuse, async mapped-resource ownership, and `WaitAny`-style
-    completion batching are still missing
-  - Validation: `deno test tests/drawing_graphite_dawn_test.ts`
-- 2026-03-23
-  - Files: `src/queue_manager.ts`, `tests/drawing_graphite_dawn_test.ts`
-  - Status transition: `QueueManager` now exposes Graphite-like finish callback attachment on
-    outstanding submissions and the queue manager itself, with completion, failure, and idle-queue
-    delivery paths
-  - Remaining delta: command-buffer reuse, async mapped-resource ownership, `WaitAny`-style
-    batching, and explicit resource/fence correlation are still missing
-  - Validation: `deno test tests/drawing_graphite_dawn_test.ts`
-- 2026-03-23
-  - Files: `src/caps.ts`, `tests/drawing_graphite_dawn_test.ts`
-  - Status transition: runtime capability policy now derives CPU sync, async pipeline creation,
-    scoped error checks, and compute support from actual WebGPU queue/device methods instead of the
-    presence of a backend tick callback alone
-  - Remaining delta: multiplanar/external-format backend nuance and native-Dawn workaround policy
-    are still intentionally reduced for the WebGPU-only target
-  - Validation: `deno test tests/drawing_graphite_dawn_test.ts`
-- 2026-03-23
-  - Files: `src/resource_provider.ts`, `tests/drawing_graphite_dawn_test.ts`
-  - Status transition: stroke tessellation shader now matches Skia more closely for duplicated-edge
-    join seaming and the `lastRadialEdgeID == 0` radial-root stabilization path
-  - Remaining delta: translucent round cap/join coverage is still flat-color, and some
-    `tessellate_stroked_curve()` safety branches remain less literal than Skia
-  - Validation: `deno test tests/drawing_graphite_dawn_test.ts`
-- 2026-03-23
-  - Files: `src/caps.ts`, `src/context.ts`, `src/shared_context.ts`, `src/renderer_provider.ts`,
-    `tests/drawing_graphite_dawn_test.ts`
-  - Status transition: `Caps` now own the policy inputs for path renderer strategy selection, and
-    shared-context/context creation can thread an explicit requested strategy into the renderer
-    provider
-  - Remaining delta: only the tessellation strategy is still implemented for the WebGPU target, so
-    the new policy surface does not yet enable alternate atlas/compute families
-  - Validation: `deno test tests/drawing_graphite_dawn_test.ts`
-- 2026-03-23
-  - Files: `src/queue_manager.ts`, `tests/drawing_graphite_dawn_test.ts`
-  - Status transition: `QueueManager` now exposes explicit Graphite-like work queries and test
-    coverage for ordered front-drain of outstanding submissions
-  - Remaining delta: WebGPU completion is still promise-based, without Graphite's `WaitAny`,
-    command-buffer reuse, or resource/fence correlation
-  - Validation: `deno test tests/drawing_graphite_dawn_test.ts`
-- 2026-03-23
-  - Files: `src/queue_manager.ts`, `tests/drawing_graphite_dawn_test.ts`
-  - Status transition: `QueueManager` now separates command-buffer staging from submission so the
-    local API shape is closer to Graphite's `add*()` then `submitToGpu()` split while keeping the
-    old one-shot submit helper as a convenience path
-  - Remaining delta: staging is still command-buffer only, without Graphite's task/recording
-    insertion API, command-buffer reuse, or resource/fence correlation
-  - Validation: `deno test tests/drawing_graphite_dawn_test.ts`
 
 ## Update Rules
 

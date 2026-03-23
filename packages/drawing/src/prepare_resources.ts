@@ -87,7 +87,7 @@ const curvePatchFloats = 12;
 const strokePatchFloats = 14;
 const maxPatchResolveLevel = 5;
 const patchSegmentCount = 1 << maxPatchResolveLevel;
-const wedgePatchVertexCount = patchSegmentCount * 3;
+const wedgePatchVertexCount = (patchSegmentCount + 1) * 3;
 const curvePatchVertexCount = patchSegmentCount * 3;
 const maxStrokeEdges = (1 << 14) - 1;
 
@@ -697,19 +697,21 @@ const prepareStepResources = (
       : usesPatchFill
       ? patchVertices
       : fillVertices;
+    const usesPatchInstances = usesPatchFill &&
+      (step.kind === 'fill-main' || step.kind === 'fill-stencil');
     const vertexBuffer = activeVertices && activeVertices.length > 0
       ? createVertexBuffer(sharedContext, activeVertices)
       : null;
     const vertexCount = !activeVertices
       ? 0
-      : step.kind === 'fill-main' && usesPatchFill
+      : usesPatchInstances
       ? step.draw.renderer.patchMode === 'wedge'
         ? wedgePatchVertexCount
         : curvePatchVertexCount
       : activeVertices.length / floatsPerVertex;
     const instanceCount = !activeVertices
       ? 0
-      : step.kind === 'fill-main' && usesPatchFill
+      : usesPatchInstances
       ? patchVertices!.length /
         (step.draw.renderer.patchMode === 'wedge' ? wedgePatchFloats : curvePatchFloats)
       : 1;

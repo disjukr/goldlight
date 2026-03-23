@@ -1754,6 +1754,49 @@ Deno.test('drawing prepared recording computes Wang-style resolve levels for pat
   assertEquals(scaledResolveLevel >= baseResolveLevel, true);
 });
 
+Deno.test('drawing prepared recording uses Graphite contour midpoint for wedge fan points', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [24, 24] },
+      { kind: 'lineTo', to: [144, 24] },
+      { kind: 'lineTo', to: [144, 120] },
+      { kind: 'lineTo', to: [24, 120] },
+      { kind: 'close' },
+      { kind: 'moveTo', to: [84, 44] },
+      { kind: 'lineTo', to: [52, 72] },
+      { kind: 'lineTo', to: [84, 100] },
+      { kind: 'lineTo', to: [116, 72] },
+      { kind: 'close' },
+    ),
+    { style: 'fill', color: [0.2, 0.4, 0.8, 1] },
+  );
+
+  const recording = finishDrawingRecorder(recorder);
+  const prepared = prepareDrawingRecording(recording);
+  const draw = prepared.passes[0]!.steps[0]!.draw;
+  const preparedWork = prepareDawnRecording(
+    createDawnSharedContext(createDawnBackendContext(mock.context)),
+    recording,
+  );
+
+  assertEquals(draw.renderer.kind, 'stencil-tessellated-wedges');
+  if (draw.kind !== 'pathFill') {
+    throw new Error(`expected pathFill draw, got ${draw.kind}`);
+  }
+  const wedgePatches = draw.patches.filter(
+    (patch): patch is (typeof draw.patches)[number] & { fanPoint: [number, number] } =>
+      'fanPoint' in patch && patch.fanPoint !== undefined,
+  );
+  assertEquals(wedgePatches.length > 0, true);
+  assertEquals(wedgePatches[0]!.fanPoint, [104, 88]);
+  assertEquals(preparedWork.resources.tasks[0]!.passes[0]!.steps[0]!.instanceCount, 8);
+});
+
 Deno.test('drawing prepared recording preserves evenodd fill rule through draw step metadata', () => {
   const mock = createMockGpuContext();
   const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
@@ -2916,6 +2959,55 @@ Deno.test('dawn command buffer uses stencil-cover fill path for patch-rendered n
   assertEquals(mock.created.renderPasses[0]?.depthStencilAttachment !== undefined, true);
   assertEquals(mock.created.drawCalls.length, 1);
   assertEquals(mock.created.renderPipelines.length, 1);
+});
+
+Deno.test('dawn stencil cover clears winding stencil for successive nonzero fills', () => {
+  const mock = createMockGpuContext();
+  const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
+  const recorder = createDrawingRecorder(sharedContext);
+  const binding = createOffscreenBinding(mock.context);
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [24, 24] },
+      { kind: 'lineTo', to: [144, 24] },
+      { kind: 'lineTo', to: [144, 144] },
+      { kind: 'lineTo', to: [24, 144] },
+      { kind: 'close' },
+      { kind: 'moveTo', to: [84, 48] },
+      { kind: 'lineTo', to: [48, 84] },
+      { kind: 'lineTo', to: [84, 120] },
+      { kind: 'lineTo', to: [120, 84] },
+      { kind: 'close' },
+    ),
+    { style: 'fill', color: [0.2, 0.4, 0.6, 0.9] },
+  );
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [168, 24] },
+      { kind: 'lineTo', to: [240, 24] },
+      { kind: 'lineTo', to: [240, 96] },
+      { kind: 'lineTo', to: [168, 96] },
+      { kind: 'close' },
+      { kind: 'moveTo', to: [204, 40] },
+      { kind: 'lineTo', to: [184, 60] },
+      { kind: 'lineTo', to: [204, 80] },
+      { kind: 'lineTo', to: [224, 60] },
+      { kind: 'close' },
+    ),
+    { style: 'fill', color: [0.7, 0.5, 0.2, 0.9] },
+  );
+
+  encodeDawnCommandBuffer(sharedContext, finishDrawingRecorder(recorder), binding);
+
+  const stencilCoverPipeline = mock.created.renderPipelines.find((pipeline) =>
+    pipeline.label === 'drawing-path-fill-stencil-cover'
+  );
+  assertEquals(stencilCoverPipeline !== undefined, true);
+  assertEquals(stencilCoverPipeline?.depthStencil?.stencilFront?.passOp, 'zero');
+  assertEquals(stencilCoverPipeline?.depthStencil?.stencilBack?.passOp, 'zero');
 });
 
 Deno.test('dawn command buffer clips via clip path stencil replay with clip bounds', () => {

@@ -486,52 +486,59 @@ fn vs_main(
   @location(5) fanPoint: vec2<f32>,
 ) -> VertexOut {
   let triVertex = vertexIndex % 3u;
-  let segmentIndex = vertexIndex / 3u;
+  let triangleIndex = vertexIndex / 3u;
   let activeSegments = max(1u, 1u << u32(clamp(curveMeta.z, 0.0, MAX_RESOLVE_LEVEL)));
-  let t0 = f32(segmentIndex) / f32(activeSegments);
-  let t1 = f32(min(segmentIndex + 1u, activeSegments)) / f32(activeSegments);
   var local: vec2<f32>;
   let curveType = curveMeta.x;
   let weight = curveMeta.y;
-  let oneMinusT0 = 1.0 - t0;
-  let oneMinusT1 = 1.0 - t1;
-  var a = p0;
-  var b = p3;
-  if (curveType < 0.5) {
-    a = mix(p0, p3, t0);
-    b = mix(p0, p3, t1);
-  } else if (curveType < 1.5) {
-    a = (oneMinusT0 * oneMinusT0 * p0) + (2.0 * oneMinusT0 * t0 * p1) + (t0 * t0 * p2);
-    b = (oneMinusT1 * oneMinusT1 * p0) + (2.0 * oneMinusT1 * t1 * p1) + (t1 * t1 * p2);
-  } else if (curveType < 2.5) {
-    let denom0 = max((oneMinusT0 * oneMinusT0) + (2.0 * weight * oneMinusT0 * t0) + (t0 * t0), 1e-5);
-    let denom1 = max((oneMinusT1 * oneMinusT1) + (2.0 * weight * oneMinusT1 * t1) + (t1 * t1), 1e-5);
-    a = ((oneMinusT0 * oneMinusT0 * p0) + (2.0 * weight * oneMinusT0 * t0 * p1) + (t0 * t0 * p2)) / denom0;
-    b = ((oneMinusT1 * oneMinusT1 * p0) + (2.0 * weight * oneMinusT1 * t1 * p1) + (t1 * t1 * p2)) / denom1;
-  } else {
-    a =
-      (oneMinusT0 * oneMinusT0 * oneMinusT0 * p0) +
-      (3.0 * oneMinusT0 * oneMinusT0 * t0 * p1) +
-      (3.0 * oneMinusT0 * t0 * t0 * p2) +
-      (t0 * t0 * t0 * p3);
-    b =
-      (oneMinusT1 * oneMinusT1 * oneMinusT1 * p0) +
-      (3.0 * oneMinusT1 * oneMinusT1 * t1 * p1) +
-      (3.0 * oneMinusT1 * t1 * t1 * p2) +
-      (t1 * t1 * t1 * p3);
-  }
-  if (segmentIndex >= activeSegments) {
+  if (triangleIndex == 0u) {
     if (triVertex == 0u) {
       local = fanPoint;
+    } else if (triVertex == 1u) {
+      local = p0;
     } else {
       local = p3;
     }
-  } else if (triVertex == 0u) {
-    local = fanPoint;
-  } else if (triVertex == 1u) {
-    local = a;
   } else {
-    local = b;
+    let segmentIndex = triangleIndex - 1u;
+    let t0 = f32(segmentIndex) / f32(activeSegments);
+    let t1 = f32(min(segmentIndex + 1u, activeSegments)) / f32(activeSegments);
+    let oneMinusT0 = 1.0 - t0;
+    let oneMinusT1 = 1.0 - t1;
+    var a = p0;
+    var b = p3;
+    if (curveType < 0.5) {
+      a = mix(p0, p3, t0);
+      b = mix(p0, p3, t1);
+    } else if (curveType < 1.5) {
+      a = (oneMinusT0 * oneMinusT0 * p0) + (2.0 * oneMinusT0 * t0 * p1) + (t0 * t0 * p2);
+      b = (oneMinusT1 * oneMinusT1 * p0) + (2.0 * oneMinusT1 * t1 * p1) + (t1 * t1 * p2);
+    } else if (curveType < 2.5) {
+      let denom0 = max((oneMinusT0 * oneMinusT0) + (2.0 * weight * oneMinusT0 * t0) + (t0 * t0), 1e-5);
+      let denom1 = max((oneMinusT1 * oneMinusT1) + (2.0 * weight * oneMinusT1 * t1) + (t1 * t1), 1e-5);
+      a = ((oneMinusT0 * oneMinusT0 * p0) + (2.0 * weight * oneMinusT0 * t0 * p1) + (t0 * t0 * p2)) / denom0;
+      b = ((oneMinusT1 * oneMinusT1 * p0) + (2.0 * weight * oneMinusT1 * t1 * p1) + (t1 * t1 * p2)) / denom1;
+    } else {
+      a =
+        (oneMinusT0 * oneMinusT0 * oneMinusT0 * p0) +
+        (3.0 * oneMinusT0 * oneMinusT0 * t0 * p1) +
+        (3.0 * oneMinusT0 * t0 * t0 * p2) +
+        (t0 * t0 * t0 * p3);
+      b =
+        (oneMinusT1 * oneMinusT1 * oneMinusT1 * p0) +
+        (3.0 * oneMinusT1 * oneMinusT1 * t1 * p1) +
+        (3.0 * oneMinusT1 * t1 * t1 * p2) +
+        (t1 * t1 * t1 * p3);
+    }
+    if (segmentIndex >= activeSegments) {
+      local = p3;
+    } else if (triVertex == 0u) {
+      local = p0;
+    } else if (triVertex == 1u) {
+      local = a;
+    } else {
+      local = b;
+    }
   }
   let devicePosition = local_to_device(local);
   var out: VertexOut;
@@ -1247,8 +1254,9 @@ const createStencilCoverState = (): GPUDepthStencilState => ({
   depthCompare: 'always',
   stencilReadMask: 0xff,
   stencilWriteMask: 0x00,
-  stencilFront: createStencilFaceState('keep', 'not-equal'),
-  stencilBack: createStencilFaceState('keep', 'not-equal'),
+  // Graphite's stencil cover consumes the accumulated winding mask as it shades.
+  stencilFront: createStencilFaceState('zero', 'not-equal'),
+  stencilBack: createStencilFaceState('zero', 'not-equal'),
 });
 
 const createDirectDepthLessState = (): GPUDepthStencilState => ({

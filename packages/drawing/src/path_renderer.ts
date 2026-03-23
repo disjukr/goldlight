@@ -2443,6 +2443,7 @@ const preparePatches = (
   let pendingContourStart: Point2D | null = null;
   let contourPoints: Point2D[] = [];
   let contourPatches: DrawingPatchDefinition[] = [];
+  let contourClosedExplicitly = false;
 
   const pushPatch = (patch: DrawingPatchDefinition): void => {
     if (includeFanPoint) {
@@ -2457,21 +2458,24 @@ const preparePatches = (
       contourPatches = [];
       contourPoints = [];
       contourStart = null;
+      contourClosedExplicitly = false;
       return;
     }
     if (contourPoints.length < 3 || contourPatches.length === 0) {
       contourPatches = [];
       contourPoints = [];
       contourStart = null;
+      contourClosedExplicitly = false;
       return;
     }
-    const fanPoint = computeContourMidpoint(contourPoints);
+    const fanPoint = computeContourMidpoint(contourPoints, !contourClosedExplicitly);
     for (const patch of contourPatches) {
       patches.push(finalizePatch(patch, { fanPoint }));
     }
     contourPatches = [];
     contourPoints = [];
     contourStart = null;
+    contourClosedExplicitly = false;
   };
 
   const ensureImplicitContour = (): boolean => {
@@ -2485,6 +2489,7 @@ const preparePatches = (
     contourStart = pendingContourStart;
     contourPoints = [pendingContourStart];
     pendingContourStart = null;
+    contourClosedExplicitly = false;
     return true;
   };
 
@@ -2497,6 +2502,7 @@ const preparePatches = (
         currentPoint = to;
         contourStart = to;
         contourPoints = [to];
+        contourClosedExplicitly = false;
         break;
       }
       case 'lineTo': {
@@ -2595,6 +2601,7 @@ const preparePatches = (
           pushPatch({ kind: 'line', points: [currentPoint, contourStart] });
         }
         pendingContourStart = contourStart;
+        contourClosedExplicitly = true;
         flushWedges();
         currentPoint = contourStart;
         break;
@@ -3302,41 +3309,32 @@ const transformPoints = (
   transform: readonly [number, number, number, number, number, number],
 ): readonly Point2D[] => Object.freeze(points.map((point) => transformPoint2D(point, transform)));
 
-const computeContourMidpoint = (points: readonly Point2D[]): Point2D => {
+const computeContourMidpoint = (
+  points: readonly Point2D[],
+  addImplicitCloseStart: boolean,
+): Point2D => {
   if (points.length === 0) {
     return [0, 0];
   }
   if (points.length === 1) {
     return points[0]!;
   }
-
-  const closedPoints = pointsEqual(points[0]!, points[points.length - 1]!)
-    ? points
-    : [...points, points[0]!];
-  let totalLength = 0;
-  for (let index = 1; index < closedPoints.length; index += 1) {
-    totalLength += Math.hypot(
-      closedPoints[index]![0] - closedPoints[index - 1]![0],
-      closedPoints[index]![1] - closedPoints[index - 1]![1],
-    );
+  const startPoint = points[0]!;
+  const endpointPoints = points.slice(1);
+  let sumX = 0;
+  let sumY = 0;
+  let weight = 0;
+  for (const point of endpointPoints) {
+    sumX += point[0];
+    sumY += point[1];
+    weight += 1;
   }
-  if (totalLength <= epsilon) {
-    return points[0]!;
+  if (addImplicitCloseStart && !pointsEqual(startPoint, endpointPoints[endpointPoints.length - 1]!)) {
+    sumX += startPoint[0];
+    sumY += startPoint[1];
+    weight += 1;
   }
-
-  const targetLength = totalLength / 2;
-  let traversed = 0;
-  for (let index = 1; index < closedPoints.length; index += 1) {
-    const start = closedPoints[index - 1]!;
-    const end = closedPoints[index]!;
-    const segmentLength = Math.hypot(end[0] - start[0], end[1] - start[1]);
-    if (traversed + segmentLength >= targetLength) {
-      const t = (targetLength - traversed) / Math.max(segmentLength, epsilon);
-      return lerp(start, end, t);
-    }
-    traversed += segmentLength;
-  }
-  return points[0]!;
+  return weight > 0 ? [sumX / weight, sumY / weight] : [0, 0];
 };
 
 const preparePathFill = (

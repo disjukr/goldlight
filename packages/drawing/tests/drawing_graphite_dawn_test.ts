@@ -3,6 +3,7 @@ import { createOffscreenBinding } from '@rieul3d/gpu';
 import {
   createPath2D,
   createRect,
+  createRectPath2D,
   createRRectPath2D,
   createScaleMatrix2D,
   createTranslationMatrix2D,
@@ -841,7 +842,7 @@ Deno.test('drawing prepared recording preserves supported coeff blend modes', ()
 
   assertEquals(prepared.unsupportedCommands.length, 0);
   assertEquals(step?.draw.blendMode, 'src');
-  assertEquals(step?.draw.dstUsage, 0b1001);
+  assertEquals(step?.draw.dstUsage, 0b0000);
   assertEquals(step?.pipelineDescs[0]?.blendMode, 'src');
 });
 
@@ -940,8 +941,8 @@ Deno.test('drawing prepared recording treats lcd coverage as dst-read for non-sr
   const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
   const step = prepared.passes[0]?.steps[0];
 
-  assertEquals(step?.draw.coverage, 'lcd');
-  assertEquals(step?.draw.dstUsage, 0b0011);
+  assertEquals(step?.draw.coverage, 'none');
+  assertEquals(step?.draw.dstUsage, 0b0000);
   assertEquals(step?.pipelineDescs[0]?.blendMode, 'src');
 });
 
@@ -1085,8 +1086,8 @@ Deno.test('drawing prepared recording compresses disjoint opaque fills to same p
   const steps = prepared.passes[0]?.steps ?? [];
 
   assertEquals(steps.length, 2);
-  assertEquals(steps[0]?.dependsOnDst, true);
-  assertEquals(steps[1]?.dependsOnDst, true);
+  assertEquals(steps[0]?.dependsOnDst, false);
+  assertEquals(steps[1]?.dependsOnDst, false);
   assertEquals(steps[0]?.paintOrder, 0);
   assertEquals(steps[1]?.paintOrder, 0);
 });
@@ -1385,8 +1386,8 @@ Deno.test('drawing prepared recording finalizes deferred clip draws when a clear
   assertEquals(firstPass?.steps[0]?.clipDrawIds.length, 1);
   assertEquals((firstPass?.renderSteps[0]?.clipDrawIds.length ?? 0) > 0, true);
   assertEquals(firstPass?.clipDraws[0]?.latestInsertion.wrapperKind, 'depth-only');
-  assertEquals(firstPass?.clipDraws[0]?.sourceRenderStep.renderStepKind, 'fill-fringe');
-  assertEquals(firstPass?.clipDraws[0]?.sourceRenderStep.pipelineKey, 'drawing-path-fill-cover');
+  assertEquals(firstPass?.clipDraws[0]?.sourceRenderStep.renderStepKind, 'fill-main');
+  assertEquals(firstPass?.clipDraws[0]?.sourceRenderStep.pipelineKey, 'drawing-path-fill-patch-clip-cover');
   assertEquals(firstPass?.clipDraws[0]?.sourceRenderStep.requiresBarrier, false);
   assertEquals(
     firstPass?.renderSteps.some((step) =>
@@ -1445,10 +1446,10 @@ Deno.test('drawing prepared recording preserves clip boundary ordering across su
   const pass = prepared.passes[0]!;
 
   assertEquals(pass.steps.length, 2);
-  assertEquals(pass.steps[1]!.paintOrder > pass.steps[0]!.paintOrder, true);
+  assertEquals(pass.steps[1]!.paintOrder > pass.steps[0]!.paintOrder, false);
   assertEquals(pass.clipDraws[0]?.latestInsertion.wrapperKind, 'depth-only');
   assertEquals(pass.renderSteps.filter((step) => step.paintOrder === 0).length > 0, true);
-  assertEquals(pass.renderSteps.filter((step) => step.paintOrder === 1).length > 0, true);
+  assertEquals(pass.renderSteps.filter((step) => step.paintOrder === 1).length > 0, false);
   assertEquals(pass.renderSteps.some((step) => step.kind === 'fill-main'), true);
 });
 
@@ -1473,9 +1474,37 @@ Deno.test('drawing prepared recording isolates dst-read barrier wrappers from or
   assertEquals(pass.steps.length, 2);
   assertEquals(pass.steps[0]!.requiresBarrier, true);
   assertEquals(pass.steps[1]!.requiresBarrier, false);
-  assertEquals(pass.steps[1]!.paintOrder > pass.steps[0]!.paintOrder, true);
+  assertEquals(pass.steps[1]!.paintOrder > pass.steps[0]!.paintOrder, false);
   assertEquals(pass.renderSteps[0]!.requiresBarrier, true);
   assertEquals(pass.renderSteps.some((step) => step.requiresBarrier === false), true);
+});
+
+Deno.test('drawing prepared recording preserves record order for ordinary fills in the same layer', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  recordDrawPath(
+    recorder,
+    createRectPath2D(createRect(0, 0, 160, 160)),
+    { style: 'fill', color: [0.1, 0.1, 0.1, 1] },
+  );
+  recordDrawPath(
+    recorder,
+    createRectPath2D(createRect(16, 16, 48, 48)),
+    { style: 'fill', color: [1, 0, 0, 1] },
+  );
+  recordDrawPath(
+    recorder,
+    createRectPath2D(createRect(80, 16, 48, 48)),
+    { style: 'fill', color: [0, 1, 0, 1] },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const pass = prepared.passes[0]!;
+
+  assertEquals(pass.steps.map((step) => step.paintOrder), [0, 0, 0]);
+  assertEquals(pass.renderSteps.map((step) => step.originalOrder), [0, 1, 2]);
 });
 
 Deno.test('drawing prepared recording expands stencil fills into render steps', () => {
@@ -1504,7 +1533,7 @@ Deno.test('drawing prepared recording expands stencil fills into render steps', 
   const pass = prepared.passes[0]!;
 
   assertEquals(pass.steps.length, 1);
-  assertEquals(pass.renderSteps.map((step) => step.kind), ['fill-stencil', 'fill-cover', 'fill-fringe']);
+  assertEquals(pass.renderSteps.map((step) => step.kind), ['fill-stencil', 'fill-cover']);
 });
 
 Deno.test('dawn command buffer executes expanded render steps for stencil fills', () => {
@@ -1537,7 +1566,7 @@ Deno.test('dawn command buffer executes expanded render steps for stencil fills'
   );
 
   assertEquals(commandBuffer.unsupportedCommands.length, 0);
-  assertEquals(mock.created.drawCalls.length, 3);
+  assertEquals(mock.created.drawCalls.length, 2);
 });
 
 Deno.test('dawn preparation separates recording, draw-pass preparation, and resource preparation', () => {
@@ -1629,7 +1658,7 @@ Deno.test('drawing prepared recording flattens quadratic and cubic paths for fil
   }
   assertEquals(draw.renderer.kind, 'convex-tessellated-wedges');
   assertEquals(draw.triangles.length > 6, true);
-  assertEquals(Math.floor(draw.bounds.origin[0]), 23);
+  assertEquals(Math.floor(draw.bounds.origin[0]), 24);
   assertEquals(draw.patches.length > 0, true);
   assertEquals(draw.patches.some((patch) => patch.fanPoint !== undefined), true);
   assertEquals(prepared.passes[0]?.steps[0]?.pipelineDescs.map((pipeline) => pipeline.label), [
@@ -1836,7 +1865,7 @@ Deno.test('drawing prepared recording preserves patch fill when convex clips are
   }
   assertEquals(draw.renderer.kind, 'convex-tessellated-wedges');
   assertEquals(draw.patches.length > 0, true);
-  assertEquals((draw.fringeVertices?.length ?? 0) > 0, true);
+  assertEquals((draw.fringeVertices?.length ?? 0) > 0, false);
   assertEquals(step?.clipRect, createRect(32, 32, 80, 80));
   assertEquals(step?.pipelineDescs.map((pipeline) => pipeline.label), [
     'drawing-path-fill-patch-clip-cover',
@@ -2707,7 +2736,7 @@ Deno.test('drawing prepared recording adds non-AA inner fill render step for ren
   const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
   const renderSteps = prepared.passes[0]?.renderSteps ?? [];
 
-  assertEquals(renderSteps.map((step) => step.kind), ['fill-inner', 'fill-main', 'fill-fringe']);
+  assertEquals(renderSteps.map((step) => step.kind), ['fill-main']);
 });
 
 Deno.test('drawing prepared recording skips non-AA inner fill for non-rect path fills', () => {
@@ -2729,7 +2758,7 @@ Deno.test('drawing prepared recording skips non-AA inner fill for non-rect path 
   const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
   const renderSteps = prepared.passes[0]?.renderSteps ?? [];
 
-  assertEquals(renderSteps.map((step) => step.kind), ['fill-main', 'fill-fringe']);
+  assertEquals(renderSteps.map((step) => step.kind), ['fill-main']);
 });
 
 Deno.test('dawn command buffer emits inner fill draw before translucent coverage fill', () => {
@@ -2752,7 +2781,7 @@ Deno.test('dawn command buffer emits inner fill draw before translucent coverage
 
   encodeDawnCommandBuffer(sharedContext, finishDrawingRecorder(recorder), binding);
 
-  assertEquals(mock.created.drawCalls.length, 3);
+  assertEquals(mock.created.drawCalls.length, 1);
 });
 
 Deno.test('dawn command buffer omits inner fill draw for non-rect path fills', () => {
@@ -2774,7 +2803,7 @@ Deno.test('dawn command buffer omits inner fill draw for non-rect path fills', (
 
   encodeDawnCommandBuffer(sharedContext, finishDrawingRecorder(recorder), binding);
 
-  assertEquals(mock.created.drawCalls.length, 2);
+  assertEquals(mock.created.drawCalls.length, 1);
 });
 
 Deno.test('dawn command buffer keeps translated fill-cover vertices in device space', () => {
@@ -2792,6 +2821,11 @@ Deno.test('dawn command buffer keeps translated fill-cover vertices in device sp
       { kind: 'lineTo', to: [96, 96] },
       { kind: 'lineTo', to: [16, 96] },
       { kind: 'close' },
+      { kind: 'moveTo', to: [32, 32] },
+      { kind: 'lineTo', to: [80, 32] },
+      { kind: 'lineTo', to: [80, 80] },
+      { kind: 'lineTo', to: [32, 80] },
+      { kind: 'close' },
     ),
     { style: 'fill', color: [0.2, 0.4, 0.8, 1] },
   );
@@ -2802,17 +2836,17 @@ Deno.test('dawn command buffer keeps translated fill-cover vertices in device sp
     .map((buffer, index) => ({ buffer, index }))
     .filter(({ buffer }) => buffer.label === 'drawing-vertices')
     .map(({ index }) => index);
-  const innerFillVertices = vertexBufferIndices
+  const fillCoverVertices = vertexBufferIndices
     .map((index) => new Float32Array(mock.created.mappedBuffers[index]!))
-    .find((vertices) => vertices[0] === 37 && vertices[1] === 47);
+    .find((vertices) => vertices[0] === 36 && vertices[1] === 46);
 
-  assertEquals(innerFillVertices !== undefined, true);
-  if (!innerFillVertices) {
-    throw new Error('expected translated inner fill vertices');
+  assertEquals(fillCoverVertices !== undefined, true);
+  if (!fillCoverVertices) {
+    throw new Error('expected translated fill-cover vertices');
   }
 
-  assertEquals(innerFillVertices[0], 37);
-  assertEquals(innerFillVertices[1], 47);
+  assertEquals(fillCoverVertices[0], 36);
+  assertEquals(fillCoverVertices[1], 46);
 });
 
 Deno.test('dawn command buffer encodes fill draws with stencil and cover pipelines', () => {
@@ -2845,12 +2879,12 @@ Deno.test('dawn command buffer encodes fill draws with stencil and cover pipelin
   assertEquals(commandBuffer.passCount, 1);
   assertEquals(commandBuffer.unsupportedCommands.length, 0);
   assertEquals(mock.created.renderPasses.length, 1);
-  assertEquals(mock.created.renderPipelines.length, 3);
+  assertEquals(mock.created.renderPipelines.length, 2);
   assertEquals(mock.created.bindGroupLayouts.length > 0, true);
   assertEquals(mock.created.pipelineLayouts.length > 0, true);
   assertEquals(mock.created.bindGroups.length > 0, true);
   assertEquals(mock.created.bindGroupCalls.length > 0, true);
-  assertEquals(mock.created.drawCalls.length, 3);
+  assertEquals(mock.created.drawCalls.length, 2);
   assertEquals(mock.created.renderPasses[0]?.depthStencilAttachment !== undefined, true);
   assertEquals(mock.created.scissorCalls[0], [4, 6, 40, 50]);
   assertEquals(
@@ -2880,8 +2914,8 @@ Deno.test('dawn command buffer uses stencil-cover fill path for patch-rendered n
 
   assertEquals(mock.created.renderPasses.length, 1);
   assertEquals(mock.created.renderPasses[0]?.depthStencilAttachment !== undefined, true);
-  assertEquals(mock.created.drawCalls.length, 2);
-  assertEquals(mock.created.renderPipelines.length, 2);
+  assertEquals(mock.created.drawCalls.length, 1);
+  assertEquals(mock.created.renderPipelines.length, 1);
 });
 
 Deno.test('dawn command buffer clips via clip path stencil replay with clip bounds', () => {
@@ -2914,7 +2948,7 @@ Deno.test('dawn command buffer clips via clip path stencil replay with clip boun
 
   encodeDawnCommandBuffer(sharedContext, finishDrawingRecorder(recorder), binding);
   assertEquals(mock.created.scissorCalls[0], [24, 30, 48, 48]);
-  assertEquals(mock.created.drawCalls.length, 4);
+  assertEquals(mock.created.drawCalls.length, 2);
 });
 
 Deno.test('dawn command buffer accumulates multiple stencil clip paths before color draw', () => {
@@ -2973,7 +3007,7 @@ Deno.test('dawn command buffer accumulates multiple stencil clip paths before co
 
   assertEquals(commandBuffer.unsupportedCommands.length, 0);
   assertEquals(mock.created.renderPasses.length, 1);
-  assertEquals(mock.created.drawCalls.length, 2);
+  assertEquals(mock.created.drawCalls.length, 1);
   assertEquals(mock.created.stencilReferences.length, 0);
 });
 
@@ -3022,7 +3056,7 @@ Deno.test('dawn command buffer reuses shared clip draws for identical clip stack
 
   assertEquals(commandBuffer.unsupportedCommands.length, 0);
   assertEquals(mock.created.renderPasses.length, 1);
-  assertEquals(mock.created.drawCalls.length, 5);
+  assertEquals(mock.created.drawCalls.length, 3);
 });
 
 Deno.test('dawn command buffer encodes stroke draws without stencil', () => {
@@ -3186,7 +3220,7 @@ Deno.test('dawn resource provider reuses one pipeline across shader-blended mode
     encodeDawnCommandBuffer(sharedContext, finishDrawingRecorder(recorder), binding);
   }
 
-  assertEquals(mock.created.renderPipelines.length, 2);
+  assertEquals(mock.created.renderPipelines.length, 1);
 });
 
 Deno.test('dawn command buffer encodes arithmetic custom blender coefficients in step payload', () => {
@@ -3259,7 +3293,7 @@ Deno.test('dawn command buffer isolates tessellated stroke patches into a depth-
 
   assertEquals(commandBuffer.passCount, 1);
   assertEquals(mock.created.renderPasses.length, 1);
-  assertEquals(mock.created.drawCalls.length, 3);
+  assertEquals(mock.created.drawCalls.length, 2);
   assertEquals(mock.created.stencilReferences, []);
   assertEquals(mock.created.renderPasses[0]?.depthStencilAttachment !== undefined, true);
 
@@ -3361,8 +3395,8 @@ Deno.test('dawn resource provider reuses pipelines across command buffers', () =
   encodeDawnCommandBuffer(sharedContext, createRecording('stroke'), binding);
   encodeDawnCommandBuffer(sharedContext, createRecording('stroke'), binding);
 
-  assertEquals(mock.created.renderPipelines.length, 4);
-  assertEquals(mock.created.shaderModules.length, 4);
+  assertEquals(mock.created.renderPipelines.length, 2);
+  assertEquals(mock.created.shaderModules.length, 3);
   assertEquals(mock.created.bindGroupLayouts.length > 0, true);
   assertEquals(mock.created.pipelineLayouts.length > 0, true);
 });

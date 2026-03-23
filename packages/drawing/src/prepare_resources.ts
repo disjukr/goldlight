@@ -120,9 +120,9 @@ const createColoredDeviceSpaceVertexData = (
     const coverage = vertex.color[3];
     vertices[offset++] = vertex.point[0];
     vertices[offset++] = vertex.point[1];
-    vertices[offset++] = coverage;
-    vertices[offset++] = coverage;
-    vertices[offset++] = coverage;
+    vertices[offset++] = 1;
+    vertices[offset++] = 1;
+    vertices[offset++] = 1;
     vertices[offset++] = coverage;
   }
 

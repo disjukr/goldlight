@@ -726,6 +726,7 @@ const assignLayeredOrder = (
     let insertedBindingNode: DrawingBinding | null = null;
     let insertedLayer: DrawingLayer | null = null;
     let lastInsertedRenderStep: MutablePreparedRenderStep | null = null;
+    let insertBeforeInTargetLayer = false;
     for (const renderStep of drawRenderSteps) {
       const orderedRenderStep: MutablePreparedRenderStep = {
         ...renderStep,
@@ -735,6 +736,7 @@ const assignLayeredOrder = (
       const candidateLayers = device.layers.filter((layer) => layer.paintOrder === step.paintOrder);
       let targetLayer: DrawingLayer | null = null;
       let targetBindingNode: DrawingBinding | null = null;
+      insertBeforeInTargetLayer = false;
 
       if (dependsOnDst) {
         const stopIndex = clipAnchorLayer && clipAnchorLayer.paintOrder === step.paintOrder
@@ -783,6 +785,7 @@ const assignLayeredOrder = (
               if (verdict.acceptable) {
                 targetLayer = layer;
                 targetBindingNode = verdict.bindingNode;
+                insertBeforeInTargetLayer = layer !== startLayer;
                 if (verdict.compatible) {
                   break;
                 }
@@ -817,8 +820,7 @@ const assignLayeredOrder = (
         targetLayer,
         orderedRenderStep,
         targetBindingNode,
-        !dependsOnDst &&
-          (!clipAnchorLayer || targetLayer !== clipAnchorLayer),
+        !dependsOnDst && insertBeforeInTargetLayer,
       );
     }
     for (let index = 0; index < clipElements.length; index += 1) {

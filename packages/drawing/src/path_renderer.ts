@@ -18,7 +18,11 @@ import type {
   DrawShapeCommand,
 } from './types.ts';
 import type { DrawingRecording } from './recording.ts';
-import { type DrawingRenderer, type DrawingRendererProvider } from './renderer_provider.ts';
+import {
+  isDrawingPatchFillRenderer,
+  type DrawingRenderer,
+  type DrawingRendererProvider,
+} from './renderer_provider.ts';
 
 type FlattenedSubpath = Readonly<{
   points: readonly Point2D[];
@@ -3395,7 +3399,9 @@ const preparePathFill = (
         baseTriangles = prepareFillTriangles(subpaths, command.path.fillRule) ?? [];
         break;
     }
-    const fringeVertices = buildFillFringe(subpaths, resolveFillColor(command.paint));
+    const fringeVertices = isDrawingPatchFillRenderer(renderer)
+      ? undefined
+      : buildFillFringe(subpaths, resolveFillColor(command.paint));
     const coverage = resolveCoverage(command.paint, Boolean(fringeVertices?.length));
     if (!baseTriangles) {
       return { supported: false, reason: 'path fill triangulation failed' };

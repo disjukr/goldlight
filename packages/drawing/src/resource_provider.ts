@@ -424,9 +424,10 @@ fn vs_main(
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
+  let coverage = in.color.a;
   let clipCoverage = clip_coverage(in.devicePosition);
-  var color = apply_clip_shader(in.color * step.color);
-  color.a *= clipCoverage;
+  var color = apply_clip_shader(step.color);
+  color.a *= coverage * clipCoverage;
   return blend_with_dst(color, in.devicePosition);
 }
 `;

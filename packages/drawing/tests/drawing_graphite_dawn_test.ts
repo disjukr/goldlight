@@ -2733,6 +2733,44 @@ Deno.test('dawn command buffer emits inner fill draw before translucent coverage
   assertEquals(mock.created.drawCalls.length, 3);
 });
 
+Deno.test('dawn command buffer keeps translated fill-cover vertices in device space', () => {
+  const mock = createMockGpuContext();
+  const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
+  const recorder = createDrawingRecorder(sharedContext);
+  const binding = createOffscreenBinding(mock.context);
+
+  translateDrawingRecorder(recorder, 20, 30);
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [16, 16] },
+      { kind: 'lineTo', to: [96, 16] },
+      { kind: 'lineTo', to: [96, 96] },
+      { kind: 'lineTo', to: [16, 96] },
+      { kind: 'close' },
+    ),
+    { style: 'fill', color: [0.2, 0.4, 0.8, 1] },
+  );
+
+  encodeDawnCommandBuffer(sharedContext, finishDrawingRecorder(recorder), binding);
+
+  const vertexBufferIndices = mock.created.buffers
+    .map((buffer, index) => ({ buffer, index }))
+    .filter(({ buffer }) => buffer.label === 'drawing-vertices')
+    .map(({ index }) => index);
+  const innerFillVertices = vertexBufferIndices
+    .map((index) => new Float32Array(mock.created.mappedBuffers[index]!))
+    .find((vertices) => vertices[0] === 37 && vertices[1] === 47);
+
+  assertEquals(innerFillVertices !== undefined, true);
+  if (!innerFillVertices) {
+    throw new Error('expected translated inner fill vertices');
+  }
+
+  assertEquals(innerFillVertices[0], 37);
+  assertEquals(innerFillVertices[1], 47);
+});
+
 Deno.test('dawn command buffer encodes fill draws with stencil and cover pipelines', () => {
   const mock = createMockGpuContext();
   const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));

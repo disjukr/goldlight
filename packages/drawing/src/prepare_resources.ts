@@ -1,5 +1,5 @@
 import type { DrawingPreparedClipElement } from './clip_stack.ts';
-import type { Point2D } from '@rieul3d/geometry';
+import { identityMatrix2D, type Point2D } from '@rieul3d/geometry';
 import {
   type DrawingPreparedClipDraw,
   type DrawingPreparedRecording,
@@ -129,6 +129,25 @@ const createColoredDeviceSpaceVertexData = (
   return vertices;
 };
 
+const createDeviceSpaceVertexData = (
+  triangles: readonly (readonly [number, number])[],
+  modulation: readonly [number, number, number, number],
+): Float32Array => {
+  const vertices = new Float32Array(triangles.length * floatsPerVertex);
+  let offset = 0;
+
+  for (const point of triangles) {
+    vertices[offset++] = point[0];
+    vertices[offset++] = point[1];
+    vertices[offset++] = modulation[0];
+    vertices[offset++] = modulation[1];
+    vertices[offset++] = modulation[2];
+    vertices[offset++] = modulation[3];
+  }
+
+  return vertices;
+};
+
 const createVertexBuffer = (
   sharedContext: DawnSharedContext,
   vertices: Float32Array,
@@ -244,7 +263,7 @@ const createBoundsCoverVertexData = (
   }>,
   color: readonly [number, number, number, number],
 ): Float32Array =>
-  createVertexModulationData(
+  createDeviceSpaceVertexData(
     [
       bounds.origin,
       [bounds.origin[0] + bounds.size.width, bounds.origin[1]],
@@ -538,6 +557,10 @@ const getPipelineBlendMode = (
 ): DrawingPreparedRenderStep['draw']['blendMode'] =>
   (step.draw.dstUsage & drawingDstUsage.dstReadRequired) !== 0 ? 'src' : step.draw.blendMode;
 
+const usesDeviceSpaceVertices = (step: DrawingPreparedRenderStep): boolean =>
+  step.kind === 'fill-inner' ||
+  step.kind === 'fill-cover';
+
 const createClipStepResources = (
   sharedContext: DawnSharedContext,
   step: DrawingPreparedRenderStep,
@@ -626,7 +649,7 @@ const prepareStepResources = (
   };
   const stepPayloadBuffer = createStepPayloadBuffer(
     sharedContext,
-    step.draw.transform,
+    usesDeviceSpaceVertices(step) ? identityMatrix2D : step.draw.transform,
     step.depth,
     step.draw.color,
     step.draw.kind === 'pathStroke' ? step.draw.strokeStyle : null,

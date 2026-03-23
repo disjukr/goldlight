@@ -1890,11 +1890,16 @@ const flattenArc = (
   transform: readonly [number, number, number, number, number, number],
   out: Point2D[],
 ): void => {
+  const turn = Math.PI * 2;
   let span = endAngle - startAngle;
-  if (counterClockwise && span > 0) {
-    span -= Math.PI * 2;
-  } else if (!counterClockwise && span < 0) {
-    span += Math.PI * 2;
+  if (counterClockwise) {
+    while (span <= 0) {
+      span += turn;
+    }
+  } else {
+    while (span >= 0) {
+      span -= turn;
+    }
   }
   const segments = Math.max(4, Math.ceil(Math.abs(span) / (Math.PI / 12)));
   for (let index = 1; index <= segments; index += 1) {
@@ -3140,6 +3145,67 @@ const computeStrokeBounds = (
   };
 };
 
+const outsetRect = (rect: Rect, amount: number): Rect => ({
+  origin: [rect.origin[0] - amount, rect.origin[1] - amount],
+  size: {
+    width: rect.size.width + (2 * amount),
+    height: rect.size.height + (2 * amount),
+  },
+});
+
+const computeStrokeInflationRadius = (
+  subpaths: readonly FlattenedSubpath[],
+  strokeStyle: DrawingStrokeStyle,
+): number => {
+  let multiplier = 1;
+  const canProduceMiters = strokeStyle.joinLimit > 0 &&
+    subpaths.some((subpath) => subpath.points.length > 2);
+  if (canProduceMiters) {
+    multiplier = Math.max(multiplier, strokeStyle.joinLimit);
+  }
+  if (strokeStyle.cap === 'square') {
+    multiplier = Math.max(multiplier, Math.SQRT2);
+  }
+  return strokeStyle.halfWidth * multiplier;
+};
+
+const computeGraphiteStyleStrokeOrderBounds = (
+  subpaths: readonly FlattenedSubpath[],
+  strokeStyle: DrawingStrokeStyle,
+  transform: readonly [number, number, number, number, number, number],
+): Rect => {
+  const points = subpaths.flatMap((subpath) => subpath.points);
+  if (points.length === 0) {
+    return { origin: [0, 0], size: { width: 0, height: 0 } };
+  }
+  const localBounds = computeBounds(points);
+  const inflatedLocalBounds = outsetRect(
+    localBounds,
+    computeStrokeInflationRadius(subpaths, strokeStyle),
+  );
+  const transformedBounds = computeBounds(transformPoints(rectCorners(inflatedLocalBounds), transform));
+  return outsetRect(transformedBounds, aaFringeWidth);
+};
+
+const rectCorners = (rect: Rect): readonly Point2D[] => Object.freeze([
+  rect.origin,
+  [rect.origin[0] + rect.size.width, rect.origin[1]],
+  [rect.origin[0] + rect.size.width, rect.origin[1] + rect.size.height],
+  [rect.origin[0], rect.origin[1] + rect.size.height],
+]);
+
+const computePreparedVertexBounds = (
+  vertices: readonly DrawingPreparedVertex[] | undefined,
+): Rect | undefined =>
+  vertices && vertices.length > 0 ? computeBounds(vertices.map((vertex) => vertex.point)) : undefined;
+
+const mergeBounds = (
+  bounds: readonly (Rect | undefined)[],
+): Rect => {
+  const valid = bounds.filter((bound): bound is Rect => bound !== undefined);
+  return valid.length > 0 ? unionBounds(valid) : { origin: [0, 0], size: { width: 0, height: 0 } };
+};
+
 const canUseTessellatedStrokePatches = (
   patches: readonly DrawingPreparedStrokePatch[],
   subpaths: readonly FlattenedSubpath[],
@@ -3270,6 +3336,12 @@ const preparePathFill = (
       blendMode,
       blender,
     );
+    const transformedFillBounds = computeBounds(transformPoints(baseTriangles, command.transform));
+    const transformedFringeBounds = computePreparedVertexBounds(fringeVertices);
+    const fillDrawBounds = mergeBounds([
+      transformedFillBounds,
+      transformedFringeBounds,
+    ]);
     return {
       supported: true,
       draw: {
@@ -3279,7 +3351,7 @@ const preparePathFill = (
         fringeVertices,
         patches,
         innerFillBounds: (dstUsage & drawingDstUsage.dstOnlyUsedByRenderer) !== 0
-          ? insetRect(computeBounds(transformPoints(baseTriangles, command.transform)), aaFringeWidth)
+          ? insetRect(transformedFillBounds, aaFringeWidth)
           : undefined,
         fillRule: command.path.fillRule,
         color: fillColor,
@@ -3288,7 +3360,7 @@ const preparePathFill = (
         blender,
         dstUsage,
         transform: command.transform,
-        bounds: computeBounds(transformPoints(baseTriangles, command.transform)),
+        bounds: fillDrawBounds,
         clipRect: preparedClipStack.bounds,
         clip: preparedClip,
         usesStencil: Boolean(preparedClipStack.stencilClip?.elements?.length),
@@ -3335,6 +3407,21 @@ const preparePathFill = (
     blendMode,
     blender,
   );
+  const transformedStrokeTriangleBounds = strokeTriangles.length > 0
+    ? computeBounds(transformPoints(strokeTriangles, command.transform))
+    : undefined;
+  const transformedStrokeRectBounds = computeBounds(transformPoints(
+    rectCorners(strokedBounds),
+    command.transform,
+  ));
+  const transformedStrokeFringeBounds = computePreparedVertexBounds(preparedStroke.fringeVertices);
+  const strokeOrderBounds = usesTessellatedStrokePatches
+    ? computeGraphiteStyleStrokeOrderBounds(dashedStrokeSubpaths, strokeStyle, command.transform)
+    : mergeBounds([
+      transformedStrokeTriangleBounds,
+      transformedStrokeRectBounds,
+      transformedStrokeFringeBounds,
+    ]);
   return {
     supported: true,
     draw: {
@@ -3351,13 +3438,7 @@ const preparePathFill = (
       dstUsage,
       strokeStyle,
       transform: command.transform,
-      bounds: computeBounds(transformPoints([
-        strokedBounds.origin,
-        [
-          strokedBounds.origin[0] + strokedBounds.size.width,
-          strokedBounds.origin[1] + strokedBounds.size.height,
-        ] as Point2D,
-      ], command.transform)),
+      bounds: strokeOrderBounds,
       clipRect: preparedClipStack.bounds,
       clip: preparedClip,
       usesStencil: Boolean(preparedClipStack.stencilClip?.elements?.length),

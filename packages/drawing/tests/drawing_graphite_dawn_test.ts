@@ -1127,6 +1127,51 @@ Deno.test('drawing prepared recording compresses disjoint translucent draws to s
   assertEquals(steps[1]?.paintOrder, 0);
 });
 
+Deno.test('drawing prepared recording can drop back to earlier compressed paint order for later disjoint draws', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [0, 0] },
+      { kind: 'lineTo', to: [20, 0] },
+      { kind: 'lineTo', to: [20, 20] },
+      { kind: 'close' },
+    ),
+    { style: 'fill', color: [1, 0, 0, 0.5] },
+  );
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [10, 10] },
+      { kind: 'lineTo', to: [30, 10] },
+      { kind: 'lineTo', to: [30, 30] },
+      { kind: 'close' },
+    ),
+    { style: 'fill', color: [0, 0, 1, 0.5] },
+  );
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [60, 60] },
+      { kind: 'lineTo', to: [80, 60] },
+      { kind: 'lineTo', to: [80, 80] },
+      { kind: 'close' },
+    ),
+    { style: 'fill', color: [0, 1, 0, 0.5] },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const steps = prepared.passes[0]?.steps ?? [];
+
+  assertEquals(steps.length, 3);
+  assertEquals(steps[0]?.paintOrder, 0);
+  assertEquals(steps[1]?.paintOrder, 1);
+  assertEquals(steps[2]?.paintOrder, 0);
+});
+
 Deno.test('drawing prepared recording uses clipped draw bounds for dst dependency queries', () => {
   const mock = createMockGpuContext();
   const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
@@ -1167,6 +1212,92 @@ Deno.test('drawing prepared recording uses clipped draw bounds for dst dependenc
   assertEquals(steps[1]?.drawBounds, createRect(40, 40, 20, 20));
   assertEquals(steps[0]?.paintOrder, 0);
   assertEquals(steps[1]?.paintOrder, 0);
+});
+
+Deno.test('drawing prepared recording uses conservative transformed stroke bounds for order compression', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+  const skewTransform: [number, number, number, number, number, number] = [1, 0, -1, 1, 0, 0];
+
+  concatDrawingRecorderTransform(recorder, skewTransform);
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [0, 0] },
+      { kind: 'lineTo', to: [10, 50] },
+    ),
+    { style: 'stroke', strokeWidth: 12, color: [1, 0, 0, 0.5] },
+  );
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [18, 0] },
+      { kind: 'lineTo', to: [28, 50] },
+    ),
+    { style: 'stroke', strokeWidth: 12, color: [0, 0, 1, 0.5] },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const steps = prepared.passes[0]?.steps ?? [];
+
+  assertEquals(steps.length, 2);
+  assertEquals(steps[0]!.drawBounds.origin[0] < steps[1]!.drawBounds.origin[0], true);
+  assertEquals(steps[0]!.paintOrder, 0);
+  assertEquals(steps[1]!.paintOrder, 1);
+});
+
+Deno.test('drawing prepared recording uses Graphite-style stroke inflation for tessellated stroke ordering', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [410, 675] },
+      {
+        kind: 'arcTo',
+        center: [500, 675],
+        radius: 90,
+        startAngle: Math.PI,
+        endAngle: 0,
+      },
+    ),
+    {
+      style: 'stroke',
+      strokeWidth: 18,
+      strokeJoin: 'round',
+      strokeCap: 'round',
+      color: [0.13, 0.45, 0.36, 0.85],
+    },
+  );
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [500, 748] },
+      { kind: 'lineTo', to: [542, 878] },
+      { kind: 'lineTo', to: [430, 796] },
+      { kind: 'lineTo', to: [570, 796] },
+      { kind: 'lineTo', to: [458, 878] },
+      { kind: 'close' },
+    ),
+    {
+      style: 'stroke',
+      strokeWidth: 18,
+      strokeJoin: 'miter',
+      strokeCap: 'butt',
+      miterLimit: 4,
+      color: [0.66, 0.22, 0.72, 0.5],
+    },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const steps = prepared.passes[0]?.steps ?? [];
+
+  assertEquals(steps.length, 2);
+  assertEquals(steps[0]!.drawBounds.origin[1] + steps[0]!.drawBounds.size.height > steps[1]!.drawBounds.origin[1], true);
+  assertEquals(steps[1]!.paintOrder, 1);
 });
 
 Deno.test('drawing prepared recording preserves shared clip element ids across restored clips', () => {
@@ -1498,7 +1629,7 @@ Deno.test('drawing prepared recording flattens quadratic and cubic paths for fil
   }
   assertEquals(draw.renderer.kind, 'convex-tessellated-wedges');
   assertEquals(draw.triangles.length > 6, true);
-  assertEquals(draw.bounds.origin[0], 24);
+  assertEquals(Math.floor(draw.bounds.origin[0]), 23);
   assertEquals(draw.patches.length > 0, true);
   assertEquals(draw.patches.some((patch) => patch.fanPoint !== undefined), true);
   assertEquals(prepared.passes[0]?.steps[0]?.pipelineDescs.map((pipeline) => pipeline.label), [
@@ -3089,6 +3220,10 @@ Deno.test('dawn stroke patch shader keeps Skia-like combined-edge solve structur
   );
   assertEquals(strokeShaderSource.includes('let rootSentinel = -0.5 * rootQ * quadraticA;'), true);
   assertEquals(strokeShaderSource.includes('unchecked_mix_vec2'), true);
+  assertEquals(
+    strokeShaderSource.includes('step.matrix1.w'),
+    true,
+  );
 });
 
 Deno.test('dawn resource provider reuses pipelines across command buffers', () => {

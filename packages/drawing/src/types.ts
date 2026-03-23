@@ -139,8 +139,73 @@ export type DrawingArithmeticBlender = Readonly<{
 
 export type DrawingCustomBlender = DrawingArithmeticBlender;
 
+export type DrawingGradientTileMode = 'clamp' | 'repeat' | 'mirror' | 'decal';
+
+export type DrawingGradientInterpolationColorSpace =
+  | 'destination'
+  | 'srgb'
+  | 'srgb-linear';
+
+export type DrawingGradientInterpolation = Readonly<{
+  inPremul?: boolean;
+  colorSpace?: DrawingGradientInterpolationColorSpace;
+}>;
+
+export type DrawingGradientStop = Readonly<{
+  offset: number;
+  color: readonly [number, number, number, number];
+}>;
+
+type DrawingGradientShaderBase = Readonly<{
+  stops: readonly DrawingGradientStop[];
+  tileMode?: DrawingGradientTileMode;
+  interpolation?: DrawingGradientInterpolation;
+}>;
+
+export type DrawingLinearGradientShader =
+  & DrawingGradientShaderBase
+  & Readonly<{
+    kind: 'linear-gradient';
+    start: DrawingPoint2D;
+    end: DrawingPoint2D;
+  }>;
+
+export type DrawingRadialGradientShader =
+  & DrawingGradientShaderBase
+  & Readonly<{
+    kind: 'radial-gradient';
+    center: DrawingPoint2D;
+    radius: number;
+  }>;
+
+export type DrawingTwoPointConicalGradientShader =
+  & DrawingGradientShaderBase
+  & Readonly<{
+    kind: 'two-point-conical-gradient';
+    startCenter: DrawingPoint2D;
+    startRadius: number;
+    endCenter: DrawingPoint2D;
+    endRadius: number;
+  }>;
+
+export type DrawingSweepGradientShader =
+  & DrawingGradientShaderBase
+  & Readonly<{
+    kind: 'sweep-gradient';
+    center: DrawingPoint2D;
+    startAngle: number;
+    endAngle?: number;
+  }>;
+
+export type DrawingPaintShader =
+  | DrawingLinearGradientShader
+  | DrawingRadialGradientShader
+  | DrawingTwoPointConicalGradientShader
+  | DrawingSweepGradientShader;
+
 export type DrawingPaint = Readonly<{
   color?: readonly [number, number, number, number];
+  shader?: DrawingPaintShader;
   blendMode?: DrawingBlendMode;
   coverage?: DrawingCoverageMode;
   blender?: DrawingCustomBlender;

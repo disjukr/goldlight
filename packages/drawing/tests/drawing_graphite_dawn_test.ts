@@ -2204,6 +2204,83 @@ Deno.test('drawing prepared recording carries analytic and shader clip metadata'
   assertEquals(draw.clip?.shader?.color, [0.5, 0.75, 1, 0.5]);
 });
 
+Deno.test('drawing prepared recording carries linear gradient shader metadata', () => {
+  const mock = createMockGpuContext();
+  const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
+  const recorder = createDrawingRecorder(sharedContext);
+
+  recordDrawPath(
+    recorder,
+    createRectPath2D(createRect(24, 24, 120, 96)),
+    {
+      style: 'fill',
+      shader: {
+        kind: 'linear-gradient',
+        start: [24, 24],
+        end: [144, 120],
+        stops: [
+          { offset: 0, color: [1, 0.4, 0.2, 1] },
+          { offset: 1, color: [0.1, 0.5, 1, 1] },
+        ],
+      },
+    },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const draw = prepared.passes[0]?.steps[0]?.draw;
+  assertEquals(draw?.kind, 'pathFill');
+  assertEquals(draw?.shader?.kind, 'linear-gradient');
+  assertEquals(draw?.shader?.stops[0], { offset: 0, color: [1, 0.4, 0.2, 1] });
+  assertEquals(draw?.shader?.stops[1], { offset: 1, color: [0.1, 0.5, 1, 1] });
+});
+
+Deno.test('dawn command buffer encodes gradient-filled draws without unsupported commands', () => {
+  const mock = createMockGpuContext();
+  const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
+  const recorder = createDrawingRecorder(sharedContext);
+  const binding = createOffscreenBinding(mock.context);
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [48, 32] },
+      { kind: 'lineTo', to: [128, 56] },
+      { kind: 'lineTo', to: [112, 144] },
+      { kind: 'lineTo', to: [32, 132] },
+      { kind: 'close' },
+    ),
+    {
+      style: 'fill',
+      shader: {
+        kind: 'sweep-gradient',
+        center: [80, 88],
+        startAngle: 0,
+        endAngle: Math.PI * 2,
+        stops: [
+          { offset: 0, color: [1, 0.84, 0.22, 1] },
+          { offset: 1, color: [0.28, 0.22, 1, 1] },
+        ],
+      },
+    },
+  );
+
+  const commandBuffer = encodeDawnCommandBuffer(
+    sharedContext,
+    finishDrawingRecorder(recorder),
+    binding,
+  );
+
+  assertEquals(commandBuffer.unsupportedCommands.length, 0);
+  const pathShaderCode = mock.created.shaderModules
+    .map((descriptor) => descriptor.code)
+    .find((code) =>
+      typeof code === 'string' &&
+      code.includes('fn paint_shader_color(devicePosition: vec2<f32>) -> vec4<f32>') &&
+      code.includes('fn sweep_gradient_t(localPosition: vec2<f32>) -> f32')
+    );
+  assertEquals(typeof pathShaderCode, 'string');
+});
+
 Deno.test('drawing prepared recording falls back for self-intersecting fill paths', () => {
   const mock = createMockGpuContext();
   const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));

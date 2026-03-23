@@ -117,7 +117,8 @@ const encodeStencilClips = (
 ): number => {
   pass.setBindGroup(0, viewportBindGroup);
   pass.setBindGroup(1, commandResources.identityStepBindGroup);
-  pass.setBindGroup(2, commandResources.defaultClipTextureBindGroup);
+  pass.setBindGroup(2, commandResources.gradientBindGroup);
+  pass.setBindGroup(3, commandResources.defaultClipTextureBindGroup);
   pass.setScissorRect(
     Math.max(0, Math.floor(clipDraw.scissorBounds.origin[0])),
     Math.max(0, Math.floor(clipDraw.scissorBounds.origin[1])),
@@ -288,7 +289,8 @@ const encodePreparedStep = (
   pass.setPipeline(resources.pipeline);
   pass.setBindGroup(0, viewportBindGroup);
   pass.setBindGroup(1, resources.stepBindGroup);
-  pass.setBindGroup(2, clipTextureBindGroup);
+  pass.setBindGroup(2, commandResources.gradientBindGroup);
+  pass.setBindGroup(3, clipTextureBindGroup);
 
   if (resources.vertexBuffer && resources.vertexCount > 0) {
     pass.setVertexBuffer(0, resources.vertexBuffer);

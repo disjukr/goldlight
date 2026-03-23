@@ -11,6 +11,7 @@ import type {
   DrawingClipRect,
   DrawingCustomBlender,
   DrawingPaint,
+  DrawingPaintShader,
   DrawingPath2D,
   DrawingStrokeStyle,
   DrawPathCommand,
@@ -32,6 +33,8 @@ export type DrawingPreparedVertex = Readonly<{
   point: Point2D;
   color: readonly [number, number, number, number];
 }>;
+
+export type DrawingPreparedShader = DrawingPaintShader;
 
 export type DrawingCoverage = 'none' | 'single-channel' | 'lcd';
 
@@ -255,6 +258,7 @@ export type DrawingPreparedPathFill = Readonly<{
   innerFillBounds?: Rect;
   fillRule: PathFillRule2D;
   color: readonly [number, number, number, number];
+  shader?: DrawingPreparedShader;
   blendMode: DrawingBlendMode;
   coverage: DrawingCoverage;
   blender?: DrawingCustomBlender;
@@ -274,6 +278,7 @@ export type DrawingPreparedPathStroke = Readonly<{
   patches: readonly DrawingPreparedStrokePatch[];
   usesTessellatedStrokePatches: boolean;
   color: readonly [number, number, number, number];
+  shader?: DrawingPreparedShader;
   blendMode: DrawingBlendMode;
   coverage: DrawingCoverage;
   blender?: DrawingCustomBlender;
@@ -321,8 +326,13 @@ const aaFringeWidth = 1;
 const cuspDerivativeEpsilon = 0.5;
 const tessellationPrecision = 4;
 
+const resolvePaintShader = (paint: DrawingPaint): DrawingPreparedShader | undefined => paint.shader;
+
+const resolvePaintBaseColor = (paint: DrawingPaint): readonly [number, number, number, number] =>
+  paint.color ?? paint.shader?.stops[0]?.color ?? defaultFillColor;
+
 const resolveFillColor = (paint: DrawingPaint): readonly [number, number, number, number] =>
-  paint.color ?? defaultFillColor;
+  resolvePaintBaseColor(paint);
 
 const resolveBlendMode = (paint: DrawingPaint): DrawingBlendMode =>
   paint.blendMode ?? defaultBlendMode;
@@ -368,7 +378,7 @@ const blendModeDependsOnDst = (
 };
 
 const resolveStrokeColor = (paint: DrawingPaint): readonly [number, number, number, number] => {
-  const color = paint.color ?? defaultFillColor;
+  const color = resolvePaintBaseColor(paint);
   const strokeWidth = paint.strokeWidth ?? 1;
   if (strokeWidth >= hairlineCoverageWidth) {
     return color;
@@ -388,9 +398,14 @@ const resolveStrokeStyle = (paint: DrawingPaint): DrawingStrokeStyle => {
   };
 };
 
+const shaderIsOpaque = (shader: DrawingPreparedShader | undefined): boolean =>
+  shader === undefined ||
+  shader.stops.every((stop) => stop.color[3] >= 1 - epsilon);
+
 const computeDstUsage = (
   recording: Pick<DrawingRecording, 'caps' | 'targetFormat'>,
   color: readonly [number, number, number, number],
+  shader: DrawingPreparedShader | undefined,
   clip: DrawingPreparedClip | undefined,
   rendererCoverage: DrawingCoverage,
   blendMode: DrawingBlendMode,
@@ -410,7 +425,10 @@ const computeDstUsage = (
     Boolean(blender) ||
     (advancedBlendMode && !recording.caps.supportsHardwareAdvancedBlending)
   );
-  const paintDependsOnDst = blendModeDependsOnDst(blendMode, color[3] >= 1 - epsilon);
+  const paintDependsOnDst = blendModeDependsOnDst(
+    blendMode,
+    color[3] >= 1 - epsilon && shaderIsOpaque(shader),
+  );
   if (paintDependsOnDst) {
     dstUsage |= drawingDstUsage.dependsOnDst;
     dstUsage &= ~drawingDstUsage.dstOnlyUsedByRenderer;
@@ -3872,9 +3890,11 @@ const preparePathFill = (
       return { supported: false, reason: 'path fill triangulation failed' };
     }
     const fillColor = resolveFillColor(command.paint);
+    const fillShader = resolvePaintShader(command.paint);
     const dstUsage = computeDstUsage(
       recording,
       fillColor,
+      fillShader,
       preparedClip,
       coverage,
       blendMode,
@@ -3899,6 +3919,7 @@ const preparePathFill = (
           : undefined,
         fillRule: command.path.fillRule,
         color: fillColor,
+        shader: fillShader,
         blendMode,
         coverage,
         blender,
@@ -3914,6 +3935,7 @@ const preparePathFill = (
 
   const strokeStyle = resolveStrokeStyle(command.paint);
   const strokeColor = resolveStrokeColor(command.paint);
+  const strokeShader = resolvePaintShader(command.paint);
   const dashedStrokeSubpaths = applyDashPattern(subpaths, command.paint);
   const strokeContours = createStrokeContourRecords(dashedStrokeSubpaths);
   const lineOnlyStrokeContours = strokeContours.every((contour) =>
@@ -3946,6 +3968,7 @@ const preparePathFill = (
   const dstUsage = computeDstUsage(
     recording,
     strokeColor,
+    strokeShader,
     preparedClip,
     coverage,
     blendMode,
@@ -3976,6 +3999,7 @@ const preparePathFill = (
       patches,
       usesTessellatedStrokePatches,
       color: strokeColor,
+      shader: strokeShader,
       blendMode,
       coverage,
       blender,

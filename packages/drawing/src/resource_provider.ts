@@ -42,6 +42,7 @@ export type DawnResourceProvider = Readonly<{
   createSampler: (descriptor?: DrawingSamplerDescriptor) => GPUSampler;
   createViewportBindGroup: (buffer: GPUBuffer) => GPUBindGroup;
   createStepBindGroup: (buffer: GPUBuffer) => GPUBindGroup;
+  createGradientBindGroup: (buffer: GPUBuffer) => GPUBindGroup;
   createClipTextureBindGroup: (
     clipTextureView?: GPUTextureView,
     dstTextureView?: GPUTextureView,
@@ -155,10 +156,10 @@ const manualBlendModes = new Set<DrawingGraphicsPipelineDesc['blendMode']>([
 ]);
 
 const commonBlendShaderSource = `
-@group(2) @binding(0) var clipMaskSampler: sampler;
-@group(2) @binding(1) var clipMaskTexture: texture_2d<f32>;
-@group(2) @binding(2) var dstColorSampler: sampler;
-@group(2) @binding(3) var dstColorTexture: texture_2d<f32>;
+@group(3) @binding(0) var clipMaskSampler: sampler;
+@group(3) @binding(1) var clipMaskTexture: texture_2d<f32>;
+@group(3) @binding(2) var dstColorSampler: sampler;
+@group(3) @binding(3) var dstColorTexture: texture_2d<f32>;
 
 fn clip_coverage(devicePosition: vec2<f32>) -> f32 {
   var coverage = 1.0;
@@ -368,14 +369,7 @@ fn blend_with_dst(srcStraight: vec4<f32>, devicePosition: vec2<f32>) -> vec4<f32
 }
 `;
 
-const fillPathShaderSource = `
-struct ViewportUniform {
-  scale: vec2<f32>,
-  translate: vec2<f32>,
-};
-
-@group(0) @binding(0) var<uniform> viewport: ViewportUniform;
-
+const commonStepUniformSource = `
 struct StepUniform {
   matrix0: vec4<f32>,
   matrix1: vec4<f32>,
@@ -386,10 +380,188 @@ struct StepUniform {
   clipShader: vec4<f32>,
   dst: vec4<f32>,
   blender: vec4<f32>,
+  shaderInfo: vec4<f32>,
+  shaderParams0: vec4<f32>,
+  shaderParams1: vec4<f32>,
+  shaderReserved0: vec4<f32>,
+  shaderReserved1: vec4<f32>,
+  shaderLocalMatrix0: vec4<f32>,
+  shaderLocalMatrix1: vec4<f32>,
 };
+`;
+
+const commonPaintShaderSource = `
+struct FSGradientBuffer {
+  data: array<f32>,
+};
+
+@group(2) @binding(0) var<storage, read> fsGradientBuffer: FSGradientBuffer;
+
+fn saturate01(value: f32) -> f32 {
+  return clamp(value, 0.0, 1.0);
+}
+
+fn paint_local_position(devicePosition: vec2<f32>) -> vec2<f32> {
+  return vec2<f32>(
+    (step.shaderLocalMatrix0.x * devicePosition.x) +
+      (step.shaderLocalMatrix0.z * devicePosition.y) + step.shaderLocalMatrix1.x,
+    (step.shaderLocalMatrix0.y * devicePosition.x) +
+      (step.shaderLocalMatrix0.w * devicePosition.y) + step.shaderLocalMatrix1.y,
+  );
+}
+
+fn linear_gradient_t(localPosition: vec2<f32>) -> f32 {
+  let start = step.shaderParams0.xy;
+  let end = step.shaderParams0.zw;
+  let axis = end - start;
+  let denom = max(dot(axis, axis), 1e-5);
+  return dot(localPosition - start, axis) / denom;
+}
+
+fn radial_gradient_t(localPosition: vec2<f32>) -> f32 {
+  let center = step.shaderParams0.xy;
+  let radius = max(step.shaderParams0.z, 1e-5);
+  return length(localPosition - center) / radius;
+}
+
+fn two_point_conical_gradient_t(localPosition: vec2<f32>) -> f32 {
+  let c0 = step.shaderParams0.xy;
+  let c1 = step.shaderParams0.zw;
+  let r0 = step.shaderParams1.x;
+  let r1 = step.shaderParams1.y;
+  let c = c0 - localPosition;
+  let d = c1 - c0;
+  let dr = r1 - r0;
+  let a = dot(d, d) - (dr * dr);
+  let b = 2.0 * (dot(c, d) - (r0 * dr));
+  let cTerm = dot(c, c) - (r0 * r0);
+  if (abs(a) <= 1e-5) {
+    if (abs(b) <= 1e-5) {
+      return select(0.0, 1.0, cTerm <= 0.0);
+    }
+    return (-cTerm) / b;
+  }
+  let discr = max((b * b) - (4.0 * a * cTerm), 0.0);
+  let sqrtDiscr = sqrt(discr);
+  let t0 = (-b - sqrtDiscr) / (2.0 * a);
+  let t1 = (-b + sqrtDiscr) / (2.0 * a);
+  let valid0 = t0 >= 0.0 && t0 <= 1.0;
+  let valid1 = t1 >= 0.0 && t1 <= 1.0;
+  if (valid0 && valid1) {
+    return min(t0, t1);
+  }
+  if (valid0) {
+    return t0;
+  }
+  if (valid1) {
+    return t1;
+  }
+  return select(t0, t1, abs(t1 - 0.5) < abs(t0 - 0.5));
+}
+
+fn sweep_gradient_t(localPosition: vec2<f32>) -> f32 {
+  let center = step.shaderParams0.xy;
+  let direction = localPosition - center;
+  let angle = atan2(direction.y, direction.x) / 6.28318530718;
+  return (angle * step.shaderParams0.w) + step.shaderParams0.z;
+}
+
+fn gradient_tile_t(t: f32, tileMode: i32) -> vec2<f32> {
+  if (tileMode == 1) {
+    return vec2<f32>(fract(t), 1.0);
+  }
+  if (tileMode == 2) {
+    let tiled = fract(t * 0.5) * 2.0;
+    return vec2<f32>(select(tiled, 2.0 - tiled, tiled > 1.0), 1.0);
+  }
+  if (tileMode == 3) {
+    let inside = t >= 0.0 && t <= 1.0;
+    return vec2<f32>(clamp(t, 0.0, 1.0), select(0.0, 1.0, inside));
+  }
+  return vec2<f32>(clamp(t, 0.0, 1.0), 1.0);
+}
+
+fn gradient_stop_color(index: i32, numStops: i32, bufferOffset: i32) -> vec4<f32> {
+  let base = bufferOffset + numStops + (index * 4);
+  return vec4<f32>(
+    fsGradientBuffer.data[base],
+    fsGradientBuffer.data[base + 1],
+    fsGradientBuffer.data[base + 2],
+    fsGradientBuffer.data[base + 3],
+  );
+}
+
+fn gradient_stop_offset(index: i32, bufferOffset: i32) -> f32 {
+  return fsGradientBuffer.data[bufferOffset + index];
+}
+
+fn sample_gradient_buffer(t: f32, numStops: i32, bufferOffset: i32) -> vec4<f32> {
+  if (numStops <= 0) {
+    return step.color;
+  }
+  if (numStops == 1) {
+    return gradient_stop_color(0, numStops, bufferOffset);
+  }
+  let firstOffset = gradient_stop_offset(0, bufferOffset);
+  if (t <= firstOffset) {
+    return gradient_stop_color(0, numStops, bufferOffset);
+  }
+  for (var index = 0; index < numStops - 1; index = index + 1) {
+    let leftOffset = gradient_stop_offset(index, bufferOffset);
+    let rightOffset = gradient_stop_offset(index + 1, bufferOffset);
+    if (t <= rightOffset) {
+      let leftColor = gradient_stop_color(index, numStops, bufferOffset);
+      let rightColor = gradient_stop_color(index + 1, numStops, bufferOffset);
+      let span = max(rightOffset - leftOffset, 1e-5);
+      let localT = clamp((t - leftOffset) / span, 0.0, 1.0);
+      return mix(leftColor, rightColor, localT);
+    }
+  }
+  return gradient_stop_color(numStops - 1, numStops, bufferOffset);
+}
+
+fn paint_shader_color(devicePosition: vec2<f32>) -> vec4<f32> {
+  let kind = i32(round(step.shaderInfo.x));
+  if (kind == 0) {
+    return step.color;
+  }
+  let numStops = i32(round(step.shaderInfo.y));
+  let bufferOffset = i32(round(step.shaderInfo.z));
+  let tileMode = i32(round(step.shaderInfo.w));
+  let localPosition = paint_local_position(devicePosition);
+  let t = select(
+    select(
+      select(
+        linear_gradient_t(localPosition),
+        radial_gradient_t(localPosition),
+        kind == 1,
+      ),
+      two_point_conical_gradient_t(localPosition),
+      kind == 3,
+    ),
+    sweep_gradient_t(localPosition),
+    kind == 4,
+  );
+  let tiled = gradient_tile_t(t, tileMode);
+  var color = sample_gradient_buffer(tiled.x, numStops, bufferOffset);
+  color.a *= tiled.y;
+  return color;
+}
+`;
+
+const fillPathShaderSource = `
+struct ViewportUniform {
+  scale: vec2<f32>,
+  translate: vec2<f32>,
+};
+
+@group(0) @binding(0) var<uniform> viewport: ViewportUniform;
+
+${commonStepUniformSource}
 
 @group(1) @binding(0) var<uniform> step: StepUniform;
 ${commonBlendShaderSource}
+${commonPaintShaderSource}
 
 struct VertexOut {
   @builtin(position) position: vec4<f32>,
@@ -426,7 +598,7 @@ fn vs_main(
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
   let coverage = in.color.a;
   let clipCoverage = clip_coverage(in.devicePosition);
-  var color = apply_clip_shader(step.color);
+  var color = apply_clip_shader(paint_shader_color(in.devicePosition));
   color.a *= coverage * clipCoverage;
   return blend_with_dst(color, in.devicePosition);
 }
@@ -442,20 +614,11 @@ struct ViewportUniform {
 
 @group(0) @binding(0) var<uniform> viewport: ViewportUniform;
 
-struct StepUniform {
-  matrix0: vec4<f32>,
-  matrix1: vec4<f32>,
-  color: vec4<f32>,
-  params: vec4<f32>,
-  clipAtlas: vec4<f32>,
-  clipAnalytic: vec4<f32>,
-  clipShader: vec4<f32>,
-  dst: vec4<f32>,
-  blender: vec4<f32>,
-};
+${commonStepUniformSource}
 
 @group(1) @binding(0) var<uniform> step: StepUniform;
 ${commonBlendShaderSource}
+${commonPaintShaderSource}
 
 struct VertexOut {
   @builtin(position) position: vec4<f32>,
@@ -663,7 +826,7 @@ fn vs_main(
   let devicePosition = local_to_device(local);
   var out: VertexOut;
   out.position = device_to_ndc(devicePosition);
-  out.color = step.color;
+  out.color = paint_shader_color(devicePosition);
   out.devicePosition = devicePosition;
   return out;
 }
@@ -688,20 +851,11 @@ struct ViewportUniform {
 
 @group(0) @binding(0) var<uniform> viewport: ViewportUniform;
 
-struct StepUniform {
-  matrix0: vec4<f32>,
-  matrix1: vec4<f32>,
-  color: vec4<f32>,
-  params: vec4<f32>,
-  clipAtlas: vec4<f32>,
-  clipAnalytic: vec4<f32>,
-  clipShader: vec4<f32>,
-  dst: vec4<f32>,
-  blender: vec4<f32>,
-};
+${commonStepUniformSource}
 
 @group(1) @binding(0) var<uniform> step: StepUniform;
 ${commonBlendShaderSource}
+${commonPaintShaderSource}
 
 struct VertexOut {
   @builtin(position) position: vec4<f32>,
@@ -915,7 +1069,7 @@ fn vs_main(
   let devicePosition = local_to_device(local);
   var out: VertexOut;
   out.position = device_to_ndc(devicePosition);
-  out.color = step.color;
+  out.color = paint_shader_color(devicePosition);
   out.devicePosition = devicePosition;
   return out;
 }
@@ -940,20 +1094,11 @@ struct ViewportUniform {
 
 @group(0) @binding(0) var<uniform> viewport: ViewportUniform;
 
-struct StepUniform {
-  matrix0: vec4<f32>,
-  matrix1: vec4<f32>,
-  color: vec4<f32>,
-  params: vec4<f32>,
-  clipAtlas: vec4<f32>,
-  clipAnalytic: vec4<f32>,
-  clipShader: vec4<f32>,
-  dst: vec4<f32>,
-  blender: vec4<f32>,
-};
+${commonStepUniformSource}
 
 @group(1) @binding(0) var<uniform> step: StepUniform;
 ${commonBlendShaderSource}
+${commonPaintShaderSource}
 
 struct VertexOut {
   @builtin(position) position: vec4<f32>,
@@ -1454,7 +1599,7 @@ fn vs_main(
   );
   var out: VertexOut;
   out.position = device_to_ndc(devicePosition);
-  out.color = step.color;
+  out.color = paint_shader_color(devicePosition);
   out.devicePosition = devicePosition;
   return out;
 }
@@ -1584,6 +1729,7 @@ export const createDawnResourceProvider = (
   const caps = options.caps;
   let viewportBindGroupLayout: GPUBindGroupLayout | null = null;
   let stepBindGroupLayout: GPUBindGroupLayout | null = null;
+  let gradientBindGroupLayout: GPUBindGroupLayout | null = null;
   let clipTextureBindGroupLayout: GPUBindGroupLayout | null = null;
   let drawingPipelineLayout: GPUPipelineLayout | null = null;
   let stencilAttachment:
@@ -1706,6 +1852,24 @@ export const createDawnResourceProvider = (
     return stepBindGroupLayout;
   };
 
+  const getGradientBindGroupLayout = (): GPUBindGroupLayout => {
+    if (gradientBindGroupLayout) {
+      return gradientBindGroupLayout;
+    }
+
+    gradientBindGroupLayout = backend.device.createBindGroupLayout({
+      label: 'drawing-gradient-bind-group-layout',
+      entries: [{
+        binding: 0,
+        visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+        buffer: {
+          type: 'read-only-storage',
+        },
+      }],
+    });
+    return gradientBindGroupLayout;
+  };
+
   const getClipTextureBindGroupLayout = (): GPUBindGroupLayout => {
     if (clipTextureBindGroupLayout) {
       return clipTextureBindGroupLayout;
@@ -1823,6 +1987,7 @@ export const createDawnResourceProvider = (
       bindGroupLayouts: [
         getViewportBindGroupLayout(),
         getStepBindGroupLayout(),
+        getGradientBindGroupLayout(),
         getClipTextureBindGroupLayout(),
       ],
     });
@@ -2001,6 +2166,17 @@ export const createDawnResourceProvider = (
       backend.device.createBindGroup({
         label: 'drawing-step-bind-group',
         layout: getStepBindGroupLayout(),
+        entries: [{
+          binding: 0,
+          resource: {
+            buffer,
+          },
+        }],
+      }),
+    createGradientBindGroup: (buffer) =>
+      backend.device.createBindGroup({
+        label: 'drawing-gradient-bind-group',
+        layout: getGradientBindGroupLayout(),
         entries: [{
           binding: 0,
           resource: {

@@ -9,6 +9,7 @@ import {
 import type { DrawingRecording } from './recording.ts';
 import type {
   DrawingPreparedPatch,
+  DrawingPreparedShader,
   DrawingPreparedStrokePatch,
   DrawingPreparedVertex,
 } from './path_renderer.ts';
@@ -59,6 +60,8 @@ export type DrawingPreparedRenderPassTaskResources = Readonly<{
 export type DrawingPreparedCommandResources = Readonly<{
   viewportTransformBuffer: GPUBuffer;
   viewportBindGroup: GPUBindGroup;
+  gradientBuffer: GPUBuffer;
+  gradientBindGroup: GPUBindGroup;
   identityStepPayloadBuffer: GPUBuffer;
   identityStepBindGroup: GPUBindGroup;
   defaultClipTextureBindGroup: GPUBindGroup;
@@ -78,8 +81,9 @@ export type DawnPreparedWork = Readonly<{
 
 const vertexBufferUsage = 0x0020;
 const uniformBufferUsage = 0x0040;
+const storageBufferUsage = 0x0080;
 const floatsPerVertex = 6;
-const stepPayloadFloats = 36;
+const stepPayloadFloats = 64;
 const wedgePatchFloats = 14;
 const curvePatchFloats = 12;
 const strokePatchFloats = 14;
@@ -270,6 +274,22 @@ const createViewportTransformBuffer = (
   return buffer;
 };
 
+const createGradientStorageBuffer = (
+  sharedContext: DawnSharedContext,
+  floats: readonly number[],
+): GPUBuffer => {
+  const payload = floats.length > 0 ? floats : [0];
+  const buffer = sharedContext.resourceProvider.createBuffer({
+    label: 'drawing-gradient-storage',
+    size: Float32Array.BYTES_PER_ELEMENT * payload.length,
+    usage: storageBufferUsage,
+    mappedAtCreation: true,
+  });
+  new Float32Array(buffer.getMappedRange()).set(payload);
+  buffer.unmap();
+  return buffer;
+};
+
 const createStepPayloadBuffer = (
   sharedContext: DawnSharedContext,
   transform: readonly [number, number, number, number, number, number],
@@ -291,6 +311,16 @@ const createStepPayloadBuffer = (
     requiresDstRead: boolean;
     invSize: Point2D;
     blenderCoefficients: readonly [number, number, number, number];
+  }>,
+  shader: Readonly<{
+    kindCode: number;
+    numStops: number;
+    bufferOffset: number;
+    tileModeCode: number;
+    params0: readonly [number, number, number, number];
+    params1: readonly [number, number, number, number];
+    localMatrix0: readonly [number, number, number, number];
+    localMatrix1: readonly [number, number, number, number];
   }>,
 ): GPUBuffer => {
   const buffer = sharedContext.resourceProvider.createBuffer({
@@ -336,6 +366,34 @@ const createStepPayloadBuffer = (
     dst.blenderCoefficients[1],
     dst.blenderCoefficients[2],
     dst.blenderCoefficients[3],
+    shader.kindCode,
+    shader.numStops,
+    shader.bufferOffset,
+    shader.tileModeCode,
+    shader.params0[0],
+    shader.params0[1],
+    shader.params0[2],
+    shader.params0[3],
+    shader.params1[0],
+    shader.params1[1],
+    shader.params1[2],
+    shader.params1[3],
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    shader.localMatrix0[0],
+    shader.localMatrix0[1],
+    shader.localMatrix0[2],
+    shader.localMatrix0[3],
+    shader.localMatrix1[0],
+    shader.localMatrix1[1],
+    shader.localMatrix1[2],
+    shader.localMatrix1[3],
   ]);
   buffer.unmap();
   return buffer;
@@ -422,6 +480,198 @@ const maxScaleFactor = (
   const det = (a * d) - (b * c);
   const disc = Math.max((sum * sum) - (4 * det * det), 0);
   return Math.sqrt(Math.max((sum + Math.sqrt(disc)) * 0.5, 1));
+};
+
+const invertAffineMatrix = (
+  matrix: readonly [number, number, number, number, number, number],
+): readonly [number, number, number, number, number, number] => {
+  const det = (matrix[0] * matrix[3]) - (matrix[1] * matrix[2]);
+  if (Math.abs(det) <= 1e-8) {
+    return identityMatrix2D;
+  }
+  const invDet = 1 / det;
+  const a = matrix[3] * invDet;
+  const b = -matrix[1] * invDet;
+  const c = -matrix[2] * invDet;
+  const d = matrix[0] * invDet;
+  const tx = -((a * matrix[4]) + (c * matrix[5]));
+  const ty = -((b * matrix[4]) + (d * matrix[5]));
+  return [a, b, c, d, tx, ty];
+};
+
+type DrawingGradientPayload = Readonly<{
+  kindCode: number;
+  numStops: number;
+  bufferOffset: number;
+  tileModeCode: number;
+  params0: readonly [number, number, number, number];
+  params1: readonly [number, number, number, number];
+  localMatrix0: readonly [number, number, number, number];
+  localMatrix1: readonly [number, number, number, number];
+}>;
+
+type DrawingGradientBufferBuilder = Readonly<{
+  data: number[];
+  cache: Map<string, Readonly<{ bufferOffset: number; numStops: number }>>;
+}>;
+
+const createGradientBufferBuilder = (): DrawingGradientBufferBuilder => ({
+  data: [],
+  cache: new Map(),
+});
+
+const toGradientTileModeCode = (
+  tileMode: DrawingPreparedShader['tileMode'] | undefined,
+): number => tileMode === 'repeat' ? 1 : tileMode === 'mirror' ? 2 : tileMode === 'decal' ? 3 : 0;
+
+const toGradientColorSpaceCode = (
+  shader: DrawingPreparedShader,
+): number =>
+  shader.interpolation?.colorSpace === 'srgb'
+    ? 1
+    : shader.interpolation?.colorSpace === 'srgb-linear'
+    ? 2
+    : 0;
+
+const normalizeGradientStops = (
+  shader: DrawingPreparedShader,
+): readonly { offset: number; color: readonly [number, number, number, number] }[] => {
+  const sourceStops = shader.stops.length > 0
+    ? shader.stops
+    : [{ offset: 0, color: [0, 0, 0, 1] as const }];
+  const sorted = [...sourceStops]
+    .map((stop) => ({
+      offset: Math.min(1, Math.max(0, stop.offset)),
+      color: stop.color,
+    }))
+    .sort((left, right) => left.offset - right.offset);
+  if (sorted.length === 1) {
+    return Object.freeze([
+      sorted[0]!,
+      { offset: 1, color: sorted[0]!.color },
+    ]);
+  }
+  const normalized = [...sorted];
+  if (normalized[0]!.offset > 0) {
+    normalized.unshift({ offset: 0, color: normalized[0]!.color });
+  }
+  if (normalized[normalized.length - 1]!.offset < 1) {
+    normalized.push({ offset: 1, color: normalized[normalized.length - 1]!.color });
+  }
+  return Object.freeze(normalized);
+};
+
+const getGradientStopBufferEntry = (
+  builder: DrawingGradientBufferBuilder,
+  shader: DrawingPreparedShader,
+): Readonly<{ bufferOffset: number; numStops: number }> => {
+  const stops = normalizeGradientStops(shader);
+  const cacheKey = JSON.stringify(
+    stops.map((stop) => [stop.offset, ...stop.color]),
+  );
+  const existing = builder.cache.get(cacheKey);
+  if (existing) {
+    return existing;
+  }
+  const bufferOffset = builder.data.length;
+  for (const stop of stops) {
+    builder.data.push(stop.offset);
+  }
+  for (const stop of stops) {
+    builder.data.push(stop.color[0], stop.color[1], stop.color[2], stop.color[3]);
+  }
+  const entry = { bufferOffset, numStops: stops.length };
+  builder.cache.set(cacheKey, entry);
+  return entry;
+};
+
+const createGradientPayload = (
+  shader: DrawingPreparedShader | undefined,
+  transform: readonly [number, number, number, number, number, number],
+  builder: DrawingGradientBufferBuilder,
+): DrawingGradientPayload => {
+  const inverse = invertAffineMatrix(transform);
+  const localMatrix0: readonly [number, number, number, number] = [
+    inverse[0],
+    inverse[1],
+    inverse[2],
+    inverse[3],
+  ];
+  const localMatrix1: readonly [number, number, number, number] = [
+    inverse[4],
+    inverse[5],
+    0,
+    0,
+  ];
+  if (!shader) {
+    return {
+      kindCode: 0,
+      numStops: 0,
+      bufferOffset: 0,
+      tileModeCode: 0,
+      params0: [0, 0, 0, 0],
+      params1: [0, 0, 0, 0],
+      localMatrix0,
+      localMatrix1,
+    };
+  }
+  const stops = getGradientStopBufferEntry(builder, shader);
+  const common = {
+    numStops: stops.numStops,
+    bufferOffset: stops.bufferOffset,
+    tileModeCode: toGradientTileModeCode(shader.tileMode),
+    localMatrix0,
+    localMatrix1,
+  } as const;
+  if (shader.kind === 'linear-gradient') {
+    return {
+      kindCode: 1,
+      ...common,
+      params0: [shader.start[0], shader.start[1], shader.end[0], shader.end[1]],
+      params1: [toGradientColorSpaceCode(shader), shader.interpolation?.inPremul ? 1 : 0, 0, 0],
+    };
+  }
+  if (shader.kind === 'radial-gradient') {
+    return {
+      kindCode: 2,
+      ...common,
+      params0: [shader.center[0], shader.center[1], shader.radius, 0],
+      params1: [toGradientColorSpaceCode(shader), shader.interpolation?.inPremul ? 1 : 0, 0, 0],
+    };
+  }
+  if (shader.kind === 'two-point-conical-gradient') {
+    return {
+      kindCode: 3,
+      ...common,
+      params0: [
+        shader.startCenter[0],
+        shader.startCenter[1],
+        shader.endCenter[0],
+        shader.endCenter[1],
+      ],
+      params1: [
+        shader.startRadius,
+        shader.endRadius,
+        toGradientColorSpaceCode(shader),
+        shader.interpolation?.inPremul ? 1 : 0,
+      ],
+    };
+  }
+  const startAngle = shader.startAngle;
+  const endAngle = shader.endAngle ?? (shader.startAngle + (Math.PI * 2));
+  const t0 = startAngle / (Math.PI * 2);
+  const t1 = endAngle / (Math.PI * 2);
+  return {
+    kindCode: 4,
+    ...common,
+    params0: [
+      shader.center[0],
+      shader.center[1],
+      -t0,
+      1 / Math.max(t1 - t0, 1e-5),
+    ],
+    params1: [toGradientColorSpaceCode(shader), shader.interpolation?.inPremul ? 1 : 0, 0, 0],
+  };
 };
 
 const calcNumRadialSegmentsPerRadian = (approxStrokeRadius: number): number => {
@@ -676,6 +926,7 @@ const prepareStepResources = (
     wedgeVertexBuffer: GPUBuffer;
     curveVertexBuffer: GPUBuffer;
   }>,
+  gradientBuilder: DrawingGradientBufferBuilder,
 ): DrawingPreparedStepResources => {
   const pipelineHandle = sharedContext.resourceProvider.createGraphicsPipelineHandle(
     step.pipelineDesc,
@@ -722,6 +973,7 @@ const prepareStepResources = (
         ? step.draw.blender.coefficients
         : [0, 0, 0, 0],
     },
+    createGradientPayload(step.draw.shader, step.draw.transform, gradientBuilder),
   );
   const stepBindGroup = sharedContext.resourceProvider.createStepBindGroup(stepPayloadBuffer);
 
@@ -843,9 +1095,10 @@ const preparePassResources = (
     wedgeVertexBuffer: GPUBuffer;
     curveVertexBuffer: GPUBuffer;
   }>,
+  gradientBuilder: DrawingGradientBufferBuilder,
 ): DrawingPreparedPassResources => {
   const steps = passInfo.renderSteps.map((step) =>
-    prepareStepResources(sharedContext, step, patchTemplates)
+    prepareStepResources(sharedContext, step, patchTemplates, gradientBuilder)
   );
   const pipelineHandles = steps.map((step) => step.pipelineHandle);
   const clipDraws = passInfo.clipDraws
@@ -864,6 +1117,7 @@ const collectOwnedBuffers = (
   tasks: readonly DrawingPreparedRenderPassTaskResources[],
   globals: Readonly<{
     viewportTransformBuffer: GPUBuffer;
+    gradientBuffer: GPUBuffer;
     identityStepPayloadBuffer: GPUBuffer;
     fullscreenClipVertexBuffer: GPUBuffer;
     wedgePatchVertexBuffer: GPUBuffer;
@@ -872,6 +1126,7 @@ const collectOwnedBuffers = (
 ): readonly GPUBuffer[] => {
   const buffers: GPUBuffer[] = [
     globals.viewportTransformBuffer,
+    globals.gradientBuffer,
     globals.identityStepPayloadBuffer,
     globals.fullscreenClipVertexBuffer,
     globals.wedgePatchVertexBuffer,
@@ -902,6 +1157,7 @@ export const prepareDawnResources = (
   sharedContext: DawnSharedContext,
   tasks: DrawingTaskList,
 ): DrawingPreparedCommandResources => {
+  const gradientBuilder = createGradientBufferBuilder();
   const viewportTransformBuffer = createViewportTransformBuffer(sharedContext);
   const viewportBindGroup = sharedContext.resourceProvider.createViewportBindGroup(
     viewportTransformBuffer,
@@ -928,6 +1184,7 @@ export const prepareDawnResources = (
       invSize: [0, 0],
       blenderCoefficients: [0, 0, 0, 0],
     },
+    createGradientPayload(undefined, identityMatrix2D, gradientBuilder),
   );
   const identityStepBindGroup = sharedContext.resourceProvider.createStepBindGroup(
     identityStepPayloadBuffer,
@@ -951,15 +1208,21 @@ export const prepareDawnResources = (
           preparePassResources(sharedContext, passInfo, {
             wedgeVertexBuffer: wedgePatchVertexBuffer,
             curveVertexBuffer: curvePatchVertexBuffer,
-          })
+          }, gradientBuilder)
         ),
       ),
     })),
+  );
+  const finalizedGradientBuffer = createGradientStorageBuffer(sharedContext, gradientBuilder.data);
+  const finalizedGradientBindGroup = sharedContext.resourceProvider.createGradientBindGroup(
+    finalizedGradientBuffer,
   );
 
   return {
     viewportTransformBuffer,
     viewportBindGroup,
+    gradientBuffer: finalizedGradientBuffer,
+    gradientBindGroup: finalizedGradientBindGroup,
     identityStepPayloadBuffer,
     identityStepBindGroup,
     defaultClipTextureBindGroup,
@@ -967,6 +1230,7 @@ export const prepareDawnResources = (
     fullscreenClipVertexCount: fullscreenClipVertices.length / floatsPerVertex,
     ownedBuffers: collectOwnedBuffers(taskResources, {
       viewportTransformBuffer,
+      gradientBuffer: finalizedGradientBuffer,
       identityStepPayloadBuffer,
       fullscreenClipVertexBuffer,
       wedgePatchVertexBuffer,

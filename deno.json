@@ -85,6 +85,9 @@
     "example:drawing:fills:check": "deno check --unstable-webgpu --unstable-raw-imports ./packages/drawing/examples/render_fills/main.ts",
     "example:drawing:fills:png": "deno run -A --unstable-webgpu --unstable-raw-imports ./packages/drawing/examples/render_fills/main.ts",
     "example:drawing:fills:ckpng": "deno run -A --unstable-raw-imports ./packages/drawing/examples/render_fills/canvaskit_main.ts",
+    "example:drawing:gradients:check": "deno check --unstable-webgpu --unstable-raw-imports ./packages/drawing/examples/render_gradients/main.ts",
+    "example:drawing:gradients:png": "deno run -A --unstable-webgpu --unstable-raw-imports ./packages/drawing/examples/render_gradients/main.ts",
+    "example:drawing:gradients:ckpng": "deno run -A --unstable-raw-imports ./packages/drawing/examples/render_gradients/canvaskit_main.ts",
     "example:drawing:tiger:check": "deno check --unstable-raw-imports ./packages/drawing/examples/render_tiger_png/main.ts",
     "example:drawing:tiger:png": "deno run -A --unstable-raw-imports ./packages/drawing/examples/render_tiger_png/main.ts",
     "example:browser:serve": "deno run -A jsr:@std/http@1/file-server ."

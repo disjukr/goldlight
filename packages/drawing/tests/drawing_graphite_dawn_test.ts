@@ -3456,7 +3456,8 @@ Deno.test('dawn curve patch shader keeps line patches on the line code path', ()
     throw new Error('expected curve patch shader source');
   }
   const curveShaderSource = curveShader.code;
-  assertEquals(curveShaderSource.includes('if (curveType < 0.5) {\n    return mix(p0, p3, t);'), true);
+  assertEquals(curveShaderSource.includes('if (curveType < 0.5) {'), true);
+  assertEquals(curveShaderSource.includes('return select(p0, p3, fixedVertexID > 0.0);'), true);
 });
 
 Deno.test('dawn resource provider reuses pipelines across command buffers', () => {

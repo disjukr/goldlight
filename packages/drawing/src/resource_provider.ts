@@ -474,6 +474,164 @@ fn local_to_device(position: vec2<f32>) -> vec2<f32> {
   );
 }
 
+fn affine_matrix() -> mat2x2<f32> {
+  return mat2x2<f32>(
+    vec2<f32>(step.matrix0.x, step.matrix0.y),
+    vec2<f32>(step.matrix0.z, step.matrix0.w),
+  );
+}
+
+fn wangs_formula_max_fdiff_p2(
+  p0: vec2<f32>,
+  p1: vec2<f32>,
+  p2: vec2<f32>,
+  p3: vec2<f32>,
+  matrix: mat2x2<f32>,
+) -> f32 {
+  let v1 = matrix * (p0 - (2.0 * p1) + p2);
+  let v2 = matrix * (p1 - (2.0 * p2) + p3);
+  return max(dot(v1, v1), dot(v2, v2));
+}
+
+fn wangs_formula_cubic(
+  p0: vec2<f32>,
+  p1: vec2<f32>,
+  p2: vec2<f32>,
+  p3: vec2<f32>,
+  matrix: mat2x2<f32>,
+) -> f32 {
+  let m = wangs_formula_max_fdiff_p2(p0, p1, p2, p3, matrix);
+  let lengthTerm = ${cubicLengthTermLiteral};
+  return max(ceil(sqrt(lengthTerm * sqrt(max(m, 0.0)))), 1.0);
+}
+
+fn unchecked_mix_vec2(a: vec2<f32>, b: vec2<f32>, t: f32) -> vec2<f32> {
+  return fma(b - a, vec2<f32>(t), a);
+}
+
+fn wangs_formula_conic_p2(
+  p0: vec2<f32>,
+  p1: vec2<f32>,
+  p2: vec2<f32>,
+  w: f32,
+  matrix: mat2x2<f32>,
+) -> f32 {
+  let tp0 = matrix * p0;
+  let tp1 = matrix * p1;
+  let tp2 = matrix * p2;
+  let center = (min(min(tp0, tp1), tp2) + max(max(tp0, tp1), tp2)) * 0.5;
+  let cp0 = tp0 - center;
+  let cp1 = tp1 - center;
+  let cp2 = tp2 - center;
+  let maxLen = sqrt(max(max(dot(cp0, cp0), dot(cp1, cp1)), dot(cp2, cp2)));
+  let dp = fma(vec2<f32>(-2.0 * w), cp1, cp0) + cp2;
+  let dw = abs(fma(-2.0, w, 2.0));
+  let rpMinus1 = max(0.0, fma(maxLen, ${patchPrecisionLiteral}, -1.0));
+  let numer = length(dp) * ${patchPrecisionLiteral} + rpMinus1 * dw;
+  let denom = 4.0 * min(w, 1.0);
+  return numer / max(denom, 1e-5);
+}
+
+fn wangs_formula_conic(
+  p0: vec2<f32>,
+  p1: vec2<f32>,
+  p2: vec2<f32>,
+  w: f32,
+  matrix: mat2x2<f32>,
+) -> f32 {
+  return max(ceil(sqrt(max(wangs_formula_conic_p2(p0, p1, p2, w, matrix), 1.0))), 1.0);
+}
+
+fn wangs_formula_cubic_log2(
+  p0: vec2<f32>,
+  p1: vec2<f32>,
+  p2: vec2<f32>,
+  p3: vec2<f32>,
+  matrix: mat2x2<f32>,
+) -> f32 {
+  let m = wangs_formula_max_fdiff_p2(p0, p1, p2, p3, matrix);
+  let lengthTermPow2 = ${((3 * 3) * (2 * 2) / 64 * (4 * 4)).toFixed(2)};
+  return ceil(log2(max(lengthTermPow2 * m, 1.0)) * 0.25);
+}
+
+fn wangs_formula_conic_log2(
+  p0: vec2<f32>,
+  p1: vec2<f32>,
+  p2: vec2<f32>,
+  w: f32,
+  matrix: mat2x2<f32>,
+) -> f32 {
+  return ceil(log2(max(wangs_formula_conic_p2(p0, p1, p2, w, matrix), 1.0)) * 0.5);
+}
+
+fn tessellate_filled_curve(
+  vectorXform: mat2x2<f32>,
+  resolveLevel: f32,
+  idxInResolveLevel: f32,
+  p0: vec2<f32>,
+  p1: vec2<f32>,
+  p2: vec2<f32>,
+  p3: vec2<f32>,
+  curveType: f32,
+  weight: f32,
+) -> vec2<f32> {
+  var localcoord: vec2<f32>;
+  if (curveType < 0.5) {
+    let fixedVertexID = floor(0.5 + (idxInResolveLevel * exp2(MAX_RESOLVE_LEVEL - resolveLevel)));
+    return select(p0, p3, fixedVertexID > 0.0);
+  }
+
+  var localP0 = p0;
+  var localP1 = p1;
+  var localP2 = p2;
+  var localP3 = p3;
+  var w = -1.0;
+  var maxResolveLevel = 0.0;
+  if (curveType < 1.5) {
+    maxResolveLevel = wangs_formula_cubic_log2(
+      localP0,
+      mix(localP0, localP1, 2.0 / 3.0),
+      mix(localP2, localP1, 2.0 / 3.0),
+      localP2,
+      vectorXform,
+    );
+    localP1 = mix(localP0, localP1, 2.0 / 3.0);
+    localP2 = mix(localP2, p1, 2.0 / 3.0);
+    localP3 = p2;
+  } else if (curveType < 2.5) {
+    w = weight;
+    maxResolveLevel = wangs_formula_conic_log2(localP0, localP1, localP2, w, vectorXform);
+    localP1 *= w;
+    localP3 = localP2;
+  } else {
+    maxResolveLevel = wangs_formula_cubic_log2(localP0, localP1, localP2, localP3, vectorXform);
+  }
+
+  var localResolveLevel = resolveLevel;
+  var localIdxInResolveLevel = idxInResolveLevel;
+  if (localResolveLevel > maxResolveLevel) {
+    localIdxInResolveLevel = floor(localIdxInResolveLevel * exp2(maxResolveLevel - localResolveLevel));
+    localResolveLevel = maxResolveLevel;
+  }
+  let fixedVertexID = floor(0.5 + (localIdxInResolveLevel * exp2(MAX_RESOLVE_LEVEL - localResolveLevel)));
+  if (0.0 < fixedVertexID && fixedVertexID < 32.0) {
+    let T = fixedVertexID * (1.0 / 32.0);
+    let ab = unchecked_mix_vec2(localP0, localP1, T);
+    let bc = unchecked_mix_vec2(localP1, localP2, T);
+    let cd = unchecked_mix_vec2(localP2, localP3, T);
+    let abc = unchecked_mix_vec2(ab, bc, T);
+    let bcd = unchecked_mix_vec2(bc, cd, T);
+    let abcd = unchecked_mix_vec2(abc, bcd, T);
+    let u = mix(1.0, w, T);
+    let v = w + 1.0 - u;
+    let uv = mix(u, v, T);
+    localcoord = select(abc / uv, abcd, w < 0.0);
+  } else {
+    localcoord = select(localP0, localP3, fixedVertexID > 0.0);
+  }
+  return localcoord;
+}
+
 @vertex
 fn vs_main(
   @location(0) resolveLevelAndIdx: vec2<f32>,
@@ -490,23 +648,17 @@ fn vs_main(
   if (resolveLevelAndIdx.x < 0.0) {
     local = fanPoint;
   } else {
-    let activeSegments = max(1.0, pow(2.0, min(resolveLevelAndIdx.x, MAX_RESOLVE_LEVEL)));
-    let t = resolveLevelAndIdx.y / activeSegments;
-    let oneMinusT = 1.0 - t;
-    if (curveType < 0.5) {
-      local = mix(p0, p3, t);
-    } else if (curveType < 1.5) {
-      local = (oneMinusT * oneMinusT * p0) + (2.0 * oneMinusT * t * p1) + (t * t * p2);
-    } else if (curveType < 2.5) {
-      let denom = max((oneMinusT * oneMinusT) + (2.0 * weight * oneMinusT * t) + (t * t), 1e-5);
-      local = ((oneMinusT * oneMinusT * p0) + (2.0 * weight * oneMinusT * t * p1) + (t * t * p2)) / denom;
-    } else {
-      local =
-        (oneMinusT * oneMinusT * oneMinusT * p0) +
-        (3.0 * oneMinusT * oneMinusT * t * p1) +
-        (3.0 * oneMinusT * t * t * p2) +
-        (t * t * t * p3);
-    }
+    local = tessellate_filled_curve(
+      affine_matrix(),
+      resolveLevelAndIdx.x,
+      resolveLevelAndIdx.y,
+      p0,
+      p1,
+      p2,
+      p3,
+      curveType,
+      weight,
+    );
   }
   let devicePosition = local_to_device(local);
   var out: VertexOut;
@@ -568,32 +720,159 @@ fn local_to_device(position: vec2<f32>) -> vec2<f32> {
   );
 }
 
-fn eval_patch(
-  curveType: f32,
-  weight: f32,
+fn affine_matrix() -> mat2x2<f32> {
+  return mat2x2<f32>(
+    vec2<f32>(step.matrix0.x, step.matrix0.y),
+    vec2<f32>(step.matrix0.z, step.matrix0.w),
+  );
+}
+
+fn wangs_formula_max_fdiff_p2(
   p0: vec2<f32>,
   p1: vec2<f32>,
   p2: vec2<f32>,
   p3: vec2<f32>,
-  t: f32,
+  matrix: mat2x2<f32>,
+) -> f32 {
+  let v1 = matrix * (p0 - (2.0 * p1) + p2);
+  let v2 = matrix * (p1 - (2.0 * p2) + p3);
+  return max(dot(v1, v1), dot(v2, v2));
+}
+
+fn wangs_formula_cubic(
+  p0: vec2<f32>,
+  p1: vec2<f32>,
+  p2: vec2<f32>,
+  p3: vec2<f32>,
+  matrix: mat2x2<f32>,
+) -> f32 {
+  let m = wangs_formula_max_fdiff_p2(p0, p1, p2, p3, matrix);
+  let lengthTerm = ${cubicLengthTermLiteral};
+  return max(ceil(sqrt(lengthTerm * sqrt(max(m, 0.0)))), 1.0);
+}
+
+fn unchecked_mix_vec2(a: vec2<f32>, b: vec2<f32>, t: f32) -> vec2<f32> {
+  return fma(b - a, vec2<f32>(t), a);
+}
+
+fn wangs_formula_conic_p2(
+  p0: vec2<f32>,
+  p1: vec2<f32>,
+  p2: vec2<f32>,
+  w: f32,
+  matrix: mat2x2<f32>,
+) -> f32 {
+  let tp0 = matrix * p0;
+  let tp1 = matrix * p1;
+  let tp2 = matrix * p2;
+  let center = (min(min(tp0, tp1), tp2) + max(max(tp0, tp1), tp2)) * 0.5;
+  let cp0 = tp0 - center;
+  let cp1 = tp1 - center;
+  let cp2 = tp2 - center;
+  let maxLen = sqrt(max(max(dot(cp0, cp0), dot(cp1, cp1)), dot(cp2, cp2)));
+  let dp = fma(vec2<f32>(-2.0 * w), cp1, cp0) + cp2;
+  let dw = abs(fma(-2.0, w, 2.0));
+  let rpMinus1 = max(0.0, fma(maxLen, ${patchPrecisionLiteral}, -1.0));
+  let numer = length(dp) * ${patchPrecisionLiteral} + rpMinus1 * dw;
+  let denom = 4.0 * min(w, 1.0);
+  return numer / max(denom, 1e-5);
+}
+
+fn wangs_formula_conic(
+  p0: vec2<f32>,
+  p1: vec2<f32>,
+  p2: vec2<f32>,
+  w: f32,
+  matrix: mat2x2<f32>,
+) -> f32 {
+  return max(ceil(sqrt(max(wangs_formula_conic_p2(p0, p1, p2, w, matrix), 1.0))), 1.0);
+}
+
+fn wangs_formula_cubic_log2(
+  p0: vec2<f32>,
+  p1: vec2<f32>,
+  p2: vec2<f32>,
+  p3: vec2<f32>,
+  matrix: mat2x2<f32>,
+) -> f32 {
+  let m = wangs_formula_max_fdiff_p2(p0, p1, p2, p3, matrix);
+  let lengthTermPow2 = ${((3 * 3) * (2 * 2) / 64 * (4 * 4)).toFixed(2)};
+  return ceil(log2(max(lengthTermPow2 * m, 1.0)) * 0.25);
+}
+
+fn wangs_formula_conic_log2(
+  p0: vec2<f32>,
+  p1: vec2<f32>,
+  p2: vec2<f32>,
+  w: f32,
+  matrix: mat2x2<f32>,
+) -> f32 {
+  return ceil(log2(max(wangs_formula_conic_p2(p0, p1, p2, w, matrix), 1.0)) * 0.5);
+}
+
+fn tessellate_filled_curve(
+  vectorXform: mat2x2<f32>,
+  resolveLevel: f32,
+  idxInResolveLevel: f32,
+  p0: vec2<f32>,
+  p1: vec2<f32>,
+  p2: vec2<f32>,
+  p3: vec2<f32>,
+  curveType: f32,
+  weight: f32,
 ) -> vec2<f32> {
-  let oneMinusT = 1.0 - t;
   if (curveType < 0.5) {
-    return mix(p0, p3, t);
+    let fixedVertexID = floor(0.5 + (idxInResolveLevel * exp2(MAX_RESOLVE_LEVEL - resolveLevel)));
+    return select(p0, p3, fixedVertexID > 0.0);
   }
-  if (curveType < 1.5) {
-    return (oneMinusT * oneMinusT * p0) + (2.0 * oneMinusT * t * p1) + (t * t * p2);
+  var localP0 = p0;
+  var localP1 = p1;
+  var localP2 = p2;
+  var localP3 = p3;
+  var w = -1.0;
+  var maxResolveLevel = 0.0;
+  if (curveType < 0.5) {
+    return select(localP0, localP3, idxInResolveLevel > 0.0);
+  } else if (curveType < 1.5) {
+    maxResolveLevel = wangs_formula_cubic_log2(
+      localP0,
+      mix(localP0, localP1, 2.0 / 3.0),
+      mix(localP2, localP1, 2.0 / 3.0),
+      localP2,
+      vectorXform,
+    );
+    localP1 = mix(localP0, localP1, 2.0 / 3.0);
+    localP2 = mix(localP2, p1, 2.0 / 3.0);
+    localP3 = p2;
+  } else if (curveType < 2.5) {
+    w = weight;
+    maxResolveLevel = wangs_formula_conic_log2(localP0, localP1, localP2, w, vectorXform);
+    localP1 *= w;
+    localP3 = localP2;
+  } else {
+    maxResolveLevel = wangs_formula_cubic_log2(localP0, localP1, localP2, localP3, vectorXform);
   }
-  if (curveType < 2.5) {
-    let denom = (oneMinusT * oneMinusT) + (2.0 * weight * oneMinusT * t) + (t * t);
-    return ((oneMinusT * oneMinusT * p0) + (2.0 * weight * oneMinusT * t * p1) + (t * t * p2)) / max(denom, 1e-5);
+  var localResolveLevel = resolveLevel;
+  var localIdxInResolveLevel = idxInResolveLevel;
+  if (localResolveLevel > maxResolveLevel) {
+    localIdxInResolveLevel = floor(localIdxInResolveLevel * exp2(maxResolveLevel - localResolveLevel));
+    localResolveLevel = maxResolveLevel;
   }
-  return (
-    (oneMinusT * oneMinusT * oneMinusT * p0) +
-    (3.0 * oneMinusT * oneMinusT * t * p1) +
-    (3.0 * oneMinusT * t * t * p2) +
-    (t * t * t * p3)
-  );
+  let fixedVertexID = floor(0.5 + (localIdxInResolveLevel * exp2(MAX_RESOLVE_LEVEL - localResolveLevel)));
+  if (0.0 < fixedVertexID && fixedVertexID < 32.0) {
+    let T = fixedVertexID * (1.0 / 32.0);
+    let ab = unchecked_mix_vec2(localP0, localP1, T);
+    let bc = unchecked_mix_vec2(localP1, localP2, T);
+    let cd = unchecked_mix_vec2(localP2, localP3, T);
+    let abc = unchecked_mix_vec2(ab, bc, T);
+    let bcd = unchecked_mix_vec2(bc, cd, T);
+    let abcd = unchecked_mix_vec2(abc, bcd, T);
+    let u = mix(1.0, w, T);
+    let v = w + 1.0 - u;
+    let uv = mix(u, v, T);
+    return select(abc / uv, abcd, w < 0.0);
+  }
+  return select(localP0, localP3, fixedVertexID > 0.0);
 }
 
 fn cosine_between_unit_vectors(a: vec2<f32>, b: vec2<f32>) -> f32 {
@@ -622,10 +901,17 @@ fn vs_main(
   @location(4) p3: vec2<f32>,
   @location(5) curveMeta: vec4<f32>,
 ) -> VertexOut {
-  var local: vec2<f32>;
-  let activeSegments = max(1.0, pow(2.0, min(resolveLevelAndIdx.x, MAX_RESOLVE_LEVEL)));
-  let t = resolveLevelAndIdx.y / activeSegments;
-  local = eval_patch(curveMeta.x, curveMeta.y, p0, p1, p2, p3, t);
+  let local = tessellate_filled_curve(
+    affine_matrix(),
+    resolveLevelAndIdx.x,
+    resolveLevelAndIdx.y,
+    p0,
+    p1,
+    p2,
+    p3,
+    curveMeta.x,
+    curveMeta.y,
+  );
   let devicePosition = local_to_device(local);
   var out: VertexOut;
   out.position = device_to_ndc(devicePosition);

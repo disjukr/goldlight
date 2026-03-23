@@ -442,7 +442,7 @@ const expandRenderSteps = (
         ), renderStepOrder, true, false);
       }
     } else {
-      pushRenderStep('fill-main', step.pipelineDescs[0]!, step.draw.innerFillBounds ? 1 : 0, false, false);
+      pushRenderStep('fill-main', step.pipelineDescs[0]!, step.draw.innerFillBounds ? 1 : 0, false, step.usesDepth);
       if (step.draw.fringeVertices?.length) {
         pushRenderStep('fill-fringe', createPipelineDesc(
           step.clipDrawIds.length > 0 ? 'drawing-path-fill-clip-cover' : 'drawing-path-fill-cover',
@@ -1066,13 +1066,20 @@ const getPipelineDescsForDraw = (
           ];
       }
       if (draw.renderer.patchMode === 'wedge') {
+        const depthStencil = draw.renderer.usesDepth
+          ? usesStencilClip
+            ? 'clip-cover-depth-less'
+            : 'direct-depth-less'
+          : usesStencilClip
+          ? 'clip-cover'
+          : 'direct';
         return usesStencilClip
           ? [createPipelineDesc(
             'drawing-path-fill-patch-clip-cover',
             'wedge-patch',
             'wedge-patch-instance',
             pipelineBlendMode,
-            'clip-cover',
+            depthStencil,
           )]
           : [
             createPipelineDesc(
@@ -1080,6 +1087,7 @@ const getPipelineDescsForDraw = (
               'wedge-patch',
               'wedge-patch-instance',
               pipelineBlendMode,
+              depthStencil,
             ),
           ];
       }
@@ -1247,10 +1255,14 @@ export const prepareDrawingRecording = (
           usesFillStencil: prepared.draw.kind === 'pathFill' &&
             isDrawingStencilFillRenderer(prepared.draw.renderer) &&
             !prepared.draw.clip?.elements?.length,
-          usesDepth: prepared.draw.kind === 'pathStroke' &&
-            prepared.draw.renderer.usesDepth &&
-            prepared.draw.usesTessellatedStrokePatches &&
-            prepared.draw.patches.length > 0,
+          usesDepth: prepared.draw.renderer.usesDepth &&
+            (
+              (prepared.draw.kind === 'pathStroke' &&
+                prepared.draw.usesTessellatedStrokePatches &&
+                prepared.draw.patches.length > 0) ||
+              (prepared.draw.kind === 'pathFill' &&
+                prepared.draw.patches.length > 0)
+            ),
         });
       } else {
         currentUnsupportedDraws.push(command);

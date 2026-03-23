@@ -93,7 +93,7 @@ export const createDrawingRendererProvider = (
     kind: 'convex-tessellated-wedges',
     patchMode: 'wedge',
     requiresStencil: false,
-    usesDepth: false,
+    usesDepth: true,
   });
   const stencilWedges = Object.freeze({
     nonzero: createRenderer({

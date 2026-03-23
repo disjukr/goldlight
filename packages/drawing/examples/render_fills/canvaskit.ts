@@ -103,7 +103,9 @@ const createCanvasKitPath = (
         throw new Error(`Unsupported path verb: ${(verb as { kind: string }).kind}`);
     }
   }
-  skPath.setFillType(path.fillRule === 'evenodd' ? CanvasKit.FillType.EvenOdd : CanvasKit.FillType.Winding);
+  skPath.setFillType(
+    path.fillRule === 'evenodd' ? CanvasKit.FillType.EvenOdd : CanvasKit.FillType.Winding,
+  );
   return skPath;
 };
 
@@ -111,48 +113,31 @@ const createRoundedDiamondPath = (
   center: Point2D,
   radiusX: number,
   radiusY: number,
-) => createPath2D(
-  { kind: 'moveTo', to: [center[0], center[1] - radiusY] },
-  {
-    kind: 'quadTo',
-    control: [center[0] + radiusX, center[1] - radiusY * 0.2],
-    to: [center[0] + radiusX, center[1]],
-  },
-  {
-    kind: 'quadTo',
-    control: [center[0] + radiusX * 0.2, center[1] + radiusY],
-    to: [center[0], center[1] + radiusY],
-  },
-  {
-    kind: 'quadTo',
-    control: [center[0] - radiusX, center[1] + radiusY * 0.2],
-    to: [center[0] - radiusX, center[1]],
-  },
-  {
-    kind: 'quadTo',
-    control: [center[0] - radiusX * 0.2, center[1] - radiusY],
-    to: [center[0], center[1] - radiusY],
-  },
-  { kind: 'close' },
-);
-
-const createKitePath = (
-  center: Point2D,
-  width: number,
-  height: number,
-) => {
-  const left = center[0] - width / 2;
-  const right = center[0] + width / 2;
-  const top = center[1] - height / 2;
-  const bottom = center[1] + height / 2;
-  return createPath2D(
-    { kind: 'moveTo', to: [center[0], top] },
-    { kind: 'lineTo', to: [right, center[1] - height * 0.12] },
-    { kind: 'lineTo', to: [center[0] + width * 0.18, bottom] },
-    { kind: 'lineTo', to: [left, center[1] + height * 0.08] },
+) =>
+  createPath2D(
+    { kind: 'moveTo', to: [center[0], center[1] - radiusY] },
+    {
+      kind: 'quadTo',
+      control: [center[0] + radiusX, center[1] - radiusY * 0.2],
+      to: [center[0] + radiusX, center[1]],
+    },
+    {
+      kind: 'quadTo',
+      control: [center[0] + radiusX * 0.2, center[1] + radiusY],
+      to: [center[0], center[1] + radiusY],
+    },
+    {
+      kind: 'quadTo',
+      control: [center[0] - radiusX, center[1] + radiusY * 0.2],
+      to: [center[0] - radiusX, center[1]],
+    },
+    {
+      kind: 'quadTo',
+      control: [center[0] - radiusX * 0.2, center[1] - radiusY],
+      to: [center[0], center[1] - radiusY],
+    },
     { kind: 'close' },
   );
-};
 
 const createWobblyDiamondPath = (
   center: Point2D,
@@ -238,12 +223,13 @@ const createTrianglePath = (
   a: Point2D,
   b: Point2D,
   c: Point2D,
-) => createPath2D(
-  { kind: 'moveTo', to: a },
-  { kind: 'lineTo', to: b },
-  { kind: 'lineTo', to: c },
-  { kind: 'close' },
-);
+) =>
+  createPath2D(
+    { kind: 'moveTo', to: a },
+    { kind: 'lineTo', to: b },
+    { kind: 'lineTo', to: c },
+    { kind: 'close' },
+  );
 
 const createSelfIntersectingStarPath = (
   center: Point2D,
@@ -321,45 +307,6 @@ const createDiamondCutoutRectPath = (
   );
 };
 
-const createFigureEightPath = (
-  center: Point2D,
-  width: number,
-  height: number,
-) => {
-  const left = center[0] - width / 2;
-  const right = center[0] + width / 2;
-  const top = center[1] - height / 2;
-  const bottom = center[1] + height / 2;
-  return createPath2D(
-    { kind: 'moveTo', to: [left, center[1] - height * 0.18] },
-    {
-      kind: 'cubicTo',
-      control1: [left + width * 0.22, top],
-      control2: [center[0] - width * 0.08, top],
-      to: [center[0], center[1]],
-    },
-    {
-      kind: 'cubicTo',
-      control1: [center[0] + width * 0.08, bottom],
-      control2: [right - width * 0.22, bottom],
-      to: [right, center[1] + height * 0.18],
-    },
-    {
-      kind: 'cubicTo',
-      control1: [right - width * 0.18, top + height * 0.02],
-      control2: [center[0] + width * 0.1, top + height * 0.08],
-      to: [center[0], center[1]],
-    },
-    {
-      kind: 'cubicTo',
-      control1: [center[0] - width * 0.12, bottom - height * 0.08],
-      control2: [left + width * 0.18, bottom - height * 0.02],
-      to: [left, center[1] - height * 0.18],
-    },
-    { kind: 'close' },
-  );
-};
-
 const createNestedDiamondPath = (
   center: Point2D,
   width: number,
@@ -419,7 +366,12 @@ export const renderFillsCanvasKitSnapshot = async (): Promise<
   drawFill(createSoftStarPath([236, 688], 92, 46), [0.2, 0.47, 0.9, 0.42]);
   drawFill(createRoundedDiamondPath([252, 690], 104, 114), [0.13, 0.65, 0.52, 0.4]);
   drawFill(createNestedDiamondPath([482, 834], 124, 92), [0.96, 0.73, 0.36, 0.88]);
-  drawFill(withPath2DFillRule(createNestedDiamondPath([608, 834], 124, 92), 'evenodd'), [0.48, 0.77, 0.86, 0.88]);
+  drawFill(withPath2DFillRule(createNestedDiamondPath([608, 834], 124, 92), 'evenodd'), [
+    0.48,
+    0.77,
+    0.86,
+    0.88,
+  ]);
 
   canvas.save();
   canvas.translate(370, 556);
@@ -432,18 +384,21 @@ export const renderFillsCanvasKitSnapshot = async (): Promise<
   drawFill(createTrianglePath([48, 170], [124, 34], [166, 170]), [0.28, 0.63, 0.55, 0.72]);
   canvas.restore();
 
-  drawFill(createPath2D(
-    { kind: 'moveTo', to: [88, 850] },
-    { kind: 'lineTo', to: [282, 850] },
-    { kind: 'lineTo', to: [282, 890] },
-    {
-      kind: 'cubicTo',
-      control1: [248, 926],
-      control2: [122, 926],
-      to: [88, 890],
-    },
-    { kind: 'close' },
-  ), [0.86, 0.34, 0.43, 1]);
+  drawFill(
+    createPath2D(
+      { kind: 'moveTo', to: [88, 850] },
+      { kind: 'lineTo', to: [282, 850] },
+      { kind: 'lineTo', to: [282, 890] },
+      {
+        kind: 'cubicTo',
+        control1: [248, 926],
+        control2: [122, 926],
+        to: [88, 890],
+      },
+      { kind: 'close' },
+    ),
+    [0.86, 0.34, 0.43, 1],
+  );
 
   surface.flush();
   const png = surface.makeImageSnapshot().encodeToBytes();

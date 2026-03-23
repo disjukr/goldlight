@@ -410,7 +410,11 @@ export const encodePreparedDawnCommandBuffer = (
         }
 
         let batchUsesDepth = false;
-        for (let batchIndex = stepIndex; batchIndex < passInfo.renderSteps.length; batchIndex += 1) {
+        for (
+          let batchIndex = stepIndex;
+          batchIndex < passInfo.renderSteps.length;
+          batchIndex += 1
+        ) {
           const batchStep = passInfo.renderSteps[batchIndex]!;
           if (stepRequiresDstRead(batchStep)) {
             break;

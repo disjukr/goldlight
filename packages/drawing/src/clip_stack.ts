@@ -114,13 +114,15 @@ const cloneClipShader = (shader: DrawingClipShader | undefined): DrawingClipShad
 const ensureRawElementRuntimeState = (
   rawElement: DrawingClipStackRawElement,
 ): {
-  -readonly [K in keyof NonNullable<DrawingClipStackRawElement['runtimeState']>]:
-    NonNullable<DrawingClipStackRawElement['runtimeState']>[K];
+  -readonly [K in keyof NonNullable<DrawingClipStackRawElement['runtimeState']>]: NonNullable<
+    DrawingClipStackRawElement['runtimeState']
+  >[K];
 } => {
   const mutableRawElement = rawElement as {
     runtimeState?: {
-      -readonly [K in keyof NonNullable<DrawingClipStackRawElement['runtimeState']>]:
-        NonNullable<DrawingClipStackRawElement['runtimeState']>[K];
+      -readonly [K in keyof NonNullable<DrawingClipStackRawElement['runtimeState']>]: NonNullable<
+        DrawingClipStackRawElement['runtimeState']
+      >[K];
     };
   };
   mutableRawElement.runtimeState ??= {};
@@ -170,7 +172,8 @@ export const getDrawingRawClipElementLatestLayerOrder = (
 
 export const getDrawingRawClipElementLatestInsertion = (
   rawElement: DrawingClipStackRawElement,
-): DrawingClipStackInsertion | undefined => ensureRawElementRuntimeState(rawElement).latestInsertion;
+): DrawingClipStackInsertion | undefined =>
+  ensureRawElementRuntimeState(rawElement).latestInsertion;
 
 export const getDrawingRawClipElementUsageBounds = (
   rawElement: DrawingClipStackRawElement,

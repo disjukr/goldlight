@@ -67,48 +67,31 @@ const createRoundedDiamondPath = (
   center: Point2D,
   radiusX: number,
   radiusY: number,
-) => createPath2D(
-  { kind: 'moveTo', to: [center[0], center[1] - radiusY] },
-  {
-    kind: 'quadTo',
-    control: [center[0] + radiusX, center[1] - radiusY * 0.2],
-    to: [center[0] + radiusX, center[1]],
-  },
-  {
-    kind: 'quadTo',
-    control: [center[0] + radiusX * 0.2, center[1] + radiusY],
-    to: [center[0], center[1] + radiusY],
-  },
-  {
-    kind: 'quadTo',
-    control: [center[0] - radiusX, center[1] + radiusY * 0.2],
-    to: [center[0] - radiusX, center[1]],
-  },
-  {
-    kind: 'quadTo',
-    control: [center[0] - radiusX * 0.2, center[1] - radiusY],
-    to: [center[0], center[1] - radiusY],
-  },
-  { kind: 'close' },
-);
-
-const createKitePath = (
-  center: Point2D,
-  width: number,
-  height: number,
-) => {
-  const left = center[0] - width / 2;
-  const right = center[0] + width / 2;
-  const top = center[1] - height / 2;
-  const bottom = center[1] + height / 2;
-  return createPath2D(
-    { kind: 'moveTo', to: [center[0], top] },
-    { kind: 'lineTo', to: [right, center[1] - height * 0.12] },
-    { kind: 'lineTo', to: [center[0] + width * 0.18, bottom] },
-    { kind: 'lineTo', to: [left, center[1] + height * 0.08] },
+) =>
+  createPath2D(
+    { kind: 'moveTo', to: [center[0], center[1] - radiusY] },
+    {
+      kind: 'quadTo',
+      control: [center[0] + radiusX, center[1] - radiusY * 0.2],
+      to: [center[0] + radiusX, center[1]],
+    },
+    {
+      kind: 'quadTo',
+      control: [center[0] + radiusX * 0.2, center[1] + radiusY],
+      to: [center[0], center[1] + radiusY],
+    },
+    {
+      kind: 'quadTo',
+      control: [center[0] - radiusX, center[1] + radiusY * 0.2],
+      to: [center[0] - radiusX, center[1]],
+    },
+    {
+      kind: 'quadTo',
+      control: [center[0] - radiusX * 0.2, center[1] - radiusY],
+      to: [center[0], center[1] - radiusY],
+    },
     { kind: 'close' },
   );
-};
 
 const createWobblyDiamondPath = (
   center: Point2D,
@@ -194,12 +177,13 @@ const createTrianglePath = (
   a: Point2D,
   b: Point2D,
   c: Point2D,
-) => createPath2D(
-  { kind: 'moveTo', to: a },
-  { kind: 'lineTo', to: b },
-  { kind: 'lineTo', to: c },
-  { kind: 'close' },
-);
+) =>
+  createPath2D(
+    { kind: 'moveTo', to: a },
+    { kind: 'lineTo', to: b },
+    { kind: 'lineTo', to: c },
+    { kind: 'close' },
+  );
 
 const createSelfIntersectingStarPath = (
   center: Point2D,
@@ -273,45 +257,6 @@ const createDiamondCutoutRectPath = (
     { kind: 'lineTo', to: [center[0] - holeRadiusX, center[1]] },
     { kind: 'lineTo', to: [center[0], center[1] + holeRadiusY] },
     { kind: 'lineTo', to: [center[0] + holeRadiusX, center[1]] },
-    { kind: 'close' },
-  );
-};
-
-const createFigureEightPath = (
-  center: Point2D,
-  width: number,
-  height: number,
-) => {
-  const left = center[0] - width / 2;
-  const right = center[0] + width / 2;
-  const top = center[1] - height / 2;
-  const bottom = center[1] + height / 2;
-  return createPath2D(
-    { kind: 'moveTo', to: [left, center[1] - height * 0.18] },
-    {
-      kind: 'cubicTo',
-      control1: [left + width * 0.22, top],
-      control2: [center[0] - width * 0.08, top],
-      to: [center[0], center[1]],
-    },
-    {
-      kind: 'cubicTo',
-      control1: [center[0] + width * 0.08, bottom],
-      control2: [right - width * 0.22, bottom],
-      to: [right, center[1] + height * 0.18],
-    },
-    {
-      kind: 'cubicTo',
-      control1: [right - width * 0.18, top + height * 0.02],
-      control2: [center[0] + width * 0.1, top + height * 0.08],
-      to: [center[0], center[1]],
-    },
-    {
-      kind: 'cubicTo',
-      control1: [center[0] - width * 0.12, bottom - height * 0.08],
-      control2: [left + width * 0.18, bottom - height * 0.02],
-      to: [left, center[1] - height * 0.18],
-    },
     { kind: 'close' },
   );
 };
@@ -409,10 +354,14 @@ export const renderFillsSnapshot = async (): Promise<
     style: 'fill',
     color: [0.96, 0.73, 0.36, 0.88],
   });
-  recordDrawPath(recorder, withPath2DFillRule(createNestedDiamondPath([608, 834], 124, 92), 'evenodd'), {
-    style: 'fill',
-    color: [0.48, 0.77, 0.86, 0.88],
-  });
+  recordDrawPath(
+    recorder,
+    withPath2DFillRule(createNestedDiamondPath([608, 834], 124, 92), 'evenodd'),
+    {
+      style: 'fill',
+      color: [0.48, 0.77, 0.86, 0.88],
+    },
+  );
 
   saveDrawingRecorder(recorder);
   translateDrawingRecorder(recorder, 370, 556);

@@ -12,10 +12,7 @@ import type {
   DrawingPreparedStrokePatch,
   DrawingPreparedVertex,
 } from './path_renderer.ts';
-import {
-  drawingDstUsage,
-  toDrawingBlendModeCode,
-} from './path_renderer.ts';
+import { drawingDstUsage, toDrawingBlendModeCode } from './path_renderer.ts';
 import type { DrawingGraphicsPipelineHandle } from './resource_provider.ts';
 import { isDrawingPatchFillRenderer } from './renderer_provider.ts';
 import type { DawnSharedContext } from './shared_context.ts';
@@ -87,7 +84,6 @@ const wedgePatchFloats = 14;
 const curvePatchFloats = 12;
 const strokePatchFloats = 14;
 const maxPatchResolveLevel = 5;
-const patchSegmentCount = 1 << maxPatchResolveLevel;
 const maxStrokeEdges = (1 << 14) - 1;
 
 const numCurveTrianglesAtResolveLevel = (resolveLevel: number): number =>
@@ -644,46 +640,9 @@ const getClipDrawKey = (
   return ids && ids.length > 0 && getStencilClipCount(step) > 0 ? ids.join(',') : null;
 };
 
-const getPipelineBlendMode = (
-  step: DrawingPreparedRenderStep,
-): DrawingPreparedRenderStep['draw']['blendMode'] =>
-  (step.draw.dstUsage & drawingDstUsage.dstReadRequired) !== 0 ? 'src' : step.draw.blendMode;
-
 const usesDeviceSpaceVertices = (step: DrawingPreparedRenderStep): boolean =>
   step.kind === 'fill-inner' ||
   step.kind === 'fill-cover';
-
-const createClipStepResources = (
-  sharedContext: DawnSharedContext,
-  step: DrawingPreparedRenderStep,
-): Readonly<{
-  buffers: readonly GPUBuffer[];
-  counts: readonly number[];
-  elements: readonly DrawingPreparedClipElement[];
-}> => {
-  const clipElements = step.draw.clip?.deferredClipDraws ?? step.draw.clip?.elements;
-  if (!clipElements || clipElements.length === 0) {
-    return {
-      buffers: Object.freeze([]),
-      counts: Object.freeze([]),
-      elements: Object.freeze([]),
-    };
-  }
-
-  const buffers: GPUBuffer[] = [];
-  const counts: number[] = [];
-  for (const element of clipElements) {
-    const clipVertices = createVertexModulationData(element.triangles, [0, 0, 0, 0]);
-    buffers.push(createVertexBuffer(sharedContext, clipVertices));
-    counts.push(clipVertices.length / floatsPerVertex);
-  }
-
-  return {
-    buffers: Object.freeze(buffers),
-    counts: Object.freeze(counts),
-    elements: Object.freeze([...clipElements]),
-  };
-};
 
 const prepareClipDrawResources = (
   sharedContext: DawnSharedContext,
@@ -718,7 +677,9 @@ const prepareStepResources = (
     curveVertexBuffer: GPUBuffer;
   }>,
 ): DrawingPreparedStepResources => {
-  const pipelineHandle = sharedContext.resourceProvider.createGraphicsPipelineHandle(step.pipelineDesc);
+  const pipelineHandle = sharedContext.resourceProvider.createGraphicsPipelineHandle(
+    step.pipelineDesc,
+  );
   const pipeline = sharedContext.resourceProvider.resolveGraphicsPipelineHandle(pipelineHandle);
   const clipAtlasView = sharedContext.atlasProvider.getClipAtlasManager().findOrCreateEntry(
     step.draw.clip?.atlasClip,
@@ -805,17 +766,13 @@ const prepareStepResources = (
         ? patchTemplates.wedgeVertexBuffer
         : patchTemplates.curveVertexBuffer
       : createVertexBuffer(sharedContext, activeVertices);
-    const vertexCount = !activeVertices
-      ? 0
-      : usesPatchInstances
+    const vertexCount = !activeVertices ? 0 : usesPatchInstances
       ? getPatchFillVertexCount(
         step.draw.patches,
         step.draw.renderer.patchMode === 'wedge' ? 'wedge' : 'curve',
       )
       : activeVertices.length / floatsPerVertex;
-    const instanceCount = !activeVertices
-      ? 0
-      : usesPatchInstances
+    const instanceCount = !activeVertices ? 0 : usesPatchInstances
       ? patchVertices!.length /
         (step.draw.renderer.patchMode === 'wedge' ? wedgePatchFloats : curvePatchFloats)
       : 1;
@@ -846,7 +803,11 @@ const prepareStepResources = (
     : step.draw.fringeVertices
     ? createColoredDeviceSpaceVertexData(step.draw.fringeVertices)
     : null;
-  const activeVertices = step.kind === 'stroke-fringe' ? fringeVertices : patchVertices.length > 0 ? patchVertices : strokeVertices;
+  const activeVertices = step.kind === 'stroke-fringe'
+    ? fringeVertices
+    : patchVertices.length > 0
+    ? patchVertices
+    : strokeVertices;
   const vertexBuffer = activeVertices && activeVertices.length > 0
     ? createVertexBuffer(sharedContext, activeVertices)
     : null;
@@ -883,7 +844,9 @@ const preparePassResources = (
     curveVertexBuffer: GPUBuffer;
   }>,
 ): DrawingPreparedPassResources => {
-  const steps = passInfo.renderSteps.map((step) => prepareStepResources(sharedContext, step, patchTemplates));
+  const steps = passInfo.renderSteps.map((step) =>
+    prepareStepResources(sharedContext, step, patchTemplates)
+  );
   const pipelineHandles = steps.map((step) => step.pipelineHandle);
   const clipDraws = passInfo.clipDraws
     .map((clipDraw) => prepareClipDrawResources(sharedContext, clipDraw))
@@ -920,11 +883,11 @@ const collectOwnedBuffers = (
       for (const step of pass.steps) {
         buffers.push(step.stepPayloadBuffer);
         if (step.vertexBuffer) {
-        buffers.push(step.vertexBuffer);
-      }
-      if (step.instanceBuffer) {
-        buffers.push(step.instanceBuffer);
-      }
+          buffers.push(step.vertexBuffer);
+        }
+        if (step.instanceBuffer) {
+          buffers.push(step.instanceBuffer);
+        }
       }
       for (const clipDraw of pass.clipDraws) {
         buffers.push(clipDraw.clipVertexBuffer);
@@ -972,8 +935,14 @@ export const prepareDawnResources = (
   const defaultClipTextureBindGroup = sharedContext.resourceProvider.createClipTextureBindGroup();
   const fullscreenClipVertices = createFullscreenClipVertexData(sharedContext.backend.target);
   const fullscreenClipVertexBuffer = createVertexBuffer(sharedContext, fullscreenClipVertices);
-  const wedgePatchVertexBuffer = createPatchTemplateBuffer(sharedContext, fixedWedgeTemplateVertices);
-  const curvePatchVertexBuffer = createPatchTemplateBuffer(sharedContext, fixedCurveTemplateVertices);
+  const wedgePatchVertexBuffer = createPatchTemplateBuffer(
+    sharedContext,
+    fixedWedgeTemplateVertices,
+  );
+  const curvePatchVertexBuffer = createPatchTemplateBuffer(
+    sharedContext,
+    fixedCurveTemplateVertices,
+  );
   const taskResources = Object.freeze(
     tasks.tasks.map((task): DrawingPreparedRenderPassTaskResources => ({
       kind: 'renderPass',

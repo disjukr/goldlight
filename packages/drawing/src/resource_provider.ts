@@ -1859,15 +1859,15 @@ export const createDawnResourceProvider = (
       ? [createPatchResolveVertexLayout(), createCurvePatchInstanceLayout()]
       : [createStrokePatchLayout()];
 
-const getDepthStencil = (
-  descriptor: DrawingGraphicsPipelineDesc,
-): GPUDepthStencilState | undefined =>
-  descriptor.depthStencil === 'none'
-    ? undefined
-    : descriptor.depthStencil === 'direct'
-    ? createDirectState()
-    : descriptor.depthStencil === 'clip-stencil-write'
-    ? {
+  const getDepthStencil = (
+    descriptor: DrawingGraphicsPipelineDesc,
+  ): GPUDepthStencilState | undefined =>
+    descriptor.depthStencil === 'none'
+      ? undefined
+      : descriptor.depthStencil === 'direct'
+      ? createDirectState()
+      : descriptor.depthStencil === 'clip-stencil-write'
+      ? {
         format: stencilFormat,
         depthWriteEnabled: false,
         depthCompare: 'always',
@@ -1944,12 +1944,12 @@ const getDepthStencil = (
     fragment: {
       module: getOrCreateShaderModule(descriptor),
       entryPoint: 'fs_main',
-        targets: [{
-          format: backend.target.format,
-          blend: descriptor.colorWriteDisabled ? undefined : getBlendState(descriptor.blendMode),
-          writeMask: descriptor.colorWriteDisabled ? noColorWrites : undefined,
-        }],
-      },
+      targets: [{
+        format: backend.target.format,
+        blend: descriptor.colorWriteDisabled ? undefined : getBlendState(descriptor.blendMode),
+        writeMask: descriptor.colorWriteDisabled ? noColorWrites : undefined,
+      }],
+    },
     primitive: {
       topology: descriptor.topology,
       cullMode: 'none',

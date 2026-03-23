@@ -8,9 +8,8 @@ import {
 import { type DrawingPreparedClip, visitDrawingClipStackForDraw } from './clip_stack.ts';
 import type {
   DrawingBlendMode,
-  DrawingCoverageMode,
-  DrawingCustomBlender,
   DrawingClipRect,
+  DrawingCustomBlender,
   DrawingPaint,
   DrawingPath2D,
   DrawingStrokeStyle,
@@ -19,9 +18,9 @@ import type {
 } from './types.ts';
 import type { DrawingRecording } from './recording.ts';
 import {
-  isDrawingPatchFillRenderer,
   type DrawingRenderer,
   type DrawingRendererProvider,
+  isDrawingPatchFillRenderer,
 } from './renderer_provider.ts';
 
 type FlattenedSubpath = Readonly<{
@@ -296,22 +295,6 @@ export type DrawingDrawPreparation = Readonly<
 
 const defaultFillColor: readonly [number, number, number, number] = [0, 0, 0, 1];
 const defaultBlendMode: DrawingBlendMode = 'src-over';
-const coeffBlendModes = new Set<DrawingBlendMode>([
-  'clear',
-  'src',
-  'dst',
-  'src-over',
-  'dst-over',
-  'src-in',
-  'dst-in',
-  'src-out',
-  'dst-out',
-  'src-atop',
-  'dst-atop',
-  'xor',
-  'plus',
-  'screen',
-]);
 const advancedBlendModes = new Set<DrawingBlendMode>([
   'multiply',
   'overlay',
@@ -1831,8 +1814,9 @@ const splitConicAtMany = (
   if (sorted.length === 0) {
     return Object.freeze([{ points: [from, control, to], weight }]);
   }
-  const segments: Array<Readonly<{ points: readonly [Point2D, Point2D, Point2D]; weight: number }>> =
-    [];
+  const segments: Array<
+    Readonly<{ points: readonly [Point2D, Point2D, Point2D]; weight: number }>
+  > = [];
   let current = { points: [from, control, to] as const, weight };
   let lastT = 0;
   for (const t of sorted) {
@@ -2164,10 +2148,16 @@ const collectPathBoundsPoints = (
         points.push(transformPoint2D(verb.to, transform));
         break;
       case 'quadTo':
-        points.push(transformPoint2D(verb.control, transform), transformPoint2D(verb.to, transform));
+        points.push(
+          transformPoint2D(verb.control, transform),
+          transformPoint2D(verb.to, transform),
+        );
         break;
       case 'conicTo':
-        points.push(transformPoint2D(verb.control, transform), transformPoint2D(verb.to, transform));
+        points.push(
+          transformPoint2D(verb.control, transform),
+          transformPoint2D(verb.to, transform),
+        );
         break;
       case 'cubicTo':
         points.push(
@@ -2177,14 +2167,16 @@ const collectPathBoundsPoints = (
         );
         break;
       case 'arcTo':
-        for (const patch of createArcConicPatches(
-          verb.center,
-          verb.radius,
-          verb.startAngle,
-          verb.endAngle,
-          verb.counterClockwise ?? false,
-          transform,
-        )) {
+        for (
+          const patch of createArcConicPatches(
+            verb.center,
+            verb.radius,
+            verb.startAngle,
+            verb.endAngle,
+            verb.counterClockwise ?? false,
+            transform,
+          )
+        ) {
           if (patch.kind === 'conic') {
             points.push(...patch.points);
           }
@@ -2272,22 +2264,6 @@ const isSelfIntersecting = (points: readonly Point2D[]): boolean => {
     }
   }
   return false;
-};
-
-const isConvexPolygon = (points: readonly Point2D[]): boolean => {
-  if (points.length < 3 || isSelfIntersecting(points)) return false;
-  let sign = 0;
-  for (let index = 0; index < points.length; index += 1) {
-    const a = points[index]!;
-    const b = points[(index + 1) % points.length]!;
-    const c = points[(index + 2) % points.length]!;
-    const turn = cross(a, b, c);
-    if (Math.abs(turn) <= epsilon) continue;
-    const nextSign = turn > 0 ? 1 : -1;
-    if (sign !== 0 && nextSign !== sign) return false;
-    sign = nextSign;
-  }
-  return sign !== 0;
 };
 
 type ConvexityVerb =
@@ -3676,16 +3652,19 @@ const computeGraphiteStyleStrokeOrderBounds = (
     localBounds,
     computeStrokeInflationRadius(subpaths, strokeStyle),
   );
-  const transformedBounds = computeBounds(transformPoints(rectCorners(inflatedLocalBounds), transform));
+  const transformedBounds = computeBounds(
+    transformPoints(rectCorners(inflatedLocalBounds), transform),
+  );
   return outsetRect(transformedBounds, aaFringeWidth);
 };
 
-const rectCorners = (rect: Rect): readonly Point2D[] => Object.freeze([
-  rect.origin,
-  [rect.origin[0] + rect.size.width, rect.origin[1]],
-  [rect.origin[0] + rect.size.width, rect.origin[1] + rect.size.height],
-  [rect.origin[0], rect.origin[1] + rect.size.height],
-]);
+const rectCorners = (rect: Rect): readonly Point2D[] =>
+  Object.freeze([
+    rect.origin,
+    [rect.origin[0] + rect.size.width, rect.origin[1]],
+    [rect.origin[0] + rect.size.width, rect.origin[1] + rect.size.height],
+    [rect.origin[0], rect.origin[1] + rect.size.height],
+  ]);
 
 const graphiteInnerFillMinArea = 64 * 64;
 
@@ -3754,7 +3733,9 @@ const computeGraphiteStyleFillInnerBounds = (
     return undefined;
   }
 
-  const transformedBounds = computeBounds(transformPoints(rectCorners(insetLocalBounds), transform));
+  const transformedBounds = computeBounds(
+    transformPoints(rectCorners(insetLocalBounds), transform),
+  );
   return transformedBounds.size.width * transformedBounds.size.height >= graphiteInnerFillMinArea
     ? transformedBounds
     : undefined;
@@ -3763,7 +3744,9 @@ const computeGraphiteStyleFillInnerBounds = (
 const computePreparedVertexBounds = (
   vertices: readonly DrawingPreparedVertex[] | undefined,
 ): Rect | undefined =>
-  vertices && vertices.length > 0 ? computeBounds(vertices.map((vertex) => vertex.point)) : undefined;
+  vertices && vertices.length > 0
+    ? computeBounds(vertices.map((vertex) => vertex.point))
+    : undefined;
 
 const mergeBounds = (
   bounds: readonly (Rect | undefined)[],
@@ -3811,7 +3794,9 @@ const computeContourMidpoint = (
     sumY += point[1];
     weight += 1;
   }
-  if (addImplicitCloseStart && !pointsEqual(startPoint, endpointPoints[endpointPoints.length - 1]!)) {
+  if (
+    addImplicitCloseStart && !pointsEqual(startPoint, endpointPoints[endpointPoints.length - 1]!)
+  ) {
     sumX += startPoint[0];
     sumY += startPoint[1];
     weight += 1;
@@ -3903,19 +3888,19 @@ const preparePathFill = (
     ]);
     return {
       supported: true,
-        draw: {
-          kind: 'pathFill',
-          renderer,
-          triangles: baseTriangles,
-          fringeVertices,
-          patches,
-          innerFillBounds: (dstUsage & drawingDstUsage.dstOnlyUsedByRenderer) !== 0
-            ? computeGraphiteStyleFillInnerBounds(subpaths, command.transform)
-            : undefined,
-          fillRule: command.path.fillRule,
-          color: fillColor,
-          blendMode,
-          coverage,
+      draw: {
+        kind: 'pathFill',
+        renderer,
+        triangles: baseTriangles,
+        fringeVertices,
+        patches,
+        innerFillBounds: (dstUsage & drawingDstUsage.dstOnlyUsedByRenderer) !== 0
+          ? computeGraphiteStyleFillInnerBounds(subpaths, command.transform)
+          : undefined,
+        fillRule: command.path.fillRule,
+        color: fillColor,
+        blendMode,
+        coverage,
         blender,
         dstUsage,
         transform: command.transform,

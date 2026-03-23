@@ -1297,7 +1297,11 @@ Deno.test('drawing prepared recording uses Graphite-style stroke inflation for t
   const steps = prepared.passes[0]?.steps ?? [];
 
   assertEquals(steps.length, 2);
-  assertEquals(steps[0]!.drawBounds.origin[1] + steps[0]!.drawBounds.size.height > steps[1]!.drawBounds.origin[1], true);
+  assertEquals(
+    steps[0]!.drawBounds.origin[1] + steps[0]!.drawBounds.size.height >
+      steps[1]!.drawBounds.origin[1],
+    true,
+  );
   assertEquals(steps[1]!.paintOrder, 1);
 });
 
@@ -1387,7 +1391,10 @@ Deno.test('drawing prepared recording finalizes deferred clip draws when a clear
   assertEquals((firstPass?.renderSteps[0]?.clipDrawIds.length ?? 0) > 0, true);
   assertEquals(firstPass?.clipDraws[0]?.latestInsertion.wrapperKind, 'depth-only');
   assertEquals(firstPass?.clipDraws[0]?.sourceRenderStep.renderStepKind, 'fill-main');
-  assertEquals(firstPass?.clipDraws[0]?.sourceRenderStep.pipelineKey, 'drawing-path-fill-patch-clip-cover');
+  assertEquals(
+    firstPass?.clipDraws[0]?.sourceRenderStep.pipelineKey,
+    'drawing-path-fill-patch-clip-cover',
+  );
   assertEquals(firstPass?.clipDraws[0]?.sourceRenderStep.requiresBarrier, false);
   assertEquals(
     firstPass?.renderSteps.some((step) =>

@@ -434,7 +434,6 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
 
 const wedgePatchShaderSource = `
 const MAX_RESOLVE_LEVEL: f32 = ${maxPatchResolveLevel}.0;
-const SEGMENTS: u32 = ${curveFillSegments}u;
 
 struct ViewportUniform {
   scale: vec2<f32>,
@@ -477,67 +476,36 @@ fn local_to_device(position: vec2<f32>) -> vec2<f32> {
 
 @vertex
 fn vs_main(
-  @builtin(vertex_index) vertexIndex: u32,
-  @location(0) p0: vec2<f32>,
-  @location(1) p1: vec2<f32>,
-  @location(2) p2: vec2<f32>,
-  @location(3) p3: vec2<f32>,
-  @location(4) curveMeta: vec4<f32>,
-  @location(5) fanPoint: vec2<f32>,
+  @location(0) resolveLevelAndIdx: vec2<f32>,
+  @location(1) p0: vec2<f32>,
+  @location(2) p1: vec2<f32>,
+  @location(3) p2: vec2<f32>,
+  @location(4) p3: vec2<f32>,
+  @location(5) curveMeta: vec4<f32>,
+  @location(6) fanPoint: vec2<f32>,
 ) -> VertexOut {
-  let triVertex = vertexIndex % 3u;
-  let triangleIndex = vertexIndex / 3u;
-  let activeSegments = max(1u, 1u << u32(clamp(curveMeta.z, 0.0, MAX_RESOLVE_LEVEL)));
   var local: vec2<f32>;
   let curveType = curveMeta.x;
   let weight = curveMeta.y;
-  if (triangleIndex == 0u) {
-    if (triVertex == 0u) {
-      local = fanPoint;
-    } else if (triVertex == 1u) {
-      local = p0;
-    } else {
-      local = p3;
-    }
+  if (resolveLevelAndIdx.x < 0.0) {
+    local = fanPoint;
   } else {
-    let segmentIndex = triangleIndex - 1u;
-    let t0 = f32(segmentIndex) / f32(activeSegments);
-    let t1 = f32(min(segmentIndex + 1u, activeSegments)) / f32(activeSegments);
-    let oneMinusT0 = 1.0 - t0;
-    let oneMinusT1 = 1.0 - t1;
-    var a = p0;
-    var b = p3;
+    let activeSegments = max(1.0, pow(2.0, min(resolveLevelAndIdx.x, MAX_RESOLVE_LEVEL)));
+    let t = resolveLevelAndIdx.y / activeSegments;
+    let oneMinusT = 1.0 - t;
     if (curveType < 0.5) {
-      a = mix(p0, p3, t0);
-      b = mix(p0, p3, t1);
+      local = mix(p0, p3, t);
     } else if (curveType < 1.5) {
-      a = (oneMinusT0 * oneMinusT0 * p0) + (2.0 * oneMinusT0 * t0 * p1) + (t0 * t0 * p2);
-      b = (oneMinusT1 * oneMinusT1 * p0) + (2.0 * oneMinusT1 * t1 * p1) + (t1 * t1 * p2);
+      local = (oneMinusT * oneMinusT * p0) + (2.0 * oneMinusT * t * p1) + (t * t * p2);
     } else if (curveType < 2.5) {
-      let denom0 = max((oneMinusT0 * oneMinusT0) + (2.0 * weight * oneMinusT0 * t0) + (t0 * t0), 1e-5);
-      let denom1 = max((oneMinusT1 * oneMinusT1) + (2.0 * weight * oneMinusT1 * t1) + (t1 * t1), 1e-5);
-      a = ((oneMinusT0 * oneMinusT0 * p0) + (2.0 * weight * oneMinusT0 * t0 * p1) + (t0 * t0 * p2)) / denom0;
-      b = ((oneMinusT1 * oneMinusT1 * p0) + (2.0 * weight * oneMinusT1 * t1 * p1) + (t1 * t1 * p2)) / denom1;
+      let denom = max((oneMinusT * oneMinusT) + (2.0 * weight * oneMinusT * t) + (t * t), 1e-5);
+      local = ((oneMinusT * oneMinusT * p0) + (2.0 * weight * oneMinusT * t * p1) + (t * t * p2)) / denom;
     } else {
-      a =
-        (oneMinusT0 * oneMinusT0 * oneMinusT0 * p0) +
-        (3.0 * oneMinusT0 * oneMinusT0 * t0 * p1) +
-        (3.0 * oneMinusT0 * t0 * t0 * p2) +
-        (t0 * t0 * t0 * p3);
-      b =
-        (oneMinusT1 * oneMinusT1 * oneMinusT1 * p0) +
-        (3.0 * oneMinusT1 * oneMinusT1 * t1 * p1) +
-        (3.0 * oneMinusT1 * t1 * t1 * p2) +
-        (t1 * t1 * t1 * p3);
-    }
-    if (segmentIndex >= activeSegments) {
-      local = p3;
-    } else if (triVertex == 0u) {
-      local = p0;
-    } else if (triVertex == 1u) {
-      local = a;
-    } else {
-      local = b;
+      local =
+        (oneMinusT * oneMinusT * oneMinusT * p0) +
+        (3.0 * oneMinusT * oneMinusT * t * p1) +
+        (3.0 * oneMinusT * t * t * p2) +
+        (t * t * t * p3);
     }
   }
   let devicePosition = local_to_device(local);
@@ -647,28 +615,17 @@ fn num_radial_segments_per_radian(approxDevStrokeRadius: f32) -> f32 {
 
 @vertex
 fn vs_main(
-  @builtin(vertex_index) vertexIndex: u32,
-  @location(0) p0: vec2<f32>,
-  @location(1) p1: vec2<f32>,
-  @location(2) p2: vec2<f32>,
-  @location(3) p3: vec2<f32>,
-  @location(4) curveMeta: vec4<f32>,
+  @location(0) resolveLevelAndIdx: vec2<f32>,
+  @location(1) p0: vec2<f32>,
+  @location(2) p1: vec2<f32>,
+  @location(3) p2: vec2<f32>,
+  @location(4) p3: vec2<f32>,
+  @location(5) curveMeta: vec4<f32>,
 ) -> VertexOut {
-  let triVertex = vertexIndex % 3u;
-  let segmentIndex = vertexIndex / 3u;
-  let activeSegments = max(1u, 1u << u32(clamp(curveMeta.z, 0.0, MAX_RESOLVE_LEVEL)));
-  let t0 = f32(segmentIndex) / f32(activeSegments);
-  let t1 = f32(min(segmentIndex + 1u, activeSegments)) / f32(activeSegments);
   var local: vec2<f32>;
-  if (segmentIndex >= activeSegments) {
-    local = p3;
-  } else if (triVertex == 0u) {
-    local = p0;
-  } else if (triVertex == 1u) {
-    local = eval_patch(curveMeta.x, curveMeta.y, p0, p1, p2, p3, t0);
-  } else {
-    local = eval_patch(curveMeta.x, curveMeta.y, p0, p1, p2, p3, t1);
-  }
+  let activeSegments = max(1.0, pow(2.0, min(resolveLevelAndIdx.x, MAX_RESOLVE_LEVEL)));
+  let t = resolveLevelAndIdx.y / activeSegments;
+  local = eval_patch(curveMeta.x, curveMeta.y, p0, p1, p2, p3, t);
   let devicePosition = local_to_device(local);
   var out: VertexOut;
   out.position = device_to_ndc(devicePosition);
@@ -1374,28 +1331,35 @@ export const createDawnResourceProvider = (
     ],
   });
 
-  const createWedgePatchLayout = (): GPUVertexBufferLayout => ({
-    arrayStride: floatBytes * 14,
-    stepMode: 'instance',
+  const createPatchResolveVertexLayout = (): GPUVertexBufferLayout => ({
+    arrayStride: floatBytes * 2,
     attributes: [
-      { shaderLocation: 0, offset: floatBytes * 0, format: 'float32x2' },
-      { shaderLocation: 1, offset: floatBytes * 2, format: 'float32x2' },
-      { shaderLocation: 2, offset: floatBytes * 4, format: 'float32x2' },
-      { shaderLocation: 3, offset: floatBytes * 6, format: 'float32x2' },
-      { shaderLocation: 4, offset: floatBytes * 8, format: 'float32x4' },
-      { shaderLocation: 5, offset: floatBytes * 12, format: 'float32x2' },
+      { shaderLocation: 0, offset: 0, format: 'float32x2' },
     ],
   });
 
-  const createCurvePatchLayout = (): GPUVertexBufferLayout => ({
+  const createWedgePatchInstanceLayout = (): GPUVertexBufferLayout => ({
+    arrayStride: floatBytes * 14,
+    stepMode: 'instance',
+    attributes: [
+      { shaderLocation: 1, offset: floatBytes * 0, format: 'float32x2' },
+      { shaderLocation: 2, offset: floatBytes * 2, format: 'float32x2' },
+      { shaderLocation: 3, offset: floatBytes * 4, format: 'float32x2' },
+      { shaderLocation: 4, offset: floatBytes * 6, format: 'float32x2' },
+      { shaderLocation: 5, offset: floatBytes * 8, format: 'float32x4' },
+      { shaderLocation: 6, offset: floatBytes * 12, format: 'float32x2' },
+    ],
+  });
+
+  const createCurvePatchInstanceLayout = (): GPUVertexBufferLayout => ({
     arrayStride: floatBytes * 12,
     stepMode: 'instance',
     attributes: [
-      { shaderLocation: 0, offset: floatBytes * 0, format: 'float32x2' },
-      { shaderLocation: 1, offset: floatBytes * 2, format: 'float32x2' },
-      { shaderLocation: 2, offset: floatBytes * 4, format: 'float32x2' },
-      { shaderLocation: 3, offset: floatBytes * 6, format: 'float32x2' },
-      { shaderLocation: 4, offset: floatBytes * 8, format: 'float32x4' },
+      { shaderLocation: 1, offset: floatBytes * 0, format: 'float32x2' },
+      { shaderLocation: 2, offset: floatBytes * 2, format: 'float32x2' },
+      { shaderLocation: 3, offset: floatBytes * 4, format: 'float32x2' },
+      { shaderLocation: 4, offset: floatBytes * 6, format: 'float32x2' },
+      { shaderLocation: 5, offset: floatBytes * 8, format: 'float32x4' },
     ],
   });
 
@@ -1600,14 +1564,14 @@ export const createDawnResourceProvider = (
 
   const getVertexLayout = (
     descriptor: DrawingGraphicsPipelineDesc,
-  ): GPUVertexBufferLayout =>
+  ): readonly GPUVertexBufferLayout[] =>
     descriptor.vertexLayout === 'device-vertex'
-      ? createVertexLayout()
+      ? [createVertexLayout()]
       : descriptor.vertexLayout === 'wedge-patch-instance'
-      ? createWedgePatchLayout()
+      ? [createPatchResolveVertexLayout(), createWedgePatchInstanceLayout()]
       : descriptor.vertexLayout === 'curve-patch-instance'
-      ? createCurvePatchLayout()
-      : createStrokePatchLayout();
+      ? [createPatchResolveVertexLayout(), createCurvePatchInstanceLayout()]
+      : [createStrokePatchLayout()];
 
 const getDepthStencil = (
   descriptor: DrawingGraphicsPipelineDesc,
@@ -1689,7 +1653,7 @@ const getDepthStencil = (
     vertex: {
       module: getOrCreateShaderModule(descriptor),
       entryPoint: 'vs_main',
-      buffers: [getVertexLayout(descriptor)],
+      buffers: [...getVertexLayout(descriptor)],
     },
     fragment: {
       module: getOrCreateShaderModule(descriptor),

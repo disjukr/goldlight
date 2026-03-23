@@ -292,6 +292,9 @@ const encodePreparedStep = (
 
   if (resources.vertexBuffer && resources.vertexCount > 0) {
     pass.setVertexBuffer(0, resources.vertexBuffer);
+    if (resources.instanceBuffer) {
+      pass.setVertexBuffer(1, resources.instanceBuffer);
+    }
     pass.draw(resources.vertexCount, resources.instanceCount);
   }
 };

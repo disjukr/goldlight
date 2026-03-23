@@ -30,6 +30,7 @@ export type DrawingPreparedStepResources = Readonly<{
   clipTextureView: GPUTextureView | null;
   clipDrawKey: string | null;
   vertexBuffer: GPUBuffer | null;
+  instanceBuffer: GPUBuffer | null;
   vertexCount: number;
   instanceCount: number;
 }>;
@@ -87,9 +88,85 @@ const curvePatchFloats = 12;
 const strokePatchFloats = 14;
 const maxPatchResolveLevel = 5;
 const patchSegmentCount = 1 << maxPatchResolveLevel;
-const wedgePatchVertexCount = (patchSegmentCount + 1) * 3;
-const curvePatchVertexCount = patchSegmentCount * 3;
 const maxStrokeEdges = (1 << 14) - 1;
+
+const numCurveTrianglesAtResolveLevel = (resolveLevel: number): number =>
+  resolveLevel <= 0 ? 0 : (1 << resolveLevel) - 1;
+
+const fixedCurveVertexCountForResolveLevel = (resolveLevel: number): number =>
+  numCurveTrianglesAtResolveLevel(resolveLevel) * 3;
+
+const fixedWedgeVertexCountForResolveLevel = (resolveLevel: number): number =>
+  (numCurveTrianglesAtResolveLevel(resolveLevel) + 1) * 3;
+
+const createFixedCountCurveVertices = (): readonly (readonly [number, number])[] => {
+  const vertices: [number, number][] = [[0, 0], [0, 1]];
+  for (let resolveLevel = 1; resolveLevel <= maxPatchResolveLevel; resolveLevel += 1) {
+    const numSegments = 1 << resolveLevel;
+    for (let index = 1; index < numSegments; index += 2) {
+      vertices.push([resolveLevel, index]);
+    }
+  }
+  return Object.freeze(vertices);
+};
+
+const appendIndexedTriangleVertices = (
+  source: readonly (readonly [number, number])[],
+  indices: readonly number[],
+): Float32Array => {
+  const data = new Float32Array(indices.length * 2);
+  let offset = 0;
+  for (const index of indices) {
+    const vertex = source[index]!;
+    data[offset++] = vertex[0];
+    data[offset++] = vertex[1];
+  }
+  return data;
+};
+
+const createFixedCountCurveIndices = (baseIndex: number): number[] => {
+  const indices: number[] = [baseIndex, baseIndex + 2, baseIndex + 1];
+  let triangleCursor = 0;
+  let nextIndex = baseIndex + 3;
+  for (let resolveLevel = 2; resolveLevel <= maxPatchResolveLevel; resolveLevel += 1) {
+    const numPairs = 1 << (resolveLevel - 2);
+    for (let pairIndex = 0; pairIndex < numPairs; pairIndex += 1) {
+      const neighbor = triangleCursor + pairIndex;
+      const a = indices[(neighbor * 3) + 0]!;
+      const b = indices[(neighbor * 3) + 1]!;
+      const c = indices[(neighbor * 3) + 2]!;
+      indices.push(a, nextIndex++, b);
+      indices.push(b, nextIndex++, c);
+    }
+    triangleCursor += numPairs;
+  }
+  return indices;
+};
+
+const fixedCurveTemplateVertices = (() => {
+  const vertices = createFixedCountCurveVertices();
+  const indices = createFixedCountCurveIndices(0);
+  return appendIndexedTriangleVertices(vertices, indices);
+})();
+
+const fixedWedgeTemplateVertices = (() => {
+  const vertices: (readonly [number, number])[] = [[-1, -1], ...createFixedCountCurveVertices()];
+  const indices = [0, 1, 2, ...createFixedCountCurveIndices(1)];
+  return appendIndexedTriangleVertices(vertices, indices);
+})();
+
+const getPatchFillVertexCount = (
+  patches: readonly DrawingPreparedPatch[],
+  patchMode: 'wedge' | 'curve',
+): number => {
+  const maxResolveLevel = patches.reduce(
+    (currentMax, patch) => Math.max(currentMax, patch.resolveLevel),
+    0,
+  );
+  return patchMode === 'wedge'
+    ? fixedWedgeVertexCountForResolveLevel(maxResolveLevel)
+    : fixedCurveVertexCountForResolveLevel(maxResolveLevel);
+};
 
 const createVertexModulationData = (
   triangles: readonly (readonly [number, number])[],
@@ -154,6 +231,21 @@ const createVertexBuffer = (
 ): GPUBuffer => {
   const buffer = sharedContext.resourceProvider.createBuffer({
     label: 'drawing-vertices',
+    size: vertices.byteLength,
+    usage: vertexBufferUsage,
+    mappedAtCreation: true,
+  });
+  new Float32Array(buffer.getMappedRange()).set(vertices);
+  buffer.unmap();
+  return buffer;
+};
+
+const createPatchTemplateBuffer = (
+  sharedContext: DawnSharedContext,
+  vertices: Float32Array,
+): GPUBuffer => {
+  const buffer = sharedContext.resourceProvider.createBuffer({
+    label: 'drawing-patch-template-vertices',
     size: vertices.byteLength,
     usage: vertexBufferUsage,
     mappedAtCreation: true,
@@ -621,6 +713,10 @@ const prepareClipDrawResources = (
 const prepareStepResources = (
   sharedContext: DawnSharedContext,
   step: DrawingPreparedRenderStep,
+  patchTemplates: Readonly<{
+    wedgeVertexBuffer: GPUBuffer;
+    curveVertexBuffer: GPUBuffer;
+  }>,
 ): DrawingPreparedStepResources => {
   const pipelineHandle = sharedContext.resourceProvider.createGraphicsPipelineHandle(step.pipelineDesc);
   const pipeline = sharedContext.resourceProvider.resolveGraphicsPipelineHandle(pipelineHandle);
@@ -699,15 +795,23 @@ const prepareStepResources = (
       : fillVertices;
     const usesPatchInstances = usesPatchFill &&
       (step.kind === 'fill-main' || step.kind === 'fill-stencil');
-    const vertexBuffer = activeVertices && activeVertices.length > 0
+    const instanceBuffer = usesPatchInstances && activeVertices && activeVertices.length > 0
       ? createVertexBuffer(sharedContext, activeVertices)
       : null;
+    const vertexBuffer = !activeVertices || activeVertices.length === 0
+      ? null
+      : usesPatchInstances
+      ? step.draw.renderer.patchMode === 'wedge'
+        ? patchTemplates.wedgeVertexBuffer
+        : patchTemplates.curveVertexBuffer
+      : createVertexBuffer(sharedContext, activeVertices);
     const vertexCount = !activeVertices
       ? 0
       : usesPatchInstances
-      ? step.draw.renderer.patchMode === 'wedge'
-        ? wedgePatchVertexCount
-        : curvePatchVertexCount
+      ? getPatchFillVertexCount(
+        step.draw.patches,
+        step.draw.renderer.patchMode === 'wedge' ? 'wedge' : 'curve',
+      )
       : activeVertices.length / floatsPerVertex;
     const instanceCount = !activeVertices
       ? 0
@@ -724,6 +828,7 @@ const prepareStepResources = (
       clipTextureView: clipAtlasView,
       clipDrawKey: getClipDrawKey(step),
       vertexBuffer,
+      instanceBuffer,
       vertexCount,
       instanceCount,
     };
@@ -764,6 +869,7 @@ const prepareStepResources = (
     clipTextureView: clipAtlasView,
     clipDrawKey: getClipDrawKey(step),
     vertexBuffer,
+    instanceBuffer: null,
     vertexCount,
     instanceCount,
   };
@@ -772,8 +878,12 @@ const prepareStepResources = (
 const preparePassResources = (
   sharedContext: DawnSharedContext,
   passInfo: DrawingPreparedRecording['passes'][number],
+  patchTemplates: Readonly<{
+    wedgeVertexBuffer: GPUBuffer;
+    curveVertexBuffer: GPUBuffer;
+  }>,
 ): DrawingPreparedPassResources => {
-  const steps = passInfo.renderSteps.map((step) => prepareStepResources(sharedContext, step));
+  const steps = passInfo.renderSteps.map((step) => prepareStepResources(sharedContext, step, patchTemplates));
   const pipelineHandles = steps.map((step) => step.pipelineHandle);
   const clipDraws = passInfo.clipDraws
     .map((clipDraw) => prepareClipDrawResources(sharedContext, clipDraw))
@@ -793,12 +903,16 @@ const collectOwnedBuffers = (
     viewportTransformBuffer: GPUBuffer;
     identityStepPayloadBuffer: GPUBuffer;
     fullscreenClipVertexBuffer: GPUBuffer;
+    wedgePatchVertexBuffer: GPUBuffer;
+    curvePatchVertexBuffer: GPUBuffer;
   }>,
 ): readonly GPUBuffer[] => {
   const buffers: GPUBuffer[] = [
     globals.viewportTransformBuffer,
     globals.identityStepPayloadBuffer,
     globals.fullscreenClipVertexBuffer,
+    globals.wedgePatchVertexBuffer,
+    globals.curvePatchVertexBuffer,
   ];
 
   for (const task of tasks) {
@@ -806,8 +920,11 @@ const collectOwnedBuffers = (
       for (const step of pass.steps) {
         buffers.push(step.stepPayloadBuffer);
         if (step.vertexBuffer) {
-          buffers.push(step.vertexBuffer);
-        }
+        buffers.push(step.vertexBuffer);
+      }
+      if (step.instanceBuffer) {
+        buffers.push(step.instanceBuffer);
+      }
       }
       for (const clipDraw of pass.clipDraws) {
         buffers.push(clipDraw.clipVertexBuffer);
@@ -855,11 +972,18 @@ export const prepareDawnResources = (
   const defaultClipTextureBindGroup = sharedContext.resourceProvider.createClipTextureBindGroup();
   const fullscreenClipVertices = createFullscreenClipVertexData(sharedContext.backend.target);
   const fullscreenClipVertexBuffer = createVertexBuffer(sharedContext, fullscreenClipVertices);
+  const wedgePatchVertexBuffer = createPatchTemplateBuffer(sharedContext, fixedWedgeTemplateVertices);
+  const curvePatchVertexBuffer = createPatchTemplateBuffer(sharedContext, fixedCurveTemplateVertices);
   const taskResources = Object.freeze(
     tasks.tasks.map((task): DrawingPreparedRenderPassTaskResources => ({
       kind: 'renderPass',
       passes: Object.freeze(
-        task.drawPasses.map((passInfo) => preparePassResources(sharedContext, passInfo)),
+        task.drawPasses.map((passInfo) =>
+          preparePassResources(sharedContext, passInfo, {
+            wedgeVertexBuffer: wedgePatchVertexBuffer,
+            curveVertexBuffer: curvePatchVertexBuffer,
+          })
+        ),
       ),
     })),
   );
@@ -876,6 +1000,8 @@ export const prepareDawnResources = (
       viewportTransformBuffer,
       identityStepPayloadBuffer,
       fullscreenClipVertexBuffer,
+      wedgePatchVertexBuffer,
+      curvePatchVertexBuffer,
     }),
     tasks: taskResources,
   };

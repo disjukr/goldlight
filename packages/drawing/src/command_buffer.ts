@@ -40,38 +40,19 @@ const applyClipRect = (
   step: DrawingPreparedRenderStep,
   target: Readonly<{ width: number; height: number }>,
 ): void => {
-  const clipRect = step.clipRect;
-  const clipBounds = step.clipBounds;
-  const clipX = clipRect?.origin[0] ?? clipBounds?.origin[0] ?? 0;
-  const clipY = clipRect?.origin[1] ?? clipBounds?.origin[1] ?? 0;
-  const clipRight = clipRect
-    ? clipRect.origin[0] + clipRect.size.width
-    : clipBounds
-    ? clipBounds.origin[0] + clipBounds.size.width
-    : target.width;
-  const clipBottom = clipRect
-    ? clipRect.origin[1] + clipRect.size.height
-    : clipBounds
-    ? clipBounds.origin[1] + clipBounds.size.height
-    : target.height;
-  const clip2X = clipBounds?.origin[0] ?? clipX;
-  const clip2Y = clipBounds?.origin[1] ?? clipY;
-  const clip2Right = clipBounds ? clipBounds.origin[0] + clipBounds.size.width : clipRight;
-  const clip2Bottom = clipBounds ? clipBounds.origin[1] + clipBounds.size.height : clipBottom;
-  const x = Math.max(0, Math.floor(Math.max(clipX, clip2X)));
-  const y = Math.max(0, Math.floor(Math.max(clipY, clip2Y)));
-  const right = Math.min(target.width, Math.ceil(Math.min(clipRight, clip2Right)));
-  const bottom = Math.min(target.height, Math.ceil(Math.min(clipBottom, clip2Bottom)));
+  const x = Math.max(0, Math.floor(step.drawBounds.origin[0]));
+  const y = Math.max(0, Math.floor(step.drawBounds.origin[1]));
+  const right = Math.min(
+    target.width,
+    Math.ceil(step.drawBounds.origin[0] + step.drawBounds.size.width),
+  );
+  const bottom = Math.min(
+    target.height,
+    Math.ceil(step.drawBounds.origin[1] + step.drawBounds.size.height),
+  );
   const width = Math.max(0, right - x);
   const height = Math.max(0, bottom - y);
   pass.setScissorRect(x, y, width, height);
-};
-
-const applyFullClip = (
-  pass: GPURenderPassEncoder,
-  target: Readonly<{ width: number; height: number }>,
-): void => {
-  pass.setScissorRect(0, 0, target.width, target.height);
 };
 
 const applyStepClip = (
@@ -79,8 +60,8 @@ const applyStepClip = (
   step: DrawingPreparedRenderStep,
   target: Readonly<{ width: number; height: number }>,
 ): void => {
-  if (!step.clipRect && !step.clipBounds) {
-    applyFullClip(pass, target);
+  if (step.drawBounds.size.width <= 0 || step.drawBounds.size.height <= 0) {
+    pass.setScissorRect(0, 0, 0, 0);
     return;
   }
 

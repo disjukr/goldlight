@@ -380,6 +380,27 @@ Deno.test('dawn resource provider uses replace for first clip writes', () => {
   );
 });
 
+Deno.test('dawn fill stencil pipelines follow graphite depth-tested stencil settings', () => {
+  const mock = createMockGpuContext();
+  const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
+
+  sharedContext.resourceProvider.findOrCreateGraphicsPipeline({
+    label: 'drawing-path-fill-stencil-nonzero',
+    shader: 'path',
+    vertexLayout: 'device-vertex',
+    blendMode: 'src-over',
+    depthStencil: 'fill-stencil-nonzero',
+    colorWriteDisabled: true,
+    topology: 'triangle-list',
+  });
+
+  const pipeline = mock.created.renderPipelines[0];
+  assertEquals(pipeline?.depthStencil?.depthCompare, 'less');
+  assertEquals(pipeline?.depthStencil?.depthWriteEnabled, false);
+  assertEquals(pipeline?.depthStencil?.stencilFront?.passOp, 'increment-wrap');
+  assertEquals(pipeline?.depthStencil?.stencilBack?.passOp, 'decrement-wrap');
+});
+
 Deno.test('dawn stroke shader keeps graphite duplicated-edge seam handling', () => {
   const mock = createMockGpuContext();
   const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
@@ -3095,7 +3116,7 @@ Deno.test('dawn command buffer encodes fill draws with stencil and cover pipelin
   assertEquals(mock.created.bindGroupCalls.length > 0, true);
   assertEquals(mock.created.drawCalls.length, 2);
   assertEquals(mock.created.renderPasses[0]?.depthStencilAttachment !== undefined, true);
-  assertEquals(mock.created.scissorCalls[0], [4, 6, 40, 50]);
+  assertEquals(mock.created.scissorCalls[0], [4, 6, 36, 34]);
   assertEquals(
     mock.created.renderPasses[0]?.colorAttachments[0]?.clearValue,
     { r: 0.25, g: 0.5, b: 0.75, a: 1 },
@@ -3172,8 +3193,13 @@ Deno.test('dawn stencil cover clears winding stencil for successive nonzero fill
     pipeline.label === 'drawing-path-fill-stencil-cover'
   );
   assertEquals(stencilCoverPipeline !== undefined, true);
+  assertEquals(stencilCoverPipeline?.depthStencil?.depthCompare, 'less');
+  assertEquals(stencilCoverPipeline?.depthStencil?.depthWriteEnabled, true);
+  assertEquals(stencilCoverPipeline?.depthStencil?.stencilWriteMask, 0xff);
   assertEquals(stencilCoverPipeline?.depthStencil?.stencilFront?.passOp, 'zero');
+  assertEquals(stencilCoverPipeline?.depthStencil?.stencilFront?.depthFailOp, 'zero');
   assertEquals(stencilCoverPipeline?.depthStencil?.stencilBack?.passOp, 'zero');
+  assertEquals(stencilCoverPipeline?.depthStencil?.stencilBack?.depthFailOp, 'zero');
 });
 
 Deno.test('dawn command buffer clips via clip path stencil replay with clip bounds', () => {

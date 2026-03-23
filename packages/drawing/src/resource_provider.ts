@@ -1862,10 +1862,14 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
 const createStencilFaceState = (
   passOp: GPUStencilOperation,
   compare: GPUCompareFunction = 'always',
+  options: Readonly<{
+    failOp?: GPUStencilOperation;
+    depthFailOp?: GPUStencilOperation;
+  }> = {},
 ): GPUStencilFaceState => ({
   compare,
-  failOp: 'keep',
-  depthFailOp: 'keep',
+  failOp: options.failOp ?? 'keep',
+  depthFailOp: options.depthFailOp ?? 'keep',
   passOp,
 });
 
@@ -1875,7 +1879,7 @@ const createFillStencilFaceState = (
 ): GPUDepthStencilState => ({
   format: stencilFormat,
   depthWriteEnabled: false,
-  depthCompare: 'always',
+  depthCompare: 'less',
   stencilReadMask: 0xff,
   stencilWriteMask: 0xff,
   stencilFront: createStencilFaceState(frontPassOp),
@@ -1884,13 +1888,17 @@ const createFillStencilFaceState = (
 
 const createStencilCoverState = (): GPUDepthStencilState => ({
   format: stencilFormat,
-  depthWriteEnabled: false,
-  depthCompare: 'always',
+  depthWriteEnabled: true,
+  depthCompare: 'less',
   stencilReadMask: 0xff,
-  stencilWriteMask: 0x00,
+  stencilWriteMask: 0xff,
   // Graphite's stencil cover consumes the accumulated winding mask as it shades.
-  stencilFront: createStencilFaceState('zero', 'not-equal'),
-  stencilBack: createStencilFaceState('zero', 'not-equal'),
+  stencilFront: createStencilFaceState('zero', 'not-equal', {
+    depthFailOp: 'zero',
+  }),
+  stencilBack: createStencilFaceState('zero', 'not-equal', {
+    depthFailOp: 'zero',
+  }),
 });
 
 const createDirectDepthLessState = (): GPUDepthStencilState => ({

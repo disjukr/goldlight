@@ -1504,7 +1504,7 @@ Deno.test('drawing prepared recording expands stencil fills into render steps', 
   const pass = prepared.passes[0]!;
 
   assertEquals(pass.steps.length, 1);
-  assertEquals(pass.renderSteps.map((step) => step.kind), ['fill-inner', 'fill-stencil', 'fill-cover', 'fill-fringe']);
+  assertEquals(pass.renderSteps.map((step) => step.kind), ['fill-stencil', 'fill-cover', 'fill-fringe']);
 });
 
 Deno.test('dawn command buffer executes expanded render steps for stencil fills', () => {
@@ -1537,7 +1537,7 @@ Deno.test('dawn command buffer executes expanded render steps for stencil fills'
   );
 
   assertEquals(commandBuffer.unsupportedCommands.length, 0);
-  assertEquals(mock.created.drawCalls.length, 4);
+  assertEquals(mock.created.drawCalls.length, 3);
 });
 
 Deno.test('dawn preparation separates recording, draw-pass preparation, and resource preparation', () => {
@@ -2710,6 +2710,28 @@ Deno.test('drawing prepared recording adds non-AA inner fill render step for ren
   assertEquals(renderSteps.map((step) => step.kind), ['fill-inner', 'fill-main', 'fill-fringe']);
 });
 
+Deno.test('drawing prepared recording skips non-AA inner fill for non-rect path fills', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [16, 96] },
+      { kind: 'lineTo', to: [64, 16] },
+      { kind: 'lineTo', to: [112, 96] },
+      { kind: 'close' },
+    ),
+    { style: 'fill', color: [0.8, 0.4, 0.2, 1] },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const renderSteps = prepared.passes[0]?.renderSteps ?? [];
+
+  assertEquals(renderSteps.map((step) => step.kind), ['fill-main', 'fill-fringe']);
+});
+
 Deno.test('dawn command buffer emits inner fill draw before translucent coverage fill', () => {
   const mock = createMockGpuContext();
   const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
@@ -2731,6 +2753,28 @@ Deno.test('dawn command buffer emits inner fill draw before translucent coverage
   encodeDawnCommandBuffer(sharedContext, finishDrawingRecorder(recorder), binding);
 
   assertEquals(mock.created.drawCalls.length, 3);
+});
+
+Deno.test('dawn command buffer omits inner fill draw for non-rect path fills', () => {
+  const mock = createMockGpuContext();
+  const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
+  const recorder = createDrawingRecorder(sharedContext);
+  const binding = createOffscreenBinding(mock.context);
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [16, 96] },
+      { kind: 'lineTo', to: [64, 16] },
+      { kind: 'lineTo', to: [112, 96] },
+      { kind: 'close' },
+    ),
+    { style: 'fill', color: [0.8, 0.4, 0.2, 1] },
+  );
+
+  encodeDawnCommandBuffer(sharedContext, finishDrawingRecorder(recorder), binding);
+
+  assertEquals(mock.created.drawCalls.length, 2);
 });
 
 Deno.test('dawn command buffer keeps translated fill-cover vertices in device space', () => {
@@ -2835,7 +2879,7 @@ Deno.test('dawn command buffer uses stencil-cover fill path for patch-rendered n
   encodeDawnCommandBuffer(sharedContext, finishDrawingRecorder(recorder), binding);
 
   assertEquals(mock.created.renderPasses.length, 1);
-  assertEquals(mock.created.renderPasses[0]?.depthStencilAttachment !== undefined, false);
+  assertEquals(mock.created.renderPasses[0]?.depthStencilAttachment !== undefined, true);
   assertEquals(mock.created.drawCalls.length, 2);
   assertEquals(mock.created.renderPipelines.length, 2);
 });
@@ -2978,7 +3022,7 @@ Deno.test('dawn command buffer reuses shared clip draws for identical clip stack
 
   assertEquals(commandBuffer.unsupportedCommands.length, 0);
   assertEquals(mock.created.renderPasses.length, 1);
-  assertEquals(mock.created.drawCalls.length, 7);
+  assertEquals(mock.created.drawCalls.length, 5);
 });
 
 Deno.test('dawn command buffer encodes stroke draws without stencil', () => {
@@ -3215,7 +3259,7 @@ Deno.test('dawn command buffer isolates tessellated stroke patches into a depth-
 
   assertEquals(commandBuffer.passCount, 1);
   assertEquals(mock.created.renderPasses.length, 1);
-  assertEquals(mock.created.drawCalls.length, 4);
+  assertEquals(mock.created.drawCalls.length, 3);
   assertEquals(mock.created.stencilReferences, []);
   assertEquals(mock.created.renderPasses[0]?.depthStencilAttachment !== undefined, true);
 
@@ -3286,7 +3330,7 @@ Deno.test('dawn curve patch shader keeps line patches on the line code path', ()
     throw new Error('expected curve patch shader source');
   }
   const curveShaderSource = curveShader.code;
-  assertEquals(curveShaderSource.includes('if (curveType < 0.5) {\n    return mix(p0, p1, t);'), true);
+  assertEquals(curveShaderSource.includes('if (curveType < 0.5) {\n    return mix(p0, p3, t);'), true);
 });
 
 Deno.test('dawn resource provider reuses pipelines across command buffers', () => {

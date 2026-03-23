@@ -179,6 +179,10 @@ const stepRequiresDstRead = (
   step: DrawingPreparedRenderStep,
 ): boolean => (step.draw.dstUsage & drawingDstUsage.dstReadRequired) !== 0;
 
+const stepNeedsDepthStencilAttachment = (
+  step: DrawingPreparedRenderStep,
+): boolean => step.pipelineDesc.depthStencil !== 'none';
+
 const createStepClipTextureBindGroup = (
   sharedContext: DawnSharedContext,
   commandResources: DrawingPreparedCommandResources,
@@ -374,7 +378,7 @@ export const encodePreparedDawnCommandBuffer = (
               resolveView,
               passInfo.clearColor,
               colorLoadOp,
-              step.usesDepth ? stencilView : undefined,
+              stepNeedsDepthStencilAttachment(step) ? stencilView : undefined,
             ),
           );
           const drawStepIndex = step.stepIndex;
@@ -408,7 +412,7 @@ export const encodePreparedDawnCommandBuffer = (
           if (stepRequiresDstRead(batchStep)) {
             break;
           }
-          batchUsesDepth ||= batchStep.usesDepth || batchStep.usesStencil || batchStep.usesFillStencil;
+          batchUsesDepth ||= stepNeedsDepthStencilAttachment(batchStep);
         }
         const pass = encoder.beginRenderPass(
           createRenderPassDescriptor(

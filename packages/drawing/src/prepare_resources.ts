@@ -688,6 +688,8 @@ const prepareStepResources = (
       ? step.draw.innerFillBounds
         ? createBoundsCoverVertexData(step.draw.innerFillBounds, [1, 1, 1, 1])
         : null
+      : step.kind === 'fill-stencil-fan'
+      ? fillVertices
       : step.kind === 'fill-fringe'
       ? fringeVertices
       : step.kind === 'fill-cover'

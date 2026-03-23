@@ -497,8 +497,8 @@ fn vs_main(
   var a = p0;
   var b = p3;
   if (curveType < 0.5) {
-    a = mix(p0, p1, t0);
-    b = mix(p0, p1, t1);
+    a = mix(p0, p3, t0);
+    b = mix(p0, p3, t1);
   } else if (curveType < 1.5) {
     a = (oneMinusT0 * oneMinusT0 * p0) + (2.0 * oneMinusT0 * t0 * p1) + (t0 * t0 * p2);
     b = (oneMinusT1 * oneMinusT1 * p0) + (2.0 * oneMinusT1 * t1 * p1) + (t1 * t1 * p2);
@@ -603,7 +603,7 @@ fn eval_patch(
 ) -> vec2<f32> {
   let oneMinusT = 1.0 - t;
   if (curveType < 0.5) {
-    return mix(p0, p1, t);
+    return mix(p0, p3, t);
   }
   if (curveType < 1.5) {
     return (oneMinusT * oneMinusT * p0) + (2.0 * oneMinusT * t * p1) + (t * t * p2);
@@ -612,11 +612,12 @@ fn eval_patch(
     let denom = (oneMinusT * oneMinusT) + (2.0 * weight * oneMinusT * t) + (t * t);
     return ((oneMinusT * oneMinusT * p0) + (2.0 * weight * oneMinusT * t * p1) + (t * t * p2)) / max(denom, 1e-5);
   }
-  return
+  return (
     (oneMinusT * oneMinusT * oneMinusT * p0) +
     (3.0 * oneMinusT * oneMinusT * t * p1) +
     (3.0 * oneMinusT * t * t * p2) +
-    (t * t * t * p3);
+    (t * t * t * p3)
+  );
 }
 
 fn cosine_between_unit_vectors(a: vec2<f32>, b: vec2<f32>) -> f32 {
@@ -804,11 +805,12 @@ fn eval_patch(
     let denom = (oneMinusT * oneMinusT) + (2.0 * weight * oneMinusT * t) + (t * t);
     return ((oneMinusT * oneMinusT * p0) + (2.0 * weight * oneMinusT * t * p1) + (t * t * p2)) / max(denom, 1e-5);
   }
-  return
+  return (
     (oneMinusT * oneMinusT * oneMinusT * p0) +
     (3.0 * oneMinusT * oneMinusT * t * p1) +
     (3.0 * oneMinusT * t * t * p2) +
-    (t * t * t * p3);
+    (t * t * t * p3)
+  );
 }
 
 fn cosine_between_unit_vectors(a: vec2<f32>, b: vec2<f32>) -> f32 {

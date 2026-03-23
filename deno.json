@@ -82,6 +82,9 @@
     "example:drawing:strokes:check": "deno check --unstable-webgpu --unstable-raw-imports ./packages/drawing/examples/render_strokes/main.ts",
     "example:drawing:strokes:png": "deno run -A --unstable-webgpu --unstable-raw-imports ./packages/drawing/examples/render_strokes/main.ts",
     "example:drawing:strokes:ckpng": "deno run -A --unstable-raw-imports ./packages/drawing/examples/render_strokes/canvaskit_main.ts",
+    "example:drawing:fills:check": "deno check --unstable-webgpu --unstable-raw-imports ./packages/drawing/examples/render_fills/main.ts",
+    "example:drawing:fills:png": "deno run -A --unstable-webgpu --unstable-raw-imports ./packages/drawing/examples/render_fills/main.ts",
+    "example:drawing:fills:ckpng": "deno run -A --unstable-raw-imports ./packages/drawing/examples/render_fills/canvaskit_main.ts",
     "example:drawing:tiger:check": "deno check --unstable-raw-imports ./packages/drawing/examples/render_tiger_png/main.ts",
     "example:drawing:tiger:png": "deno run -A --unstable-raw-imports ./packages/drawing/examples/render_tiger_png/main.ts",
     "example:browser:serve": "deno run -A jsr:@std/http@1/file-server ."

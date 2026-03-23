@@ -3194,6 +3194,79 @@ const rectCorners = (rect: Rect): readonly Point2D[] => Object.freeze([
   [rect.origin[0], rect.origin[1] + rect.size.height],
 ]);
 
+const graphiteInnerFillMinArea = 64 * 64;
+
+const isAxisAlignedScaleTranslateTransform = (
+  transform: readonly [number, number, number, number, number, number],
+): boolean => Math.abs(transform[1]) <= epsilon && Math.abs(transform[2]) <= epsilon;
+
+const isRectCornerPoint = (point: Point2D, rect: Rect): boolean => {
+  const left = rect.origin[0];
+  const right = rect.origin[0] + rect.size.width;
+  const top = rect.origin[1];
+  const bottom = rect.origin[1] + rect.size.height;
+  const matchesX = Math.abs(point[0] - left) <= epsilon || Math.abs(point[0] - right) <= epsilon;
+  const matchesY = Math.abs(point[1] - top) <= epsilon || Math.abs(point[1] - bottom) <= epsilon;
+  return matchesX && matchesY;
+};
+
+const isSimpleClosedRectSubpath = (subpath: FlattenedSubpath): boolean => {
+  if (!subpath.closed || subpath.points.length < 4) {
+    return false;
+  }
+
+  const uniquePoints: Point2D[] = [];
+  for (const point of subpath.points) {
+    if (!uniquePoints.some((candidate) => pointsEqual(candidate, point))) {
+      uniquePoints.push(point);
+    }
+  }
+  if (uniquePoints.length !== 4) {
+    return false;
+  }
+
+  const bounds = computeBounds(uniquePoints);
+  if (bounds.size.width <= epsilon || bounds.size.height <= epsilon) {
+    return false;
+  }
+
+  for (let index = 0; index < uniquePoints.length; index += 1) {
+    const current = uniquePoints[index]!;
+    const next = uniquePoints[(index + 1) % uniquePoints.length]!;
+    if (Math.abs(current[0] - next[0]) > epsilon && Math.abs(current[1] - next[1]) > epsilon) {
+      return false;
+    }
+    if (!isRectCornerPoint(current, bounds)) {
+      return false;
+    }
+  }
+
+  return true;
+};
+
+const computeGraphiteStyleFillInnerBounds = (
+  subpaths: readonly FlattenedSubpath[],
+  transform: readonly [number, number, number, number, number, number],
+): Rect | undefined => {
+  if (
+    subpaths.length !== 1 ||
+    !isAxisAlignedScaleTranslateTransform(transform) ||
+    !isSimpleClosedRectSubpath(subpaths[0]!)
+  ) {
+    return undefined;
+  }
+
+  const insetLocalBounds = insetRect(computeBounds(subpaths[0]!.points), aaFringeWidth);
+  if (!insetLocalBounds) {
+    return undefined;
+  }
+
+  const transformedBounds = computeBounds(transformPoints(rectCorners(insetLocalBounds), transform));
+  return transformedBounds.size.width * transformedBounds.size.height >= graphiteInnerFillMinArea
+    ? transformedBounds
+    : undefined;
+};
+
 const computePreparedVertexBounds = (
   vertices: readonly DrawingPreparedVertex[] | undefined,
 ): Rect | undefined =>
@@ -3344,19 +3417,19 @@ const preparePathFill = (
     ]);
     return {
       supported: true,
-      draw: {
-        kind: 'pathFill',
-        renderer,
-        triangles: baseTriangles,
-        fringeVertices,
-        patches,
-        innerFillBounds: (dstUsage & drawingDstUsage.dstOnlyUsedByRenderer) !== 0
-          ? insetRect(transformedFillBounds, aaFringeWidth)
-          : undefined,
-        fillRule: command.path.fillRule,
-        color: fillColor,
-        blendMode,
-        coverage,
+        draw: {
+          kind: 'pathFill',
+          renderer,
+          triangles: baseTriangles,
+          fringeVertices,
+          patches,
+          innerFillBounds: (dstUsage & drawingDstUsage.dstOnlyUsedByRenderer) !== 0
+            ? computeGraphiteStyleFillInnerBounds(subpaths, command.transform)
+            : undefined,
+          fillRule: command.path.fillRule,
+          color: fillColor,
+          blendMode,
+          coverage,
         blender,
         dstUsage,
         transform: command.transform,

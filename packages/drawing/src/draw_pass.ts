@@ -87,6 +87,7 @@ export type DrawingPreparedStep = Readonly<{
 export type DrawingPreparedRenderStepKind =
   | 'fill-inner'
   | 'fill-main'
+  | 'fill-stencil-fan'
   | 'fill-stencil'
   | 'fill-cover'
   | 'fill-fringe'
@@ -422,8 +423,15 @@ const expandRenderSteps = (
       ), 0, false, false);
     }
     if (step.usesFillStencil) {
-      pushRenderStep('fill-stencil', step.pipelineDescs[0]!, step.draw.innerFillBounds ? 1 : 0, true, false);
-      pushRenderStep('fill-cover', step.pipelineDescs[1]!, step.draw.innerFillBounds ? 2 : 1, true, false);
+      let renderStepOrder = step.draw.innerFillBounds ? 1 : 0;
+      if (step.pipelineDescs.length === 3) {
+        pushRenderStep('fill-stencil-fan', step.pipelineDescs[0]!, renderStepOrder++, true, false);
+        pushRenderStep('fill-stencil', step.pipelineDescs[1]!, renderStepOrder++, true, false);
+        pushRenderStep('fill-cover', step.pipelineDescs[2]!, renderStepOrder++, true, false);
+      } else {
+        pushRenderStep('fill-stencil', step.pipelineDescs[0]!, renderStepOrder++, true, false);
+        pushRenderStep('fill-cover', step.pipelineDescs[1]!, renderStepOrder++, true, false);
+      }
       if (step.draw.fringeVertices?.length) {
         pushRenderStep('fill-fringe', createPipelineDesc(
           'drawing-path-fill-stencil-cover',
@@ -431,7 +439,7 @@ const expandRenderSteps = (
           'device-vertex',
           (step.draw.dstUsage & drawingDstUsage.dstReadRequired) !== 0 ? 'src' : step.draw.blendMode,
           'fill-stencil-cover',
-        ), step.draw.innerFillBounds ? 3 : 2, true, false);
+        ), renderStepOrder, true, false);
       }
     } else {
       pushRenderStep('fill-main', step.pipelineDescs[0]!, step.draw.innerFillBounds ? 1 : 0, false, false);
@@ -942,7 +950,7 @@ const getPipelineDescsForDraw = (
   switch (draw.kind) {
     case 'pathFill': {
       const rendererFillRule = draw.renderer.fillRule ?? draw.fillRule;
-      const fillStencilDesc = rendererFillRule === 'evenodd'
+      const fillStencilCurveDesc = rendererFillRule === 'evenodd'
         ? draw.renderer.kind === 'stencil-tessellated-curves'
           ? createPipelineDesc(
             'drawing-path-fill-curve-patch-stencil-evenodd',
@@ -995,18 +1003,47 @@ const getPipelineDescsForDraw = (
           'fill-stencil-nonzero',
           true,
         );
+      const fillStencilFanDesc = rendererFillRule === 'evenodd'
+        ? createPipelineDesc(
+          'drawing-path-fill-stencil-evenodd',
+          'path',
+          'device-vertex',
+          pipelineBlendMode,
+          'fill-stencil-evenodd',
+          true,
+        )
+        : createPipelineDesc(
+          'drawing-path-fill-stencil-nonzero',
+          'path',
+          'device-vertex',
+          pipelineBlendMode,
+          'fill-stencil-nonzero',
+          true,
+        );
 
       if (!usesStencilClip && isDrawingStencilFillRenderer(draw.renderer)) {
-        return [
-          fillStencilDesc,
-          createPipelineDesc(
-            'drawing-path-fill-stencil-cover',
-            'path',
-            'device-vertex',
-            pipelineBlendMode,
-            'fill-stencil-cover',
-          ),
-        ];
+        return draw.renderer.kind === 'stencil-tessellated-curves'
+          ? [
+            fillStencilFanDesc,
+            fillStencilCurveDesc,
+            createPipelineDesc(
+              'drawing-path-fill-stencil-cover',
+              'path',
+              'device-vertex',
+              pipelineBlendMode,
+              'fill-stencil-cover',
+            ),
+          ]
+          : [
+            fillStencilCurveDesc,
+            createPipelineDesc(
+              'drawing-path-fill-stencil-cover',
+              'path',
+              'device-vertex',
+              pipelineBlendMode,
+              'fill-stencil-cover',
+            ),
+          ];
       }
       if (draw.renderer.patchMode === 'curve') {
         return usesStencilClip

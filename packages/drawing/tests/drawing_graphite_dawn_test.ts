@@ -2276,7 +2276,10 @@ Deno.test('dawn command buffer encodes gradient-filled draws without unsupported
     .find((code) =>
       typeof code === 'string' &&
       code.includes('fn paint_shader_color(devicePosition: vec2<f32>) -> vec4<f32>') &&
-      code.includes('fn sweep_gradient_t(localPosition: vec2<f32>) -> f32')
+      code.includes(
+        'fn sweep_grad_layout(biasParam: f32, scaleParam: f32, pos: vec2<f32>) -> vec2<f32>',
+      ) &&
+      code.includes('fn colorize_grad_4(t: vec2<f32>) -> vec4<f32>')
     );
   assertEquals(typeof pathShaderCode, 'string');
 });

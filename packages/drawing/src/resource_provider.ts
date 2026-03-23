@@ -381,10 +381,19 @@ struct StepUniform {
   dst: vec4<f32>,
   blender: vec4<f32>,
   shaderInfo: vec4<f32>,
+  shaderMeta: vec4<f32>,
   shaderParams0: vec4<f32>,
   shaderParams1: vec4<f32>,
-  shaderReserved0: vec4<f32>,
-  shaderReserved1: vec4<f32>,
+  gradientOffsets0: vec4<f32>,
+  gradientOffsets1: vec4<f32>,
+  gradientColor0: vec4<f32>,
+  gradientColor1: vec4<f32>,
+  gradientColor2: vec4<f32>,
+  gradientColor3: vec4<f32>,
+  gradientColor4: vec4<f32>,
+  gradientColor5: vec4<f32>,
+  gradientColor6: vec4<f32>,
+  gradientColor7: vec4<f32>,
   shaderLocalMatrix0: vec4<f32>,
   shaderLocalMatrix1: vec4<f32>,
 };
@@ -410,75 +419,255 @@ fn paint_local_position(devicePosition: vec2<f32>) -> vec2<f32> {
   );
 }
 
-fn linear_gradient_t(localPosition: vec2<f32>) -> f32 {
-  let start = step.shaderParams0.xy;
-  let end = step.shaderParams0.zw;
-  let axis = end - start;
-  let denom = max(dot(axis, axis), 1e-5);
-  return dot(localPosition - start, axis) / denom;
+fn unpremul_color(color: vec4<f32>) -> vec4<f32> {
+  return vec4<f32>(color.rgb / max(color.a, 0.0001), color.a);
 }
 
-fn radial_gradient_t(localPosition: vec2<f32>) -> f32 {
-  let center = step.shaderParams0.xy;
-  let radius = max(step.shaderParams0.z, 1e-5);
-  return length(localPosition - center) / radius;
+fn unpremul_polar(color: vec4<f32>) -> vec4<f32> {
+  return vec4<f32>(color.r, color.g / max(color.a, 0.0001), color.b / max(color.a, 0.0001), color.a);
 }
 
-fn two_point_conical_gradient_t(localPosition: vec2<f32>) -> f32 {
-  let c0 = step.shaderParams0.xy;
-  let c1 = step.shaderParams0.zw;
-  let r0 = step.shaderParams1.x;
-  let r1 = step.shaderParams1.y;
-  let c = c0 - localPosition;
-  let d = c1 - c0;
-  let dr = r1 - r0;
-  let a = dot(d, d) - (dr * dr);
-  let b = 2.0 * (dot(c, d) - (r0 * dr));
-  let cTerm = dot(c, c) - (r0 * r0);
-  if (abs(a) <= 1e-5) {
-    if (abs(b) <= 1e-5) {
-      return select(0.0, 1.0, cTerm <= 0.0);
+fn css_lab_to_xyz(lab: vec3<f32>) -> vec3<f32> {
+  let k = 24389.0 / 27.0;
+  let e = 216.0 / 24389.0;
+  var f = vec3<f32>(0.0);
+  f.y = (lab.x + 16.0) / 116.0;
+  f.x = (lab.y / 500.0) + f.y;
+  f.z = f.y - (lab.z / 200.0);
+  let fCubed = f * f * f;
+  var xyz = vec3<f32>(
+    select((116.0 * f.x - 16.0) / k, fCubed.x, fCubed.x > e),
+    select(lab.x / k, fCubed.y, lab.x > k * e),
+    select((116.0 * f.z - 16.0) / k, fCubed.z, fCubed.z > e),
+  );
+  let d50 = vec3<f32>(0.3457 / 0.3585, 1.0, (1.0 - 0.3457 - 0.3585) / 0.3585);
+  return xyz * d50;
+}
+
+fn css_hcl_to_lab(hcl: vec3<f32>) -> vec3<f32> {
+  let radiansHue = radians(hcl.x);
+  return vec3<f32>(hcl.z, hcl.y * cos(radiansHue), hcl.y * sin(radiansHue));
+}
+
+fn css_hcl_to_xyz(hcl: vec3<f32>) -> vec3<f32> {
+  return css_lab_to_xyz(css_hcl_to_lab(hcl));
+}
+
+fn css_oklab_to_linear_srgb(oklab: vec3<f32>) -> vec3<f32> {
+  let l_ = oklab.x + 0.3963377774 * oklab.y + 0.2158037573 * oklab.z;
+  let m_ = oklab.x - 0.1055613458 * oklab.y - 0.0638541728 * oklab.z;
+  let s_ = oklab.x - 0.0894841775 * oklab.y - 1.2914855480 * oklab.z;
+  let l = l_ * l_ * l_;
+  let m = m_ * m_ * m_;
+  let s = s_ * s_ * s_;
+  return vec3<f32>(
+    4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+    -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+    -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s,
+  );
+}
+
+fn css_okhcl_to_linear_srgb(okhcl: vec3<f32>) -> vec3<f32> {
+  return css_oklab_to_linear_srgb(css_hcl_to_lab(okhcl));
+}
+
+fn css_oklab_gamut_map_to_linear_srgb(oklab: vec3<f32>) -> vec3<f32> {
+  let normalR = vec2<f32>(0.409702, -0.912219);
+  let normalM = vec2<f32>(-0.397919, -0.917421);
+  let normalB = vec2<f32>(-0.906800, 0.421562);
+  let normalC = vec2<f32>(-0.171122, 0.985250);
+  let normalG = vec2<f32>(0.460276, 0.887776);
+  let normalY = vec2<f32>(0.947925, 0.318495);
+  let c0YR = 0.091132;
+  let cWYR = vec2<f32>(0.070370, 0.034139);
+  let cKYR = vec2<f32>(0.018170, 0.378550);
+  let c0RM = 0.113902;
+  let cWRM = vec2<f32>(0.090836, 0.036251);
+  let cKRM = vec2<f32>(0.226781, 0.018764);
+  let c0MB = 0.161739;
+  let cWMB = vec2<f32>(-0.008202, -0.264819);
+  let cKMB = vec2<f32>(0.187156, -0.284304);
+  let c0BC = 0.102047;
+  let cWBC = vec2<f32>(-0.014804, -0.162608);
+  let cKBC = vec2<f32>(-0.276786, 0.004193);
+  let c0CG = 0.092029;
+  let cWCG = vec2<f32>(-0.038533, -0.001650);
+  let cKCG = vec2<f32>(-0.232572, -0.094331);
+  let c0GY = 0.081709;
+  let cWGY = vec2<f32>(-0.034601, -0.002215);
+  let cKGY = vec2<f32>(0.012185, 0.338031);
+  var ab = oklab.yz;
+  var c0 = 0.0;
+  var cW = vec2<f32>(0.0);
+  var cK = vec2<f32>(0.0);
+  if (dot(ab, normalR) < 0.0) {
+    if (dot(ab, normalG) < 0.0) {
+      if (dot(ab, normalC) < 0.0) {
+        c0 = c0BC; cW = cWBC; cK = cKBC;
+      } else {
+        c0 = c0CG; cW = cWCG; cK = cKCG;
+      }
+    } else {
+      if (dot(ab, normalY) < 0.0) {
+        c0 = c0GY; cW = cWGY; cK = cKGY;
+      } else {
+        c0 = c0YR; cW = cWYR; cK = cKYR;
+      }
     }
-    return (-cTerm) / b;
+  } else if (dot(ab, normalB) < 0.0) {
+    if (dot(ab, normalM) < 0.0) {
+      c0 = c0RM; cW = cWRM; cK = cKRM;
+    } else {
+      c0 = c0MB; cW = cWMB; cK = cKMB;
+    }
+  } else {
+    c0 = c0BC; cW = cWBC; cK = cKBC;
   }
-  let discr = max((b * b) - (4.0 * a * cTerm), 0.0);
-  let sqrtDiscr = sqrt(discr);
-  let t0 = (-b - sqrtDiscr) / (2.0 * a);
-  let t1 = (-b + sqrtDiscr) / (2.0 * a);
-  let valid0 = t0 >= 0.0 && t0 <= 1.0;
-  let valid1 = t1 >= 0.0 && t1 <= 1.0;
-  if (valid0 && valid1) {
-    return min(t0, t1);
+  var alpha = 1.0;
+  let wDenom = dot(cW, ab);
+  if (wDenom > 0.0) {
+    let wNum = c0 * (1.0 - oklab.x);
+    if (wNum < wDenom) {
+      alpha = min(alpha, wNum / wDenom);
+    }
   }
-  if (valid0) {
-    return t0;
+  let kDenom = dot(cK, ab);
+  if (kDenom > 0.0) {
+    let kNum = c0 * oklab.x;
+    if (kNum < kDenom) {
+      alpha = min(alpha, kNum / kDenom);
+    }
   }
-  if (valid1) {
-    return t1;
-  }
-  return select(t0, t1, abs(t1 - 0.5) < abs(t0 - 0.5));
+  return css_oklab_to_linear_srgb(vec3<f32>(oklab.x, oklab.y * alpha, oklab.z * alpha));
 }
 
-fn sweep_gradient_t(localPosition: vec2<f32>) -> f32 {
-  let center = step.shaderParams0.xy;
-  let direction = localPosition - center;
-  let angle = atan2(direction.y, direction.x) / 6.28318530718;
-  return (angle * step.shaderParams0.w) + step.shaderParams0.z;
+fn css_okhcl_gamut_map_to_linear_srgb(okhcl: vec3<f32>) -> vec3<f32> {
+  return css_oklab_gamut_map_to_linear_srgb(css_hcl_to_lab(okhcl));
 }
 
-fn gradient_tile_t(t: f32, tileMode: i32) -> vec2<f32> {
-  if (tileMode == 1) {
-    return vec2<f32>(fract(t), 1.0);
+fn css_hsl_to_srgb(hslIn: vec3<f32>) -> vec3<f32> {
+  var hsl = hslIn;
+  hsl.x = hsl.x - 360.0 * floor(hsl.x / 360.0);
+  if (hsl.x < 0.0) {
+    hsl.x += 360.0;
   }
-  if (tileMode == 2) {
-    let tiled = fract(t * 0.5) * 2.0;
-    return vec2<f32>(select(tiled, 2.0 - tiled, tiled > 1.0), 1.0);
+  hsl.y = hsl.y / 100.0;
+  hsl.z = hsl.z / 100.0;
+  let modK = vec3<f32>(
+    fract((0.0 + hsl.x / 30.0) / 12.0) * 12.0,
+    fract((8.0 + hsl.x / 30.0) / 12.0) * 12.0,
+    fract((4.0 + hsl.x / 30.0) / 12.0) * 12.0,
+  );
+  let a = hsl.y * min(hsl.z, 1.0 - hsl.z);
+  return vec3<f32>(hsl.z) - a * clamp(min(modK - 3.0, 9.0 - modK), vec3<f32>(-1.0), vec3<f32>(1.0));
+}
+
+fn css_hwb_to_srgb(hwbIn: vec3<f32>) -> vec3<f32> {
+  var hwb = hwbIn;
+  hwb.y = hwb.y / 100.0;
+  hwb.z = hwb.z / 100.0;
+  if (hwb.y + hwb.z >= 1.0) {
+    return vec3<f32>(hwb.y / (hwb.y + hwb.z));
   }
-  if (tileMode == 3) {
-    let inside = t >= 0.0 && t <= 1.0;
-    return vec2<f32>(clamp(t, 0.0, 1.0), select(0.0, 1.0, inside));
+  var rgb = css_hsl_to_srgb(vec3<f32>(hwb.x, 100.0, 50.0));
+  rgb *= 1.0 - hwb.y - hwb.z;
+  rgb += hwb.y;
+  return rgb;
+}
+
+fn interpolated_to_rgb_unpremul(colorIn: vec4<f32>, colorSpace: i32, doUnpremul: i32) -> vec4<f32> {
+  var color = colorIn;
+  if (doUnpremul != 0) {
+    if (colorSpace == 2 || colorSpace == 3 || colorSpace == 4) {
+      color = unpremul_color(color);
+    } else if (
+      colorSpace == 5 || colorSpace == 6 || colorSpace == 7 ||
+      colorSpace == 9 || colorSpace == 10
+    ) {
+      color = unpremul_polar(color);
+    }
   }
-  return vec2<f32>(clamp(t, 0.0, 1.0), 1.0);
+  if (colorSpace == 2) {
+    color = vec4<f32>(css_lab_to_xyz(color.rgb), color.a);
+  } else if (colorSpace == 3) {
+    color = vec4<f32>(css_oklab_to_linear_srgb(color.rgb), color.a);
+  } else if (colorSpace == 4) {
+    color = vec4<f32>(css_oklab_gamut_map_to_linear_srgb(color.rgb), color.a);
+  } else if (colorSpace == 5) {
+    color = vec4<f32>(css_hcl_to_xyz(color.rgb), color.a);
+  } else if (colorSpace == 6) {
+    color = vec4<f32>(css_okhcl_to_linear_srgb(color.rgb), color.a);
+  } else if (colorSpace == 7) {
+    color = vec4<f32>(css_okhcl_gamut_map_to_linear_srgb(color.rgb), color.a);
+  } else if (colorSpace == 9) {
+    color = vec4<f32>(css_hsl_to_srgb(color.rgb), color.a);
+  } else if (colorSpace == 10) {
+    color = vec4<f32>(css_hwb_to_srgb(color.rgb), color.a);
+  }
+  return color;
+}
+
+fn tile_grad(tileMode: i32, tIn: vec2<f32>) -> vec2<f32> {
+  var t = tIn;
+  if (tileMode == 0) {
+    t.x = saturate01(t.x);
+  } else if (tileMode == 1) {
+    t.x = fract(t.x);
+  } else if (tileMode == 2) {
+    let t1 = t.x - 1.0;
+    t.x = abs(t1 - 2.0 * floor(t1 * 0.5) - 1.0);
+  } else if (tileMode == 3) {
+    if (t.x < 0.0 || t.x > 1.0) {
+      return vec2<f32>(0.0, -1.0);
+    }
+  }
+  return t;
+}
+
+fn colorize_grad_4(t: vec2<f32>) -> vec4<f32> {
+  if (t.y < 0.0) {
+    return vec4<f32>(0.0);
+  } else if (t.x <= step.gradientOffsets0.x) {
+    return step.gradientColor0;
+  } else if (t.x < step.gradientOffsets0.y) {
+    return mix(step.gradientColor0, step.gradientColor1, (t.x - step.gradientOffsets0.x) / (step.gradientOffsets0.y - step.gradientOffsets0.x));
+  } else if (t.x < step.gradientOffsets0.z) {
+    return mix(step.gradientColor1, step.gradientColor2, (t.x - step.gradientOffsets0.y) / (step.gradientOffsets0.z - step.gradientOffsets0.y));
+  } else if (t.x < step.gradientOffsets0.w) {
+    return mix(step.gradientColor2, step.gradientColor3, (t.x - step.gradientOffsets0.z) / (step.gradientOffsets0.w - step.gradientOffsets0.z));
+  } else {
+    return step.gradientColor3;
+  }
+}
+
+fn colorize_grad_8(t: vec2<f32>) -> vec4<f32> {
+  if (t.y < 0.0) {
+    return vec4<f32>(0.0);
+  } else if (t.x < step.gradientOffsets1.x) {
+    if (t.x < step.gradientOffsets0.z) {
+      if (t.x <= step.gradientOffsets0.x) {
+        return step.gradientColor0;
+      } else if (t.x < step.gradientOffsets0.y) {
+        return mix(step.gradientColor0, step.gradientColor1, (t.x - step.gradientOffsets0.x) / (step.gradientOffsets0.y - step.gradientOffsets0.x));
+      } else {
+        return mix(step.gradientColor1, step.gradientColor2, (t.x - step.gradientOffsets0.y) / (step.gradientOffsets0.z - step.gradientOffsets0.y));
+      }
+    } else if (t.x < step.gradientOffsets0.w) {
+      return mix(step.gradientColor2, step.gradientColor3, (t.x - step.gradientOffsets0.z) / (step.gradientOffsets0.w - step.gradientOffsets0.z));
+    } else {
+      return mix(step.gradientColor3, step.gradientColor4, (t.x - step.gradientOffsets0.w) / (step.gradientOffsets1.x - step.gradientOffsets0.w));
+    }
+  } else if (t.x < step.gradientOffsets1.z) {
+    if (t.x < step.gradientOffsets1.y) {
+      return mix(step.gradientColor4, step.gradientColor5, (t.x - step.gradientOffsets1.x) / (step.gradientOffsets1.y - step.gradientOffsets1.x));
+    } else {
+      return mix(step.gradientColor5, step.gradientColor6, (t.x - step.gradientOffsets1.y) / (step.gradientOffsets1.z - step.gradientOffsets1.y));
+    }
+  } else if (t.x < step.gradientOffsets1.w) {
+    return mix(step.gradientColor6, step.gradientColor7, (t.x - step.gradientOffsets1.z) / (step.gradientOffsets1.w - step.gradientOffsets1.z));
+  } else {
+    return step.gradientColor7;
+  }
 }
 
 fn gradient_stop_color(index: i32, numStops: i32, bufferOffset: i32) -> vec4<f32> {
@@ -491,33 +680,80 @@ fn gradient_stop_color(index: i32, numStops: i32, bufferOffset: i32) -> vec4<f32
   );
 }
 
-fn gradient_stop_offset(index: i32, bufferOffset: i32) -> f32 {
-  return fsGradientBuffer.data[bufferOffset + index];
+fn colorize_grad_buf(numStops: i32, bufferOffset: i32, t: vec2<f32>) -> vec4<f32> {
+  let colorsBaseIndex = bufferOffset + numStops;
+  if (t.y < 0.0) {
+    return vec4<f32>(0.0);
+  } else if (t.x == 0.0) {
+    return gradient_stop_color(0, numStops, bufferOffset);
+  } else if (t.x == 1.0) {
+    return gradient_stop_color(numStops - 1, numStops, bufferOffset);
+  }
+  var lowOffsetIndex = bufferOffset;
+  var highOffsetIndex = lowOffsetIndex + numStops - 1;
+  var i = 1;
+  while (i < numStops) {
+    let middleOffsetIndex = (lowOffsetIndex + highOffsetIndex) / 2;
+    if (t.x < fsGradientBuffer.data[middleOffsetIndex]) {
+      highOffsetIndex = middleOffsetIndex;
+    } else {
+      lowOffsetIndex = middleOffsetIndex;
+    }
+    i = i * 2;
+  }
+  let lowColorIndex = colorsBaseIndex + (lowOffsetIndex - bufferOffset) * 4;
+  let lowOffset = fsGradientBuffer.data[lowOffsetIndex];
+  let lowColor = vec4<f32>(
+    fsGradientBuffer.data[lowColorIndex],
+    fsGradientBuffer.data[lowColorIndex + 1],
+    fsGradientBuffer.data[lowColorIndex + 2],
+    fsGradientBuffer.data[lowColorIndex + 3],
+  );
+  let highColorIndex = colorsBaseIndex + (highOffsetIndex - bufferOffset) * 4;
+  let highOffset = fsGradientBuffer.data[highOffsetIndex];
+  if (highOffset == lowOffset) {
+    return lowColor;
+  }
+  let highColor = vec4<f32>(
+    fsGradientBuffer.data[highColorIndex],
+    fsGradientBuffer.data[highColorIndex + 1],
+    fsGradientBuffer.data[highColorIndex + 2],
+    fsGradientBuffer.data[highColorIndex + 3],
+  );
+  return mix(lowColor, highColor, (t.x - lowOffset) / (highOffset - lowOffset));
 }
 
-fn sample_gradient_buffer(t: f32, numStops: i32, bufferOffset: i32) -> vec4<f32> {
-  if (numStops <= 0) {
-    return step.color;
+fn linear_grad_layout(pos: vec2<f32>) -> vec2<f32> {
+  return vec2<f32>(pos.x + 0.00001, 1.0);
+}
+
+fn radial_grad_layout(pos: vec2<f32>) -> vec2<f32> {
+  return vec2<f32>(length(pos), 1.0);
+}
+
+fn sweep_grad_layout(biasParam: f32, scaleParam: f32, pos: vec2<f32>) -> vec2<f32> {
+  let angle = select(atan2(-pos.y, -pos.x), sign(pos.y) * -1.5707963267949, pos.x == 0.0);
+  let t = (angle * 0.1591549430918 + 0.5 + biasParam) * scaleParam;
+  return vec2<f32>(t, 1.0);
+}
+
+fn conical_grad_layout(radius0: f32, dRadius: f32, a: f32, invA: f32, pos: vec2<f32>) -> vec2<f32> {
+  if (a == 0.0 && invA == 1.0) {
+    return vec2<f32>(length(pos) * dRadius - radius0, 1.0);
   }
-  if (numStops == 1) {
-    return gradient_stop_color(0, numStops, bufferOffset);
-  }
-  let firstOffset = gradient_stop_offset(0, bufferOffset);
-  if (t <= firstOffset) {
-    return gradient_stop_color(0, numStops, bufferOffset);
-  }
-  for (var index = 0; index < numStops - 1; index = index + 1) {
-    let leftOffset = gradient_stop_offset(index, bufferOffset);
-    let rightOffset = gradient_stop_offset(index + 1, bufferOffset);
-    if (t <= rightOffset) {
-      let leftColor = gradient_stop_color(index, numStops, bufferOffset);
-      let rightColor = gradient_stop_color(index + 1, numStops, bufferOffset);
-      let span = max(rightOffset - leftOffset, 1e-5);
-      let localT = clamp((t - leftOffset) / span, 0.0, 1.0);
-      return mix(leftColor, rightColor, localT);
+  let c = dot(pos, pos) - radius0 * radius0;
+  let negB = 2.0 * (dRadius * radius0 + pos.x);
+  var t = 0.0;
+  if (a == 0.0) {
+    t = c / negB;
+  } else {
+    let d = negB * negB - 4.0 * a * c;
+    if (d < 0.0) {
+      return vec2<f32>(0.0, -1.0);
     }
+    t = invA * (negB + sign(1.0 - dRadius) * sqrt(d));
   }
-  return gradient_stop_color(numStops - 1, numStops, bufferOffset);
+  return vec2<f32>(t, sign(t * dRadius + radius0));
 }
 
 fn paint_shader_color(devicePosition: vec2<f32>) -> vec4<f32> {
@@ -525,27 +761,37 @@ fn paint_shader_color(devicePosition: vec2<f32>) -> vec4<f32> {
   if (kind == 0) {
     return step.color;
   }
-  let numStops = i32(round(step.shaderInfo.y));
-  let bufferOffset = i32(round(step.shaderInfo.z));
-  let tileMode = i32(round(step.shaderInfo.w));
-  let localPosition = paint_local_position(devicePosition);
+  let gradientLayout = i32(round(step.shaderInfo.y));
+  let numStops = i32(round(step.shaderInfo.z));
+  let bufferOffset = i32(round(step.shaderInfo.w));
+  let tileMode = i32(round(step.shaderMeta.x));
+  let colorSpace = i32(round(step.shaderMeta.y));
+  let doUnpremul = i32(round(step.shaderMeta.z));
+  let coords = paint_local_position(devicePosition);
   let t = select(
     select(
       select(
-        linear_gradient_t(localPosition),
-        radial_gradient_t(localPosition),
+        radial_grad_layout(coords),
+        linear_grad_layout(coords),
         kind == 1,
       ),
-      two_point_conical_gradient_t(localPosition),
+      sweep_grad_layout(step.shaderParams0.x, step.shaderParams0.y, coords),
       kind == 3,
     ),
-    sweep_gradient_t(localPosition),
+    conical_grad_layout(step.shaderParams0.x, step.shaderParams0.y, step.shaderParams0.z, step.shaderParams0.w, coords),
     kind == 4,
   );
-  let tiled = gradient_tile_t(t, tileMode);
-  var color = sample_gradient_buffer(tiled.x, numStops, bufferOffset);
-  color.a *= tiled.y;
-  return color;
+  let tiled = tile_grad(tileMode, t);
+  let color = select(
+    select(
+      colorize_grad_8(tiled),
+      colorize_grad_4(tiled),
+      gradientLayout == 1,
+    ),
+    colorize_grad_buf(numStops, bufferOffset, tiled),
+    gradientLayout == 3,
+  );
+  return interpolated_to_rgb_unpremul(color, colorSpace, doUnpremul);
 }
 `;
 

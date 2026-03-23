@@ -143,12 +143,27 @@ export type DrawingGradientTileMode = 'clamp' | 'repeat' | 'mirror' | 'decal';
 
 export type DrawingGradientInterpolationColorSpace =
   | 'destination'
+  | 'srgb-linear'
+  | 'lab'
+  | 'oklab'
+  | 'oklab-gamut-map'
+  | 'lch'
+  | 'oklch'
+  | 'oklch-gamut-map'
   | 'srgb'
-  | 'srgb-linear';
+  | 'hsl'
+  | 'hwb';
+
+export type DrawingGradientInterpolationHueMethod =
+  | 'shorter'
+  | 'longer'
+  | 'increasing'
+  | 'decreasing';
 
 export type DrawingGradientInterpolation = Readonly<{
   inPremul?: boolean;
   colorSpace?: DrawingGradientInterpolationColorSpace;
+  hueMethod?: DrawingGradientInterpolationHueMethod;
 }>;
 
 export type DrawingGradientStop = Readonly<{

@@ -83,7 +83,7 @@ const vertexBufferUsage = 0x0020;
 const uniformBufferUsage = 0x0040;
 const storageBufferUsage = 0x0080;
 const floatsPerVertex = 6;
-const stepPayloadFloats = 64;
+const stepPayloadFloats = 100;
 const wedgePatchFloats = 14;
 const curvePatchFloats = 12;
 const strokePatchFloats = 14;
@@ -314,11 +314,34 @@ const createStepPayloadBuffer = (
   }>,
   shader: Readonly<{
     kindCode: number;
+    layoutCode: number;
     numStops: number;
     bufferOffset: number;
     tileModeCode: number;
+    colorSpaceCode: number;
+    doUnpremulCode: number;
     params0: readonly [number, number, number, number];
     params1: readonly [number, number, number, number];
+    inlineOffsets: readonly [
+      number,
+      number,
+      number,
+      number,
+      number,
+      number,
+      number,
+      number,
+    ];
+    inlineColors: readonly [
+      readonly [number, number, number, number],
+      readonly [number, number, number, number],
+      readonly [number, number, number, number],
+      readonly [number, number, number, number],
+      readonly [number, number, number, number],
+      readonly [number, number, number, number],
+      readonly [number, number, number, number],
+      readonly [number, number, number, number],
+    ];
     localMatrix0: readonly [number, number, number, number];
     localMatrix1: readonly [number, number, number, number];
   }>,
@@ -329,7 +352,7 @@ const createStepPayloadBuffer = (
     usage: uniformBufferUsage,
     mappedAtCreation: true,
   });
-  new Float32Array(buffer.getMappedRange()).set([
+  const payload = [
     transform[0],
     transform[1],
     transform[2],
@@ -367,9 +390,13 @@ const createStepPayloadBuffer = (
     dst.blenderCoefficients[2],
     dst.blenderCoefficients[3],
     shader.kindCode,
+    shader.layoutCode,
     shader.numStops,
     shader.bufferOffset,
     shader.tileModeCode,
+    shader.colorSpaceCode,
+    shader.doUnpremulCode,
+    0,
     shader.params0[0],
     shader.params0[1],
     shader.params0[2],
@@ -378,14 +405,46 @@ const createStepPayloadBuffer = (
     shader.params1[1],
     shader.params1[2],
     shader.params1[3],
-    0,
-    0,
-    0,
-    0,
-    0,
-    0,
-    0,
-    0,
+    shader.inlineOffsets[0],
+    shader.inlineOffsets[1],
+    shader.inlineOffsets[2],
+    shader.inlineOffsets[3],
+    shader.inlineOffsets[4],
+    shader.inlineOffsets[5],
+    shader.inlineOffsets[6],
+    shader.inlineOffsets[7],
+    shader.inlineColors[0][0],
+    shader.inlineColors[0][1],
+    shader.inlineColors[0][2],
+    shader.inlineColors[0][3],
+    shader.inlineColors[1][0],
+    shader.inlineColors[1][1],
+    shader.inlineColors[1][2],
+    shader.inlineColors[1][3],
+    shader.inlineColors[2][0],
+    shader.inlineColors[2][1],
+    shader.inlineColors[2][2],
+    shader.inlineColors[2][3],
+    shader.inlineColors[3][0],
+    shader.inlineColors[3][1],
+    shader.inlineColors[3][2],
+    shader.inlineColors[3][3],
+    shader.inlineColors[4][0],
+    shader.inlineColors[4][1],
+    shader.inlineColors[4][2],
+    shader.inlineColors[4][3],
+    shader.inlineColors[5][0],
+    shader.inlineColors[5][1],
+    shader.inlineColors[5][2],
+    shader.inlineColors[5][3],
+    shader.inlineColors[6][0],
+    shader.inlineColors[6][1],
+    shader.inlineColors[6][2],
+    shader.inlineColors[6][3],
+    shader.inlineColors[7][0],
+    shader.inlineColors[7][1],
+    shader.inlineColors[7][2],
+    shader.inlineColors[7][3],
     shader.localMatrix0[0],
     shader.localMatrix0[1],
     shader.localMatrix0[2],
@@ -394,7 +453,8 @@ const createStepPayloadBuffer = (
     shader.localMatrix1[1],
     shader.localMatrix1[2],
     shader.localMatrix1[3],
-  ]);
+  ];
+  new Float32Array(buffer.getMappedRange()).set(payload);
   buffer.unmap();
   return buffer;
 };
@@ -499,13 +559,47 @@ const invertAffineMatrix = (
   return [a, b, c, d, tx, ty];
 };
 
+type DrawingGradientColor = readonly [number, number, number, number];
+
+type DrawingGradientNormalizedStop = Readonly<{
+  offset: number;
+  color: DrawingGradientColor;
+}>;
+
+type DrawingGradientInlineColors = readonly [
+  DrawingGradientColor,
+  DrawingGradientColor,
+  DrawingGradientColor,
+  DrawingGradientColor,
+  DrawingGradientColor,
+  DrawingGradientColor,
+  DrawingGradientColor,
+  DrawingGradientColor,
+];
+
+type DrawingGradientInlineOffsets = readonly [
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+];
+
 type DrawingGradientPayload = Readonly<{
   kindCode: number;
+  layoutCode: number;
   numStops: number;
   bufferOffset: number;
   tileModeCode: number;
+  colorSpaceCode: number;
+  doUnpremulCode: number;
   params0: readonly [number, number, number, number];
   params1: readonly [number, number, number, number];
+  inlineOffsets: DrawingGradientInlineOffsets;
+  inlineColors: DrawingGradientInlineColors;
   localMatrix0: readonly [number, number, number, number];
   localMatrix1: readonly [number, number, number, number];
 }>;
@@ -520,58 +614,352 @@ const createGradientBufferBuilder = (): DrawingGradientBufferBuilder => ({
   cache: new Map(),
 });
 
+const gradientEpsilon = 1e-5;
+
+const identityGradientColor: DrawingGradientColor = [0, 0, 0, 0];
+const identityGradientInlineColors: DrawingGradientInlineColors = [
+  identityGradientColor,
+  identityGradientColor,
+  identityGradientColor,
+  identityGradientColor,
+  identityGradientColor,
+  identityGradientColor,
+  identityGradientColor,
+  identityGradientColor,
+];
+const identityGradientInlineOffsets: DrawingGradientInlineOffsets = [0, 0, 0, 0, 0, 0, 0, 0];
+
 const toGradientTileModeCode = (
   tileMode: DrawingPreparedShader['tileMode'] | undefined,
 ): number => tileMode === 'repeat' ? 1 : tileMode === 'mirror' ? 2 : tileMode === 'decal' ? 3 : 0;
 
 const toGradientColorSpaceCode = (
   shader: DrawingPreparedShader,
-): number =>
-  shader.interpolation?.colorSpace === 'srgb'
-    ? 1
-    : shader.interpolation?.colorSpace === 'srgb-linear'
-    ? 2
-    : 0;
+): number => {
+  switch (shader.interpolation?.colorSpace) {
+    case 'srgb-linear':
+      return 1;
+    case 'lab':
+      return 2;
+    case 'oklab':
+      return 3;
+    case 'oklab-gamut-map':
+      return 4;
+    case 'lch':
+      return 5;
+    case 'oklch':
+      return 6;
+    case 'oklch-gamut-map':
+      return 7;
+    case 'srgb':
+      return 8;
+    case 'hsl':
+      return 9;
+    case 'hwb':
+      return 10;
+    default:
+      return 0;
+  }
+};
+
+const toGradientHueMethodCode = (
+  shader: DrawingPreparedShader,
+): number => {
+  switch (shader.interpolation?.hueMethod) {
+    case 'longer':
+      return 1;
+    case 'increasing':
+      return 2;
+    case 'decreasing':
+      return 3;
+    default:
+      return 0;
+  }
+};
+
+const clamp01 = (value: number): number => Math.min(1, Math.max(0, value));
+
+const srgbToLinearComponent = (value: number): number =>
+  value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+
+const srgbToLinear = (
+  color: DrawingGradientColor,
+): DrawingGradientColor => [
+  srgbToLinearComponent(color[0]),
+  srgbToLinearComponent(color[1]),
+  srgbToLinearComponent(color[2]),
+  color[3],
+];
+
+const linearSrgbToXyzD50 = (
+  color: DrawingGradientColor,
+): DrawingGradientColor => {
+  const r = color[0];
+  const g = color[1];
+  const b = color[2];
+  return [
+    (0.4360747 * r) + (0.3850649 * g) + (0.1430804 * b),
+    (0.2225045 * r) + (0.7168786 * g) + (0.0606169 * b),
+    (0.0139322 * r) + (0.0971045 * g) + (0.7141733 * b),
+    color[3],
+  ];
+};
+
+const xyzD50ToLab = (
+  color: DrawingGradientColor,
+): DrawingGradientColor => {
+  const d50 = [0.9642956764295677, 1, 0.8251046025104602] as const;
+  const e = 216 / 24389;
+  const k = 24389 / 27;
+  const mapped = [0, 1, 2].map((index) => {
+    const value = color[index]! / d50[index]!;
+    return value > e ? Math.cbrt(value) : ((k * value) + 16) / 116;
+  });
+  return [
+    (116 * mapped[1]!) - 16,
+    500 * (mapped[0]! - mapped[1]!),
+    200 * (mapped[1]! - mapped[2]!),
+    color[3],
+  ];
+};
+
+const labToHcl = (
+  color: DrawingGradientColor,
+): DrawingGradientColor => {
+  const hue = Math.atan2(color[2], color[1]) * (180 / Math.PI);
+  const chroma = Math.hypot(color[1], color[2]);
+  return [hue >= 0 ? hue : hue + 360, chroma, color[0], color[3]];
+};
+
+const linearSrgbToOklab = (
+  color: DrawingGradientColor,
+): DrawingGradientColor => {
+  let l = (0.4122214708 * color[0]) + (0.5363325363 * color[1]) + (0.0514459929 * color[2]);
+  let m = (0.2119034982 * color[0]) + (0.6806995451 * color[1]) + (0.1073969566 * color[2]);
+  let s = (0.0883024619 * color[0]) + (0.2817188376 * color[1]) + (0.6299787005 * color[2]);
+  l = Math.cbrt(l);
+  m = Math.cbrt(m);
+  s = Math.cbrt(s);
+  return [
+    (0.2104542553 * l) + (0.793617785 * m) - (0.0040720468 * s),
+    (1.9779984951 * l) - (2.428592205 * m) + (0.4505937099 * s),
+    (0.0259040371 * l) + (0.7827717662 * m) - (0.808675766 * s),
+    color[3],
+  ];
+};
+
+const oklabToOkhcl = (
+  color: DrawingGradientColor,
+): DrawingGradientColor => {
+  const hue = Math.atan2(color[2], color[1]) * (180 / Math.PI);
+  const chroma = Math.hypot(color[1], color[2]);
+  return [hue >= 0 ? hue : hue + 360, chroma, color[0], color[3]];
+};
+
+const srgbToHsl = (
+  color: DrawingGradientColor,
+): DrawingGradientColor => {
+  const mx = Math.max(color[0], color[1], color[2]);
+  const mn = Math.min(color[0], color[1], color[2]);
+  let hue = 0;
+  let sat = 0;
+  const light = (mn + mx) / 2;
+  const delta = mx - mn;
+  if (delta !== 0) {
+    sat = light === 0 || light === 1 ? 0 : (mx - light) / Math.min(light, 1 - light);
+    if (mx === color[0]) {
+      hue = ((color[1] - color[2]) / delta) + (color[1] < color[2] ? 6 : 0);
+    } else if (mx === color[1]) {
+      hue = ((color[2] - color[0]) / delta) + 2;
+    } else {
+      hue = ((color[0] - color[1]) / delta) + 4;
+    }
+    hue *= 60;
+  }
+  return [hue, sat * 100, light * 100, color[3]];
+};
+
+const srgbToHwb = (
+  color: DrawingGradientColor,
+): DrawingGradientColor => {
+  const hsl = srgbToHsl(color);
+  const white = Math.min(color[0], color[1], color[2]);
+  const black = 1 - Math.max(color[0], color[1], color[2]);
+  return [hsl[0], white * 100, black * 100, color[3]];
+};
+
+const isPolarColorSpaceCode = (colorSpaceCode: number): boolean =>
+  colorSpaceCode === 5 || colorSpaceCode === 6 || colorSpaceCode === 7 ||
+  colorSpaceCode === 9 || colorSpaceCode === 10;
+
+const transformGradientColorToInterpolationSpace = (
+  color: DrawingGradientColor,
+  colorSpaceCode: number,
+): DrawingGradientColor => {
+  switch (colorSpaceCode) {
+    case 1:
+      return srgbToLinear(color);
+    case 2:
+      return xyzD50ToLab(linearSrgbToXyzD50(srgbToLinear(color)));
+    case 3:
+    case 4:
+      return linearSrgbToOklab(srgbToLinear(color));
+    case 5:
+      return labToHcl(xyzD50ToLab(linearSrgbToXyzD50(srgbToLinear(color))));
+    case 6:
+    case 7:
+      return oklabToOkhcl(linearSrgbToOklab(srgbToLinear(color)));
+    case 9:
+      return srgbToHsl(color);
+    case 10:
+      return srgbToHwb(color);
+    default:
+      return color;
+  }
+};
+
+const premulInterpolationColor = (
+  color: DrawingGradientColor,
+  colorSpaceCode: number,
+): DrawingGradientColor =>
+  isPolarColorSpaceCode(colorSpaceCode)
+    ? [color[0], color[1] * color[3], color[2] * color[3], color[3]]
+    : [color[0] * color[3], color[1] * color[3], color[2] * color[3], color[3]];
+
+const applyHueMethodToStops = (
+  stops: readonly DrawingGradientNormalizedStop[],
+  hueMethodCode: number,
+  colorSpaceCode: number,
+): readonly DrawingGradientNormalizedStop[] => {
+  if (!isPolarColorSpaceCode(colorSpaceCode) || stops.length < 2) {
+    return stops;
+  }
+  const nextStops = stops.map((stop) => ({
+    offset: stop.offset,
+    color: [...stop.color] as DrawingGradientColor,
+  }));
+  let delta = 0;
+  for (let index = 0; index < nextStops.length - 1; index += 1) {
+    const currentHue = nextStops[index]!.color[0];
+    const nextColor = [...nextStops[index + 1]!.color] as [number, number, number, number];
+    nextColor[0] += delta;
+    if (hueMethodCode === 0) {
+      if (nextColor[0] - currentHue > 180) {
+        nextColor[0] -= 360;
+        delta -= 360;
+      } else if (nextColor[0] - currentHue < -180) {
+        nextColor[0] += 360;
+        delta += 360;
+      }
+    } else if (hueMethodCode === 1) {
+      if (0 < nextColor[0] - currentHue && nextColor[0] - currentHue < 180) {
+        nextColor[0] -= 360;
+        delta -= 360;
+      } else if (-180 < nextColor[0] - currentHue && nextColor[0] - currentHue <= 0) {
+        nextColor[0] += 360;
+        delta += 360;
+      }
+    } else if (hueMethodCode === 2) {
+      if (nextColor[0] < currentHue) {
+        nextColor[0] += 360;
+        delta += 360;
+      }
+    } else if (hueMethodCode === 3 && currentHue < nextColor[0]) {
+      nextColor[0] -= 360;
+      delta -= 360;
+    }
+    nextStops[index + 1] = { offset: nextStops[index + 1]!.offset, color: nextColor };
+  }
+  return Object.freeze(nextStops);
+};
 
 const normalizeGradientStops = (
   shader: DrawingPreparedShader,
-): readonly { offset: number; color: readonly [number, number, number, number] }[] => {
+): readonly DrawingGradientNormalizedStop[] => {
   const sourceStops = shader.stops.length > 0
     ? shader.stops
     : [{ offset: 0, color: [0, 0, 0, 1] as const }];
   const sorted = [...sourceStops]
     .map((stop) => ({
-      offset: Math.min(1, Math.max(0, stop.offset)),
+      offset: clamp01(stop.offset),
       color: stop.color,
     }))
     .sort((left, right) => left.offset - right.offset);
-  if (sorted.length === 1) {
-    return Object.freeze([
+
+  const stops = sorted.length === 1
+    ? [
       sorted[0]!,
       { offset: 1, color: sorted[0]!.color },
-    ]);
+    ]
+    : [...sorted];
+
+  if (stops[0]!.offset > 0) {
+    stops.unshift({ offset: 0, color: stops[0]!.color });
   }
-  const normalized = [...sorted];
-  if (normalized[0]!.offset > 0) {
-    normalized.unshift({ offset: 0, color: normalized[0]!.color });
+  if (stops[stops.length - 1]!.offset < 1) {
+    stops.push({ offset: 1, color: stops[stops.length - 1]!.color });
   }
-  if (normalized[normalized.length - 1]!.offset < 1) {
-    normalized.push({ offset: 1, color: normalized[normalized.length - 1]!.color });
+
+  const deduped: DrawingGradientNormalizedStop[] = [];
+  for (let index = 0; index < stops.length;) {
+    let runEnd = index + 1;
+    while (
+      runEnd < stops.length &&
+      Math.abs(stops[runEnd]!.offset - stops[index]!.offset) <= gradientEpsilon
+    ) {
+      runEnd += 1;
+    }
+    const runLength = runEnd - index;
+    const offset = stops[index]!.offset;
+    const duplicate = runLength > 1;
+    const ignoreLeftmost = duplicate && shader.tileMode !== 'clamp' && offset === 0;
+    const ignoreRightmost = shader.tileMode !== 'clamp' && offset === 1;
+    if (!ignoreLeftmost) {
+      deduped.push(stops[index]!);
+    }
+    if (duplicate && !ignoreRightmost) {
+      deduped.push(stops[runEnd - 1]!);
+    }
+    index = runEnd;
   }
-  return Object.freeze(normalized);
+
+  return Object.freeze(
+    deduped.length === 1 ? [deduped[0]!, { offset: 1, color: deduped[0]!.color }] : deduped,
+  );
+};
+
+const transformGradientStops = (
+  shader: DrawingPreparedShader,
+): readonly DrawingGradientNormalizedStop[] => {
+  const colorSpaceCode = toGradientColorSpaceCode(shader);
+  const hueMethodCode = toGradientHueMethodCode(shader);
+  let stops = normalizeGradientStops(shader).map((stop) => ({
+    offset: stop.offset,
+    color: transformGradientColorToInterpolationSpace(stop.color, colorSpaceCode),
+  })) as DrawingGradientNormalizedStop[];
+  stops = [...applyHueMethodToStops(stops, hueMethodCode, colorSpaceCode)];
+  if (shader.interpolation?.inPremul) {
+    stops = stops.map((stop) => ({
+      offset: stop.offset,
+      color: premulInterpolationColor(stop.color, colorSpaceCode),
+    }));
+  }
+  return Object.freeze(stops);
 };
 
 const getGradientStopBufferEntry = (
   builder: DrawingGradientBufferBuilder,
   shader: DrawingPreparedShader,
-): Readonly<{ bufferOffset: number; numStops: number }> => {
-  const stops = normalizeGradientStops(shader);
+): Readonly<
+  { bufferOffset: number; numStops: number; stops: readonly DrawingGradientNormalizedStop[] }
+> => {
+  const stops = transformGradientStops(shader);
   const cacheKey = JSON.stringify(
     stops.map((stop) => [stop.offset, ...stop.color]),
   );
   const existing = builder.cache.get(cacheKey);
   if (existing) {
-    return existing;
+    return { ...existing, stops };
   }
   const bufferOffset = builder.data.length;
   for (const stop of stops) {
@@ -582,7 +970,120 @@ const getGradientStopBufferEntry = (
   }
   const entry = { bufferOffset, numStops: stops.length };
   builder.cache.set(cacheKey, entry);
-  return entry;
+  return { ...entry, stops };
+};
+
+const toInlineGradientData = (
+  stops: readonly DrawingGradientNormalizedStop[],
+): Readonly<
+  {
+    layoutCode: number;
+    inlineOffsets: DrawingGradientInlineOffsets;
+    inlineColors: DrawingGradientInlineColors;
+  }
+> => {
+  const targetLength = stops.length <= 4 ? 4 : 8;
+  const paddedStops = Array.from(
+    { length: targetLength },
+    (_, index) => stops[Math.min(index, stops.length - 1)]!,
+  );
+  return {
+    layoutCode: targetLength === 4 ? 1 : 2,
+    inlineOffsets: Object.freeze([
+      paddedStops[0]!.offset,
+      paddedStops[1]!.offset,
+      paddedStops[2]!.offset,
+      paddedStops[3]!.offset,
+      targetLength === 8 ? paddedStops[4]!.offset : paddedStops[3]!.offset,
+      targetLength === 8 ? paddedStops[5]!.offset : paddedStops[3]!.offset,
+      targetLength === 8 ? paddedStops[6]!.offset : paddedStops[3]!.offset,
+      targetLength === 8 ? paddedStops[7]!.offset : paddedStops[3]!.offset,
+    ]) as DrawingGradientInlineOffsets,
+    inlineColors: Object.freeze([
+      paddedStops[0]!.color,
+      paddedStops[1]!.color,
+      paddedStops[2]!.color,
+      paddedStops[3]!.color,
+      targetLength === 8 ? paddedStops[4]!.color : paddedStops[3]!.color,
+      targetLength === 8 ? paddedStops[5]!.color : paddedStops[3]!.color,
+      targetLength === 8 ? paddedStops[6]!.color : paddedStops[3]!.color,
+      targetLength === 8 ? paddedStops[7]!.color : paddedStops[3]!.color,
+    ]) as DrawingGradientInlineColors,
+  };
+};
+
+const multiplyAffineMatrices = (
+  left: readonly [number, number, number, number, number, number],
+  right: readonly [number, number, number, number, number, number],
+): readonly [number, number, number, number, number, number] => [
+  (left[0] * right[0]) + (left[2] * right[1]),
+  (left[1] * right[0]) + (left[3] * right[1]),
+  (left[0] * right[2]) + (left[2] * right[3]),
+  (left[1] * right[2]) + (left[3] * right[3]),
+  (left[0] * right[4]) + (left[2] * right[5]) + left[4],
+  (left[1] * right[4]) + (left[3] * right[5]) + left[5],
+];
+
+const createLinearGradientMatrix = (
+  start: Point2D,
+  end: Point2D,
+): readonly [number, number, number, number, number, number] => {
+  const dx = end[0] - start[0];
+  const dy = end[1] - start[1];
+  const denom = Math.max((dx * dx) + (dy * dy), gradientEpsilon);
+  const a = dx / denom;
+  const b = -dy / denom;
+  const c = dy / denom;
+  const d = dx / denom;
+  return [a, b, c, d, -((a * start[0]) + (c * start[1])), -((b * start[0]) + (d * start[1]))];
+};
+
+const createRadialGradientMatrix = (
+  center: Point2D,
+  radius: number,
+): readonly [number, number, number, number, number, number] => {
+  const scale = 1 / Math.max(radius, gradientEpsilon);
+  return [scale, 0, 0, scale, -center[0] * scale, -center[1] * scale];
+};
+
+const createSweepGradientMatrix = (
+  center: Point2D,
+): readonly [number, number, number, number, number, number] => [
+  1,
+  0,
+  0,
+  1,
+  -center[0],
+  -center[1],
+];
+
+const createConicalGradientMatrix = (
+  startCenter: Point2D,
+  endCenter: Point2D,
+  startRadius: number,
+  endRadius: number,
+): readonly [number, number, number, number, number, number] => {
+  const dx = endCenter[0] - startCenter[0];
+  const dy = endCenter[1] - startCenter[1];
+  const len = Math.hypot(dx, dy);
+  if (len <= gradientEpsilon) {
+    const diffRadius = endRadius - startRadius;
+    const scale = 1 / Math.max(Math.abs(diffRadius), gradientEpsilon);
+    return [scale, 0, 0, scale, -startCenter[0] * scale, -startCenter[1] * scale];
+  }
+  const invLenSq = 1 / (len * len);
+  const a = dx * invLenSq;
+  const b = -dy * invLenSq;
+  const c = dy * invLenSq;
+  const d = dx * invLenSq;
+  return [
+    a,
+    b,
+    c,
+    d,
+    -((a * startCenter[0]) + (c * startCenter[1])),
+    -((b * startCenter[0]) + (d * startCenter[1])),
+  ];
 };
 
 const createGradientPayload = (
@@ -590,87 +1091,121 @@ const createGradientPayload = (
   transform: readonly [number, number, number, number, number, number],
   builder: DrawingGradientBufferBuilder,
 ): DrawingGradientPayload => {
-  const inverse = invertAffineMatrix(transform);
-  const localMatrix0: readonly [number, number, number, number] = [
-    inverse[0],
-    inverse[1],
-    inverse[2],
-    inverse[3],
-  ];
-  const localMatrix1: readonly [number, number, number, number] = [
-    inverse[4],
-    inverse[5],
-    0,
-    0,
-  ];
+  const inverseDrawTransform = invertAffineMatrix(transform);
+  const identityPayload = {
+    kindCode: 0,
+    layoutCode: 0,
+    numStops: 0,
+    bufferOffset: 0,
+    tileModeCode: 0,
+    colorSpaceCode: 0,
+    doUnpremulCode: 0,
+    params0: [0, 0, 0, 0] as const,
+    params1: [0, 0, 0, 0] as const,
+    inlineOffsets: identityGradientInlineOffsets,
+    inlineColors: identityGradientInlineColors,
+  };
+
   if (!shader) {
     return {
-      kindCode: 0,
-      numStops: 0,
-      bufferOffset: 0,
-      tileModeCode: 0,
-      params0: [0, 0, 0, 0],
-      params1: [0, 0, 0, 0],
-      localMatrix0,
-      localMatrix1,
+      ...identityPayload,
+      localMatrix0: [
+        inverseDrawTransform[0],
+        inverseDrawTransform[1],
+        inverseDrawTransform[2],
+        inverseDrawTransform[3],
+      ],
+      localMatrix1: [inverseDrawTransform[4], inverseDrawTransform[5], 0, 0],
     };
   }
-  const stops = getGradientStopBufferEntry(builder, shader);
+
+  const colorSpaceCode = toGradientColorSpaceCode(shader);
+  const gradientStops = getGradientStopBufferEntry(builder, shader);
+  const specialization = gradientStops.numStops <= 8 ? toInlineGradientData(gradientStops.stops) : {
+    layoutCode: 3,
+    inlineOffsets: identityGradientInlineOffsets,
+    inlineColors: identityGradientInlineColors,
+  };
   const common = {
-    numStops: stops.numStops,
-    bufferOffset: stops.bufferOffset,
+    layoutCode: specialization.layoutCode,
+    numStops: gradientStops.numStops,
+    bufferOffset: specialization.layoutCode === 3 ? gradientStops.bufferOffset : 0,
     tileModeCode: toGradientTileModeCode(shader.tileMode),
-    localMatrix0,
-    localMatrix1,
+    colorSpaceCode,
+    doUnpremulCode: shader.interpolation?.inPremul ? 1 : 0,
+    inlineOffsets: specialization.inlineOffsets,
+    inlineColors: specialization.inlineColors,
   } as const;
+
+  let gradientMatrix: readonly [number, number, number, number, number, number] = identityMatrix2D;
+  let kindCode = 0;
+  let params0: readonly [number, number, number, number] = [0, 0, 0, 0];
+  const params1: readonly [number, number, number, number] = [0, 0, 0, 0];
+
   if (shader.kind === 'linear-gradient') {
-    return {
-      kindCode: 1,
-      ...common,
-      params0: [shader.start[0], shader.start[1], shader.end[0], shader.end[1]],
-      params1: [toGradientColorSpaceCode(shader), shader.interpolation?.inPremul ? 1 : 0, 0, 0],
-    };
+    kindCode = 1;
+    gradientMatrix = createLinearGradientMatrix(shader.start, shader.end);
+  } else if (shader.kind === 'radial-gradient') {
+    kindCode = 2;
+    gradientMatrix = createRadialGradientMatrix(shader.center, shader.radius);
+  } else if (shader.kind === 'sweep-gradient') {
+    kindCode = 3;
+    gradientMatrix = createSweepGradientMatrix(shader.center);
+    const startAngle = shader.startAngle;
+    const endAngle = shader.endAngle ?? (shader.startAngle + (Math.PI * 2));
+    params0 = [
+      -startAngle / (Math.PI * 2),
+      1 / Math.max((endAngle - startAngle) / (Math.PI * 2), gradientEpsilon),
+      0,
+      0,
+    ];
+  } else {
+    kindCode = 4;
+    gradientMatrix = createConicalGradientMatrix(
+      shader.startCenter,
+      shader.endCenter,
+      shader.startRadius,
+      shader.endRadius,
+    );
+    let radius0 = shader.startRadius;
+    let radius1 = shader.endRadius;
+    let dRadius = radius1 - radius0;
+    const centerDistance = Math.hypot(
+      shader.endCenter[0] - shader.startCenter[0],
+      shader.endCenter[1] - shader.startCenter[1],
+    );
+    const isRadial = centerDistance <= gradientEpsilon;
+    if (isRadial) {
+      const diffRadius = radius1 - radius0;
+      const scale = Math.abs(diffRadius) <= gradientEpsilon ? 0 : 1 / diffRadius;
+      radius0 *= scale;
+      radius1 *= scale;
+      dRadius = radius0 > 0 ? 1 : -1;
+      params0 = [radius0, dRadius, 0, 1];
+    } else {
+      radius0 /= centerDistance;
+      radius1 /= centerDistance;
+      dRadius = radius1 - radius0;
+      let a = 1 - (dRadius * dRadius);
+      let invA = 1;
+      if (Math.abs(a) > gradientEpsilon) {
+        invA = 1 / (2 * a);
+      } else {
+        a = 0;
+        invA = 0;
+      }
+      params0 = [radius0, dRadius, a, invA];
+    }
   }
-  if (shader.kind === 'radial-gradient') {
-    return {
-      kindCode: 2,
-      ...common,
-      params0: [shader.center[0], shader.center[1], shader.radius, 0],
-      params1: [toGradientColorSpaceCode(shader), shader.interpolation?.inPremul ? 1 : 0, 0, 0],
-    };
-  }
-  if (shader.kind === 'two-point-conical-gradient') {
-    return {
-      kindCode: 3,
-      ...common,
-      params0: [
-        shader.startCenter[0],
-        shader.startCenter[1],
-        shader.endCenter[0],
-        shader.endCenter[1],
-      ],
-      params1: [
-        shader.startRadius,
-        shader.endRadius,
-        toGradientColorSpaceCode(shader),
-        shader.interpolation?.inPremul ? 1 : 0,
-      ],
-    };
-  }
-  const startAngle = shader.startAngle;
-  const endAngle = shader.endAngle ?? (shader.startAngle + (Math.PI * 2));
-  const t0 = startAngle / (Math.PI * 2);
-  const t1 = endAngle / (Math.PI * 2);
+
+  const localMatrix = multiplyAffineMatrices(gradientMatrix, inverseDrawTransform);
   return {
-    kindCode: 4,
+    kindCode,
     ...common,
-    params0: [
-      shader.center[0],
-      shader.center[1],
-      -t0,
-      1 / Math.max(t1 - t0, 1e-5),
-    ],
-    params1: [toGradientColorSpaceCode(shader), shader.interpolation?.inPremul ? 1 : 0, 0, 0],
+    params0,
+    params1,
+    localMatrix0: [localMatrix[0], localMatrix[1], localMatrix[2], localMatrix[3]],
+    localMatrix1: [localMatrix[4], localMatrix[5], 0, 0],
   };
 };
 

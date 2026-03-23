@@ -2,6 +2,7 @@ import { exportPngRgba } from '@rieul3d/exporters';
 import { createOffscreenBinding, readOffscreenSnapshot } from '@rieul3d/gpu';
 import { createPath2D } from '@rieul3d/geometry';
 import {
+  checkForFinishedDawnQueueWork,
   encodeDawnCommandBuffer,
   finishDrawingRecorder,
   recordClear,
@@ -311,6 +312,7 @@ export const renderStrokesSnapshot = async (): Promise<
 
   submitToDawnQueueManager(drawingContext.sharedContext.queueManager, commandBuffer);
   await drawingContext.tick();
+  await checkForFinishedDawnQueueWork(drawingContext.sharedContext.queueManager, 'yes');
 
   const snapshot = await readOffscreenSnapshot(
     {

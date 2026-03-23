@@ -8,6 +8,7 @@ import {
   withPath2DFillRule,
 } from '@rieul3d/geometry';
 import {
+  checkForFinishedDawnQueueWork,
   encodeDawnCommandBuffer,
   finishDrawingRecorder,
   recordClear,
@@ -409,6 +410,7 @@ export const renderFillsSnapshot = async (): Promise<
 
   submitToDawnQueueManager(drawingContext.sharedContext.queueManager, commandBuffer);
   await drawingContext.tick();
+  await checkForFinishedDawnQueueWork(drawingContext.sharedContext.queueManager, 'yes');
 
   const snapshot = await readOffscreenSnapshot(
     { device: drawingContext.backend.device, queue: drawingContext.backend.queue },

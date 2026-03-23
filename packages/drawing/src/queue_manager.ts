@@ -40,6 +40,7 @@ export type DawnQueueManager = Readonly<{
   lastCompletedRecorderId: number | null;
   supportsSubmittedWorkDone: boolean;
   outstandingSubmissions: readonly DawnOutstandingSubmission[];
+  currentCommandBuffer: DawnCommandBuffer | null;
   lastCompletedSerial: number;
   lastError: string | null;
 }>;
@@ -61,6 +62,7 @@ type MutableDawnQueueManager = {
   lastCompletedRecorderId: number | null;
   supportsSubmittedWorkDone: boolean;
   outstandingSubmissions: DawnOutstandingSubmission[];
+  currentCommandBuffer: DawnCommandBuffer | null;
   lastCompletedSerial: number;
   lastError: string | null;
 };
@@ -213,15 +215,32 @@ export const createDawnQueueManager = (
   lastCompletedRecorderId: null,
   supportsSubmittedWorkDone: typeof backend.queue.onSubmittedWorkDone === 'function',
   outstandingSubmissions: [],
+  currentCommandBuffer: null,
   lastCompletedSerial: 0,
   lastError: null,
 });
 
-export const submitToDawnQueueManager = (
+export const addCommandBufferToDawnQueueManager = (
   queueManager: DawnQueueManager,
   commandBuffer: DawnCommandBuffer,
-): DawnOutstandingSubmission => {
+): boolean => {
   const mutable = asMutableQueueManager(queueManager);
+  if (mutable.currentCommandBuffer !== null) {
+    mutable.lastError = 'command buffer already staged';
+    return false;
+  }
+  mutable.currentCommandBuffer = commandBuffer;
+  return true;
+};
+
+export const submitPendingWorkToDawnQueueManager = (
+  queueManager: DawnQueueManager,
+): DawnOutstandingSubmission | null => {
+  const mutable = asMutableQueueManager(queueManager);
+  const commandBuffer = mutable.currentCommandBuffer;
+  if (commandBuffer === null) {
+    return null;
+  }
   const submission = createOutstandingSubmission(commandBuffer, mutable.submittedCount + 1);
 
   try {
@@ -232,6 +251,7 @@ export const submitToDawnQueueManager = (
     mutableSubmission.error = message;
     mutableSubmission.state = 'failed';
     mutable.lastError = message;
+    mutable.currentCommandBuffer = null;
     releaseSubmissionResources(submission);
     notifyFinishedCallbacks(submission);
     return submission;
@@ -241,8 +261,19 @@ export const submitToDawnQueueManager = (
   mutable.inFlightCount += 1;
   mutable.lastSubmittedRecorderId = submission.recorderId;
   mutable.outstandingSubmissions = [...mutable.outstandingSubmissions, submission];
+  mutable.currentCommandBuffer = null;
   void settleSubmissionCompletion(queueManager, submission);
   return submission;
+};
+
+export const submitToDawnQueueManager = (
+  queueManager: DawnQueueManager,
+  commandBuffer: DawnCommandBuffer,
+): DawnOutstandingSubmission | null => {
+  if (!addCommandBufferToDawnQueueManager(queueManager, commandBuffer)) {
+    return null;
+  }
+  return submitPendingWorkToDawnQueueManager(queueManager);
 };
 
 export const addFinishedCallbackToDawnSubmission = (
@@ -287,6 +318,7 @@ export const hasUnfinishedDawnQueueWork = (
 export const hasPendingDawnQueueWork = (
   queueManager: DawnQueueManager,
 ): boolean =>
+  queueManager.currentCommandBuffer !== null ||
   queueManager.outstandingSubmissions.some((submission) => submission.state === 'pending');
 
 export const checkForFinishedDawnQueueManager = async (

@@ -10,6 +10,7 @@ import {
   withPath2DFillRule,
 } from '@rieul3d/geometry';
 import {
+  addCommandBufferToDawnQueueManager,
   addFinishedCallbackToDawnQueueManager,
   addFinishedCallbackToDawnSubmission,
   appendDrawingClipStackElement,
@@ -45,6 +46,7 @@ import {
   scaleDrawingRecorder,
   submitDawnCommandBuffer,
   submitDrawingRecorder,
+  submitPendingWorkToDawnQueueManager,
   submitToDawnQueueManager,
   tickDawnQueueManager,
   translateDrawingRecorder,
@@ -2322,6 +2324,35 @@ Deno.test('dawn queue manager tracks explicit submitted-work completion', async 
   assertEquals(mock.created.destroyedBuffers.length > 0, true);
 });
 
+Deno.test('dawn queue manager can stage a command buffer before submit', () => {
+  const mock = createMockGpuContext();
+  const backend = createDawnBackendContext(mock.context);
+  const queueManager = createDawnQueueManager(backend);
+  const sharedContext = createDawnSharedContext(backend);
+  const recorder = createDrawingRecorder(sharedContext);
+  const binding = createOffscreenBinding(mock.context);
+
+  recordClear(recorder, [0, 0, 0, 1]);
+  const commandBuffer = encodeDawnCommandBuffer(
+    sharedContext,
+    finishDrawingRecorder(recorder),
+    binding,
+  );
+
+  assertEquals(queueManager.currentCommandBuffer, null);
+  assertEquals(addCommandBufferToDawnQueueManager(queueManager, commandBuffer), true);
+  assertEquals(
+    queueManager.currentCommandBuffer?.recording.recorderId,
+    commandBuffer.recording.recorderId,
+  );
+  assertEquals(hasPendingDawnQueueWork(queueManager), true);
+
+  const submission = submitPendingWorkToDawnQueueManager(queueManager);
+  assertEquals(submission?.recorderId, commandBuffer.recording.recorderId);
+  assertEquals(queueManager.currentCommandBuffer, null);
+  assertEquals(queueManager.outstandingSubmissions.length, 1);
+});
+
 Deno.test('dawn queue manager does not sync unfinished submissions during ordinary tick', async () => {
   const mock = createMockGpuContext();
   const backend = createDawnBackendContext(mock.context, {
@@ -2373,6 +2404,9 @@ Deno.test('dawn submission finished callbacks fire when gpu work completes', asy
     binding,
   );
   const submission = submitToDawnQueueManager(queueManager, commandBuffer);
+  if (submission === null) {
+    throw new Error('expected submission');
+  }
   addFinishedCallbackToDawnSubmission(submission, (result) => {
     finished.push(result);
   });
@@ -2602,6 +2636,9 @@ Deno.test('dawn queue manager drains outstanding submissions in submission order
 
   const first = submitClear([1, 0, 0, 1]);
   const second = submitClear([0, 0, 1, 1]);
+  if (first === null || second === null) {
+    throw new Error('expected queued submissions');
+  }
 
   assertEquals(queueManager.outstandingSubmissions.length, 2);
 
@@ -2647,6 +2684,9 @@ Deno.test('dawn queue manager records submit failures without enqueuing work', (
     binding,
   );
   const submission = submitToDawnQueueManager(queueManager, commandBuffer);
+  if (submission === null) {
+    throw new Error('expected failed submission');
+  }
 
   assertEquals(submission.state, 'failed');
   assertEquals(submission.error, 'submit failed');

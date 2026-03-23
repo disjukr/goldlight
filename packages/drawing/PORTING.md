@@ -743,6 +743,14 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
   - Remaining delta: WebGPU completion is still promise-based, without Graphite's `WaitAny`,
     command-buffer reuse, or resource/fence correlation
   - Validation: `deno test tests/drawing_graphite_dawn_test.ts`
+- 2026-03-23
+  - Files: `src/queue_manager.ts`, `tests/drawing_graphite_dawn_test.ts`
+  - Status transition: `QueueManager` now separates command-buffer staging from submission so the
+    local API shape is closer to Graphite's `add*()` then `submitToGpu()` split while keeping the
+    old one-shot submit helper as a convenience path
+  - Remaining delta: staging is still command-buffer only, without Graphite's task/recording
+    insertion API, command-buffer reuse, or resource/fence correlation
+  - Validation: `deno test tests/drawing_graphite_dawn_test.ts`
 
 ## Update Rules
 

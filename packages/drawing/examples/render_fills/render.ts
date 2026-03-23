@@ -227,6 +227,37 @@ const createSelfIntersectingStarPath = (
   );
 };
 
+const createSoftStarPath = (
+  center: Point2D,
+  outerRadius: number,
+  innerRadius: number,
+) => {
+  const points: Point2D[] = [];
+  for (let index = 0; index < 10; index += 1) {
+    const angle = (-Math.PI / 2) + (index * Math.PI / 5);
+    const radius = index % 2 === 0 ? outerRadius : innerRadius;
+    points.push([
+      center[0] + (Math.cos(angle) * radius),
+      center[1] + (Math.sin(angle) * radius),
+    ]);
+  }
+
+  const verbs: Parameters<typeof createPath2D>[number][] = [
+    { kind: 'moveTo', to: points[0]! },
+  ];
+  for (let index = 0; index < points.length; index += 1) {
+    const current = points[index]!;
+    const next = points[(index + 1) % points.length]!;
+    const control: Point2D = [
+      ((current[0] + next[0]) / 2) + ((center[0] - (current[0] + next[0]) / 2) * 0.08),
+      ((current[1] + next[1]) / 2) + ((center[1] - (current[1] + next[1]) / 2) * 0.08),
+    ];
+    verbs.push({ kind: 'quadTo', control, to: next });
+  }
+  verbs.push({ kind: 'close' });
+  return createPath2D(...verbs);
+};
+
 const createDiamondCutoutRectPath = (
   x: number,
   y: number,
@@ -366,7 +397,7 @@ export const renderFillsSnapshot = async (): Promise<
     style: 'fill',
     color: [0.95, 0.46, 0.28, 0.54],
   });
-  recordDrawPath(recorder, createTrianglePath([152, 736], [278, 606], [322, 742]), {
+  recordDrawPath(recorder, createSoftStarPath([236, 688], 92, 46), {
     style: 'fill',
     color: [0.2, 0.47, 0.9, 0.42],
   });

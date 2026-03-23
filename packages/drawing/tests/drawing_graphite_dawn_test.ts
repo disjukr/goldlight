@@ -1168,6 +1168,56 @@ Deno.test('drawing prepared recording uses clipped draw bounds for dst dependenc
   assertEquals(steps[1]?.paintOrder, 0);
 });
 
+Deno.test('drawing prepared recording preserves shared clip element ids across restored clips', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  saveDrawingRecorder(recorder);
+  clipDrawingRecorderRect(recorder, createRect(0, 0, 60, 60));
+  saveDrawingRecorder(recorder);
+  clipDrawingRecorderPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [10, 10] },
+      { kind: 'lineTo', to: [40, 10] },
+      { kind: 'lineTo', to: [25, 40] },
+      { kind: 'close' },
+    ),
+  );
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [0, 0] },
+      { kind: 'lineTo', to: [50, 0] },
+      { kind: 'lineTo', to: [50, 50] },
+      { kind: 'close' },
+    ),
+    { style: 'fill', color: [1, 0, 0, 1] },
+  );
+  restoreDrawingRecorder(recorder);
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [0, 0] },
+      { kind: 'lineTo', to: [50, 0] },
+      { kind: 'lineTo', to: [50, 50] },
+      { kind: 'close' },
+    ),
+    { style: 'fill', color: [0, 0, 1, 1] },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const steps = prepared.passes[0]?.steps ?? [];
+  const firstIds = steps[0]?.draw.clip?.effectiveElementIds ?? [];
+  const secondIds = steps[1]?.draw.clip?.effectiveElementIds ?? [];
+
+  assertEquals(firstIds.length, 2);
+  assertEquals(secondIds.length, 1);
+  assertEquals(firstIds[0], secondIds[0]);
+  assertEquals(firstIds[1] !== secondIds[0], true);
+});
+
 Deno.test('dawn preparation separates recording, draw-pass preparation, and resource preparation', () => {
   const mock = createMockGpuContext();
   const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
@@ -2472,6 +2522,54 @@ Deno.test('dawn command buffer accumulates multiple stencil clip paths before co
   assertEquals(mock.created.renderPasses.length, 1);
   assertEquals(mock.created.drawCalls.length, 2);
   assertEquals(mock.created.stencilReferences.length, 0);
+});
+
+Deno.test('dawn command buffer reuses shared clip draws for identical clip stacks', () => {
+  const mock = createMockGpuContext();
+  const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
+  const recorder = createDrawingRecorder(sharedContext);
+  const binding = createOffscreenBinding(mock.context);
+
+  clipDrawingRecorderPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [24, 24] },
+      { kind: 'lineTo', to: [88, 24] },
+      { kind: 'lineTo', to: [88, 88] },
+      { kind: 'lineTo', to: [24, 88] },
+      { kind: 'close' },
+    ),
+  );
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [0, 0] },
+      { kind: 'lineTo', to: [64, 0] },
+      { kind: 'lineTo', to: [64, 64] },
+      { kind: 'close' },
+    ),
+    { style: 'fill' },
+  );
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [32, 32] },
+      { kind: 'lineTo', to: [96, 32] },
+      { kind: 'lineTo', to: [96, 96] },
+      { kind: 'close' },
+    ),
+    { style: 'fill' },
+  );
+
+  const commandBuffer = encodeDawnCommandBuffer(
+    sharedContext,
+    finishDrawingRecorder(recorder),
+    binding,
+  );
+
+  assertEquals(commandBuffer.unsupportedCommands.length, 0);
+  assertEquals(mock.created.renderPasses.length, 1);
+  assertEquals(mock.created.drawCalls.length, 5);
 });
 
 Deno.test('dawn command buffer encodes stroke draws without stencil', () => {

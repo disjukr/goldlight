@@ -39,10 +39,42 @@ export type DrawingClipStackSaveRecord = Readonly<{
   clipShader?: DrawingClipShader;
 }>;
 
+export type DrawingClipStackRawElementPendingDraw = Readonly<{
+  drawId: number;
+  usageBounds: DrawingClipRect;
+  scissorBounds: DrawingClipRect;
+  maxDepthIndex: number;
+  maxDepth: number;
+  firstUseOrder: number;
+  paintOrder: number;
+  stencilIndex: number;
+}>;
+
+export type DrawingClipStackInsertion = Readonly<{
+  layerOrder: number;
+  bindingNode: unknown | null;
+}>;
+
+export type DrawingClipStackRawElementRuntimeState = Readonly<{
+  preparedBounds?: DrawingClipRect;
+  preparedTriangles?: readonly DrawingPoint2D[];
+  latestInsertion?: DrawingClipStackInsertion;
+  usageBounds?: DrawingClipRect;
+  pendingDraw?: DrawingClipStackRawElementPendingDraw;
+}>;
+
+export type DrawingClipStackRawElement = Readonly<{
+  id: number;
+  clip: DrawingClip;
+  runtimeState?: DrawingClipStackRawElementRuntimeState;
+}>;
+
 export type DrawingClipStackElement = Readonly<{
+  id: number;
   clip: DrawingClip;
   saveRecordIndex: number;
   invalidatedByIndex?: number;
+  rawElement: DrawingClipStackRawElement;
 }>;
 
 export type DrawingClipStackSnapshot = Readonly<{

@@ -1,6 +1,10 @@
 import type { DrawingPreparedClipElement } from './clip_stack.ts';
 import type { Point2D } from '@rieul3d/geometry';
-import { type DrawingPreparedRecording, prepareDrawingRecording } from './draw_pass.ts';
+import {
+  type DrawingPreparedClipDraw,
+  type DrawingPreparedRecording,
+  prepareDrawingRecording,
+} from './draw_pass.ts';
 import type { DrawingRecording } from './recording.ts';
 import type {
   DrawingPreparedPatch,
@@ -19,13 +23,12 @@ import type { DrawingStrokeStyle } from './types.ts';
 
 export type DrawingPreparedStepResources = Readonly<{
   pipelineHandles: readonly DrawingGraphicsPipelineHandle[];
-  clipPipelineHandles: readonly DrawingGraphicsPipelineHandle[];
   pipelines: readonly GPURenderPipeline[];
-  clipPipelines: readonly GPURenderPipeline[];
   fringePipeline: GPURenderPipeline | null;
   stepPayloadBuffer: GPUBuffer;
   stepBindGroup: GPUBindGroup;
   clipTextureView: GPUTextureView | null;
+  clipDrawKey: string | null;
   fillVertexBuffer: GPUBuffer | null;
   fillVertexCount: number;
   patchVertexBuffer: GPUBuffer | null;
@@ -35,16 +38,23 @@ export type DrawingPreparedStepResources = Readonly<{
   fringeVertexCount: number;
   boundsCoverVertexBuffer: GPUBuffer | null;
   boundsCoverVertexCount: number;
-  clipVertexBuffers: readonly GPUBuffer[];
-  clipVertexCounts: readonly number[];
-  clipElements: readonly DrawingPreparedClipElement[];
+}>;
+
+export type DrawingPreparedClipDrawResources = Readonly<{
+  id: number;
+  pipelineHandle: DrawingGraphicsPipelineHandle;
+  pipeline: GPURenderPipeline;
+  clipVertexBuffer: GPUBuffer;
+  clipVertexCount: number;
+  clipElement: DrawingPreparedClipElement;
+  scissorBounds: DrawingPreparedClipDraw['scissorBounds'];
+  maxDepth: number;
 }>;
 
 export type DrawingPreparedPassResources = Readonly<{
   pipelineHandles: readonly DrawingGraphicsPipelineHandle[];
-  clipPipelineHandles: readonly DrawingGraphicsPipelineHandle[];
   resolvedPipelines: readonly GPURenderPipeline[];
-  resolvedClipPipelines: readonly GPURenderPipeline[];
+  clipDraws: readonly DrawingPreparedClipDrawResources[];
   sampledTextures: readonly GPUTextureView[];
   steps: readonly DrawingPreparedStepResources[];
 }>;
@@ -520,7 +530,14 @@ const createStrokePatchInstanceData = (
 
 const getStencilClipCount = (
   step: DrawingPreparedRecording['passes'][number]['steps'][number],
-): number => step.draw.clip?.elements?.length ?? 0;
+): number => step.clipDrawIds.length;
+
+const getClipDrawKey = (
+  step: DrawingPreparedRecording['passes'][number]['steps'][number],
+): string | null => {
+  const ids = step.draw.clip?.effectiveElementIds;
+  return ids && ids.length > 0 && getStencilClipCount(step) > 0 ? ids.join(',') : null;
+};
 
 const getPipelineBlendMode = (
   step: DrawingPreparedRecording['passes'][number]['steps'][number],
@@ -559,6 +576,31 @@ const createClipStepResources = (
   };
 };
 
+const prepareClipDrawResources = (
+  sharedContext: DawnSharedContext,
+  clipDraw: DrawingPreparedClipDraw,
+): DrawingPreparedClipDrawResources | null => {
+  const clipVertices = createVertexModulationData(clipDraw.triangles, [0, 0, 0, 0]);
+  const clipVertexBuffer = createVertexBuffer(sharedContext, clipVertices);
+  const pipelineHandle = sharedContext.resourceProvider.createGraphicsPipelineHandle(
+    clipDraw.pipelineDesc,
+  );
+  const pipeline = sharedContext.resourceProvider.resolveGraphicsPipelineHandle(pipelineHandle);
+  return {
+    id: clipDraw.id,
+    pipelineHandle,
+    pipeline,
+    clipVertexBuffer,
+    clipVertexCount: clipVertices.length / floatsPerVertex,
+    clipElement: {
+      op: clipDraw.op,
+      triangles: clipDraw.triangles,
+    },
+    scissorBounds: clipDraw.scissorBounds,
+    maxDepth: clipDraw.maxDepth,
+  };
+};
+
 const prepareStepResources = (
   sharedContext: DawnSharedContext,
   step: DrawingPreparedRecording['passes'][number]['steps'][number],
@@ -566,16 +608,9 @@ const prepareStepResources = (
   const pipelineHandles = step.pipelineDescs.map((descriptor) =>
     sharedContext.resourceProvider.createGraphicsPipelineHandle(descriptor)
   );
-  const clipPipelineHandles = step.clipPipelineDescs.map((descriptor) =>
-    sharedContext.resourceProvider.createGraphicsPipelineHandle(descriptor)
-  );
   const pipelines = pipelineHandles.map((handle) =>
     sharedContext.resourceProvider.resolveGraphicsPipelineHandle(handle)
   );
-  const clipPipelines = clipPipelineHandles.map((handle) =>
-    sharedContext.resourceProvider.resolveGraphicsPipelineHandle(handle)
-  );
-  const clipResources = createClipStepResources(sharedContext, step);
   const clipAtlasView = sharedContext.atlasProvider.getClipAtlasManager().findOrCreateEntry(
     step.draw.clip?.atlasClip,
   );
@@ -659,13 +694,12 @@ const prepareStepResources = (
 
     return {
       pipelineHandles: Object.freeze(pipelineHandles),
-      clipPipelineHandles: Object.freeze(clipPipelineHandles),
       pipelines: Object.freeze(pipelines),
-      clipPipelines: Object.freeze(clipPipelines),
       fringePipeline,
       stepPayloadBuffer,
       stepBindGroup,
       clipTextureView: clipAtlasView,
+      clipDrawKey: getClipDrawKey(step),
       fillVertexBuffer: fillVertices ? createVertexBuffer(sharedContext, fillVertices) : null,
       fillVertexCount: fillVertices ? fillVertices.length / floatsPerVertex : 0,
       patchVertexBuffer: patchVertices && patchVertices.length > 0
@@ -686,9 +720,6 @@ const prepareStepResources = (
       boundsCoverVertexCount: boundsCoverVertices
         ? boundsCoverVertices.length / floatsPerVertex
         : 0,
-      clipVertexBuffers: clipResources.buffers,
-      clipVertexCounts: clipResources.counts,
-      clipElements: clipResources.elements,
     };
   }
 
@@ -707,9 +738,7 @@ const prepareStepResources = (
 
   return {
     pipelineHandles: Object.freeze(pipelineHandles),
-    clipPipelineHandles: Object.freeze(clipPipelineHandles),
     pipelines: Object.freeze(pipelines),
-    clipPipelines: Object.freeze(clipPipelines),
     fringePipeline: step.draw.fringeVertices
       ? sharedContext.resourceProvider.findOrCreateGraphicsPipeline({
         label: getStencilClipCount(step) > 0
@@ -726,6 +755,7 @@ const prepareStepResources = (
     stepPayloadBuffer,
     stepBindGroup,
     clipTextureView: clipAtlasView,
+    clipDrawKey: getClipDrawKey(step),
     fillVertexBuffer: createVertexBuffer(sharedContext, strokeVertices),
     fillVertexCount: strokeVertices.length / floatsPerVertex,
     patchVertexBuffer: patchVertices.length > 0
@@ -737,9 +767,6 @@ const prepareStepResources = (
     fringeVertexCount: fringeVertices ? fringeVertices.length / floatsPerVertex : 0,
     boundsCoverVertexBuffer: null,
     boundsCoverVertexCount: 0,
-    clipVertexBuffers: clipResources.buffers,
-    clipVertexCounts: clipResources.counts,
-    clipElements: clipResources.elements,
   };
 };
 
@@ -749,12 +776,13 @@ const preparePassResources = (
 ): DrawingPreparedPassResources => {
   const steps = passInfo.steps.map((step) => prepareStepResources(sharedContext, step));
   const pipelineHandles = steps.flatMap((step) => step.pipelineHandles);
-  const clipPipelineHandles = steps.flatMap((step) => step.clipPipelineHandles);
+  const clipDraws = passInfo.clipDraws
+    .map((clipDraw) => prepareClipDrawResources(sharedContext, clipDraw))
+    .filter((clipDraw): clipDraw is DrawingPreparedClipDrawResources => clipDraw !== null);
   return {
     pipelineHandles: Object.freeze(pipelineHandles),
-    clipPipelineHandles: Object.freeze(clipPipelineHandles),
     resolvedPipelines: Object.freeze(steps.flatMap((step) => step.pipelines)),
-    resolvedClipPipelines: Object.freeze(steps.flatMap((step) => step.clipPipelines)),
+    clipDraws: Object.freeze(clipDraws),
     sampledTextures: Object.freeze([]),
     steps: Object.freeze(steps),
   };
@@ -790,7 +818,9 @@ const collectOwnedBuffers = (
         if (step.boundsCoverVertexBuffer) {
           buffers.push(step.boundsCoverVertexBuffer);
         }
-        buffers.push(...step.clipVertexBuffers);
+      }
+      for (const clipDraw of pass.clipDraws) {
+        buffers.push(clipDraw.clipVertexBuffer);
       }
     }
   }

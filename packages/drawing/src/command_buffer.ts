@@ -7,7 +7,9 @@ import { isDrawingPatchFillRenderer } from './renderer_provider.ts';
 import type { DrawingPreparedRecording } from './draw_pass.ts';
 import {
   type DawnPreparedWork,
+  type DrawingPreparedClipDrawResources,
   type DrawingPreparedCommandResources,
+  type DrawingPreparedPassResources,
   type DrawingPreparedStepResources,
   prepareDawnRecording,
 } from './prepare_resources.ts';
@@ -90,39 +92,54 @@ const getStencilClipCount = (
   step: DrawingPreparedRecording['passes'][number]['steps'][number],
 ): number => step.draw.clip?.elements?.length ?? 0;
 
+const getStencilClipKey = (
+  step: DrawingPreparedRecording['passes'][number]['steps'][number],
+): string | null => {
+  const ids = step.draw.clip?.effectiveElementIds;
+  return ids && ids.length > 0 && getStencilClipCount(step) > 0 ? ids.join(',') : null;
+};
+
+type ClipStencilCache = {
+  key: string | null;
+  reference: number;
+};
+
+const findClipDrawResourceById = (
+  passResources: DrawingPreparedPassResources,
+  clipDrawId: number,
+): DrawingPreparedClipDrawResources | null =>
+  passResources.clipDraws.find((clipDraw) => clipDraw.id === clipDrawId) ?? null;
+
 const encodeStencilClips = (
   pass: GPURenderPassEncoder,
-  resources: DrawingPreparedStepResources,
+  clipDraw: DrawingPreparedClipDrawResources,
   commandResources: DrawingPreparedCommandResources,
   viewportBindGroup: GPUBindGroup,
 ): number => {
-  if (resources.clipVertexBuffers.length === 0) {
-    return 0;
-  }
-
   pass.setBindGroup(0, viewportBindGroup);
   pass.setBindGroup(1, commandResources.identityStepBindGroup);
   pass.setBindGroup(2, commandResources.defaultClipTextureBindGroup);
-  let clipPipelineIndex = 0;
+  pass.setScissorRect(
+    Math.max(0, Math.floor(clipDraw.scissorBounds.origin[0])),
+    Math.max(0, Math.floor(clipDraw.scissorBounds.origin[1])),
+    Math.max(0, Math.ceil(clipDraw.scissorBounds.size.width)),
+    Math.max(0, Math.ceil(clipDraw.scissorBounds.size.height)),
+  );
   let clipReference = 0;
 
-  if (resources.clipElements[0]?.op === 'difference') {
-    pass.setPipeline(resources.clipPipelines[clipPipelineIndex++]!);
+  if (clipDraw.clipElement.op === 'difference') {
+    pass.setPipeline(clipDraw.pipeline);
     pass.setStencilReference?.(1);
     pass.setVertexBuffer(0, commandResources.fullscreenClipVertexBuffer);
     pass.draw(commandResources.fullscreenClipVertexCount);
     clipReference = 1;
   }
-
-  for (let index = 0; index < resources.clipVertexBuffers.length; index += 1) {
-    const element = resources.clipElements[index]!;
-    const nextReference = element.op === 'intersect' ? clipReference + 1 : clipReference;
-    pass.setPipeline(resources.clipPipelines[clipPipelineIndex++]!);
-    pass.setStencilReference?.(nextReference);
-    pass.setVertexBuffer(0, resources.clipVertexBuffers[index]!);
-    pass.draw(resources.clipVertexCounts[index]!);
-    clipReference = nextReference;
-  }
+  const nextReference = clipDraw.clipElement.op === 'intersect' ? clipReference + 1 : clipReference;
+  pass.setPipeline(clipDraw.pipeline);
+  pass.setStencilReference?.(nextReference);
+  pass.setVertexBuffer(0, clipDraw.clipVertexBuffer);
+  pass.draw(clipDraw.clipVertexCount);
+  clipReference = nextReference;
   pass.setStencilReference?.(clipReference);
   return clipReference;
 };
@@ -214,14 +231,44 @@ const createDstSnapshotView = (
   return snapshotTexture.createView();
 };
 
+const ensureClipDrawsEncoded = (
+  pass: GPURenderPassEncoder,
+  step: DrawingPreparedRecording['passes'][number]['steps'][number],
+  passResources: DrawingPreparedPassResources,
+  commandResources: DrawingPreparedCommandResources,
+  viewportBindGroup: GPUBindGroup,
+  clipStencilCache: ClipStencilCache,
+): number => {
+  const clipKey = getStencilClipKey(step);
+  if (!clipKey) {
+    return 0;
+  }
+  if (clipStencilCache.key === clipKey) {
+    return clipStencilCache.reference;
+  }
+  let clipReference = 0;
+  for (const clipDrawId of step.clipDrawIds) {
+    const clipDraw = findClipDrawResourceById(passResources, clipDrawId);
+    if (!clipDraw) {
+      continue;
+    }
+    clipReference = encodeStencilClips(pass, clipDraw, commandResources, viewportBindGroup);
+  }
+  clipStencilCache.key = clipKey;
+  clipStencilCache.reference = clipReference;
+  return clipReference;
+};
+
 const encodePreparedFillStep = (
   pass: GPURenderPassEncoder,
   step: DrawingPreparedRecording['passes'][number]['steps'][number],
   resources: DrawingPreparedStepResources,
+  passResources: DrawingPreparedPassResources,
   commandResources: DrawingPreparedCommandResources,
   target: Readonly<{ width: number; height: number }>,
   viewportBindGroup: GPUBindGroup,
   clipTextureBindGroup: GPUBindGroup,
+  clipStencilCache: ClipStencilCache,
 ): void => {
   if (step.draw.kind !== 'pathFill') {
     return;
@@ -267,7 +314,14 @@ const encodePreparedFillStep = (
 
   if (getStencilClipCount(step) > 0) {
     const colorPipeline = resources.pipelines[0]!;
-    const clipReference = encodeStencilClips(pass, resources, commandResources, viewportBindGroup);
+    const clipReference = ensureClipDrawsEncoded(
+      pass,
+      step,
+      passResources,
+      commandResources,
+      viewportBindGroup,
+      clipStencilCache,
+    );
     pass.setStencilReference?.(clipReference);
     pass.setPipeline(colorPipeline);
   } else {
@@ -301,10 +355,12 @@ const encodePreparedStrokeStep = (
   pass: GPURenderPassEncoder,
   step: DrawingPreparedRecording['passes'][number]['steps'][number],
   resources: DrawingPreparedStepResources,
+  passResources: DrawingPreparedPassResources,
   commandResources: DrawingPreparedCommandResources,
   target: Readonly<{ width: number; height: number }>,
   viewportBindGroup: GPUBindGroup,
   clipTextureBindGroup: GPUBindGroup,
+  clipStencilCache: ClipStencilCache,
 ): void => {
   if (step.draw.kind !== 'pathStroke') {
     return;
@@ -312,7 +368,14 @@ const encodePreparedStrokeStep = (
 
   applyStepClip(pass, step, target);
   if (getStencilClipCount(step) > 0) {
-    const clipReference = encodeStencilClips(pass, resources, commandResources, viewportBindGroup);
+    const clipReference = ensureClipDrawsEncoded(
+      pass,
+      step,
+      passResources,
+      commandResources,
+      viewportBindGroup,
+      clipStencilCache,
+    );
     pass.setStencilReference?.(clipReference);
     pass.setPipeline(resources.pipelines[0]!);
   } else {
@@ -345,10 +408,12 @@ const encodePreparedStep = (
   pass: GPURenderPassEncoder,
   step: DrawingPreparedRecording['passes'][number]['steps'][number],
   resources: DrawingPreparedStepResources,
+  passResources: DrawingPreparedPassResources,
   commandResources: DrawingPreparedCommandResources,
   target: Readonly<{ width: number; height: number }>,
   viewportBindGroup: GPUBindGroup,
   clipTextureBindGroup: GPUBindGroup,
+  clipStencilCache: ClipStencilCache,
 ): void => {
   switch (step.draw.kind) {
     case 'pathFill':
@@ -356,10 +421,12 @@ const encodePreparedStep = (
         pass,
         step,
         resources,
+        passResources,
         commandResources,
         target,
         viewportBindGroup,
         clipTextureBindGroup,
+        clipStencilCache,
       );
       break;
     case 'pathStroke':
@@ -367,10 +434,12 @@ const encodePreparedStep = (
         pass,
         step,
         resources,
+        passResources,
         commandResources,
         target,
         viewportBindGroup,
         clipTextureBindGroup,
+        clipStencilCache,
       );
       break;
   }
@@ -431,7 +500,8 @@ export const encodePreparedDawnCommandBuffer = (
       let stepIndex = 0;
       while (stepIndex < passInfo.steps.length) {
         const step = passInfo.steps[stepIndex]!;
-        if (step.usesStencil || step.usesFillStencil) {
+        const clipStencilCache: ClipStencilCache = { key: null, reference: 0 };
+        if (step.usesFillStencil) {
           const clipTextureBindGroup = createStepClipTextureBindGroup(
             sharedContext,
             preparedWork.resources,
@@ -451,10 +521,12 @@ export const encodePreparedDawnCommandBuffer = (
             pass,
             step,
             passResources.steps[stepIndex]!,
+            passResources,
             preparedWork.resources,
             sharedContext.backend.target,
             preparedWork.resources.viewportBindGroup,
             clipTextureBindGroup,
+            clipStencilCache,
           );
           pass.end();
           passCount += 1;
@@ -504,10 +576,12 @@ export const encodePreparedDawnCommandBuffer = (
             pass,
             step,
             passResources.steps[stepIndex]!,
+            passResources,
             preparedWork.resources,
             sharedContext.backend.target,
             preparedWork.resources.viewportBindGroup,
             clipTextureBindGroup,
+            clipStencilCache,
           );
           pass.end();
           passCount += 1;
@@ -520,13 +594,12 @@ export const encodePreparedDawnCommandBuffer = (
         for (let batchIndex = stepIndex; batchIndex < passInfo.steps.length; batchIndex += 1) {
           const batchStep = passInfo.steps[batchIndex]!;
           if (
-            batchStep.usesStencil ||
             batchStep.usesFillStencil ||
             stepRequiresDstRead(batchStep)
           ) {
             break;
           }
-          batchUsesDepth ||= batchStep.usesDepth;
+          batchUsesDepth ||= batchStep.usesDepth || batchStep.usesStencil;
         }
         const pass = encoder.beginRenderPass(
           createRenderPassDescriptor(
@@ -537,9 +610,10 @@ export const encodePreparedDawnCommandBuffer = (
             batchUsesDepth ? stencilView : undefined,
           ),
         );
+        clipStencilCache.key = null;
+        clipStencilCache.reference = 0;
         while (
           stepIndex < passInfo.steps.length &&
-          !passInfo.steps[stepIndex]!.usesStencil &&
           !passInfo.steps[stepIndex]!.usesFillStencil &&
           !stepRequiresDstRead(passInfo.steps[stepIndex]!)
         ) {
@@ -553,10 +627,12 @@ export const encodePreparedDawnCommandBuffer = (
             pass,
             passInfo.steps[stepIndex]!,
             passResources.steps[stepIndex]!,
+            passResources,
             preparedWork.resources,
             sharedContext.backend.target,
             preparedWork.resources.viewportBindGroup,
             clipTextureBindGroup,
+            clipStencilCache,
           );
           stepIndex += 1;
         }

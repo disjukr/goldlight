@@ -432,6 +432,9 @@ const createPreparedDrawClip = (
     ? {
       ...preparedClipStack.stencilClip,
       deferredClipDraws: preparedClipStack.deferredClipDraws,
+      effectiveElementIds: preparedClipStack.effectiveElements.map((element) => element.id),
+      effectiveElements: preparedClipStack.preparedEffectiveElements,
+      effectiveClipDraws: preparedClipStack.preparedClipDrawElements,
       analyticClip: preparedClipStack.analyticClip,
       atlasClip: preparedClipStack.atlasClip,
       shader: preparedClipStack.shader,
@@ -440,6 +443,9 @@ const createPreparedDrawClip = (
     ? {
       bounds: preparedClipStack.bounds,
       deferredClipDraws: preparedClipStack.deferredClipDraws,
+      effectiveElementIds: preparedClipStack.effectiveElements.map((element) => element.id),
+      effectiveElements: preparedClipStack.preparedEffectiveElements,
+      effectiveClipDraws: preparedClipStack.preparedClipDrawElements,
       analyticClip: preparedClipStack.analyticClip,
       atlasClip: preparedClipStack.atlasClip,
       shader: preparedClipStack.shader,

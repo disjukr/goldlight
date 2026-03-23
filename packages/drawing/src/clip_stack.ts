@@ -4,6 +4,9 @@ import type {
   DrawingClipRect,
   DrawingClipShader,
   DrawingClipStackElement,
+  DrawingClipStackInsertion,
+  DrawingClipStackRawElement,
+  DrawingClipStackRawElementPendingDraw,
   DrawingClipStackSaveRecord,
   DrawingClipStackSnapshot,
   DrawingClipStackState,
@@ -14,6 +17,20 @@ import type {
 export type DrawingPreparedClipElement = Readonly<{
   op: DrawingClip['op'];
   triangles: readonly Point2D[];
+}>;
+
+export type DrawingPreparedClipUsageElement = Readonly<{
+  id: number;
+  bounds?: Rect;
+  rawElement: DrawingClipStackRawElement;
+}>;
+
+export type DrawingPreparedClipDrawElement = Readonly<{
+  id: number;
+  op: DrawingClip['op'];
+  triangles: readonly Point2D[];
+  bounds?: Rect;
+  rawElement: DrawingClipStackRawElement;
 }>;
 
 export type DrawingPreparedAnalyticClip = Readonly<{
@@ -30,6 +47,9 @@ export type DrawingPreparedClip = Readonly<{
   bounds?: Rect;
   elements?: readonly DrawingPreparedClipElement[];
   deferredClipDraws?: readonly DrawingPreparedClipElement[];
+  effectiveElementIds?: readonly number[];
+  effectiveElements?: readonly DrawingPreparedClipUsageElement[];
+  effectiveClipDraws?: readonly DrawingPreparedClipDrawElement[];
   analyticClip?: DrawingPreparedAnalyticClip;
   atlasClip?: DrawingPreparedAtlasClip;
   shader?: DrawingClipShader;
@@ -44,6 +64,8 @@ export type DrawingVisitedClipStack = Readonly<{
   atlasClip?: DrawingPreparedAtlasClip;
   shader?: DrawingClipShader;
   effectiveElements: readonly DrawingClipStackElement[];
+  preparedEffectiveElements: readonly DrawingPreparedClipUsageElement[];
+  preparedClipDrawElements: readonly DrawingPreparedClipDrawElement[];
 }>;
 
 const cloneClip = (clip: DrawingClip): DrawingClip =>
@@ -68,9 +90,14 @@ const cloneClip = (clip: DrawingClip): DrawingClip =>
     };
 
 const cloneElement = (element: DrawingClipStackElement): DrawingClipStackElement => ({
-  clip: cloneClip(element.clip),
+  id: element.id,
+  clip: element.rawElement?.clip ?? cloneClip(element.clip),
   saveRecordIndex: element.saveRecordIndex,
   invalidatedByIndex: element.invalidatedByIndex,
+  rawElement: element.rawElement ?? {
+    id: element.id,
+    clip: cloneClip(element.clip),
+  },
 });
 
 const cloneBounds = (bounds: DrawingClipRect | Rect | undefined): DrawingClipRect | undefined =>
@@ -83,6 +110,133 @@ const cloneBounds = (bounds: DrawingClipRect | Rect | undefined): DrawingClipRec
 
 const cloneClipShader = (shader: DrawingClipShader | undefined): DrawingClipShader | undefined =>
   shader ? { kind: shader.kind, color: [...shader.color] as typeof shader.color } : undefined;
+
+const ensureRawElementRuntimeState = (
+  rawElement: DrawingClipStackRawElement,
+): {
+  -readonly [K in keyof NonNullable<DrawingClipStackRawElement['runtimeState']>]:
+    NonNullable<DrawingClipStackRawElement['runtimeState']>[K];
+} => {
+  const mutableRawElement = rawElement as {
+    runtimeState?: {
+      -readonly [K in keyof NonNullable<DrawingClipStackRawElement['runtimeState']>]:
+        NonNullable<DrawingClipStackRawElement['runtimeState']>[K];
+    };
+  };
+  mutableRawElement.runtimeState ??= {};
+  return mutableRawElement.runtimeState;
+};
+
+const unionRect = (left: Rect, right: Rect): Rect => {
+  const minX = Math.min(left.origin[0], right.origin[0]);
+  const minY = Math.min(left.origin[1], right.origin[1]);
+  const maxX = Math.max(left.origin[0] + left.size.width, right.origin[0] + right.size.width);
+  const maxY = Math.max(left.origin[1] + left.size.height, right.origin[1] + right.size.height);
+  return {
+    origin: [minX, minY],
+    size: {
+      width: Math.max(0, maxX - minX),
+      height: Math.max(0, maxY - minY),
+    },
+  };
+};
+
+export const prepareDrawingRawClipElementGeometry = (
+  rawElement: DrawingClipStackRawElement,
+  bounds: Rect | undefined,
+  triangles: readonly Point2D[] | undefined,
+): void => {
+  const runtimeState = ensureRawElementRuntimeState(rawElement);
+  runtimeState.preparedBounds = bounds;
+  runtimeState.preparedTriangles = triangles;
+};
+
+export const getDrawingRawClipElementPreparedGeometry = (
+  rawElement: DrawingClipStackRawElement,
+): Readonly<{
+  bounds?: Rect;
+  triangles?: readonly Point2D[];
+}> => {
+  const runtimeState = ensureRawElementRuntimeState(rawElement);
+  return {
+    bounds: runtimeState.preparedBounds,
+    triangles: runtimeState.preparedTriangles,
+  };
+};
+
+export const getDrawingRawClipElementLatestLayerOrder = (
+  rawElement: DrawingClipStackRawElement,
+): number | undefined => ensureRawElementRuntimeState(rawElement).latestInsertion?.layerOrder;
+
+export const getDrawingRawClipElementLatestInsertion = (
+  rawElement: DrawingClipStackRawElement,
+): DrawingClipStackInsertion | undefined => ensureRawElementRuntimeState(rawElement).latestInsertion;
+
+export const getDrawingRawClipElementUsageBounds = (
+  rawElement: DrawingClipStackRawElement,
+): Rect | undefined => ensureRawElementRuntimeState(rawElement).usageBounds;
+
+export const updateDrawingRawClipElementForDraw = (
+  rawElement: DrawingClipStackRawElement,
+  usageBounds: Rect,
+  latestInsertion: DrawingClipStackInsertion,
+): Rect => {
+  const runtimeState = ensureRawElementRuntimeState(rawElement);
+  runtimeState.usageBounds = runtimeState.usageBounds
+    ? unionRect(runtimeState.usageBounds, usageBounds)
+    : usageBounds;
+  runtimeState.latestInsertion = latestInsertion;
+  return runtimeState.usageBounds;
+};
+
+export const getDrawingRawClipElementPendingDraw = (
+  rawElement: DrawingClipStackRawElement,
+): DrawingClipStackRawElementPendingDraw | undefined =>
+  ensureRawElementRuntimeState(rawElement).pendingDraw;
+
+export const drawDrawingRawClipElementImmediate = (
+  rawElement: DrawingClipStackRawElement,
+  pendingDraw: DrawingClipStackRawElementPendingDraw,
+): DrawingClipStackRawElementPendingDraw => {
+  const runtimeState = ensureRawElementRuntimeState(rawElement);
+  runtimeState.pendingDraw = pendingDraw;
+  return pendingDraw;
+};
+
+export const captureDrawingRawClipElementDeferredDraw = (
+  rawElement: DrawingClipStackRawElement,
+  update: Readonly<{
+    usageBounds: Rect;
+    scissorBounds: Rect;
+    maxDepthIndex: number;
+    maxDepth: number;
+    paintOrder: number;
+  }>,
+): DrawingClipStackRawElementPendingDraw | undefined => {
+  const runtimeState = ensureRawElementRuntimeState(rawElement);
+  if (!runtimeState.pendingDraw) {
+    return undefined;
+  }
+  const pendingDraw = runtimeState.pendingDraw as {
+    -readonly [K in keyof DrawingClipStackRawElementPendingDraw]:
+      DrawingClipStackRawElementPendingDraw[K];
+  };
+  pendingDraw.usageBounds = update.usageBounds;
+  pendingDraw.scissorBounds = update.scissorBounds;
+  pendingDraw.maxDepthIndex = update.maxDepthIndex;
+  pendingDraw.maxDepth = update.maxDepth;
+  pendingDraw.paintOrder = update.paintOrder;
+  return pendingDraw;
+};
+
+export const resetDrawingRawClipElementRuntimeState = (
+  rawElement: DrawingClipStackRawElement,
+): void => {
+  const runtimeState = ensureRawElementRuntimeState(rawElement);
+  runtimeState.latestInsertion = undefined;
+  runtimeState.usageBounds = undefined;
+  runtimeState.pendingDraw = undefined;
+};
 
 const isEmptyRect = (rect: Rect | undefined): boolean =>
   rect !== undefined && (rect.size.width <= 0 || rect.size.height <= 0);
@@ -426,10 +580,21 @@ export const appendDrawingClipStackElement = (
   );
   const appendedElements = [
     ...updatedElements,
-    {
-      clip: cloneClip(clip),
-      saveRecordIndex: getCurrentSaveRecordIndex(writableClipStack),
-    },
+    (() => {
+      const elementId = writableClipStack.elements.length;
+      const rawClip = cloneClip(clip);
+      const rawElement: DrawingClipStackRawElement = {
+        id: elementId,
+        clip: rawClip,
+      };
+      return {
+        id: elementId,
+        clip: rawClip,
+        saveRecordIndex: getCurrentSaveRecordIndex(writableClipStack),
+        invalidatedByIndex: undefined,
+        rawElement,
+      };
+    })(),
   ];
 
   const activeAfterAppend = appendedElements.filter((element) =>
@@ -485,23 +650,47 @@ export const visitDrawingClipStackForDraw = (
     .filter((element) => element.invalidatedByIndex === undefined);
   let bounds = saveRecord.bounds;
   const stencilElements: DrawingPreparedClipElement[] = [];
+  const preparedEffectiveElements: DrawingPreparedClipUsageElement[] = [];
+  const preparedClipDrawElements: DrawingPreparedClipDrawElement[] = [];
 
   for (const element of activeElements) {
     const clip = element.clip;
     if (clip.kind === 'rect') {
       const polygon = createRectClipPolygon(clip.rect, clip.transform);
+      const elementBounds = computeBounds(polygon);
       if (clip.op === 'intersect') {
-        bounds = intersectBounds(bounds, computeBounds(polygon));
+        bounds = intersectBounds(bounds, elementBounds);
       }
       stencilElements.push({
         op: clip.op,
         triangles: createPolygonTriangles(polygon),
+      });
+      preparedClipDrawElements.push({
+        id: element.id,
+        op: clip.op,
+        triangles: createPolygonTriangles(polygon),
+        bounds: elementBounds,
+        rawElement: element.rawElement,
+      });
+      prepareDrawingRawClipElementGeometry(
+        element.rawElement,
+        elementBounds,
+        createPolygonTriangles(polygon),
+      );
+      preparedEffectiveElements.push({
+        id: element.id,
+        bounds: elementBounds,
+        rawElement: element.rawElement,
       });
       continue;
     }
 
     const prepared = preparePathClip(clip.path, clip.transform);
     if (!prepared) {
+      preparedEffectiveElements.push({
+        id: element.id,
+        rawElement: element.rawElement,
+      });
       continue;
     }
     if (clip.op === 'intersect') {
@@ -512,7 +701,24 @@ export const visitDrawingClipStackForDraw = (
         op: clip.op,
         triangles: Object.freeze([...prepared.triangles]),
       });
+      preparedClipDrawElements.push({
+        id: element.id,
+        op: clip.op,
+        triangles: Object.freeze([...prepared.triangles]),
+        bounds: prepared.bounds,
+        rawElement: element.rawElement,
+      });
+      prepareDrawingRawClipElementGeometry(
+        element.rawElement,
+        prepared.bounds,
+        Object.freeze([...prepared.triangles]),
+      );
     }
+    preparedEffectiveElements.push({
+      id: element.id,
+      bounds: prepared.bounds,
+      rawElement: element.rawElement,
+    });
   }
 
   const analyticClip = activeElements.length === 1 &&
@@ -542,6 +748,9 @@ export const visitDrawingClipStackForDraw = (
         op: element.op,
         triangles: Object.freeze([...element.triangles]),
       }))),
+      effectiveElementIds: Object.freeze(activeElements.map((element) => element.id)),
+      effectiveElements: Object.freeze([...preparedEffectiveElements]),
+      effectiveClipDraws: Object.freeze([...preparedClipDrawElements]),
       analyticClip,
       shader: cloneClipShader(saveRecord.clipShader),
     }
@@ -552,6 +761,9 @@ export const visitDrawingClipStackForDraw = (
         op: element.op,
         triangles: Object.freeze([...element.triangles]),
       }))),
+      effectiveElementIds: Object.freeze(activeElements.map((element) => element.id)),
+      effectiveElements: Object.freeze([...preparedEffectiveElements]),
+      effectiveClipDraws: Object.freeze([...preparedClipDrawElements]),
       analyticClip,
       shader: cloneClipShader(saveRecord.clipShader),
     }
@@ -569,5 +781,7 @@ export const visitDrawingClipStackForDraw = (
     atlasClip,
     shader: cloneClipShader(saveRecord.clipShader),
     effectiveElements: Object.freeze([...activeElements]),
+    preparedEffectiveElements: Object.freeze([...preparedEffectiveElements]),
+    preparedClipDrawElements: Object.freeze([...preparedClipDrawElements]),
   };
 };

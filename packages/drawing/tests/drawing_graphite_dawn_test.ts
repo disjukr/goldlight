@@ -1633,6 +1633,85 @@ Deno.test('drawing prepared recording selects convex tessellated wedges for simp
   assertEquals((draw?.triangles.length ?? 0) > 0, true);
 });
 
+Deno.test('drawing prepared recording uses Graphite convexity for concave cubic fills', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [370, 89] },
+      {
+        kind: 'cubicTo',
+        control1: [410.92, 99.72],
+        control2: [474.16, 139.92],
+        to: [463, 153.32],
+      },
+      {
+        kind: 'cubicTo',
+        control1: [451.84, 182.8],
+        control2: [425.8, 225.36],
+        to: [384.88, 223],
+      },
+      {
+        kind: 'cubicTo',
+        control1: [347.68, 220.32],
+        control2: [317.92, 198.88],
+        to: [277, 169.4],
+      },
+      {
+        kind: 'cubicTo',
+        control1: [310.48, 131.88],
+        control2: [340.24, 107.76],
+        to: [370, 89],
+      },
+      { kind: 'close' },
+    ),
+    { style: 'fill' },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const draw = prepared.passes[0]?.steps[0]?.draw;
+
+  assertEquals(draw?.kind, 'pathFill');
+  assertEquals(draw?.renderer.kind, 'stencil-tessellated-wedges');
+});
+
+Deno.test('drawing prepared recording uses Graphite path bounds for cubic fill cover', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [88, 850] },
+      { kind: 'lineTo', to: [282, 850] },
+      { kind: 'lineTo', to: [282, 890] },
+      {
+        kind: 'cubicTo',
+        control1: [248, 926],
+        control2: [122, 926],
+        to: [88, 890],
+      },
+      { kind: 'close' },
+    ),
+    { style: 'fill' },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const draw = prepared.passes[0]?.steps[0]?.draw;
+
+  assertEquals(draw?.kind, 'pathFill');
+  if (draw?.kind !== 'pathFill') {
+    throw new Error('expected pathFill draw');
+  }
+  assertEquals(draw.bounds.origin, [88, 850]);
+  assertEquals(draw.bounds.size.width, 194);
+  assertEquals(draw.bounds.size.height, 76);
+});
+
 Deno.test('drawing prepared recording flattens quadratic and cubic paths for fill draws', () => {
   const mock = createMockGpuContext();
   const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));

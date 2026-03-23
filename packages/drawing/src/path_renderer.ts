@@ -2152,6 +2152,56 @@ const unionBounds = (bounds: readonly Rect[]): Rect => {
   ]));
 };
 
+const collectPathBoundsPoints = (
+  path: DrawingPath2D,
+  transform: readonly [number, number, number, number, number, number],
+): readonly Point2D[] => {
+  const points: Point2D[] = [];
+  for (const verb of path.verbs) {
+    switch (verb.kind) {
+      case 'moveTo':
+      case 'lineTo':
+        points.push(transformPoint2D(verb.to, transform));
+        break;
+      case 'quadTo':
+        points.push(transformPoint2D(verb.control, transform), transformPoint2D(verb.to, transform));
+        break;
+      case 'conicTo':
+        points.push(transformPoint2D(verb.control, transform), transformPoint2D(verb.to, transform));
+        break;
+      case 'cubicTo':
+        points.push(
+          transformPoint2D(verb.control1, transform),
+          transformPoint2D(verb.control2, transform),
+          transformPoint2D(verb.to, transform),
+        );
+        break;
+      case 'arcTo':
+        for (const patch of createArcConicPatches(
+          verb.center,
+          verb.radius,
+          verb.startAngle,
+          verb.endAngle,
+          verb.counterClockwise ?? false,
+          transform,
+        )) {
+          if (patch.kind === 'conic') {
+            points.push(...patch.points);
+          }
+        }
+        break;
+      case 'close':
+        break;
+    }
+  }
+  return Object.freeze(points);
+};
+
+const computePathBounds = (
+  path: DrawingPath2D,
+  transform: readonly [number, number, number, number, number, number],
+): Rect => computeBounds(collectPathBoundsPoints(path, transform));
+
 const intersectBounds = (left: Rect | undefined, right: Rect): Rect | undefined => {
   if (!left) return right;
   const x0 = Math.max(left.origin[0], right.origin[0]);
@@ -2238,6 +2288,267 @@ const isConvexPolygon = (points: readonly Point2D[]): boolean => {
     sign = nextSign;
   }
   return sign !== 0;
+};
+
+type ConvexityVerb =
+  | Readonly<{ kind: 'moveTo'; to: Point2D }>
+  | Readonly<{ kind: 'lineTo'; to: Point2D }>
+  | Readonly<{ kind: 'quadTo'; control: Point2D; to: Point2D }>
+  | Readonly<{ kind: 'conicTo'; control: Point2D; to: Point2D; weight: number }>
+  | Readonly<{ kind: 'cubicTo'; control1: Point2D; control2: Point2D; to: Point2D }>
+  | Readonly<{ kind: 'close' }>;
+
+const convexitySign = (value: number): number => value > epsilon ? 1 : value < -epsilon ? -1 : 0;
+
+const trimTrailingConvexityMoves = (
+  verbs: readonly ConvexityVerb[],
+): readonly ConvexityVerb[] => {
+  let count = verbs.length;
+  while (count > 0 && verbs[count - 1]?.kind === 'moveTo') {
+    count -= 1;
+  }
+  return count === verbs.length ? verbs : verbs.slice(0, count);
+};
+
+const getConvexityVerbPoints = (verb: ConvexityVerb): readonly Point2D[] => {
+  switch (verb.kind) {
+    case 'moveTo':
+    case 'lineTo':
+      return [verb.to];
+    case 'quadTo':
+      return [verb.control, verb.to];
+    case 'conicTo':
+      return [verb.control, verb.to];
+    case 'cubicTo':
+      return [verb.control1, verb.control2, verb.to];
+    case 'close':
+      return [];
+  }
+};
+
+const expandPathForConvexity = (path: DrawingPath2D): readonly ConvexityVerb[] => {
+  const expanded: ConvexityVerb[] = [];
+  let currentPoint: Point2D | null = null;
+  for (const verb of path.verbs) {
+    switch (verb.kind) {
+      case 'moveTo':
+        expanded.push(verb);
+        currentPoint = verb.to;
+        break;
+      case 'lineTo':
+      case 'quadTo':
+      case 'conicTo':
+      case 'cubicTo':
+        expanded.push(verb);
+        currentPoint = verb.to;
+        break;
+      case 'arcTo': {
+        const patches = createArcConicPatches(
+          verb.center,
+          verb.radius,
+          verb.startAngle,
+          verb.endAngle,
+          verb.counterClockwise ?? false,
+          identityMatrix2D,
+        );
+        if (patches.length === 0) {
+          break;
+        }
+        const start = patches[0]!.points[0];
+        if (currentPoint === null) {
+          expanded.push({ kind: 'moveTo', to: start });
+        } else if (!pointsEqual(currentPoint, start)) {
+          expanded.push({ kind: 'lineTo', to: start });
+        }
+        for (const patch of patches) {
+          if (patch.kind !== 'conic') {
+            continue;
+          }
+          expanded.push({
+            kind: 'conicTo',
+            control: patch.points[1],
+            to: patch.points[2],
+            weight: patch.weight,
+          });
+        }
+        const lastPatch = patches[patches.length - 1];
+        currentPoint = lastPatch?.kind === 'conic' ? lastPatch.points[2] : currentPoint;
+        break;
+      }
+      case 'close':
+        expanded.push(verb);
+        break;
+    }
+  }
+  return Object.freeze(expanded);
+};
+
+const getConvexityPathPoints = (verbs: readonly ConvexityVerb[]): readonly Point2D[] =>
+  Object.freeze(verbs.flatMap(getConvexityVerbPoints));
+
+const isConcaveBySign = (points: readonly Point2D[]): boolean => {
+  if (points.length <= 3) {
+    return false;
+  }
+  let current = points[0]!;
+  const first = current;
+  let dxes = 0;
+  let dyes = 0;
+  let lastSx = 2;
+  let lastSy = 2;
+  for (let outer = 0; outer < 2; outer += 1) {
+    const limit = outer === 0 ? points.length : 1;
+    for (let index = 1; index < limit; index += 1) {
+      const next = points[index]!;
+      const vec: Point2D = [next[0] - current[0], next[1] - current[1]];
+      if (Math.abs(vec[0]) > epsilon || Math.abs(vec[1]) > epsilon) {
+        const sx = convexitySign(vec[0]);
+        const sy = convexitySign(vec[1]);
+        dxes += Number(sx !== lastSx);
+        dyes += Number(sy !== lastSy);
+        if (dxes > 3 || dyes > 3) {
+          return true;
+        }
+        lastSx = sx;
+        lastSy = sy;
+      }
+      current = next;
+    }
+    current = first;
+  }
+  return false;
+};
+
+type ConvexDirChange = 'left' | 'right' | 'straight' | 'backwards' | 'unknown' | 'invalid';
+
+const classifyDirectionChange = (lastVec: Point2D, currentVec: Point2D): ConvexDirChange => {
+  const crossValue = (lastVec[0] * currentVec[1]) - (lastVec[1] * currentVec[0]);
+  if (!Number.isFinite(crossValue)) {
+    return 'unknown';
+  }
+  if (Math.abs(crossValue) <= epsilon) {
+    const dot = (lastVec[0] * currentVec[0]) + (lastVec[1] * currentVec[1]);
+    return dot < 0 ? 'backwards' : 'straight';
+  }
+  return crossValue > 0 ? 'right' : 'left';
+};
+
+const isPathConvex = (path: DrawingPath2D): boolean => {
+  const verbs = trimTrailingConvexityMoves(expandPathForConvexity(path));
+  if (verbs.length === 0) {
+    return true;
+  }
+  const points = getConvexityPathPoints(verbs);
+  if (isConcaveBySign(points)) {
+    return false;
+  }
+
+  let contourCount = 0;
+  let needsClose = false;
+  let firstPoint: Point2D = [0, 0];
+  let firstVec: Point2D = [0, 0];
+  let lastPoint: Point2D = [0, 0];
+  let lastVec: Point2D = [0, 0];
+  let expectedDir: ConvexDirChange = 'invalid';
+  let firstDirection: 'cw' | 'ccw' | 'unknown' = 'unknown';
+  let reversals = 0;
+
+  const setMovePoint = (point: Point2D) => {
+    firstPoint = point;
+    lastPoint = point;
+    firstVec = [0, 0];
+    lastVec = [0, 0];
+    expectedDir = 'invalid';
+    firstDirection = 'unknown';
+    reversals = 0;
+  };
+
+  const addVec = (currentVec: Point2D): boolean => {
+    const dir = classifyDirectionChange(lastVec, currentVec);
+    switch (dir) {
+      case 'left':
+      case 'right':
+        if (expectedDir === 'invalid') {
+          expectedDir = dir;
+          firstDirection = dir === 'right' ? 'cw' : 'ccw';
+        } else if (dir !== expectedDir) {
+          firstDirection = 'unknown';
+          return false;
+        }
+        lastVec = currentVec;
+        return true;
+      case 'straight':
+        return true;
+      case 'backwards':
+        lastVec = currentVec;
+        reversals += 1;
+        return reversals < 3;
+      case 'unknown':
+        return false;
+      case 'invalid':
+        return false;
+    }
+  };
+
+  const addPoint = (point: Point2D): boolean => {
+    if (pointsEqual(lastPoint, point)) {
+      return true;
+    }
+    if (
+      pointsEqual(firstPoint, lastPoint) &&
+      expectedDir === 'invalid' &&
+      Math.abs(lastVec[0]) <= epsilon &&
+      Math.abs(lastVec[1]) <= epsilon
+    ) {
+      lastVec = [point[0] - lastPoint[0], point[1] - lastPoint[1]];
+      firstVec = lastVec;
+    } else if (!addVec([point[0] - lastPoint[0], point[1] - lastPoint[1]])) {
+      return false;
+    }
+    lastPoint = point;
+    return true;
+  };
+
+  const closeContour = (): boolean => addPoint(firstPoint) && addVec(firstVec);
+
+  for (const verb of verbs) {
+    if (contourCount === 0) {
+      if (verb.kind === 'moveTo') {
+        setMovePoint(verb.to);
+        continue;
+      }
+      contourCount += 1;
+      needsClose = true;
+    }
+    if (contourCount === 1) {
+      if (verb.kind === 'close' || verb.kind === 'moveTo') {
+        if (!closeContour()) {
+          return false;
+        }
+        needsClose = false;
+        contourCount += 1;
+        if (verb.kind === 'moveTo') {
+          setMovePoint(verb.to);
+        }
+        continue;
+      }
+      for (const point of getConvexityVerbPoints(verb)) {
+        if (!addPoint(point)) {
+          return false;
+        }
+      }
+    } else if (verb.kind !== 'moveTo') {
+      return false;
+    }
+  }
+
+  if (needsClose && !closeContour()) {
+    return false;
+  }
+  if (firstDirection === 'unknown' && reversals >= 3) {
+    return false;
+  }
+  return true;
 };
 
 const isPointInTriangle = (point: Point2D, a: Point2D, b: Point2D, c: Point2D): boolean => {
@@ -3526,7 +3837,7 @@ const preparePathFill = (
         return null;
       }
       return {
-        bounds: unionBounds(subpaths.map((subpath) => computeBounds(subpath.points))),
+        bounds: computePathBounds(path, transform),
         triangles: prepareFillTriangles(subpaths, path.fillRule) ?? undefined,
       };
     },
@@ -3542,8 +3853,8 @@ const preparePathFill = (
     const hasWedges = patches.some((patch) => patch.fanPoint !== undefined);
     const isSingleConvexContour = subpaths.length === 1 &&
       subpaths[0]!.closed &&
-      isConvexPolygon(subpaths[0]!.points);
-    const fillBounds = unionBounds(subpaths.map((subpath) => computeBounds(subpath.points)));
+      isPathConvex(command.path);
+    const fillBounds = computePathBounds(command.path, identityMatrix2D);
     const renderer = rendererProvider.getPathFillRenderer({
       fillRule: command.path.fillRule,
       patchCount: patches.length,
@@ -3584,7 +3895,7 @@ const preparePathFill = (
       blendMode,
       blender,
     );
-    const transformedFillBounds = computeBounds(transformPoints(baseTriangles, command.transform));
+    const transformedFillBounds = computePathBounds(command.path, command.transform);
     const transformedFringeBounds = computePreparedVertexBounds(fringeVertices);
     const fillDrawBounds = mergeBounds([
       transformedFillBounds,

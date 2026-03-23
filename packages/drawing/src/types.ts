@@ -48,10 +48,26 @@ export type DrawingClipStackRawElementPendingDraw = Readonly<{
   firstUseOrder: number;
   paintOrder: number;
   stencilIndex: number;
+  latestInsertion: DrawingClipStackInsertion;
+  sourceRenderStep: Readonly<{
+    renderStepIndex: number;
+    renderStepKind: string;
+    pipelineKey: string;
+    requiresBarrier: boolean;
+    usesFillStencil: boolean;
+    usesDepth: boolean;
+  }>;
 }>;
+
+export type DrawingClipStackWrapperKind = 'single' | 'stencil' | 'depth-only';
 
 export type DrawingClipStackInsertion = Readonly<{
   layerOrder: number;
+  renderStepIndex: number;
+  renderStepKind: string;
+  pipelineKey: string;
+  bindingKey: string;
+  wrapperKind: DrawingClipStackWrapperKind;
   bindingNode: unknown | null;
 }>;
 

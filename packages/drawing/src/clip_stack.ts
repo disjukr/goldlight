@@ -211,6 +211,7 @@ export const captureDrawingRawClipElementDeferredDraw = (
     maxDepthIndex: number;
     maxDepth: number;
     paintOrder: number;
+    sourceRenderStep: DrawingClipStackRawElementPendingDraw['sourceRenderStep'];
   }>,
 ): DrawingClipStackRawElementPendingDraw | undefined => {
   const runtimeState = ensureRawElementRuntimeState(rawElement);
@@ -226,6 +227,8 @@ export const captureDrawingRawClipElementDeferredDraw = (
   pendingDraw.maxDepthIndex = update.maxDepthIndex;
   pendingDraw.maxDepth = update.maxDepth;
   pendingDraw.paintOrder = update.paintOrder;
+  pendingDraw.latestInsertion = runtimeState.latestInsertion ?? pendingDraw.latestInsertion;
+  pendingDraw.sourceRenderStep = update.sourceRenderStep;
   return pendingDraw;
 };
 

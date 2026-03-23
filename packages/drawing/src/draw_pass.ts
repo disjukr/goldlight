@@ -3,7 +3,6 @@ import type { DrawingRecording } from './recording.ts';
 import {
   captureDrawingRawClipElementDeferredDraw,
   getDrawingRawClipElementLatestInsertion,
-  getDrawingRawClipElementLatestLayerOrder,
   getDrawingRawClipElementPendingDraw,
   getDrawingRawClipElementPreparedGeometry,
   getDrawingRawClipElementUsageBounds,
@@ -17,7 +16,14 @@ import {
   prepareDrawingPathCommand,
 } from './path_renderer.ts';
 import { isDrawingStencilFillRenderer } from './renderer_provider.ts';
-import type { DrawingBlendMode, DrawingClipRect, DrawingCommand, DrawPathCommand, DrawShapeCommand } from './types.ts';
+import type {
+  DrawingBlendMode,
+  DrawingClipRect,
+  DrawingClipStackWrapperKind,
+  DrawingCommand,
+  DrawPathCommand,
+  DrawShapeCommand,
+} from './types.ts';
 
 export type DrawingDrawCommand = DrawPathCommand | DrawShapeCommand;
 
@@ -65,8 +71,41 @@ export type DrawingPreparedStep = Readonly<{
   paintOrder: number;
   stencilIndex: number;
   dependsOnDst: boolean;
+  requiresBarrier: boolean;
   pipelineDescs: readonly DrawingGraphicsPipelineDesc[];
   clipPipelineDescs: readonly DrawingGraphicsPipelineDesc[];
+  clipRect?: DrawingClipRect;
+  drawBounds: DrawingPreparedDraw['bounds'];
+  clipBounds?: Rect;
+  clipDrawIds: readonly number[];
+  usesStencil: boolean;
+  usesFillStencil: boolean;
+  usesDepth: boolean;
+}>;
+
+export type DrawingPreparedRenderStepKind =
+  | 'fill-inner'
+  | 'fill-main'
+  | 'fill-stencil'
+  | 'fill-cover'
+  | 'fill-fringe'
+  | 'stroke-main'
+  | 'stroke-fringe';
+
+export type DrawingPreparedRenderStep = Readonly<{
+  draw: DrawingPreparedDraw;
+  stepIndex: number;
+  renderStepIndex: number;
+  renderStepCount: number;
+  kind: DrawingPreparedRenderStepKind;
+  pipelineDesc: DrawingGraphicsPipelineDesc;
+  depth: number;
+  depthIndex: number;
+  originalOrder: number;
+  paintOrder: number;
+  stencilIndex: number;
+  dependsOnDst: boolean;
+  requiresBarrier: boolean;
   clipRect?: DrawingClipRect;
   drawBounds: DrawingPreparedDraw['bounds'];
   clipBounds?: Rect;
@@ -88,6 +127,23 @@ export type DrawingPreparedClipDraw = Readonly<{
   maxDepth: number;
   firstUseOrder: number;
   paintOrder: number;
+  latestInsertion: Readonly<{
+    layerOrder: number;
+    renderStepIndex: number;
+    renderStepKind: string;
+    pipelineKey: string;
+    bindingKey: string;
+    wrapperKind: DrawingClipStackWrapperKind;
+    bindingNode: unknown | null;
+  }>;
+  sourceRenderStep: Readonly<{
+    renderStepIndex: number;
+    renderStepKind: string;
+    pipelineKey: string;
+    requiresBarrier: boolean;
+    usesFillStencil: boolean;
+    usesDepth: boolean;
+  }>;
   pipelineDesc: DrawingGraphicsPipelineDesc;
 }>;
 
@@ -98,6 +154,7 @@ export type DrawingDrawPass = Readonly<{
   clearColor: readonly [number, number, number, number];
   clipDraws: readonly DrawingPreparedClipDraw[];
   steps: readonly DrawingPreparedStep[];
+  renderSteps: readonly DrawingPreparedRenderStep[];
   unsupportedDraws: readonly DrawingDrawCommand[];
 }>;
 
@@ -137,6 +194,20 @@ const intersectRect = (left: Rect, right: Rect): Rect => {
     size: {
       width: Math.max(0, x1 - x0),
       height: Math.max(0, y1 - y0),
+    },
+  };
+};
+
+const unionStepBounds = (left: Rect, right: Rect): Rect => {
+  const minX = Math.min(left.origin[0], right.origin[0]);
+  const minY = Math.min(left.origin[1], right.origin[1]);
+  const maxX = Math.max(left.origin[0] + left.size.width, right.origin[0] + right.size.width);
+  const maxY = Math.max(left.origin[1] + left.size.height, right.origin[1] + right.size.height);
+  return {
+    origin: [minX, minY],
+    size: {
+      width: Math.max(0, maxX - minX),
+      height: Math.max(0, maxY - minY),
     },
   };
 };
@@ -185,9 +256,16 @@ type MutablePreparedStep = Omit<DrawingPreparedStep, 'clipDrawIds'> & {
   clipDrawIds: number[];
 };
 
+type MutablePreparedRenderStep = Omit<DrawingPreparedRenderStep, 'clipDrawIds'> & {
+  clipDrawIds: number[];
+};
+
 type DrawingBinding = {
   key: string;
-  steps: MutablePreparedStep[];
+  wrapperKind: DrawingClipStackWrapperKind;
+  requiresBarrier: boolean;
+  bounds: Rect;
+  steps: MutablePreparedRenderStep[];
   prev: DrawingBinding | null;
   next: DrawingBinding | null;
 };
@@ -196,6 +274,13 @@ type DrawingLayer = {
   order: number;
   head: DrawingBinding | null;
   tail: DrawingBinding | null;
+};
+
+type DrawingOrderingDevice = {
+  layers: DrawingLayer[];
+  nextLayerOrder: number;
+  nextClipDrawId: number;
+  trackedRawElements: Set<NonNullable<NonNullable<DrawingPreparedDraw['clip']>['effectiveElements']>[number]['rawElement']>;
 };
 
 const iterateBindings = function* (
@@ -209,9 +294,15 @@ const iterateBindings = function* (
 const findBindingByKey = (
   layer: DrawingLayer,
   key: string,
+  wrapperKind: DrawingClipStackWrapperKind,
+  requiresBarrier: boolean,
 ): DrawingBinding | null => {
   for (const binding of iterateBindings(layer)) {
-    if (binding.key === key) {
+    if (
+      binding.key === key &&
+      binding.wrapperKind === wrapperKind &&
+      binding.requiresBarrier === requiresBarrier
+    ) {
       return binding;
     }
   }
@@ -245,32 +336,192 @@ const insertBindingAfter = (
   }
 };
 
-const stepsOverlap = (left: DrawingPreparedStep, right: DrawingPreparedStep): boolean =>
+const stepsOverlap = (left: Pick<DrawingPreparedRenderStep, 'drawBounds'>, right: Pick<DrawingPreparedRenderStep, 'drawBounds'>): boolean =>
   rectsIntersect(left.drawBounds, right.drawBounds);
 
-const stepsHaveCompatibleBinding = (left: DrawingPreparedStep, right: DrawingPreparedStep): boolean =>
-  getPipelineSortKey(left) === getPipelineSortKey(right) &&
+const bindingIntersectsStep = (
+  binding: DrawingBinding,
+  step: DrawingPreparedRenderStep,
+): boolean => rectsIntersect(binding.bounds, step.drawBounds);
+
+const renderStepBindingKey = (step: Pick<DrawingPreparedRenderStep, 'pipelineDesc'>): string =>
+  step.pipelineDesc.label;
+
+const renderStepWrapperKind = (
+  step: Pick<DrawingPreparedRenderStep, 'usesFillStencil'>,
+): DrawingClipStackWrapperKind => step.usesFillStencil ? 'stencil' : 'single';
+
+const renderStepRequiresBarrier = (
+  step: Pick<DrawingPreparedRenderStep, 'requiresBarrier'>,
+): boolean => step.requiresBarrier;
+
+const renderStepsHaveCompatibleBinding = (
+  left: DrawingPreparedRenderStep,
+  right: DrawingPreparedRenderStep,
+): boolean =>
+  left.pipelineDesc.label === right.pipelineDesc.label &&
+  left.requiresBarrier === right.requiresBarrier &&
   left.usesStencil === right.usesStencil &&
   left.usesFillStencil === right.usesFillStencil &&
   left.usesDepth === right.usesDepth;
 
+const getClipKey = (step: Pick<DrawingPreparedRenderStep, 'draw'>): string =>
+  step.draw.clip?.effectiveElementIds?.join(',') ?? '';
+
+const renderStepsRequireIsolation = (
+  left: DrawingPreparedRenderStep,
+  right: DrawingPreparedRenderStep,
+): boolean =>
+  left.dependsOnDst !== right.dependsOnDst ||
+  left.requiresBarrier !== right.requiresBarrier ||
+  left.stepIndex !== right.stepIndex && (left.kind === 'fill-inner' || right.kind === 'fill-inner') ||
+  left.stepIndex !== right.stepIndex && (left.usesFillStencil !== right.usesFillStencil) ||
+  left.stepIndex !== right.stepIndex && (left.usesDepth !== right.usesDepth) ||
+  getClipKey(left) !== getClipKey(right);
+
+const bindingCanMatchRenderStep = (
+  binding: DrawingBinding,
+  step: DrawingPreparedRenderStep,
+): boolean => binding.key === renderStepBindingKey(step) &&
+  binding.wrapperKind === renderStepWrapperKind(step) &&
+  binding.requiresBarrier === renderStepRequiresBarrier(step);
+
+const expandRenderSteps = (
+  step: MutablePreparedStep,
+  stepIndex: number,
+): MutablePreparedRenderStep[] => {
+  const renderSteps: MutablePreparedRenderStep[] = [];
+  const pushRenderStep = (
+    kind: DrawingPreparedRenderStepKind,
+    pipelineDesc: DrawingGraphicsPipelineDesc,
+    renderStepIndex: number,
+    usesFillStencil = false,
+    usesDepth = false,
+  ): void => {
+    renderSteps.push({
+      draw: step.draw,
+      stepIndex,
+      renderStepIndex,
+      renderStepCount: 0,
+      kind,
+      pipelineDesc,
+      depth: step.depth,
+      depthIndex: step.depthIndex,
+      originalOrder: step.originalOrder,
+      paintOrder: step.paintOrder,
+      stencilIndex: step.stencilIndex,
+      dependsOnDst: step.dependsOnDst,
+      requiresBarrier: step.requiresBarrier,
+      clipRect: step.clipRect,
+      drawBounds: step.drawBounds,
+      clipBounds: step.clipBounds,
+      clipDrawIds: [],
+      usesStencil: step.usesStencil,
+      usesFillStencil,
+      usesDepth,
+    });
+  };
+
+  if (step.draw.kind === 'pathFill') {
+    if (step.draw.innerFillBounds) {
+      pushRenderStep('fill-inner', createPipelineDesc(
+        'drawing-path-fill-inner',
+        'path',
+        'device-vertex',
+        'src-over',
+      ), 0, false, false);
+    }
+    if (step.usesFillStencil) {
+      pushRenderStep('fill-stencil', step.pipelineDescs[0]!, step.draw.innerFillBounds ? 1 : 0, true, false);
+      pushRenderStep('fill-cover', step.pipelineDescs[1]!, step.draw.innerFillBounds ? 2 : 1, true, false);
+      if (step.draw.fringeVertices?.length) {
+        pushRenderStep('fill-fringe', createPipelineDesc(
+          'drawing-path-fill-stencil-cover',
+          'path',
+          'device-vertex',
+          (step.draw.dstUsage & drawingDstUsage.dstReadRequired) !== 0 ? 'src' : step.draw.blendMode,
+          'fill-stencil-cover',
+        ), step.draw.innerFillBounds ? 3 : 2, true, false);
+      }
+    } else {
+      pushRenderStep('fill-main', step.pipelineDescs[0]!, step.draw.innerFillBounds ? 1 : 0, false, false);
+      if (step.draw.fringeVertices?.length) {
+        pushRenderStep('fill-fringe', createPipelineDesc(
+          step.clipDrawIds.length > 0 ? 'drawing-path-fill-clip-cover' : 'drawing-path-fill-cover',
+          'path',
+          'device-vertex',
+          (step.draw.dstUsage & drawingDstUsage.dstReadRequired) !== 0 ? 'src' : step.draw.blendMode,
+          step.clipDrawIds.length > 0 ? 'clip-cover' : 'none',
+        ), step.draw.innerFillBounds ? 2 : 1, false, false);
+      }
+    }
+  } else {
+    pushRenderStep('stroke-main', step.pipelineDescs[0]!, 0, false, step.usesDepth);
+    if (step.draw.fringeVertices?.length) {
+      pushRenderStep('stroke-fringe', createPipelineDesc(
+        step.clipDrawIds.length > 0 ? 'drawing-path-stroke-clip-cover' : 'drawing-path-stroke-cover',
+        'path',
+        'device-vertex',
+        (step.draw.dstUsage & drawingDstUsage.dstReadRequired) !== 0 ? 'src' : step.draw.blendMode,
+        step.clipDrawIds.length > 0 ? 'clip-cover' : 'none',
+      ), 1, false, false);
+    }
+  }
+
+  return renderSteps.map((renderStep) => ({
+    ...renderStep,
+    renderStepCount: renderSteps.length,
+  }));
+};
+
 const canInsertIntoLayer = (
   layer: DrawingLayer,
-  step: DrawingPreparedStep,
+  step: DrawingPreparedRenderStep,
+  boundaryNode: DrawingBinding | null = null,
+  direction: 'forward' | 'backward' = 'forward',
 ): Readonly<{
   acceptable: boolean;
   compatible: boolean;
   incompatibleOverlap: boolean;
   bindingNode: DrawingBinding | null;
 }> => {
+  const stepKey = renderStepBindingKey(step);
+  const stepWrapperKind = renderStepWrapperKind(step);
+  const stepRequiresBarrier = renderStepRequiresBarrier(step);
   let compatible = false;
   let bindingNode: DrawingBinding | null = null;
-  for (const binding of iterateBindings(layer)) {
+  const bindings = [...iterateBindings(layer)];
+  const orderedBindings = direction === 'backward' ? bindings.reverse() : bindings;
+  let boundaryReached = boundaryNode === null;
+
+  for (const binding of orderedBindings) {
+    if (!boundaryReached) {
+      if (binding === boundaryNode) {
+        boundaryReached = true;
+      } else {
+        continue;
+      }
+    }
+    if (!bindingIntersectsStep(binding, step)) {
+      continue;
+    }
+    if (
+      binding.wrapperKind !== stepWrapperKind ||
+      binding.key !== stepKey ||
+      binding.requiresBarrier !== stepRequiresBarrier
+    ) {
+      return {
+        acceptable: false,
+        compatible: false,
+        incompatibleOverlap: true,
+        bindingNode: null,
+      };
+    }
     for (const existing of binding.steps) {
       if (!stepsOverlap(existing, step)) {
         continue;
       }
-      if (!stepsHaveCompatibleBinding(existing, step)) {
+      if (renderStepsRequireIsolation(existing, step) || !renderStepsHaveCompatibleBinding(existing, step)) {
         return {
           acceptable: false,
           compatible: false,
@@ -278,9 +529,9 @@ const canInsertIntoLayer = (
           bindingNode: null,
         };
       }
-      compatible = true;
-      bindingNode = binding;
     }
+    compatible = true;
+    bindingNode = binding;
   }
   return {
     acceptable: true,
@@ -292,43 +543,34 @@ const canInsertIntoLayer = (
 
 const insertStepIntoLayer = (
   layer: DrawingLayer,
-  step: MutablePreparedStep,
+  step: MutablePreparedRenderStep,
   boundaryNode: DrawingBinding | null = null,
 ): DrawingBinding => {
-  const stepKey = getPipelineSortKey(step);
-  const existingBinding = findBindingByKey(layer, stepKey);
+  const stepKey = renderStepBindingKey(step);
+  const wrapperKind = renderStepWrapperKind(step);
+  const requiresBarrier = renderStepRequiresBarrier(step);
+  const searchBindings = boundaryNode
+    ? [...iterateBindings(layer)].slice(Math.max(0, [...iterateBindings(layer)].indexOf(boundaryNode)))
+    : [...iterateBindings(layer)];
+  const existingBinding = searchBindings.find((binding) => bindingCanMatchRenderStep(binding, step)) ??
+    (!boundaryNode ? findBindingByKey(layer, stepKey, wrapperKind, requiresBarrier) : null);
   if (existingBinding) {
     existingBinding.steps.push(step);
+    existingBinding.bounds = unionStepBounds(existingBinding.bounds, step.drawBounds);
     return existingBinding;
   }
 
-  let previous: DrawingBinding | null = null;
-  for (const existing of iterateBindings(layer)) {
-    if (boundaryNode && existing === boundaryNode) {
-      previous = existing;
-      continue;
-    }
-    if (existing.key > stepKey) {
-      break;
-    }
-    previous = existing;
-  }
   const binding: DrawingBinding = {
     key: stepKey,
+    wrapperKind,
+    requiresBarrier,
+    bounds: step.drawBounds,
     steps: [step],
     prev: null,
     next: null,
   };
-  insertBindingAfter(layer, binding, previous);
+  insertBindingAfter(layer, binding, boundaryNode ?? layer.tail);
   return binding;
-};
-
-const resetRawElementRuntimeState = (
-  rawElements: Iterable<NonNullable<NonNullable<DrawingPreparedDraw['clip']>['effectiveElements']>[number]['rawElement']>,
-): void => {
-  for (const rawElement of rawElements) {
-    resetDrawingRawClipElementRuntimeState(rawElement);
-  }
 };
 
 const createClipPipelineDescForElement = (
@@ -354,12 +596,97 @@ const createClipPipelineDescForElement = (
     true,
   );
 
+const createOrderingDevice = (): DrawingOrderingDevice => ({
+  layers: [],
+  nextLayerOrder: firstLayerOrder,
+  nextClipDrawId: 1,
+  trackedRawElements: new Set(),
+});
+
+const resetOrderingDevice = (
+  device: DrawingOrderingDevice,
+): void => {
+  for (const rawElement of device.trackedRawElements) {
+    resetDrawingRawClipElementRuntimeState(rawElement);
+  }
+  device.layers.length = 0;
+  device.nextLayerOrder = firstLayerOrder;
+  device.trackedRawElements.clear();
+};
+
+const finalizeDeferredClipDraws = (
+  device: DrawingOrderingDevice,
+): readonly DrawingPreparedClipDraw[] => [...device.trackedRawElements]
+  .flatMap((rawElement) => {
+    const pendingDraw = getDrawingRawClipElementPendingDraw(rawElement);
+    const geometry = getDrawingRawClipElementPreparedGeometry(rawElement);
+    const triangles = geometry.triangles;
+    if (!pendingDraw || !triangles || triangles.length === 0) {
+      return [];
+    }
+    return [Object.freeze({
+      id: pendingDraw.drawId,
+      elementId: rawElement.id,
+      op: rawElement.clip.op,
+      triangles,
+      bounds: geometry.bounds,
+      usageBounds: pendingDraw.usageBounds,
+      scissorBounds: pendingDraw.scissorBounds,
+      maxDepthIndex: pendingDraw.maxDepthIndex,
+      maxDepth: pendingDraw.maxDepth,
+      firstUseOrder: pendingDraw.firstUseOrder,
+      paintOrder: pendingDraw.paintOrder,
+      latestInsertion: pendingDraw.latestInsertion,
+      sourceRenderStep: pendingDraw.sourceRenderStep,
+      pipelineDesc: createClipPipelineDescForElement({ op: rawElement.clip.op }, pendingDraw.stencilIndex),
+    }) as DrawingPreparedClipDraw];
+  })
+  .sort((left, right) => left.firstUseOrder - right.firstUseOrder || left.id - right.id);
+
+const createClipLatestInsertion = (
+  layer: DrawingLayer,
+  bindingNode: DrawingBinding | null,
+  renderStep: DrawingPreparedRenderStep,
+): Readonly<{
+  layerOrder: number;
+  renderStepIndex: number;
+  renderStepKind: string;
+  pipelineKey: string;
+  bindingKey: string;
+  wrapperKind: DrawingClipStackWrapperKind;
+  bindingNode: DrawingBinding | null;
+}> => ({
+  layerOrder: layer.order,
+  renderStepIndex: renderStep.renderStepIndex,
+  renderStepKind: renderStep.kind,
+  pipelineKey: renderStep.pipelineDesc.label,
+  bindingKey: bindingNode?.key ?? renderStep.pipelineDesc.label,
+  wrapperKind: 'depth-only',
+  bindingNode,
+});
+
+const createClipSourceRenderStep = (
+  renderStep: DrawingPreparedRenderStep,
+): Readonly<{
+  renderStepIndex: number;
+  renderStepKind: string;
+  pipelineKey: string;
+  requiresBarrier: boolean;
+  usesFillStencil: boolean;
+  usesDepth: boolean;
+}> => ({
+  renderStepIndex: renderStep.renderStepIndex,
+  renderStepKind: renderStep.kind,
+  pipelineKey: renderStep.pipelineDesc.label,
+  requiresBarrier: renderStep.requiresBarrier,
+  usesFillStencil: renderStep.usesFillStencil,
+  usesDepth: renderStep.usesDepth,
+});
+
 const assignLayeredOrder = (
+  device: DrawingOrderingDevice,
   pass: DrawingDrawPass,
-  allocateClipDrawId: () => number,
 ): DrawingDrawPass => {
-  const layers: DrawingLayer[] = [];
-  let nextLayerOrder = firstLayerOrder;
   const preparedSteps = pass.steps.map((step, originalOrder) => ({
     ...step,
     depthIndex: originalOrder + 1,
@@ -368,10 +695,12 @@ const assignLayeredOrder = (
     paintOrder: noIntersectionPaintOrder,
     stencilIndex: step.usesStencil || step.usesFillStencil ? originalOrder : unassignedStencilIndex,
     dependsOnDst: stepDependsOnDst(step),
+    requiresBarrier: (step.draw.dstUsage & drawingDstUsage.dstReadRequired) !== 0,
     clipDrawIds: [] as number[],
   }));
+  const renderSteps = preparedSteps.flatMap((step, stepIndex) => expandRenderSteps(step, stepIndex));
 
-  for (const step of preparedSteps) {
+  for (const [stepIndex, step] of preparedSteps.entries()) {
     const dependsOnDst = step.dependsOnDst;
     const clipElements = step.draw.clip?.effectiveElements ?? [];
     let clipAnchorLayer: DrawingLayer | null = null;
@@ -386,21 +715,22 @@ const assignLayeredOrder = (
       if (element.bounds && !rectsIntersect(usageBounds, step.drawBounds)) {
         continue;
       }
-      const candidateLayer = layers.find((layer) => layer.order === latestLayerOrder) ?? null;
+      const candidateLayer = device.layers.find((layer) => layer.order === latestLayerOrder) ?? null;
       if (candidateLayer && (!clipAnchorLayer || candidateLayer.order > clipAnchorLayer.order)) {
         clipAnchorLayer = candidateLayer;
         clipAnchorBindingNode = (latestInsertion?.bindingNode as DrawingBinding | null | undefined) ??
           null;
       }
     }
+    const drawRenderSteps = renderSteps.filter((candidate) => candidate.stepIndex === stepIndex);
     let targetLayer: DrawingLayer | null = null;
     let targetBindingNode: DrawingBinding | null = null;
 
     if (dependsOnDst) {
-      const stopIndex = clipAnchorLayer ? layers.indexOf(clipAnchorLayer) : -1;
-      for (let index = layers.length - 1; index >= 0; index -= 1) {
-        const layer = layers[index]!;
-        const verdict = canInsertIntoLayer(layer, step);
+      const stopIndex = clipAnchorLayer ? device.layers.indexOf(clipAnchorLayer) : -1;
+      for (let index = device.layers.length - 1; index >= 0; index -= 1) {
+        const layer = device.layers[index]!;
+        const verdict = canInsertIntoLayer(layer, drawRenderSteps[0]!, clipAnchorBindingNode, 'backward');
         if (verdict.acceptable) {
           targetLayer = layer;
           targetBindingNode = verdict.bindingNode;
@@ -417,10 +747,10 @@ const assignLayeredOrder = (
         }
       }
     } else {
-      const startIndex = clipAnchorLayer ? Math.max(0, layers.indexOf(clipAnchorLayer)) : 0;
-      for (let index = startIndex; index < layers.length; index += 1) {
-        const layer = layers[index]!;
-        const verdict = canInsertIntoLayer(layer, step);
+      const startIndex = clipAnchorLayer ? Math.max(0, device.layers.indexOf(clipAnchorLayer)) : 0;
+      for (let index = startIndex; index < device.layers.length; index += 1) {
+        const layer = device.layers[index]!;
+        const verdict = canInsertIntoLayer(layer, drawRenderSteps[0]!, clipAnchorBindingNode, 'forward');
         if (verdict.acceptable) {
           targetLayer = layer;
           targetBindingNode = verdict.bindingNode;
@@ -433,27 +763,37 @@ const assignLayeredOrder = (
 
     if (!targetLayer) {
       targetLayer = {
-        order: nextLayerOrder++,
+        order: device.nextLayerOrder++,
         head: null,
         tail: null,
       };
       if (clipAnchorLayer && !dependsOnDst) {
-        const anchorIndex = layers.indexOf(clipAnchorLayer);
-        layers.splice(anchorIndex + 1, 0, targetLayer);
+        const anchorIndex = device.layers.indexOf(clipAnchorLayer);
+        device.layers.splice(anchorIndex + 1, 0, targetLayer);
       } else {
-        layers.push(targetLayer);
+        device.layers.push(targetLayer);
       }
     }
 
     step.paintOrder = targetLayer.order - firstLayerOrder;
-    const insertedBindingNode = insertStepIntoLayer(
-      targetLayer,
-      step,
-      targetLayer === clipAnchorLayer ? clipAnchorBindingNode : targetBindingNode,
-    );
+    let insertedBindingNode: DrawingBinding | null = null;
+    let lastInsertedRenderStep: MutablePreparedRenderStep | null = null;
+    for (const renderStep of drawRenderSteps) {
+      const orderedRenderStep: MutablePreparedRenderStep = {
+        ...renderStep,
+        paintOrder: step.paintOrder,
+      };
+      lastInsertedRenderStep = orderedRenderStep;
+      insertedBindingNode = insertStepIntoLayer(
+        targetLayer,
+        orderedRenderStep,
+        insertedBindingNode ?? (targetLayer === clipAnchorLayer ? clipAnchorBindingNode : targetBindingNode),
+      );
+    }
     for (let index = 0; index < clipElements.length; index += 1) {
       const clipElement = clipElements[index]!;
       const rawElement = clipElement.rawElement;
+      device.trackedRawElements.add(rawElement);
       const geometry = getDrawingRawClipElementPreparedGeometry(rawElement);
       const rawBounds = geometry.bounds ?? clipElement.bounds;
       const rawTriangles = geometry.triangles;
@@ -463,10 +803,7 @@ const assignLayeredOrder = (
       const accumulatedUsageBounds = updateDrawingRawClipElementForDraw(
         rawElement,
         usageBounds,
-        {
-          layerOrder: targetLayer.order,
-          bindingNode: insertedBindingNode,
-        },
+        createClipLatestInsertion(targetLayer, insertedBindingNode, lastInsertedRenderStep ?? drawRenderSteps[drawRenderSteps.length - 1]!),
       );
 
       if (!rawTriangles || rawTriangles.length === 0) {
@@ -486,15 +823,21 @@ const assignLayeredOrder = (
             Math.min(lastDepthIndex, Math.max(pendingDraw.maxDepthIndex, step.depthIndex) + 1),
           ),
           paintOrder: targetLayer.order - firstLayerOrder,
+          sourceRenderStep: createClipSourceRenderStep(
+            lastInsertedRenderStep ?? drawRenderSteps[drawRenderSteps.length - 1]!,
+          ),
         });
         if (updatedPendingDraw) {
           step.clipDrawIds.push(updatedPendingDraw.drawId);
+          for (const renderStep of drawRenderSteps) {
+            renderStep.clipDrawIds.push(updatedPendingDraw.drawId);
+          }
         }
         continue;
       }
 
       const createdPendingDraw = drawDrawingRawClipElementImmediate(rawElement, {
-        drawId: allocateClipDrawId(),
+        drawId: device.nextClipDrawId++,
         usageBounds: accumulatedUsageBounds,
         scissorBounds,
         maxDepthIndex: step.depthIndex,
@@ -502,52 +845,42 @@ const assignLayeredOrder = (
         firstUseOrder: step.originalOrder,
         paintOrder: targetLayer.order - firstLayerOrder,
         stencilIndex: index,
+        latestInsertion: createClipLatestInsertion(
+          targetLayer,
+          insertedBindingNode,
+          lastInsertedRenderStep ?? drawRenderSteps[drawRenderSteps.length - 1]!,
+        ),
+        sourceRenderStep: createClipSourceRenderStep(
+          lastInsertedRenderStep ?? drawRenderSteps[drawRenderSteps.length - 1]!,
+        ),
       });
       if (createdPendingDraw) {
         step.clipDrawIds.push(createdPendingDraw.drawId);
+        for (const renderStep of drawRenderSteps) {
+          renderStep.clipDrawIds.push(createdPendingDraw.drawId);
+        }
       }
     }
   }
 
-  const orderedSteps = layers.flatMap((layer) =>
+  const orderedRenderSteps = device.layers.flatMap((layer) =>
     [...iterateBindings(layer)].flatMap((binding) => binding.steps)
-  )
-    .map((step) => Object.freeze({
+  ).map((step) => Object.freeze({
+    ...step,
+    clipDrawIds: Object.freeze([...step.clipDrawIds]),
+  }) as DrawingPreparedRenderStep);
+  const orderedDrawSteps = preparedSteps.map((step) =>
+    Object.freeze({
       ...step,
       clipDrawIds: Object.freeze([...step.clipDrawIds]),
-    }) as DrawingPreparedStep);
-  const orderedClipDraws = [...new Set(
-    preparedSteps.flatMap((step) => (step.draw.clip?.effectiveElements ?? []).map((element) => element.rawElement)),
-  )]
-    .flatMap((rawElement) => {
-      const pendingDraw = getDrawingRawClipElementPendingDraw(rawElement);
-      const geometry = getDrawingRawClipElementPreparedGeometry(rawElement);
-      const triangles = geometry.triangles;
-      if (!pendingDraw || !triangles || triangles.length === 0) {
-        return [];
-      }
-      return [{
-        id: pendingDraw.drawId,
-        elementId: rawElement.id,
-        op: rawElement.clip.op,
-        triangles,
-        bounds: geometry.bounds,
-        usageBounds: pendingDraw.usageBounds,
-        scissorBounds: pendingDraw.scissorBounds,
-        maxDepthIndex: pendingDraw.maxDepthIndex,
-        maxDepth: pendingDraw.maxDepth,
-        firstUseOrder: pendingDraw.firstUseOrder,
-        paintOrder: pendingDraw.paintOrder,
-        pipelineDesc: createClipPipelineDescForElement({ op: rawElement.clip.op }, pendingDraw.stencilIndex),
-      } satisfies MutablePreparedClipDraw];
-    })
-    .sort((left, right) => left.firstUseOrder - right.firstUseOrder || left.id - right.id)
-    .map((clipDraw) => Object.freeze(clipDraw) as DrawingPreparedClipDraw);
+    }) as DrawingPreparedStep
+  );
 
   return {
     ...pass,
-    clipDraws: Object.freeze(orderedClipDraws),
-    steps: Object.freeze(orderedSteps),
+    clipDraws: Object.freeze(finalizeDeferredClipDraws(device)),
+    steps: Object.freeze(orderedDrawSteps),
+    renderSteps: Object.freeze(orderedRenderSteps),
   };
 };
 
@@ -779,7 +1112,7 @@ export const prepareDrawingRecording = (
 ): DrawingPreparedRecording => {
   const passes: DrawingDrawPass[] = [];
   const unsupportedCommands: DrawingCommand[] = [];
-  let nextClipDrawId = 1;
+  const orderingDevice = createOrderingDevice();
 
   let currentLoadOp: 'load' | 'clear' = 'load';
   let currentClearColor = defaultClearColor;
@@ -795,19 +1128,18 @@ export const prepareDrawingRecording = (
       return;
     }
 
-    const pass = assignLayeredOrder({
+    const pass = assignLayeredOrder(orderingDevice, {
       kind: 'drawPass',
       recorderId: recording.recorderId,
       loadOp: currentLoadOp,
       clearColor: currentClearColor,
       clipDraws: Object.freeze([]),
       steps: Object.freeze([...currentSteps]),
+      renderSteps: Object.freeze([]),
       unsupportedDraws: Object.freeze([...currentUnsupportedDraws]),
-    }, () => nextClipDrawId++);
+    });
     passes.push(pass);
-    resetRawElementRuntimeState(
-      currentSteps.flatMap((step) => (step.draw.clip?.effectiveElements ?? []).map((element) => element.rawElement)),
-    );
+    resetOrderingDevice(orderingDevice);
 
     currentLoadOp = 'load';
     currentClearColor = defaultClearColor;
@@ -834,6 +1166,7 @@ export const prepareDrawingRecording = (
           paintOrder: -1,
           stencilIndex: unassignedStencilIndex,
           dependsOnDst: false,
+          requiresBarrier: false,
           pipelineDescs: getPipelineDescsForDraw(prepared.draw),
           clipPipelineDescs: getClipPipelineDescsForDraw(prepared.draw),
           clipRect: prepared.draw.clipRect,

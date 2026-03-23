@@ -249,6 +249,7 @@ export type DrawingPreparedPathFill = Readonly<{
   triangles: readonly Point2D[];
   fringeVertices?: readonly DrawingPreparedVertex[];
   patches: readonly DrawingPreparedPatch[];
+  innerFillBounds?: Rect;
   fillRule: PathFillRule2D;
   color: readonly [number, number, number, number];
   blendMode: DrawingBlendMode;
@@ -353,6 +354,18 @@ const resolveCoverage = (
 
 const formatAutoClamps = (format: GPUTextureFormat): boolean =>
   format !== 'rgba16float' && format !== 'r16float' && format !== 'r32float';
+
+const insetRect = (rect: Rect, inset: number): Rect | undefined => {
+  const width = rect.size.width - (2 * inset);
+  const height = rect.size.height - (2 * inset);
+  if (width <= 0 || height <= 0) {
+    return undefined;
+  }
+  return {
+    origin: [rect.origin[0] + inset, rect.origin[1] + inset],
+    size: { width, height },
+  };
+};
 
 const blendModeDependsOnDst = (
   blendMode: DrawingBlendMode,
@@ -3265,6 +3278,9 @@ const preparePathFill = (
         triangles: baseTriangles,
         fringeVertices,
         patches,
+        innerFillBounds: (dstUsage & drawingDstUsage.dstOnlyUsedByRenderer) !== 0
+          ? insetRect(computeBounds(transformPoints(baseTriangles, command.transform)), aaFringeWidth)
+          : undefined,
         fillRule: command.path.fillRule,
         color: fillColor,
         blendMode,

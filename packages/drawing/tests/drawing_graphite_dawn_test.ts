@@ -32,6 +32,7 @@ import {
   encodeDawnCommandBuffer,
   encodePreparedDawnCommandBuffer,
   finishDrawingRecorder,
+  getDrawingRawClipElementLatestInsertion,
   hasPendingDawnQueueWork,
   hasUnfinishedDawnQueueWork,
   popDrawingClipStackSave,
@@ -1218,6 +1219,196 @@ Deno.test('drawing prepared recording preserves shared clip element ids across r
   assertEquals(firstIds[1] !== secondIds[0], true);
 });
 
+Deno.test('drawing prepared recording finalizes deferred clip draws when a clear flushes the pass', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  clipDrawingRecorderPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [16, 16] },
+      { kind: 'lineTo', to: [96, 16] },
+      { kind: 'lineTo', to: [64, 96] },
+      { kind: 'close' },
+    ),
+  );
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [0, 0] },
+      { kind: 'lineTo', to: [128, 0] },
+      { kind: 'lineTo', to: [128, 128] },
+      { kind: 'close' },
+    ),
+    { style: 'fill', color: [1, 0, 0, 1] },
+  );
+  recordClear(recorder, [0, 0, 0, 0]);
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const firstPass = prepared.passes[0];
+  const secondPass = prepared.passes[1];
+  const rawClipElement = firstPass?.steps[0]?.draw.clip?.effectiveElements?.[0]?.rawElement;
+
+  assertEquals(firstPass?.clipDraws.length, 1);
+  assertEquals(firstPass?.steps[0]?.clipDrawIds.length, 1);
+  assertEquals((firstPass?.renderSteps[0]?.clipDrawIds.length ?? 0) > 0, true);
+  assertEquals(firstPass?.clipDraws[0]?.latestInsertion.wrapperKind, 'depth-only');
+  assertEquals(firstPass?.clipDraws[0]?.sourceRenderStep.renderStepKind, 'fill-fringe');
+  assertEquals(firstPass?.clipDraws[0]?.sourceRenderStep.pipelineKey, 'drawing-path-fill-cover');
+  assertEquals(firstPass?.clipDraws[0]?.sourceRenderStep.requiresBarrier, false);
+  assertEquals(
+    firstPass?.renderSteps.some((step) =>
+      step.pipelineDesc.label === firstPass.clipDraws[0]?.latestInsertion.pipelineKey &&
+      step.renderStepIndex === firstPass.clipDraws[0]?.latestInsertion.renderStepIndex
+    ),
+    true,
+  );
+  assertEquals(getDrawingRawClipElementLatestInsertion(rawClipElement!), undefined);
+  assertEquals(secondPass?.loadOp, 'clear');
+});
+
+Deno.test('drawing prepared recording preserves clip boundary ordering across successive clipped fills', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  clipDrawingRecorderPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [16, 16] },
+      { kind: 'lineTo', to: [112, 16] },
+      { kind: 'lineTo', to: [64, 112] },
+      { kind: 'close' },
+    ),
+  );
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [24, 24] },
+      { kind: 'lineTo', to: [104, 24] },
+      { kind: 'lineTo', to: [104, 104] },
+      { kind: 'lineTo', to: [24, 104] },
+      { kind: 'close' },
+      { kind: 'moveTo', to: [40, 40] },
+      { kind: 'lineTo', to: [88, 40] },
+      { kind: 'lineTo', to: [88, 88] },
+      { kind: 'lineTo', to: [40, 88] },
+      { kind: 'close' },
+    ),
+    { style: 'fill' },
+  );
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [32, 32] },
+      { kind: 'lineTo', to: [96, 32] },
+      { kind: 'lineTo', to: [96, 96] },
+      { kind: 'lineTo', to: [32, 96] },
+      { kind: 'close' },
+    ),
+    { style: 'fill', color: [0.9, 0.2, 0.2, 1] },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const pass = prepared.passes[0]!;
+
+  assertEquals(pass.steps.length, 2);
+  assertEquals(pass.steps[1]!.paintOrder > pass.steps[0]!.paintOrder, true);
+  assertEquals(pass.clipDraws[0]?.latestInsertion.wrapperKind, 'depth-only');
+  assertEquals(pass.renderSteps.filter((step) => step.paintOrder === 0).length > 0, true);
+  assertEquals(pass.renderSteps.filter((step) => step.paintOrder === 1).length > 0, true);
+  assertEquals(pass.renderSteps.some((step) => step.kind === 'fill-main'), true);
+});
+
+Deno.test('drawing prepared recording isolates dst-read barrier wrappers from ordinary fills', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+  const path = createPath2D(
+    { kind: 'moveTo', to: [16, 16] },
+    { kind: 'lineTo', to: [96, 16] },
+    { kind: 'lineTo', to: [96, 96] },
+    { kind: 'lineTo', to: [16, 96] },
+    { kind: 'close' },
+  );
+
+  recordDrawPath(recorder, path, { style: 'fill', blendMode: 'multiply' });
+  recordDrawPath(recorder, path, { style: 'fill', color: [0.1, 0.5, 0.8, 1] });
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const pass = prepared.passes[0]!;
+
+  assertEquals(pass.steps.length, 2);
+  assertEquals(pass.steps[0]!.requiresBarrier, true);
+  assertEquals(pass.steps[1]!.requiresBarrier, false);
+  assertEquals(pass.steps[1]!.paintOrder > pass.steps[0]!.paintOrder, true);
+  assertEquals(pass.renderSteps[0]!.requiresBarrier, true);
+  assertEquals(pass.renderSteps.some((step) => step.requiresBarrier === false), true);
+});
+
+Deno.test('drawing prepared recording expands stencil fills into render steps', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [16, 16] },
+      { kind: 'lineTo', to: [96, 16] },
+      { kind: 'lineTo', to: [96, 96] },
+      { kind: 'lineTo', to: [16, 96] },
+      { kind: 'close' },
+      { kind: 'moveTo', to: [32, 32] },
+      { kind: 'lineTo', to: [80, 32] },
+      { kind: 'lineTo', to: [80, 80] },
+      { kind: 'lineTo', to: [32, 80] },
+      { kind: 'close' },
+    ),
+    { style: 'fill' },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const pass = prepared.passes[0]!;
+
+  assertEquals(pass.steps.length, 1);
+  assertEquals(pass.renderSteps.map((step) => step.kind), ['fill-inner', 'fill-stencil', 'fill-cover', 'fill-fringe']);
+});
+
+Deno.test('dawn command buffer executes expanded render steps for stencil fills', () => {
+  const mock = createMockGpuContext();
+  const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
+  const recorder = createDrawingRecorder(sharedContext);
+  const binding = createOffscreenBinding(mock.context);
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [16, 16] },
+      { kind: 'lineTo', to: [96, 16] },
+      { kind: 'lineTo', to: [96, 96] },
+      { kind: 'lineTo', to: [16, 96] },
+      { kind: 'close' },
+      { kind: 'moveTo', to: [32, 32] },
+      { kind: 'lineTo', to: [80, 32] },
+      { kind: 'lineTo', to: [80, 80] },
+      { kind: 'lineTo', to: [32, 80] },
+      { kind: 'close' },
+    ),
+    { style: 'fill' },
+  );
+
+  const commandBuffer = encodeDawnCommandBuffer(
+    sharedContext,
+    finishDrawingRecorder(recorder),
+    binding,
+  );
+
+  assertEquals(commandBuffer.unsupportedCommands.length, 0);
+  assertEquals(mock.created.drawCalls.length, 4);
+});
+
 Deno.test('dawn preparation separates recording, draw-pass preparation, and resource preparation', () => {
   const mock = createMockGpuContext();
   const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
@@ -1244,7 +1435,10 @@ Deno.test('dawn preparation separates recording, draw-pass preparation, and reso
   assertEquals(preparedWork.tasks.tasks.length, 1);
   assertEquals(preparedWork.resources.tasks.length, 1);
   assertEquals(preparedWork.resources.tasks[0]?.passes.length, 1);
-  assertEquals(preparedWork.resources.tasks[0]?.passes[0]?.steps.length, 1);
+  assertEquals(
+    preparedWork.resources.tasks[0]?.passes[0]?.steps.length,
+    preparedWork.prepared.passes[0]?.renderSteps.length,
+  );
   assertEquals((preparedWork.resources.tasks[0]?.passes[0]?.pipelineHandles.length ?? 0) > 0, true);
   assertEquals(
     (preparedWork.resources.tasks[0]?.passes[0]?.resolvedPipelines.length ?? 0) > 0,
@@ -2362,6 +2556,52 @@ Deno.test('drawing prepared recording scales hairline alpha coverage', () => {
   assertEquals(draw?.color, [0.4, 0.6, 0.8, 0.5]);
 });
 
+Deno.test('drawing prepared recording adds non-AA inner fill render step for renderer-only dst usage', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [16, 16] },
+      { kind: 'lineTo', to: [96, 16] },
+      { kind: 'lineTo', to: [96, 96] },
+      { kind: 'lineTo', to: [16, 96] },
+      { kind: 'close' },
+    ),
+    { style: 'fill', color: [0.2, 0.4, 0.8, 1] },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const renderSteps = prepared.passes[0]?.renderSteps ?? [];
+
+  assertEquals(renderSteps.map((step) => step.kind), ['fill-inner', 'fill-main', 'fill-fringe']);
+});
+
+Deno.test('dawn command buffer emits inner fill draw before translucent coverage fill', () => {
+  const mock = createMockGpuContext();
+  const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
+  const recorder = createDrawingRecorder(sharedContext);
+  const binding = createOffscreenBinding(mock.context);
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [16, 16] },
+      { kind: 'lineTo', to: [96, 16] },
+      { kind: 'lineTo', to: [96, 96] },
+      { kind: 'lineTo', to: [16, 96] },
+      { kind: 'close' },
+    ),
+    { style: 'fill', color: [0.2, 0.4, 0.8, 1] },
+  );
+
+  encodeDawnCommandBuffer(sharedContext, finishDrawingRecorder(recorder), binding);
+
+  assertEquals(mock.created.drawCalls.length, 3);
+});
+
 Deno.test('dawn command buffer encodes fill draws with stencil and cover pipelines', () => {
   const mock = createMockGpuContext();
   const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
@@ -2461,7 +2701,7 @@ Deno.test('dawn command buffer clips via clip path stencil replay with clip boun
 
   encodeDawnCommandBuffer(sharedContext, finishDrawingRecorder(recorder), binding);
   assertEquals(mock.created.scissorCalls[0], [24, 30, 48, 48]);
-  assertEquals(mock.created.drawCalls.length, 3);
+  assertEquals(mock.created.drawCalls.length, 4);
 });
 
 Deno.test('dawn command buffer accumulates multiple stencil clip paths before color draw', () => {
@@ -2569,7 +2809,7 @@ Deno.test('dawn command buffer reuses shared clip draws for identical clip stack
 
   assertEquals(commandBuffer.unsupportedCommands.length, 0);
   assertEquals(mock.created.renderPasses.length, 1);
-  assertEquals(mock.created.drawCalls.length, 5);
+  assertEquals(mock.created.drawCalls.length, 7);
 });
 
 Deno.test('dawn command buffer encodes stroke draws without stencil', () => {
@@ -2806,7 +3046,7 @@ Deno.test('dawn command buffer isolates tessellated stroke patches into a depth-
 
   assertEquals(commandBuffer.passCount, 1);
   assertEquals(mock.created.renderPasses.length, 1);
-  assertEquals(mock.created.drawCalls.length, 3);
+  assertEquals(mock.created.drawCalls.length, 4);
   assertEquals(mock.created.stencilReferences, []);
   assertEquals(mock.created.renderPasses[0]?.depthStencilAttachment !== undefined, true);
 
@@ -2879,7 +3119,7 @@ Deno.test('dawn resource provider reuses pipelines across command buffers', () =
   encodeDawnCommandBuffer(sharedContext, createRecording('stroke'), binding);
   encodeDawnCommandBuffer(sharedContext, createRecording('stroke'), binding);
 
-  assertEquals(mock.created.renderPipelines.length, 3);
+  assertEquals(mock.created.renderPipelines.length, 4);
   assertEquals(mock.created.shaderModules.length, 4);
   assertEquals(mock.created.bindGroupLayouts.length > 0, true);
   assertEquals(mock.created.pipelineLayouts.length > 0, true);

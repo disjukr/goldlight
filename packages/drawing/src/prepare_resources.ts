@@ -3,6 +3,7 @@ import type { Point2D } from '@rieul3d/geometry';
 import {
   type DrawingPreparedClipDraw,
   type DrawingPreparedRecording,
+  type DrawingPreparedRenderStep,
   prepareDrawingRecording,
 } from './draw_pass.ts';
 import type { DrawingRecording } from './recording.ts';
@@ -22,22 +23,15 @@ import { createDrawingTaskList, type DrawingTaskList } from './task.ts';
 import type { DrawingStrokeStyle } from './types.ts';
 
 export type DrawingPreparedStepResources = Readonly<{
-  pipelineHandles: readonly DrawingGraphicsPipelineHandle[];
-  pipelines: readonly GPURenderPipeline[];
-  fringePipeline: GPURenderPipeline | null;
+  pipelineHandle: DrawingGraphicsPipelineHandle;
+  pipeline: GPURenderPipeline;
   stepPayloadBuffer: GPUBuffer;
   stepBindGroup: GPUBindGroup;
   clipTextureView: GPUTextureView | null;
   clipDrawKey: string | null;
-  fillVertexBuffer: GPUBuffer | null;
-  fillVertexCount: number;
-  patchVertexBuffer: GPUBuffer | null;
-  patchInstanceCount: number;
-  patchVertexCount: number;
-  fringeVertexBuffer: GPUBuffer | null;
-  fringeVertexCount: number;
-  boundsCoverVertexBuffer: GPUBuffer | null;
-  boundsCoverVertexCount: number;
+  vertexBuffer: GPUBuffer | null;
+  vertexCount: number;
+  instanceCount: number;
 }>;
 
 export type DrawingPreparedClipDrawResources = Readonly<{
@@ -529,24 +523,24 @@ const createStrokePatchInstanceData = (
 };
 
 const getStencilClipCount = (
-  step: DrawingPreparedRecording['passes'][number]['steps'][number],
+  step: DrawingPreparedRenderStep,
 ): number => step.clipDrawIds.length;
 
 const getClipDrawKey = (
-  step: DrawingPreparedRecording['passes'][number]['steps'][number],
+  step: DrawingPreparedRenderStep,
 ): string | null => {
   const ids = step.draw.clip?.effectiveElementIds;
   return ids && ids.length > 0 && getStencilClipCount(step) > 0 ? ids.join(',') : null;
 };
 
 const getPipelineBlendMode = (
-  step: DrawingPreparedRecording['passes'][number]['steps'][number],
-): DrawingPreparedRecording['passes'][number]['steps'][number]['draw']['blendMode'] =>
+  step: DrawingPreparedRenderStep,
+): DrawingPreparedRenderStep['draw']['blendMode'] =>
   (step.draw.dstUsage & drawingDstUsage.dstReadRequired) !== 0 ? 'src' : step.draw.blendMode;
 
 const createClipStepResources = (
   sharedContext: DawnSharedContext,
-  step: DrawingPreparedRecording['passes'][number]['steps'][number],
+  step: DrawingPreparedRenderStep,
 ): Readonly<{
   buffers: readonly GPUBuffer[];
   counts: readonly number[];
@@ -603,14 +597,10 @@ const prepareClipDrawResources = (
 
 const prepareStepResources = (
   sharedContext: DawnSharedContext,
-  step: DrawingPreparedRecording['passes'][number]['steps'][number],
+  step: DrawingPreparedRenderStep,
 ): DrawingPreparedStepResources => {
-  const pipelineHandles = step.pipelineDescs.map((descriptor) =>
-    sharedContext.resourceProvider.createGraphicsPipelineHandle(descriptor)
-  );
-  const pipelines = pipelineHandles.map((handle) =>
-    sharedContext.resourceProvider.resolveGraphicsPipelineHandle(handle)
-  );
+  const pipelineHandle = sharedContext.resourceProvider.createGraphicsPipelineHandle(step.pipelineDesc);
+  const pipeline = sharedContext.resourceProvider.resolveGraphicsPipelineHandle(pipelineHandle);
   const clipAtlasView = sharedContext.atlasProvider.getClipAtlasManager().findOrCreateEntry(
     step.draw.clip?.atlasClip,
   );
@@ -671,55 +661,44 @@ const prepareStepResources = (
     const boundsCoverVertices = step.usesFillStencil
       ? createBoundsCoverVertexData(step.draw.bounds, [1, 1, 1, 1])
       : null;
-
-    const fringePipeline = step.draw.fringeVertices
-      ? sharedContext.resourceProvider.findOrCreateGraphicsPipeline({
-        label: step.usesFillStencil
-          ? 'drawing-path-fill-stencil-cover'
-          : getStencilClipCount(step) > 0
-          ? 'drawing-path-fill-clip-cover'
-          : 'drawing-path-fill-cover',
-        shader: 'path',
-        vertexLayout: 'device-vertex',
-        blendMode: getPipelineBlendMode(step),
-        depthStencil: step.usesFillStencil
-          ? 'fill-stencil-cover'
-          : getStencilClipCount(step) > 0
-          ? 'clip-cover'
-          : 'none',
-        colorWriteDisabled: false,
-        topology: 'triangle-list',
-      })
+    const activeVertices = step.kind === 'fill-inner'
+      ? step.draw.innerFillBounds
+        ? createBoundsCoverVertexData(step.draw.innerFillBounds, [1, 1, 1, 1])
+        : null
+      : step.kind === 'fill-fringe'
+      ? fringeVertices
+      : step.kind === 'fill-cover'
+      ? boundsCoverVertices
+      : usesPatchFill
+      ? patchVertices
+      : fillVertices;
+    const vertexBuffer = activeVertices && activeVertices.length > 0
+      ? createVertexBuffer(sharedContext, activeVertices)
       : null;
+    const vertexCount = !activeVertices
+      ? 0
+      : step.kind === 'fill-main' && usesPatchFill
+      ? step.draw.renderer.patchMode === 'wedge'
+        ? wedgePatchVertexCount
+        : curvePatchVertexCount
+      : activeVertices.length / floatsPerVertex;
+    const instanceCount = !activeVertices
+      ? 0
+      : step.kind === 'fill-main' && usesPatchFill
+      ? patchVertices!.length /
+        (step.draw.renderer.patchMode === 'wedge' ? wedgePatchFloats : curvePatchFloats)
+      : 1;
 
     return {
-      pipelineHandles: Object.freeze(pipelineHandles),
-      pipelines: Object.freeze(pipelines),
-      fringePipeline,
+      pipelineHandle,
+      pipeline,
       stepPayloadBuffer,
       stepBindGroup,
       clipTextureView: clipAtlasView,
       clipDrawKey: getClipDrawKey(step),
-      fillVertexBuffer: fillVertices ? createVertexBuffer(sharedContext, fillVertices) : null,
-      fillVertexCount: fillVertices ? fillVertices.length / floatsPerVertex : 0,
-      patchVertexBuffer: patchVertices && patchVertices.length > 0
-        ? createVertexBuffer(sharedContext, patchVertices)
-        : null,
-      patchInstanceCount: patchVertices
-        ? patchVertices.length /
-          (step.draw.renderer.patchMode === 'wedge' ? wedgePatchFloats : curvePatchFloats)
-        : 0,
-      patchVertexCount: step.draw.renderer.patchMode === 'wedge'
-        ? wedgePatchVertexCount
-        : curvePatchVertexCount,
-      fringeVertexBuffer: fringeVertices ? createVertexBuffer(sharedContext, fringeVertices) : null,
-      fringeVertexCount: fringeVertices ? fringeVertices.length / floatsPerVertex : 0,
-      boundsCoverVertexBuffer: boundsCoverVertices
-        ? createVertexBuffer(sharedContext, boundsCoverVertices)
-        : null,
-      boundsCoverVertexCount: boundsCoverVertices
-        ? boundsCoverVertices.length / floatsPerVertex
-        : 0,
+      vertexBuffer,
+      vertexCount,
+      instanceCount,
     };
   }
 
@@ -735,38 +714,31 @@ const prepareStepResources = (
     : step.draw.fringeVertices
     ? createColoredDeviceSpaceVertexData(step.draw.fringeVertices)
     : null;
+  const activeVertices = step.kind === 'stroke-fringe' ? fringeVertices : patchVertices.length > 0 ? patchVertices : strokeVertices;
+  const vertexBuffer = activeVertices && activeVertices.length > 0
+    ? createVertexBuffer(sharedContext, activeVertices)
+    : null;
+  const vertexCount = !activeVertices
+    ? 0
+    : step.kind === 'stroke-main' && patchVertices.length > 0
+    ? patchVertexCount
+    : activeVertices.length / floatsPerVertex;
+  const instanceCount = !activeVertices
+    ? 0
+    : step.kind === 'stroke-main' && patchVertices.length > 0
+    ? patchVertices.length / strokePatchFloats
+    : 1;
 
   return {
-    pipelineHandles: Object.freeze(pipelineHandles),
-    pipelines: Object.freeze(pipelines),
-    fringePipeline: step.draw.fringeVertices
-      ? sharedContext.resourceProvider.findOrCreateGraphicsPipeline({
-        label: getStencilClipCount(step) > 0
-          ? 'drawing-path-stroke-clip-cover'
-          : 'drawing-path-stroke-cover',
-        shader: 'path',
-        vertexLayout: 'device-vertex',
-        blendMode: getPipelineBlendMode(step),
-        depthStencil: getStencilClipCount(step) > 0 ? 'clip-cover' : 'none',
-        colorWriteDisabled: false,
-        topology: 'triangle-list',
-      })
-      : null,
+    pipelineHandle,
+    pipeline,
     stepPayloadBuffer,
     stepBindGroup,
     clipTextureView: clipAtlasView,
     clipDrawKey: getClipDrawKey(step),
-    fillVertexBuffer: createVertexBuffer(sharedContext, strokeVertices),
-    fillVertexCount: strokeVertices.length / floatsPerVertex,
-    patchVertexBuffer: patchVertices.length > 0
-      ? createVertexBuffer(sharedContext, patchVertices)
-      : null,
-    patchInstanceCount: patchVertices.length / strokePatchFloats,
-    patchVertexCount,
-    fringeVertexBuffer: fringeVertices ? createVertexBuffer(sharedContext, fringeVertices) : null,
-    fringeVertexCount: fringeVertices ? fringeVertices.length / floatsPerVertex : 0,
-    boundsCoverVertexBuffer: null,
-    boundsCoverVertexCount: 0,
+    vertexBuffer,
+    vertexCount,
+    instanceCount,
   };
 };
 
@@ -774,14 +746,14 @@ const preparePassResources = (
   sharedContext: DawnSharedContext,
   passInfo: DrawingPreparedRecording['passes'][number],
 ): DrawingPreparedPassResources => {
-  const steps = passInfo.steps.map((step) => prepareStepResources(sharedContext, step));
-  const pipelineHandles = steps.flatMap((step) => step.pipelineHandles);
+  const steps = passInfo.renderSteps.map((step) => prepareStepResources(sharedContext, step));
+  const pipelineHandles = steps.map((step) => step.pipelineHandle);
   const clipDraws = passInfo.clipDraws
     .map((clipDraw) => prepareClipDrawResources(sharedContext, clipDraw))
     .filter((clipDraw): clipDraw is DrawingPreparedClipDrawResources => clipDraw !== null);
   return {
     pipelineHandles: Object.freeze(pipelineHandles),
-    resolvedPipelines: Object.freeze(steps.flatMap((step) => step.pipelines)),
+    resolvedPipelines: Object.freeze(steps.map((step) => step.pipeline)),
     clipDraws: Object.freeze(clipDraws),
     sampledTextures: Object.freeze([]),
     steps: Object.freeze(steps),
@@ -806,17 +778,8 @@ const collectOwnedBuffers = (
     for (const pass of task.passes) {
       for (const step of pass.steps) {
         buffers.push(step.stepPayloadBuffer);
-        if (step.fillVertexBuffer) {
-          buffers.push(step.fillVertexBuffer);
-        }
-        if (step.patchVertexBuffer) {
-          buffers.push(step.patchVertexBuffer);
-        }
-        if (step.fringeVertexBuffer) {
-          buffers.push(step.fringeVertexBuffer);
-        }
-        if (step.boundsCoverVertexBuffer) {
-          buffers.push(step.boundsCoverVertexBuffer);
+        if (step.vertexBuffer) {
+          buffers.push(step.vertexBuffer);
         }
       }
       for (const clipDraw of pass.clipDraws) {

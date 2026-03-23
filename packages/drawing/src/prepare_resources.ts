@@ -7,6 +7,10 @@ import type {
   DrawingPreparedStrokePatch,
   DrawingPreparedVertex,
 } from './path_renderer.ts';
+import {
+  drawingDstUsage,
+  toDrawingBlendModeCode,
+} from './path_renderer.ts';
 import type { DrawingGraphicsPipelineHandle } from './resource_provider.ts';
 import { isDrawingPatchFillRenderer } from './renderer_provider.ts';
 import type { DawnSharedContext } from './shared_context.ts';
@@ -22,7 +26,6 @@ export type DrawingPreparedStepResources = Readonly<{
   stepPayloadBuffer: GPUBuffer;
   stepBindGroup: GPUBindGroup;
   clipTextureView: GPUTextureView | null;
-  clipTextureBindGroup: GPUBindGroup;
   fillVertexBuffer: GPUBuffer | null;
   fillVertexCount: number;
   patchVertexBuffer: GPUBuffer | null;
@@ -74,7 +77,7 @@ export type DawnPreparedWork = Readonly<{
 const vertexBufferUsage = 0x0020;
 const uniformBufferUsage = 0x0040;
 const floatsPerVertex = 6;
-const stepPayloadFloats = 28;
+const stepPayloadFloats = 36;
 const wedgePatchFloats = 14;
 const curvePatchFloats = 12;
 const strokePatchFloats = 14;
@@ -159,6 +162,7 @@ const createViewportTransformBuffer = (
 const createStepPayloadBuffer = (
   sharedContext: DawnSharedContext,
   transform: readonly [number, number, number, number, number, number],
+  depth: number,
   color: readonly [number, number, number, number],
   strokeStyle: DrawingStrokeStyle | null,
   clip: Readonly<{
@@ -170,6 +174,12 @@ const createStepPayloadBuffer = (
     analyticSize: Point2D;
     hasShader: boolean;
     shaderColor: readonly [number, number, number, number];
+  }>,
+  dst: Readonly<{
+    blendModeCode: number;
+    requiresDstRead: boolean;
+    invSize: Point2D;
+    blenderCoefficients: readonly [number, number, number, number];
   }>,
 ): GPUBuffer => {
   const buffer = sharedContext.resourceProvider.createBuffer({
@@ -186,7 +196,7 @@ const createStepPayloadBuffer = (
     transform[4],
     transform[5],
     maxScaleFactor(transform),
-    0,
+    depth,
     color[0],
     color[1],
     color[2],
@@ -207,6 +217,14 @@ const createStepPayloadBuffer = (
     clip.shaderColor[1],
     clip.shaderColor[2],
     clip.shaderColor[3],
+    dst.blendModeCode,
+    dst.requiresDstRead ? 1 : 0,
+    dst.invSize[0],
+    dst.invSize[1],
+    dst.blenderCoefficients[0],
+    dst.blenderCoefficients[1],
+    dst.blenderCoefficients[2],
+    dst.blenderCoefficients[3],
   ]);
   buffer.unmap();
   return buffer;
@@ -504,6 +522,11 @@ const getStencilClipCount = (
   step: DrawingPreparedRecording['passes'][number]['steps'][number],
 ): number => step.draw.clip?.elements?.length ?? 0;
 
+const getPipelineBlendMode = (
+  step: DrawingPreparedRecording['passes'][number]['steps'][number],
+): DrawingPreparedRecording['passes'][number]['steps'][number]['draw']['blendMode'] =>
+  (step.draw.dstUsage & drawingDstUsage.dstReadRequired) !== 0 ? 'src' : step.draw.blendMode;
+
 const createClipStepResources = (
   sharedContext: DawnSharedContext,
   step: DrawingPreparedRecording['passes'][number]['steps'][number],
@@ -556,9 +579,6 @@ const prepareStepResources = (
   const clipAtlasView = sharedContext.atlasProvider.getClipAtlasManager().findOrCreateEntry(
     step.draw.clip?.atlasClip,
   );
-  const clipTextureBindGroup = sharedContext.resourceProvider.createClipTextureBindGroup(
-    clipAtlasView ?? undefined,
-  );
   const clipPayload = {
     hasAtlas: Boolean(step.draw.clip?.atlasClip),
     atlasOrigin: step.draw.clip?.atlasClip?.bounds.origin ?? [0, 0],
@@ -582,9 +602,21 @@ const prepareStepResources = (
   const stepPayloadBuffer = createStepPayloadBuffer(
     sharedContext,
     step.draw.transform,
+    step.depth,
     step.draw.color,
     step.draw.kind === 'pathStroke' ? step.draw.strokeStyle : null,
     clipPayload,
+    {
+      blendModeCode: toDrawingBlendModeCode(step.draw.blendMode, step.draw.blender),
+      requiresDstRead: (step.draw.dstUsage & drawingDstUsage.dstReadRequired) !== 0,
+      invSize: [
+        1 / Math.max(sharedContext.backend.target.width, 1),
+        1 / Math.max(sharedContext.backend.target.height, 1),
+      ],
+      blenderCoefficients: step.draw.blender?.kind === 'arithmetic'
+        ? step.draw.blender.coefficients
+        : [0, 0, 0, 0],
+    },
   );
   const stepBindGroup = sharedContext.resourceProvider.createStepBindGroup(stepPayloadBuffer);
 
@@ -614,6 +646,7 @@ const prepareStepResources = (
           : 'drawing-path-fill-cover',
         shader: 'path',
         vertexLayout: 'device-vertex',
+        blendMode: getPipelineBlendMode(step),
         depthStencil: step.usesFillStencil
           ? 'fill-stencil-cover'
           : getStencilClipCount(step) > 0
@@ -633,7 +666,6 @@ const prepareStepResources = (
       stepPayloadBuffer,
       stepBindGroup,
       clipTextureView: clipAtlasView,
-      clipTextureBindGroup,
       fillVertexBuffer: fillVertices ? createVertexBuffer(sharedContext, fillVertices) : null,
       fillVertexCount: fillVertices ? fillVertices.length / floatsPerVertex : 0,
       patchVertexBuffer: patchVertices && patchVertices.length > 0
@@ -685,6 +717,7 @@ const prepareStepResources = (
           : 'drawing-path-stroke-cover',
         shader: 'path',
         vertexLayout: 'device-vertex',
+        blendMode: getPipelineBlendMode(step),
         depthStencil: getStencilClipCount(step) > 0 ? 'clip-cover' : 'none',
         colorWriteDisabled: false,
         topology: 'triangle-list',
@@ -693,7 +726,6 @@ const prepareStepResources = (
     stepPayloadBuffer,
     stepBindGroup,
     clipTextureView: clipAtlasView,
-    clipTextureBindGroup,
     fillVertexBuffer: createVertexBuffer(sharedContext, strokeVertices),
     fillVertexCount: strokeVertices.length / floatsPerVertex,
     patchVertexBuffer: patchVertices.length > 0
@@ -777,6 +809,7 @@ export const prepareDawnResources = (
   const identityStepPayloadBuffer = createStepPayloadBuffer(
     sharedContext,
     [1, 0, 0, 1, 0, 0],
+    0,
     [0, 0, 0, 0],
     null,
     {
@@ -788,6 +821,12 @@ export const prepareDawnResources = (
       analyticSize: [0, 0],
       hasShader: false,
       shaderColor: [1, 1, 1, 1],
+    },
+    {
+      blendModeCode: 3,
+      requiresDstRead: false,
+      invSize: [0, 0],
+      blenderCoefficients: [0, 0, 0, 0],
     },
   );
   const identityStepBindGroup = sharedContext.resourceProvider.createStepBindGroup(

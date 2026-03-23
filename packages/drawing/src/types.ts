@@ -52,8 +52,50 @@ export type DrawingClipStackSnapshot = Readonly<{
 
 export type DrawingBackendKind = 'graphite-dawn';
 
+export type DrawingBlendMode =
+  | 'clear'
+  | 'src'
+  | 'dst'
+  | 'src-over'
+  | 'dst-over'
+  | 'src-in'
+  | 'dst-in'
+  | 'src-out'
+  | 'dst-out'
+  | 'src-atop'
+  | 'dst-atop'
+  | 'xor'
+  | 'plus'
+  | 'multiply'
+  | 'screen'
+  | 'overlay'
+  | 'darken'
+  | 'lighten'
+  | 'color-dodge'
+  | 'color-burn'
+  | 'hard-light'
+  | 'soft-light'
+  | 'difference'
+  | 'exclusion'
+  | 'hue'
+  | 'saturation'
+  | 'color'
+  | 'luminosity';
+
+export type DrawingCoverageMode = 'auto' | 'single-channel' | 'lcd';
+
+export type DrawingArithmeticBlender = Readonly<{
+  kind: 'arithmetic';
+  coefficients: readonly [number, number, number, number];
+}>;
+
+export type DrawingCustomBlender = DrawingArithmeticBlender;
+
 export type DrawingPaint = Readonly<{
   color?: readonly [number, number, number, number];
+  blendMode?: DrawingBlendMode;
+  coverage?: DrawingCoverageMode;
+  blender?: DrawingCustomBlender;
   style?: 'fill' | 'stroke';
   strokeWidth?: number;
   strokeJoin?: 'miter' | 'bevel' | 'round';

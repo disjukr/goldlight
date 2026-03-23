@@ -7,6 +7,9 @@ import {
 } from '@rieul3d/geometry';
 import { type DrawingPreparedClip, visitDrawingClipStackForDraw } from './clip_stack.ts';
 import type {
+  DrawingBlendMode,
+  DrawingCoverageMode,
+  DrawingCustomBlender,
   DrawingClipRect,
   DrawingPaint,
   DrawingPath2D,
@@ -14,6 +17,7 @@ import type {
   DrawPathCommand,
   DrawShapeCommand,
 } from './types.ts';
+import type { DrawingRecording } from './recording.ts';
 import { type DrawingRenderer, type DrawingRendererProvider } from './renderer_provider.ts';
 
 type FlattenedSubpath = Readonly<{
@@ -25,6 +29,112 @@ export type DrawingPreparedVertex = Readonly<{
   point: Point2D;
   color: readonly [number, number, number, number];
 }>;
+
+export type DrawingCoverage = 'none' | 'single-channel' | 'lcd';
+
+export const drawingDstUsage = {
+  none: 0,
+  dependsOnDst: 0b0001,
+  dstReadRequired: 0b0010,
+  advancedBlend: 0b0100,
+  dstOnlyUsedByRenderer: 0b1000,
+} as const;
+
+export type DrawingDstUsage = number;
+
+export const drawingBlendModeCodes = {
+  clear: 0,
+  src: 1,
+  dst: 2,
+  srcOver: 3,
+  dstOver: 4,
+  srcIn: 5,
+  dstIn: 6,
+  srcOut: 7,
+  dstOut: 8,
+  srcAtop: 9,
+  dstAtop: 10,
+  xor: 11,
+  plus: 12,
+  multiply: 13,
+  screen: 14,
+  overlay: 15,
+  darken: 16,
+  lighten: 17,
+  colorDodge: 18,
+  colorBurn: 19,
+  hardLight: 20,
+  softLight: 21,
+  difference: 22,
+  exclusion: 23,
+  hue: 24,
+  saturation: 25,
+  color: 26,
+  luminosity: 27,
+  arithmetic: 100,
+} as const;
+
+export const toDrawingBlendModeCode = (
+  blendMode: DrawingBlendMode,
+  blender?: DrawingCustomBlender,
+): number =>
+  blender?.kind === 'arithmetic'
+    ? drawingBlendModeCodes.arithmetic
+    : blendMode === 'clear'
+    ? drawingBlendModeCodes.clear
+    : blendMode === 'src'
+    ? drawingBlendModeCodes.src
+    : blendMode === 'dst'
+    ? drawingBlendModeCodes.dst
+    : blendMode === 'src-over'
+    ? drawingBlendModeCodes.srcOver
+    : blendMode === 'dst-over'
+    ? drawingBlendModeCodes.dstOver
+    : blendMode === 'src-in'
+    ? drawingBlendModeCodes.srcIn
+    : blendMode === 'dst-in'
+    ? drawingBlendModeCodes.dstIn
+    : blendMode === 'src-out'
+    ? drawingBlendModeCodes.srcOut
+    : blendMode === 'dst-out'
+    ? drawingBlendModeCodes.dstOut
+    : blendMode === 'src-atop'
+    ? drawingBlendModeCodes.srcAtop
+    : blendMode === 'dst-atop'
+    ? drawingBlendModeCodes.dstAtop
+    : blendMode === 'xor'
+    ? drawingBlendModeCodes.xor
+    : blendMode === 'plus'
+    ? drawingBlendModeCodes.plus
+    : blendMode === 'multiply'
+    ? drawingBlendModeCodes.multiply
+    : blendMode === 'screen'
+    ? drawingBlendModeCodes.screen
+    : blendMode === 'overlay'
+    ? drawingBlendModeCodes.overlay
+    : blendMode === 'darken'
+    ? drawingBlendModeCodes.darken
+    : blendMode === 'lighten'
+    ? drawingBlendModeCodes.lighten
+    : blendMode === 'color-dodge'
+    ? drawingBlendModeCodes.colorDodge
+    : blendMode === 'color-burn'
+    ? drawingBlendModeCodes.colorBurn
+    : blendMode === 'hard-light'
+    ? drawingBlendModeCodes.hardLight
+    : blendMode === 'soft-light'
+    ? drawingBlendModeCodes.softLight
+    : blendMode === 'difference'
+    ? drawingBlendModeCodes.difference
+    : blendMode === 'exclusion'
+    ? drawingBlendModeCodes.exclusion
+    : blendMode === 'hue'
+    ? drawingBlendModeCodes.hue
+    : blendMode === 'saturation'
+    ? drawingBlendModeCodes.saturation
+    : blendMode === 'color'
+    ? drawingBlendModeCodes.color
+    : drawingBlendModeCodes.luminosity;
 
 type DrawingPreparedPatchBase = Readonly<{
   fanPoint?: Point2D;
@@ -141,6 +251,10 @@ export type DrawingPreparedPathFill = Readonly<{
   patches: readonly DrawingPreparedPatch[];
   fillRule: PathFillRule2D;
   color: readonly [number, number, number, number];
+  blendMode: DrawingBlendMode;
+  coverage: DrawingCoverage;
+  blender?: DrawingCustomBlender;
+  dstUsage: DrawingDstUsage;
   transform: readonly [number, number, number, number, number, number];
   bounds: Rect;
   clipRect?: DrawingClipRect;
@@ -156,6 +270,10 @@ export type DrawingPreparedPathStroke = Readonly<{
   patches: readonly DrawingPreparedStrokePatch[];
   usesTessellatedStrokePatches: boolean;
   color: readonly [number, number, number, number];
+  blendMode: DrawingBlendMode;
+  coverage: DrawingCoverage;
+  blender?: DrawingCustomBlender;
+  dstUsage: DrawingDstUsage;
   strokeStyle: DrawingStrokeStyle;
   transform: readonly [number, number, number, number, number, number];
   bounds: Rect;
@@ -172,6 +290,39 @@ export type DrawingDrawPreparation = Readonly<
 >;
 
 const defaultFillColor: readonly [number, number, number, number] = [0, 0, 0, 1];
+const defaultBlendMode: DrawingBlendMode = 'src-over';
+const coeffBlendModes = new Set<DrawingBlendMode>([
+  'clear',
+  'src',
+  'dst',
+  'src-over',
+  'dst-over',
+  'src-in',
+  'dst-in',
+  'src-out',
+  'dst-out',
+  'src-atop',
+  'dst-atop',
+  'xor',
+  'plus',
+  'screen',
+]);
+const advancedBlendModes = new Set<DrawingBlendMode>([
+  'multiply',
+  'overlay',
+  'darken',
+  'lighten',
+  'color-dodge',
+  'color-burn',
+  'hard-light',
+  'soft-light',
+  'difference',
+  'exclusion',
+  'hue',
+  'saturation',
+  'color',
+  'luminosity',
+]);
 const epsilon = 1e-5;
 const maxCurveSubdivisionDepth = 8;
 const curveFlatnessTolerance = 0.75;
@@ -184,6 +335,37 @@ const tessellationPrecision = 4;
 
 const resolveFillColor = (paint: DrawingPaint): readonly [number, number, number, number] =>
   paint.color ?? defaultFillColor;
+
+const resolveBlendMode = (paint: DrawingPaint): DrawingBlendMode =>
+  paint.blendMode ?? defaultBlendMode;
+
+const resolveCoverage = (
+  paint: DrawingPaint,
+  hasCoverage: boolean,
+): DrawingCoverage =>
+  !hasCoverage
+    ? 'none'
+    : paint.coverage === 'lcd'
+    ? 'lcd'
+    : paint.coverage === 'single-channel'
+    ? 'single-channel'
+    : 'single-channel';
+
+const formatAutoClamps = (format: GPUTextureFormat): boolean =>
+  format !== 'rgba16float' && format !== 'r16float' && format !== 'r32float';
+
+const blendModeDependsOnDst = (
+  blendMode: DrawingBlendMode,
+  srcIsOpaque: boolean,
+): boolean => {
+  if (blendMode === 'src' || blendMode === 'clear') {
+    return false;
+  }
+  if (blendMode === 'src-over' || blendMode === 'dst-out') {
+    return !srcIsOpaque;
+  }
+  return true;
+};
 
 const resolveStrokeColor = (paint: DrawingPaint): readonly [number, number, number, number] => {
   const color = paint.color ?? defaultFillColor;
@@ -205,6 +387,64 @@ const resolveStrokeStyle = (paint: DrawingPaint): DrawingStrokeStyle => {
     cap: paint.strokeCap ?? 'butt',
   };
 };
+
+const computeDstUsage = (
+  recording: Pick<DrawingRecording, 'caps' | 'targetFormat'>,
+  color: readonly [number, number, number, number],
+  clip: DrawingPreparedClip | undefined,
+  rendererCoverage: DrawingCoverage,
+  blendMode: DrawingBlendMode,
+  blender: DrawingCustomBlender | undefined,
+): DrawingDstUsage => {
+  const hasNonMsaaClip = Boolean(clip?.analyticClip) || Boolean(clip?.atlasClip);
+  let dstUsage = clip?.shader || hasNonMsaaClip
+    ? drawingDstUsage.dependsOnDst
+    : rendererCoverage !== 'none'
+    ? drawingDstUsage.dependsOnDst | drawingDstUsage.dstOnlyUsedByRenderer
+    : drawingDstUsage.none;
+  const advancedBlendMode = advancedBlendModes.has(blendMode);
+  const dstIsFast = recording.caps.dstReadStrategy !== 'texture-copy';
+  const canUseHardwareBlend = !(
+    (rendererCoverage === 'lcd' && blendMode !== 'src-over') ||
+    (blendMode === 'plus' && (dstIsFast || !formatAutoClamps(recording.targetFormat))) ||
+    Boolean(blender) ||
+    (advancedBlendMode && !recording.caps.supportsHardwareAdvancedBlending)
+  );
+  const paintDependsOnDst = blendModeDependsOnDst(blendMode, color[3] >= 1 - epsilon);
+  if (paintDependsOnDst) {
+    dstUsage |= drawingDstUsage.dependsOnDst;
+    dstUsage &= ~drawingDstUsage.dstOnlyUsedByRenderer;
+  }
+  if (!canUseHardwareBlend) {
+    dstUsage |= drawingDstUsage.dependsOnDst | drawingDstUsage.dstReadRequired;
+    dstUsage &= ~drawingDstUsage.dstOnlyUsedByRenderer;
+  }
+  if (advancedBlendMode) {
+    dstUsage |= drawingDstUsage.advancedBlend;
+  }
+  return dstUsage;
+};
+
+const createPreparedDrawClip = (
+  preparedClipStack: ReturnType<typeof visitDrawingClipStackForDraw>,
+): DrawingPreparedClip | undefined =>
+  preparedClipStack.stencilClip
+    ? {
+      ...preparedClipStack.stencilClip,
+      deferredClipDraws: preparedClipStack.deferredClipDraws,
+      analyticClip: preparedClipStack.analyticClip,
+      atlasClip: preparedClipStack.atlasClip,
+      shader: preparedClipStack.shader,
+    }
+    : preparedClipStack.analyticClip || preparedClipStack.atlasClip || preparedClipStack.shader
+    ? {
+      bounds: preparedClipStack.bounds,
+      deferredClipDraws: preparedClipStack.deferredClipDraws,
+      analyticClip: preparedClipStack.analyticClip,
+      atlasClip: preparedClipStack.atlasClip,
+      shader: preparedClipStack.shader,
+    }
+    : undefined;
 
 const pointsEqual = (left: Point2D, right: Point2D): boolean =>
   Math.abs(left[0] - right[0]) <= epsilon && Math.abs(left[1] - right[1]) <= epsilon;
@@ -723,7 +963,7 @@ const createSquareCapStartPatch = (
   );
   return finalizePatch({
     kind: 'line',
-    points: [subtract(anchor, offset), anchor],
+    points: [add(anchor, offset), anchor],
   });
 };
 
@@ -1071,7 +1311,7 @@ const createPreparedStrokePatchesFromPath = (
       });
       sequence.push({
         kind: 'moveWithinContour',
-        anchor: subtract(
+        anchor: add(
           firstPoint,
           resolveSquareCapOffset(
             firstPoint,
@@ -2938,6 +3178,7 @@ const computeContourMidpoint = (points: readonly Point2D[]): Point2D => {
 };
 
 const preparePathFill = (
+  recording: Pick<DrawingRecording, 'caps' | 'targetFormat'>,
   rendererProvider: DrawingRendererProvider,
   command: DrawPathCommand | DrawShapeCommand,
 ): DrawingDrawPreparation => {
@@ -2962,6 +3203,9 @@ const preparePathFill = (
     computeBounds,
   );
   const style = command.paint.style ?? 'fill';
+  const blendMode = resolveBlendMode(command.paint);
+  const blender = command.paint.blender;
+  const preparedClip = createPreparedDrawClip(preparedClipStack);
   if (style === 'fill') {
     const patches = preparePatches(command.path, identityMatrix2D, true);
     const hasWedges = patches.some((patch) => patch.fanPoint !== undefined);
@@ -2994,9 +3238,19 @@ const preparePathFill = (
         break;
     }
     const fringeVertices = buildFillFringe(subpaths, resolveFillColor(command.paint));
+    const coverage = resolveCoverage(command.paint, Boolean(fringeVertices?.length));
     if (!baseTriangles) {
       return { supported: false, reason: 'path fill triangulation failed' };
     }
+    const fillColor = resolveFillColor(command.paint);
+    const dstUsage = computeDstUsage(
+      recording,
+      fillColor,
+      preparedClip,
+      coverage,
+      blendMode,
+      blender,
+    );
     return {
       supported: true,
       draw: {
@@ -3006,28 +3260,15 @@ const preparePathFill = (
         fringeVertices,
         patches,
         fillRule: command.path.fillRule,
-        color: resolveFillColor(command.paint),
+        color: fillColor,
+        blendMode,
+        coverage,
+        blender,
+        dstUsage,
         transform: command.transform,
         bounds: computeBounds(transformPoints(baseTriangles, command.transform)),
         clipRect: preparedClipStack.bounds,
-        clip: preparedClipStack.stencilClip
-          ? {
-            ...preparedClipStack.stencilClip,
-            deferredClipDraws: preparedClipStack.deferredClipDraws,
-            analyticClip: preparedClipStack.analyticClip,
-            atlasClip: preparedClipStack.atlasClip,
-            shader: preparedClipStack.shader,
-          }
-          : preparedClipStack.analyticClip || preparedClipStack.atlasClip ||
-              preparedClipStack.shader
-          ? {
-            bounds: preparedClipStack.bounds,
-            deferredClipDraws: preparedClipStack.deferredClipDraws,
-            analyticClip: preparedClipStack.analyticClip,
-            atlasClip: preparedClipStack.atlasClip,
-            shader: preparedClipStack.shader,
-          }
-          : undefined,
+        clip: preparedClip,
         usesStencil: Boolean(preparedClipStack.stencilClip?.elements?.length),
       },
     };
@@ -3063,6 +3304,15 @@ const preparePathFill = (
   if (!preparedStroke) {
     return { supported: false, reason: 'path stroke expansion failed' };
   }
+  const coverage = resolveCoverage(command.paint, Boolean(preparedStroke.fringeVertices?.length));
+  const dstUsage = computeDstUsage(
+    recording,
+    strokeColor,
+    preparedClip,
+    coverage,
+    blendMode,
+    blender,
+  );
   return {
     supported: true,
     draw: {
@@ -3073,6 +3323,10 @@ const preparePathFill = (
       patches,
       usesTessellatedStrokePatches,
       color: strokeColor,
+      blendMode,
+      coverage,
+      blender,
+      dstUsage,
       strokeStyle,
       transform: command.transform,
       bounds: computeBounds(transformPoints([
@@ -3083,29 +3337,14 @@ const preparePathFill = (
         ] as Point2D,
       ], command.transform)),
       clipRect: preparedClipStack.bounds,
-      clip: preparedClipStack.stencilClip
-        ? {
-          ...preparedClipStack.stencilClip,
-          deferredClipDraws: preparedClipStack.deferredClipDraws,
-          analyticClip: preparedClipStack.analyticClip,
-          atlasClip: preparedClipStack.atlasClip,
-          shader: preparedClipStack.shader,
-        }
-        : preparedClipStack.analyticClip || preparedClipStack.atlasClip || preparedClipStack.shader
-        ? {
-          bounds: preparedClipStack.bounds,
-          deferredClipDraws: preparedClipStack.deferredClipDraws,
-          analyticClip: preparedClipStack.analyticClip,
-          atlasClip: preparedClipStack.atlasClip,
-          shader: preparedClipStack.shader,
-        }
-        : undefined,
+      clip: preparedClip,
       usesStencil: Boolean(preparedClipStack.stencilClip?.elements?.length),
     },
   };
 };
 
 export const prepareDrawingPathCommand = (
+  recording: Pick<DrawingRecording, 'caps' | 'targetFormat'>,
   rendererProvider: DrawingRendererProvider,
   command: DrawPathCommand | DrawShapeCommand,
-): DrawingDrawPreparation => preparePathFill(rendererProvider, command);
+): DrawingDrawPreparation => preparePathFill(recording, rendererProvider, command);

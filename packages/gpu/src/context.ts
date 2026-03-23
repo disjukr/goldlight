@@ -285,17 +285,17 @@ export const bindRenderTarget = (
   return createOffscreenBinding(context);
 };
 
-export const acquireColorAttachmentView = (
+export const acquireColorAttachmentTexture = (
   context: Readonly<{
     device: Pick<GPUDevice, 'createTexture'>;
   }>,
   binding: RenderContextBinding,
-): GPUTextureView => {
+): GPUTexture => {
   if (binding.kind === 'surface') {
     try {
       const colorTexture = binding.canvasContext.getCurrentTexture();
       syncSurfaceDepthAttachment(context.device, binding, colorTexture);
-      return colorTexture.createView();
+      return colorTexture;
     } catch (error) {
       if (isDroppedSurfacePresentationError(error)) {
         binding.canvasContext.configure({
@@ -305,14 +305,21 @@ export const acquireColorAttachmentView = (
         });
         const colorTexture = binding.canvasContext.getCurrentTexture();
         syncSurfaceDepthAttachment(context.device, binding, colorTexture);
-        return colorTexture.createView();
+        return colorTexture;
       }
       throw error;
     }
   }
 
-  return binding.view;
+  return binding.texture;
 };
+
+export const acquireColorAttachmentView = (
+  context: Readonly<{
+    device: Pick<GPUDevice, 'createTexture'>;
+  }>,
+  binding: RenderContextBinding,
+): GPUTextureView => acquireColorAttachmentTexture(context, binding).createView();
 
 export const acquireDepthAttachmentView = (binding: RenderContextBinding): GPUTextureView =>
   binding.depthView;

@@ -1,11 +1,18 @@
 import type { Path2D } from '@rieul3d/geometry';
 import { cloneDrawingClipStackSnapshot } from './clip_stack.ts';
+import type { DawnCaps } from './caps.ts';
 import type { DrawingRendererProvider } from './renderer_provider.ts';
 import type { DawnSharedContext } from './shared_context.ts';
 import type { DrawingCommand, DrawingSubmission } from './types.ts';
 
 export type DrawingRecording = Readonly<{
   backend: DrawingSubmission['backend'];
+  caps: Readonly<{
+    dstReadStrategy: DawnCaps['dstReadStrategy'];
+    supportsHardwareAdvancedBlending: boolean;
+    supportsDualSourceBlending: boolean;
+  }>;
+  targetFormat: GPUTextureFormat;
   rendererProvider: DrawingRendererProvider;
   recorderId: number;
   commandCount: number;
@@ -55,6 +62,12 @@ export const createDrawingRecording = (
 
   return {
     backend: sharedContext.backend.kind,
+    caps: {
+      dstReadStrategy: sharedContext.caps.dstReadStrategy,
+      supportsHardwareAdvancedBlending: sharedContext.caps.supportsHardwareAdvancedBlending,
+      supportsDualSourceBlending: sharedContext.caps.supportsDualSourceBlending,
+    },
+    targetFormat: sharedContext.backend.target.format,
     rendererProvider: sharedContext.rendererProvider,
     recorderId,
     commandCount: clonedCommands.length,

@@ -75,6 +75,10 @@ export type DrawingRuntimeCapabilities = Readonly<{
 
 export type DawnCaps = Readonly<{
   backend: 'graphite-dawn';
+  dstReadStrategy: 'texture-copy' | 'framebuffer-fetch';
+  blendEquationSupport: 'basic' | 'advanced-noncoherent' | 'advanced-coherent';
+  supportsHardwareAdvancedBlending: boolean;
+  supportsDualSourceBlending: boolean;
   adapterFeatures: DrawingFeatureSet;
   deviceFeatures: DrawingFeatureSet;
   limits: DrawingLimits;
@@ -634,6 +638,10 @@ export const createDawnCaps = (
   const requiresStorageBufferWorkaround = deviceFeatures.has('disable-storage-buffers');
   const supportsStorageBuffers = !requiresStorageBufferWorkaround &&
     limits.maxStorageBuffersPerShaderStage >= 4;
+  const supportsDualSourceBlending = deviceFeatures.has('dual-source-blending');
+  const blendEquationSupport = 'basic' as const;
+  const supportsHardwareAdvancedBlending = blendEquationSupport !== 'basic';
+  const dstReadStrategy = 'texture-copy' as const;
   const requiredTransferBufferAlignment = 4;
   const requiredBytesPerRowAlignment = 256;
   const maxSampleCount = chooseMaxSampleCount(backend, limits);
@@ -681,6 +689,10 @@ export const createDawnCaps = (
 
   return {
     backend: 'graphite-dawn',
+    dstReadStrategy,
+    blendEquationSupport,
+    supportsHardwareAdvancedBlending,
+    supportsDualSourceBlending,
     adapterFeatures,
     deviceFeatures,
     limits,

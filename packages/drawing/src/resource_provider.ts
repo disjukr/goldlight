@@ -42,7 +42,10 @@ export type DawnResourceProvider = Readonly<{
   createSampler: (descriptor?: DrawingSamplerDescriptor) => GPUSampler;
   createViewportBindGroup: (buffer: GPUBuffer) => GPUBindGroup;
   createStepBindGroup: (buffer: GPUBuffer) => GPUBindGroup;
-  createClipTextureBindGroup: (textureView?: GPUTextureView) => GPUBindGroup;
+  createClipTextureBindGroup: (
+    clipTextureView?: GPUTextureView,
+    dstTextureView?: GPUTextureView,
+  ) => GPUBindGroup;
   createGraphicsPipelineHandle: (
     descriptor: DrawingGraphicsPipelineDesc,
   ) => DrawingGraphicsPipelineHandle;
@@ -69,6 +72,42 @@ const srcOverBlend: GPUBlendState = {
     dstFactor: 'one-minus-src-alpha',
   },
 };
+const clearBlend: GPUBlendState = {
+  color: {
+    operation: 'add',
+    srcFactor: 'zero',
+    dstFactor: 'zero',
+  },
+  alpha: {
+    operation: 'add',
+    srcFactor: 'zero',
+    dstFactor: 'zero',
+  },
+};
+const srcBlend: GPUBlendState = {
+  color: {
+    operation: 'add',
+    srcFactor: 'one',
+    dstFactor: 'zero',
+  },
+  alpha: {
+    operation: 'add',
+    srcFactor: 'one',
+    dstFactor: 'zero',
+  },
+};
+const dstBlend: GPUBlendState = {
+  color: {
+    operation: 'add',
+    srcFactor: 'zero',
+    dstFactor: 'one',
+  },
+  alpha: {
+    operation: 'add',
+    srcFactor: 'zero',
+    dstFactor: 'one',
+  },
+};
 const maxPatchResolveLevel = 5;
 const tessellationPrecision = 4;
 const patchPrecision = 4;
@@ -78,6 +117,256 @@ const cubicLengthTermLiteral = `${(patchPrecision * (3 * 2 / 8)).toFixed(1)}`;
 const curveFillSegments = 1 << maxPatchResolveLevel;
 const strokePatchSegments = (1 << 14) - 1;
 const textureBindingUsage = 0x04;
+
+const getBlendState = (blendMode: DrawingGraphicsPipelineDesc['blendMode']): GPUBlendState =>
+  blendMode === 'clear'
+    ? clearBlend
+    : blendMode === 'src'
+    ? srcBlend
+    : blendMode === 'dst'
+    ? dstBlend
+    : manualBlendModes.has(blendMode)
+    ? srcBlend
+    : srcOverBlend;
+
+const manualBlendModes = new Set<DrawingGraphicsPipelineDesc['blendMode']>([
+  'dst-over',
+  'src-in',
+  'dst-in',
+  'src-out',
+  'dst-out',
+  'src-atop',
+  'dst-atop',
+  'xor',
+  'multiply',
+  'overlay',
+  'darken',
+  'lighten',
+  'color-dodge',
+  'color-burn',
+  'hard-light',
+  'soft-light',
+  'difference',
+  'exclusion',
+  'hue',
+  'saturation',
+  'color',
+  'luminosity',
+]);
+
+const commonBlendShaderSource = `
+@group(2) @binding(0) var clipMaskSampler: sampler;
+@group(2) @binding(1) var clipMaskTexture: texture_2d<f32>;
+@group(2) @binding(2) var dstColorSampler: sampler;
+@group(2) @binding(3) var dstColorTexture: texture_2d<f32>;
+
+fn clip_coverage(devicePosition: vec2<f32>) -> f32 {
+  var coverage = 1.0;
+  if (step.params.y > 0.5) {
+    let uv = (devicePosition - step.clipAtlas.xy) * step.clipAtlas.zw;
+    coverage *= textureSample(clipMaskTexture, clipMaskSampler, uv).a;
+  }
+  if (step.params.z > 0.5) {
+    let local = devicePosition - step.clipAnalytic.xy;
+    let inside = local.x >= 0.0 && local.y >= 0.0 &&
+      local.x <= step.clipAnalytic.z && local.y <= step.clipAnalytic.w;
+    coverage *= select(0.0, 1.0, inside);
+  }
+  return coverage;
+}
+
+fn apply_clip_shader(color: vec4<f32>) -> vec4<f32> {
+  if (step.params.w > 0.5) {
+    return color * step.clipShader;
+  }
+  return color;
+}
+
+fn premul_to_straight(color: vec4<f32>) -> vec4<f32> {
+  if (color.a <= 1e-5) {
+    return vec4<f32>(0.0);
+  }
+  return vec4<f32>(color.rgb / color.a, color.a);
+}
+
+fn straight_to_premul(color: vec4<f32>) -> vec4<f32> {
+  return vec4<f32>(color.rgb * color.a, color.a);
+}
+
+fn blend_channel_soft_light(backdrop: f32, source: f32) -> f32 {
+  if (source <= 0.5) {
+    return backdrop - (1.0 - (2.0 * source)) * backdrop * (1.0 - backdrop);
+  }
+  let d = select(((16.0 * backdrop - 12.0) * backdrop + 4.0) * backdrop, sqrt(backdrop), backdrop > 0.25);
+  return backdrop + ((2.0 * source - 1.0) * (d - backdrop));
+}
+
+fn lum(color: vec3<f32>) -> f32 {
+  return dot(color, vec3<f32>(0.3, 0.59, 0.11));
+}
+
+fn sat(color: vec3<f32>) -> f32 {
+  return max(color.r, max(color.g, color.b)) - min(color.r, min(color.g, color.b));
+}
+
+fn clip_color(color: vec3<f32>) -> vec3<f32> {
+  let l = lum(color);
+  let n = min(color.r, min(color.g, color.b));
+  let x = max(color.r, max(color.g, color.b));
+  var c = color;
+  if (n < 0.0) {
+    c = vec3<f32>(
+      l + (((c.r - l) * l) / (l - n)),
+      l + (((c.g - l) * l) / (l - n)),
+      l + (((c.b - l) * l) / (l - n)),
+    );
+  }
+  if (x > 1.0) {
+    c = vec3<f32>(
+      l + (((c.r - l) * (1.0 - l)) / (x - l)),
+      l + (((c.g - l) * (1.0 - l)) / (x - l)),
+      l + (((c.b - l) * (1.0 - l)) / (x - l)),
+    );
+  }
+  return clamp(c, vec3<f32>(0.0), vec3<f32>(1.0));
+}
+
+fn set_lum(color: vec3<f32>, l: f32) -> vec3<f32> {
+  return clip_color(color + vec3<f32>(l - lum(color)));
+}
+
+fn set_sat(color: vec3<f32>, s: f32) -> vec3<f32> {
+  let cmin = min(color.r, min(color.g, color.b));
+  let cmax = max(color.r, max(color.g, color.b));
+  if (cmax <= cmin) {
+    return vec3<f32>(0.0);
+  }
+  let mid = color.r + color.g + color.b - cmin - cmax;
+  var result = vec3<f32>(0.0);
+  if (color.r == cmin) {
+    result.r = 0.0;
+  } else if (color.r == cmax) {
+    result.r = s;
+  } else {
+    result.r = ((color.r - cmin) * s) / (cmax - cmin);
+  }
+  if (color.g == cmin) {
+    result.g = 0.0;
+  } else if (color.g == cmax) {
+    result.g = s;
+  } else {
+    result.g = ((color.g - cmin) * s) / (cmax - cmin);
+  }
+  if (color.b == cmin) {
+    result.b = 0.0;
+  } else if (color.b == cmax) {
+    result.b = s;
+  } else {
+    result.b = ((color.b - cmin) * s) / (cmax - cmin);
+  }
+  return result;
+}
+
+fn blend_advanced(mode: i32, source: vec3<f32>, backdrop: vec3<f32>) -> vec3<f32> {
+  if (mode == 13) { return source * backdrop; }
+  if (mode == 14) { return source + backdrop - source * backdrop; }
+  if (mode == 15) {
+    return vec3<f32>(
+      select(2.0 * source.r * backdrop.r, 1.0 - 2.0 * (1.0 - source.r) * (1.0 - backdrop.r), backdrop.r > 0.5),
+      select(2.0 * source.g * backdrop.g, 1.0 - 2.0 * (1.0 - source.g) * (1.0 - backdrop.g), backdrop.g > 0.5),
+      select(2.0 * source.b * backdrop.b, 1.0 - 2.0 * (1.0 - source.b) * (1.0 - backdrop.b), backdrop.b > 0.5),
+    );
+  }
+  if (mode == 16) { return min(source, backdrop); }
+  if (mode == 17) { return max(source, backdrop); }
+  if (mode == 18) {
+    return vec3<f32>(
+      select(min(1.0, backdrop.r / max(1.0 - source.r, 1e-5)), 1.0, backdrop.r <= 0.0),
+      select(min(1.0, backdrop.g / max(1.0 - source.g, 1e-5)), 1.0, backdrop.g <= 0.0),
+      select(min(1.0, backdrop.b / max(1.0 - source.b, 1e-5)), 1.0, backdrop.b <= 0.0),
+    );
+  }
+  if (mode == 19) {
+    return vec3<f32>(
+      select(1.0 - min(1.0, (1.0 - backdrop.r) / max(source.r, 1e-5)), 0.0, backdrop.r >= 1.0),
+      select(1.0 - min(1.0, (1.0 - backdrop.g) / max(source.g, 1e-5)), 0.0, backdrop.g >= 1.0),
+      select(1.0 - min(1.0, (1.0 - backdrop.b) / max(source.b, 1e-5)), 0.0, backdrop.b >= 1.0),
+    );
+  }
+  if (mode == 20) {
+    return vec3<f32>(
+      select(2.0 * source.r * backdrop.r, 1.0 - 2.0 * (1.0 - source.r) * (1.0 - backdrop.r), source.r > 0.5),
+      select(2.0 * source.g * backdrop.g, 1.0 - 2.0 * (1.0 - source.g) * (1.0 - backdrop.g), source.g > 0.5),
+      select(2.0 * source.b * backdrop.b, 1.0 - 2.0 * (1.0 - source.b) * (1.0 - backdrop.b), source.b > 0.5),
+    );
+  }
+  if (mode == 21) {
+    return vec3<f32>(
+      blend_channel_soft_light(backdrop.r, source.r),
+      blend_channel_soft_light(backdrop.g, source.g),
+      blend_channel_soft_light(backdrop.b, source.b),
+    );
+  }
+  if (mode == 22) { return abs(backdrop - source); }
+  if (mode == 23) { return source + backdrop - 2.0 * source * backdrop; }
+  if (mode == 24) { return set_lum(set_sat(source, sat(backdrop)), lum(backdrop)); }
+  if (mode == 25) { return set_lum(set_sat(backdrop, sat(source)), lum(backdrop)); }
+  if (mode == 26) { return set_lum(source, lum(backdrop)); }
+  if (mode == 27) { return set_lum(backdrop, lum(source)); }
+  return source;
+}
+
+fn blend_with_dst(srcStraight: vec4<f32>, devicePosition: vec2<f32>) -> vec4<f32> {
+  let mode = i32(round(step.dst.z));
+  if (step.dst.w <= 0.5) {
+    return srcStraight;
+  }
+  let uv = (devicePosition + vec2<f32>(0.5, 0.5)) * step.dst.xy;
+  let dstPremul = textureSample(dstColorTexture, dstColorSampler, uv);
+  let srcPremul = straight_to_premul(srcStraight);
+  let sa = srcPremul.a;
+  let da = dstPremul.a;
+  if (mode == 0) { return vec4<f32>(0.0); }
+  if (mode == 1) { return srcPremul; }
+  if (mode == 2) { return dstPremul; }
+  var outPremul = vec4<f32>(0.0);
+  if (mode == 3) { outPremul = srcPremul + dstPremul * (1.0 - sa); }
+  else if (mode == 4) { outPremul = srcPremul * (1.0 - da) + dstPremul; }
+  else if (mode == 5) { outPremul = srcPremul * da; }
+  else if (mode == 6) { outPremul = dstPremul * sa; }
+  else if (mode == 7) { outPremul = srcPremul * (1.0 - da); }
+  else if (mode == 8) { outPremul = dstPremul * (1.0 - sa); }
+  else if (mode == 9) { outPremul = srcPremul * da + dstPremul * (1.0 - sa); }
+  else if (mode == 10) { outPremul = srcPremul * (1.0 - da) + dstPremul * sa; }
+  else if (mode == 11) { outPremul = srcPremul * (1.0 - da) + dstPremul * (1.0 - sa); }
+  else if (mode == 12) { outPremul = min(srcPremul + dstPremul, vec4<f32>(1.0)); }
+  else if (mode == 100) {
+    let src = premul_to_straight(srcPremul);
+    let dst = premul_to_straight(dstPremul);
+    let result = clamp(
+      (step.blender.x * src * dst) +
+      (step.blender.y * src) +
+      (step.blender.z * dst) +
+      vec4<f32>(step.blender.w),
+      vec4<f32>(0.0),
+      vec4<f32>(1.0),
+    );
+    outPremul = straight_to_premul(result);
+  }
+  else {
+    let src = premul_to_straight(srcPremul);
+    let dst = premul_to_straight(dstPremul);
+    let blended = blend_advanced(mode, src.rgb, dst.rgb);
+    let outAlpha = sa + da - sa * da;
+    let outRgbPremul =
+      ((1.0 - da) * srcPremul.rgb) +
+      ((1.0 - sa) * dstPremul.rgb) +
+      (sa * da * blended);
+    outPremul = vec4<f32>(outRgbPremul, outAlpha);
+  }
+  return outPremul;
+}
+`;
 
 const fillPathShaderSource = `
 struct ViewportUniform {
@@ -95,11 +384,12 @@ struct StepUniform {
   clipAtlas: vec4<f32>,
   clipAnalytic: vec4<f32>,
   clipShader: vec4<f32>,
+  dst: vec4<f32>,
+  blender: vec4<f32>,
 };
 
 @group(1) @binding(0) var<uniform> step: StepUniform;
-@group(2) @binding(0) var clipMaskSampler: sampler;
-@group(2) @binding(1) var clipMaskTexture: texture_2d<f32>;
+${commonBlendShaderSource}
 
 struct VertexOut {
   @builtin(position) position: vec4<f32>,
@@ -134,23 +424,10 @@ fn vs_main(
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
-  var clipCoverage = 1.0;
-  if (step.params.y > 0.5) {
-    let uv = (in.devicePosition - step.clipAtlas.xy) * step.clipAtlas.zw;
-    clipCoverage *= textureSample(clipMaskTexture, clipMaskSampler, uv).a;
-  }
-  if (step.params.z > 0.5) {
-    let local = in.devicePosition - step.clipAnalytic.xy;
-    let inside = local.x >= 0.0 && local.y >= 0.0 &&
-      local.x <= step.clipAnalytic.z && local.y <= step.clipAnalytic.w;
-    clipCoverage *= select(0.0, 1.0, inside);
-  }
-  var color = in.color * step.color;
-  if (step.params.w > 0.5) {
-    color *= step.clipShader;
-  }
+  let clipCoverage = clip_coverage(in.devicePosition);
+  var color = apply_clip_shader(in.color * step.color);
   color.a *= clipCoverage;
-  return color;
+  return blend_with_dst(color, in.devicePosition);
 }
 `;
 
@@ -173,11 +450,12 @@ struct StepUniform {
   clipAtlas: vec4<f32>,
   clipAnalytic: vec4<f32>,
   clipShader: vec4<f32>,
+  dst: vec4<f32>,
+  blender: vec4<f32>,
 };
 
 @group(1) @binding(0) var<uniform> step: StepUniform;
-@group(2) @binding(0) var clipMaskSampler: sampler;
-@group(2) @binding(1) var clipMaskTexture: texture_2d<f32>;
+${commonBlendShaderSource}
 
 struct VertexOut {
   @builtin(position) position: vec4<f32>,
@@ -186,7 +464,7 @@ struct VertexOut {
 };
 
 fn device_to_ndc(position: vec2<f32>) -> vec4<f32> {
-  return vec4<f32>((position * viewport.scale) + viewport.translate, 0.0, 1.0);
+  return vec4<f32>((position * viewport.scale) + viewport.translate, step.matrix1.w, 1.0);
 }
 
 fn local_to_device(position: vec2<f32>) -> vec2<f32> {
@@ -264,23 +542,10 @@ fn vs_main(
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
-  var clipCoverage = 1.0;
-  if (step.params.y > 0.5) {
-    let uv = (in.devicePosition - step.clipAtlas.xy) * step.clipAtlas.zw;
-    clipCoverage *= textureSample(clipMaskTexture, clipMaskSampler, uv).a;
-  }
-  if (step.params.z > 0.5) {
-    let local = in.devicePosition - step.clipAnalytic.xy;
-    let inside = local.x >= 0.0 && local.y >= 0.0 &&
-      local.x <= step.clipAnalytic.z && local.y <= step.clipAnalytic.w;
-    clipCoverage *= select(0.0, 1.0, inside);
-  }
-  var color = in.color;
-  if (step.params.w > 0.5) {
-    color *= step.clipShader;
-  }
+  let clipCoverage = clip_coverage(in.devicePosition);
+  var color = apply_clip_shader(in.color);
   color.a *= clipCoverage;
-  return color;
+  return blend_with_dst(color, in.devicePosition);
 }
 `;
 
@@ -303,11 +568,12 @@ struct StepUniform {
   clipAtlas: vec4<f32>,
   clipAnalytic: vec4<f32>,
   clipShader: vec4<f32>,
+  dst: vec4<f32>,
+  blender: vec4<f32>,
 };
 
 @group(1) @binding(0) var<uniform> step: StepUniform;
-@group(2) @binding(0) var clipMaskSampler: sampler;
-@group(2) @binding(1) var clipMaskTexture: texture_2d<f32>;
+${commonBlendShaderSource}
 
 struct VertexOut {
   @builtin(position) position: vec4<f32>,
@@ -408,23 +674,10 @@ fn vs_main(
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
-  var clipCoverage = 1.0;
-  if (step.params.y > 0.5) {
-    let uv = (in.devicePosition - step.clipAtlas.xy) * step.clipAtlas.zw;
-    clipCoverage *= textureSample(clipMaskTexture, clipMaskSampler, uv).a;
-  }
-  if (step.params.z > 0.5) {
-    let local = in.devicePosition - step.clipAnalytic.xy;
-    let inside = local.x >= 0.0 && local.y >= 0.0 &&
-      local.x <= step.clipAnalytic.z && local.y <= step.clipAnalytic.w;
-    clipCoverage *= select(0.0, 1.0, inside);
-  }
-  var color = in.color;
-  if (step.params.w > 0.5) {
-    color *= step.clipShader;
-  }
+  let clipCoverage = clip_coverage(in.devicePosition);
+  var color = apply_clip_shader(in.color);
   color.a *= clipCoverage;
-  return color;
+  return blend_with_dst(color, in.devicePosition);
 }
 `;
 
@@ -447,11 +700,12 @@ struct StepUniform {
   clipAtlas: vec4<f32>,
   clipAnalytic: vec4<f32>,
   clipShader: vec4<f32>,
+  dst: vec4<f32>,
+  blender: vec4<f32>,
 };
 
 @group(1) @binding(0) var<uniform> step: StepUniform;
-@group(2) @binding(0) var clipMaskSampler: sampler;
-@group(2) @binding(1) var clipMaskTexture: texture_2d<f32>;
+${commonBlendShaderSource}
 
 struct VertexOut {
   @builtin(position) position: vec4<f32>,
@@ -719,7 +973,7 @@ fn vs_main(
   }
   var strokeRadius = stroke.x;
   var joinType = stroke.y;
-  let lastControlPoint = joinControlPoint;
+  var lastControlPoint = joinControlPoint;
   let maxScale = max(step.matrix1.z, 1.0);
   var numParametricSegments: f32;
   if (weight < 0.0) {
@@ -963,23 +1217,10 @@ fn vs_main(
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
-  var clipCoverage = 1.0;
-  if (step.params.y > 0.5) {
-    let uv = (in.devicePosition - step.clipAtlas.xy) * step.clipAtlas.zw;
-    clipCoverage *= textureSample(clipMaskTexture, clipMaskSampler, uv).a;
-  }
-  if (step.params.z > 0.5) {
-    let local = in.devicePosition - step.clipAnalytic.xy;
-    let inside = local.x >= 0.0 && local.y >= 0.0 &&
-      local.x <= step.clipAnalytic.z && local.y <= step.clipAnalytic.w;
-    clipCoverage *= select(0.0, 1.0, inside);
-  }
-  var color = in.color;
-  if (step.params.w > 0.5) {
-    color *= step.clipShader;
-  }
+  let clipCoverage = clip_coverage(in.devicePosition);
+  var color = apply_clip_shader(in.color);
   color.a *= clipCoverage;
-  return color;
+  return blend_with_dst(color, in.devicePosition);
 }
 `;
 
@@ -1105,6 +1346,7 @@ export const createDawnResourceProvider = (
   const shaderModuleCache = new Map<string, GPUShaderModule>();
   const graphicsPipelineCache = new Map<string, GPURenderPipeline>();
   let defaultClipTextureView: GPUTextureView | null = null;
+  let defaultDstTextureView: GPUTextureView | null = null;
 
   const createVertexLayout = (): GPUVertexBufferLayout => ({
     arrayStride: floatBytes * floatsPerVertex,
@@ -1228,6 +1470,22 @@ export const createDawnResourceProvider = (
             multisampled: false,
           },
         },
+        {
+          binding: 2,
+          visibility: GPUShaderStage.FRAGMENT,
+          sampler: {
+            type: 'filtering',
+          },
+        },
+        {
+          binding: 3,
+          visibility: GPUShaderStage.FRAGMENT,
+          texture: {
+            sampleType: 'float',
+            viewDimension: '2d',
+            multisampled: false,
+          },
+        },
       ],
     });
     return clipTextureBindGroupLayout;
@@ -1262,6 +1520,37 @@ export const createDawnResourceProvider = (
     }
     defaultClipTextureView = texture.createView();
     return defaultClipTextureView;
+  };
+
+  const getDefaultDstTextureView = (): GPUTextureView => {
+    if (defaultDstTextureView) {
+      return defaultDstTextureView;
+    }
+
+    const texture = backend.device.createTexture({
+      label: 'drawing-default-dst-texture',
+      size: {
+        width: 1,
+        height: 1,
+        depthOrArrayLayers: 1,
+      },
+      format: 'rgba8unorm',
+      usage: textureBindingUsage | renderAttachmentUsage | textureCopyDstUsage,
+    });
+    if (
+      'writeTexture' in backend.queue &&
+      typeof backend.queue.writeTexture === 'function'
+    ) {
+      const pixel = new Uint8Array([0, 0, 0, 0]);
+      backend.queue.writeTexture(
+        { texture },
+        pixel,
+        { bytesPerRow: 4, rowsPerImage: 1 },
+        { width: 1, height: 1, depthOrArrayLayers: 1 },
+      );
+    }
+    defaultDstTextureView = texture.createView();
+    return defaultDstTextureView;
   };
 
   const getDrawingPipelineLayout = (): GPUPipelineLayout => {
@@ -1372,6 +1661,7 @@ export const createDawnResourceProvider = (
       descriptor.label,
       descriptor.shader,
       descriptor.vertexLayout,
+      descriptor.blendMode,
       descriptor.depthStencil,
       descriptor.topology,
       descriptor.colorWriteDisabled ? '1' : '0',
@@ -1392,12 +1682,12 @@ export const createDawnResourceProvider = (
     fragment: {
       module: getOrCreateShaderModule(descriptor),
       entryPoint: 'fs_main',
-      targets: [{
-        format: backend.target.format,
-        blend: descriptor.colorWriteDisabled ? undefined : srcOverBlend,
-        writeMask: descriptor.colorWriteDisabled ? noColorWrites : undefined,
-      }],
-    },
+        targets: [{
+          format: backend.target.format,
+          blend: descriptor.colorWriteDisabled ? undefined : getBlendState(descriptor.blendMode),
+          writeMask: descriptor.colorWriteDisabled ? noColorWrites : undefined,
+        }],
+      },
     primitive: {
       topology: descriptor.topology,
       cullMode: 'none',
@@ -1456,7 +1746,7 @@ export const createDawnResourceProvider = (
           },
         }],
       }),
-    createClipTextureBindGroup: (textureView) =>
+    createClipTextureBindGroup: (clipTextureView, dstTextureView) =>
       backend.device.createBindGroup({
         label: 'drawing-clip-texture-bind-group',
         layout: getClipTextureBindGroupLayout(),
@@ -1471,7 +1761,19 @@ export const createDawnResourceProvider = (
           },
           {
             binding: 1,
-            resource: textureView ?? getDefaultClipTextureView(),
+            resource: clipTextureView ?? getDefaultClipTextureView(),
+          },
+          {
+            binding: 2,
+            resource: provider.createSampler({
+              label: 'drawing-dst-texture-sampler',
+              magFilter: 'nearest',
+              minFilter: 'nearest',
+            }),
+          },
+          {
+            binding: 3,
+            resource: dstTextureView ?? getDefaultDstTextureView(),
           },
         ],
       }),

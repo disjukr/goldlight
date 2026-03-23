@@ -54,11 +54,17 @@ import {
 } from '@rieul3d/drawing';
 
 const createMockGpuContext = () => {
+  type MockTextureCopy = {
+    source: unknown;
+    destination: unknown;
+    copySize: Readonly<{ width: number; height: number; depthOrArrayLayers: number }>;
+  };
   const buffers: GPUBufferDescriptor[] = [];
   const destroyedBuffers: GPUBufferDescriptor[] = [];
   const textures: GPUTextureDescriptor[] = [];
   const samplers: GPUSamplerDescriptor[] = [];
   const renderPasses: GPURenderPassDescriptor[] = [];
+  const textureCopies: MockTextureCopy[] = [];
   const submitted: GPUCommandBuffer[][] = [];
   const finishedCommandBuffers: GPUCommandBuffer[] = [];
   const shaderModules: GPUShaderModuleDescriptor[] = [];
@@ -83,6 +89,7 @@ const createMockGpuContext = () => {
       textures,
       samplers,
       renderPasses,
+      textureCopies,
       submitted,
       finishedCommandBuffers,
       shaderModules,
@@ -179,6 +186,13 @@ const createMockGpuContext = () => {
                 },
                 end: () => undefined,
               } as unknown as GPURenderPassEncoder;
+            },
+            copyTextureToTexture: (
+              source: unknown,
+              destination: unknown,
+              copySize: Readonly<{ width: number; height: number; depthOrArrayLayers: number }>,
+            ) => {
+              textureCopies.push({ source, destination, copySize });
             },
             finish: () => {
               const commandBuffer = {
@@ -352,6 +366,7 @@ Deno.test('dawn resource provider uses replace for first clip writes', () => {
     label: 'drawing-clip-stencil-write',
     shader: 'path',
     vertexLayout: 'device-vertex',
+    blendMode: 'src-over',
     depthStencil: 'clip-stencil-write',
     colorWriteDisabled: true,
     topology: 'triangle-list',
@@ -436,6 +451,10 @@ Deno.test('dawn caps expose feature, format, and sample count policy', () => {
   assertEquals(caps.limits.maxStorageBuffersPerShaderStage, 8);
   assertEquals(caps.requestedPathRendererStrategy, null);
   assertEquals(caps.avoidMSAA, false);
+  assertEquals(caps.dstReadStrategy, 'texture-copy');
+  assertEquals(caps.blendEquationSupport, 'basic');
+  assertEquals(caps.supportsHardwareAdvancedBlending, false);
+  assertEquals(caps.supportsDualSourceBlending, false);
   assertEquals(caps.minPathSizeForMSAA, 0);
   assertEquals(caps.supportsStorageBuffers, true);
   assertEquals(caps.isFormatRenderable('rgba8unorm'), true);
@@ -798,6 +817,355 @@ Deno.test('drawing prepared recording groups clear and prepared steps into passe
   assertEquals(prepared.passes[1]?.loadOp, 'clear');
   assertEquals(prepared.passes[1]?.steps.length, 0);
   assertEquals(prepared.unsupportedCommands.length, 0);
+});
+
+Deno.test('drawing prepared recording preserves supported coeff blend modes', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [0, 0] },
+      { kind: 'lineTo', to: [20, 0] },
+      { kind: 'lineTo', to: [20, 20] },
+      { kind: 'close' },
+    ),
+    { style: 'fill', blendMode: 'src' },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const step = prepared.passes[0]?.steps[0];
+
+  assertEquals(prepared.unsupportedCommands.length, 0);
+  assertEquals(step?.draw.blendMode, 'src');
+  assertEquals(step?.draw.dstUsage, 0b1001);
+  assertEquals(step?.pipelineDescs[0]?.blendMode, 'src');
+});
+
+Deno.test('drawing prepared recording keeps plus and screen on hardware blend path for dawn', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const plusRecorder = drawingContext.createRecorder();
+  const screenRecorder = drawingContext.createRecorder();
+  const path = createPath2D(
+    { kind: 'moveTo', to: [0, 0] },
+    { kind: 'lineTo', to: [20, 0] },
+    { kind: 'lineTo', to: [20, 20] },
+    { kind: 'close' },
+  );
+
+  recordDrawPath(plusRecorder, path, { style: 'fill', blendMode: 'plus' });
+  recordDrawPath(screenRecorder, path, { style: 'fill', blendMode: 'screen' });
+
+  const plusPrepared = prepareDrawingRecording(finishDrawingRecorder(plusRecorder));
+  const screenPrepared = prepareDrawingRecording(finishDrawingRecorder(screenRecorder));
+
+  assertEquals(plusPrepared.unsupportedCommands.length, 0);
+  assertEquals(plusPrepared.passes[0]?.steps[0]?.draw.dstUsage, 0b0001);
+  assertEquals(plusPrepared.passes[0]?.steps[0]?.pipelineDescs[0]?.blendMode, 'plus');
+  assertEquals(screenPrepared.unsupportedCommands.length, 0);
+  assertEquals(screenPrepared.passes[0]?.steps[0]?.draw.dstUsage, 0b0001);
+  assertEquals(screenPrepared.passes[0]?.steps[0]?.pipelineDescs[0]?.blendMode, 'screen');
+});
+
+Deno.test('drawing prepared recording keeps coeff dst-over on the hardware blend path', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [0, 0] },
+      { kind: 'lineTo', to: [20, 0] },
+      { kind: 'lineTo', to: [20, 20] },
+      { kind: 'close' },
+    ),
+    { style: 'fill', blendMode: 'dst-over' },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const step = prepared.passes[0]?.steps[0];
+
+  assertEquals(prepared.unsupportedCommands.length, 0);
+  assertEquals(step?.draw.blendMode, 'dst-over');
+  assertEquals(step?.draw.dstUsage, 0b0001);
+  assertEquals(step?.pipelineDescs[0]?.blendMode, 'dst-over');
+});
+
+Deno.test('drawing prepared recording marks advanced blend modes for dst read', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [0, 0] },
+      { kind: 'lineTo', to: [20, 0] },
+      { kind: 'lineTo', to: [20, 20] },
+      { kind: 'close' },
+    ),
+    { style: 'fill', blendMode: 'multiply' },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const step = prepared.passes[0]?.steps[0];
+
+  assertEquals(prepared.unsupportedCommands.length, 0);
+  assertEquals(step?.draw.blendMode, 'multiply');
+  assertEquals(step?.draw.dstUsage, 0b0111);
+  assertEquals(step?.pipelineDescs[0]?.blendMode, 'src');
+});
+
+Deno.test('drawing prepared recording treats lcd coverage as dst-read for non-src-over', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [0, 0] },
+      { kind: 'lineTo', to: [20, 0] },
+      { kind: 'lineTo', to: [20, 20] },
+      { kind: 'close' },
+    ),
+    { style: 'fill', blendMode: 'src', coverage: 'lcd' },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const step = prepared.passes[0]?.steps[0];
+
+  assertEquals(step?.draw.coverage, 'lcd');
+  assertEquals(step?.draw.dstUsage, 0b0011);
+  assertEquals(step?.pipelineDescs[0]?.blendMode, 'src');
+});
+
+Deno.test('drawing prepared recording carries arithmetic custom blenders into dst-read path', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [0, 0] },
+      { kind: 'lineTo', to: [20, 0] },
+      { kind: 'lineTo', to: [20, 20] },
+      { kind: 'close' },
+    ),
+    {
+      style: 'fill',
+      blender: { kind: 'arithmetic', coefficients: [0.25, 0.5, 0.25, 0.1] },
+    },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const step = prepared.passes[0]?.steps[0];
+
+  assertEquals(step?.draw.blender?.kind, 'arithmetic');
+  assertEquals(step?.draw.dstUsage, 0b0011);
+  assertEquals(step?.pipelineDescs[0]?.blendMode, 'src');
+});
+
+Deno.test('drawing prepared recording assigns original painter depth within each pass', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [0, 0] },
+      { kind: 'lineTo', to: [20, 0] },
+      { kind: 'lineTo', to: [20, 20] },
+      { kind: 'close' },
+    ),
+    { style: 'fill' },
+  );
+  recordClear(recorder, [1, 1, 1, 1]);
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [24, 0] },
+      { kind: 'lineTo', to: [44, 0] },
+      { kind: 'lineTo', to: [44, 20] },
+      { kind: 'close' },
+    ),
+    { style: 'stroke', strokeWidth: 6 },
+  );
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [48, 0] },
+      { kind: 'lineTo', to: [68, 0] },
+      { kind: 'lineTo', to: [68, 20] },
+      { kind: 'close' },
+    ),
+    { style: 'stroke', strokeWidth: 6 },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const firstPassDepths = prepared.passes[0]?.steps.map((step) => step.depth) ?? [];
+  const secondPassDepths = prepared.passes[1]?.steps.map((step) => step.depth) ?? [];
+
+  assertEquals(firstPassDepths.length, 1);
+  assertEquals(secondPassDepths.length, 2);
+  assertEquals(secondPassDepths[0]! > secondPassDepths[1]!, true);
+  assertEquals(firstPassDepths[0], secondPassDepths[0]);
+});
+
+Deno.test('drawing prepared recording marks overlapping translucent draws as dst dependent', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [0, 0] },
+      { kind: 'lineTo', to: [40, 0] },
+      { kind: 'lineTo', to: [40, 40] },
+      { kind: 'close' },
+    ),
+    { style: 'fill', color: [1, 0, 0, 0.5] },
+  );
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [20, 20] },
+      { kind: 'lineTo', to: [60, 20] },
+      { kind: 'lineTo', to: [60, 60] },
+      { kind: 'close' },
+    ),
+    { style: 'fill', color: [0, 0, 1, 0.5] },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const steps = prepared.passes[0]?.steps ?? [];
+
+  assertEquals(steps.length, 2);
+  assertEquals(steps[0]?.dependsOnDst, true);
+  assertEquals(steps[1]?.dependsOnDst, true);
+  assertEquals((steps[1]?.paintOrder ?? -1) > (steps[0]?.paintOrder ?? -1), true);
+  assertEquals((steps[1]?.depth ?? 1) < (steps[0]?.depth ?? 0), true);
+});
+
+Deno.test('drawing prepared recording compresses disjoint opaque fills to same paint order', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [0, 0] },
+      { kind: 'lineTo', to: [20, 0] },
+      { kind: 'lineTo', to: [20, 20] },
+      { kind: 'close' },
+    ),
+    { style: 'fill', color: [1, 0, 0, 1] },
+  );
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [40, 0] },
+      { kind: 'lineTo', to: [60, 0] },
+      { kind: 'lineTo', to: [60, 20] },
+      { kind: 'close' },
+    ),
+    { style: 'fill', color: [0, 0, 1, 1] },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const steps = prepared.passes[0]?.steps ?? [];
+
+  assertEquals(steps.length, 2);
+  assertEquals(steps[0]?.dependsOnDst, true);
+  assertEquals(steps[1]?.dependsOnDst, true);
+  assertEquals(steps[0]?.paintOrder, 0);
+  assertEquals(steps[1]?.paintOrder, 0);
+});
+
+Deno.test('drawing prepared recording compresses disjoint translucent draws to same paint order', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [0, 0] },
+      { kind: 'lineTo', to: [20, 0] },
+      { kind: 'lineTo', to: [20, 20] },
+      { kind: 'close' },
+    ),
+    { style: 'fill', color: [1, 0, 0, 0.5] },
+  );
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [40, 0] },
+      { kind: 'lineTo', to: [60, 0] },
+      { kind: 'lineTo', to: [60, 20] },
+      { kind: 'close' },
+    ),
+    { style: 'fill', color: [0, 0, 1, 0.5] },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const steps = prepared.passes[0]?.steps ?? [];
+
+  assertEquals(steps.length, 2);
+  assertEquals(steps[0]?.dependsOnDst, true);
+  assertEquals(steps[1]?.dependsOnDst, true);
+  assertEquals(steps[0]?.paintOrder, 0);
+  assertEquals(steps[1]?.paintOrder, 0);
+});
+
+Deno.test('drawing prepared recording uses clipped draw bounds for dst dependency queries', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  clipDrawingRecorderRect(recorder, createRect(0, 0, 20, 20));
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [0, 0] },
+      { kind: 'lineTo', to: [60, 0] },
+      { kind: 'lineTo', to: [60, 60] },
+      { kind: 'close' },
+    ),
+    { style: 'fill', color: [1, 0, 0, 0.5] },
+  );
+  restoreDrawingRecorder(recorder);
+
+  clipDrawingRecorderRect(recorder, createRect(40, 40, 20, 20));
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [0, 0] },
+      { kind: 'lineTo', to: [60, 0] },
+      { kind: 'lineTo', to: [60, 60] },
+      { kind: 'close' },
+    ),
+    { style: 'fill', color: [0, 0, 1, 0.5] },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const steps = prepared.passes[0]?.steps ?? [];
+
+  assertEquals(steps.length, 2);
+  assertEquals(steps[0]?.dependsOnDst, true);
+  assertEquals(steps[1]?.dependsOnDst, true);
+  assertEquals(steps[0]?.drawBounds, createRect(0, 0, 20, 20));
+  assertEquals(steps[1]?.drawBounds, createRect(40, 40, 20, 20));
+  assertEquals(steps[0]?.paintOrder, 0);
+  assertEquals(steps[1]?.paintOrder, 0);
 });
 
 Deno.test('dawn preparation separates recording, draw-pass preparation, and resource preparation', () => {
@@ -1578,9 +1946,9 @@ Deno.test('drawing prepared stroke patches emit square cap patches for open cont
   assertEquals(draw.patches[1]?.patch.kind, 'line');
   assertEquals(draw.patches.at(-1)?.patch.kind, 'line');
   assertEquals(draw.patches[0]?.joinControlPoint, [260, 315]);
-  assertEquals(draw.patches[1]?.joinControlPoint, [276, 315]);
+  assertEquals(draw.patches[1]?.joinControlPoint, [244, 315]);
   assertEquals(draw.patches[0]?.patch.points, [[380, 315], [396, 315]]);
-  assertEquals(draw.patches[1]?.patch.points, [[276, 315], [260, 315]]);
+  assertEquals(draw.patches[1]?.patch.points, [[244, 315], [260, 315]]);
 });
 
 Deno.test('drawing prepared stroke patches emit synthetic cap patches for degenerate contours', () => {
@@ -2134,6 +2502,175 @@ Deno.test('dawn command buffer encodes stroke draws without stencil', () => {
   assertEquals(mock.created.drawCalls.length, 1);
 });
 
+Deno.test('dawn command buffer snapshots dst for offscreen dst-read blend modes', () => {
+  const mock = createMockGpuContext();
+  const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
+  const recorder = createDrawingRecorder(sharedContext);
+  const binding = createOffscreenBinding(mock.context);
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [16, 16] },
+      { kind: 'lineTo', to: [72, 16] },
+      { kind: 'lineTo', to: [72, 72] },
+      { kind: 'lineTo', to: [16, 72] },
+      { kind: 'close' },
+    ),
+    { style: 'fill', color: [1, 0, 0, 1] },
+  );
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [40, 40] },
+      { kind: 'lineTo', to: [96, 40] },
+      { kind: 'lineTo', to: [96, 96] },
+      { kind: 'lineTo', to: [40, 96] },
+      { kind: 'close' },
+    ),
+    { style: 'fill', color: [0, 0, 1, 1], blendMode: 'multiply' },
+  );
+
+  const commandBuffer = encodeDawnCommandBuffer(
+    sharedContext,
+    finishDrawingRecorder(recorder),
+    binding,
+  );
+
+  assertEquals(commandBuffer.unsupportedCommands.length, 0);
+  assertEquals(mock.created.textureCopies.length, 1);
+  assertEquals(mock.created.bindGroups.some((group) => group.entries.length === 4), true);
+  assertEquals(commandBuffer.passCount, 2);
+});
+
+Deno.test('dawn command buffer snapshots dst for surface dst-read blend modes', () => {
+  const mock = createMockGpuContext();
+  const sharedContext = createDawnSharedContext(createDawnBackendContext({
+    ...mock.context,
+    target: {
+      kind: 'surface',
+      width: 256,
+      height: 256,
+      format: 'rgba8unorm',
+    } as const,
+  }));
+  const recorder = createDrawingRecorder(sharedContext);
+  const surfaceTexture = {
+    width: 256,
+    height: 256,
+    createView: () => ({ label: 'surface-view' } as unknown as GPUTextureView),
+  } as unknown as GPUTexture;
+  const binding = {
+    kind: 'surface',
+    device: mock.context.device,
+    target: {
+      kind: 'surface',
+      width: 256,
+      height: 256,
+      format: 'rgba8unorm',
+    } as const,
+    canvasContext: {
+      configure: () => undefined,
+      getCurrentTexture: () => surfaceTexture,
+    } as unknown as GPUCanvasContext,
+    depthTexture: surfaceTexture,
+    depthView: surfaceTexture.createView(),
+    depthWidth: 256,
+    depthHeight: 256,
+  } as Parameters<typeof encodeDawnCommandBuffer>[2];
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [16, 16] },
+      { kind: 'lineTo', to: [72, 16] },
+      { kind: 'lineTo', to: [72, 72] },
+      { kind: 'lineTo', to: [16, 72] },
+      { kind: 'close' },
+    ),
+    { style: 'fill', color: [1, 0, 0, 1] },
+  );
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [40, 40] },
+      { kind: 'lineTo', to: [96, 40] },
+      { kind: 'lineTo', to: [96, 96] },
+      { kind: 'lineTo', to: [40, 96] },
+      { kind: 'close' },
+    ),
+    { style: 'fill', color: [0, 0, 1, 1], blendMode: 'multiply' },
+  );
+
+  const commandBuffer = encodeDawnCommandBuffer(
+    sharedContext,
+    finishDrawingRecorder(recorder),
+    binding,
+  );
+
+  assertEquals(commandBuffer.unsupportedCommands.length, 0);
+  assertEquals(mock.created.textureCopies.length, 1);
+  assertEquals(commandBuffer.passCount, 2);
+});
+
+Deno.test('dawn resource provider reuses one pipeline across shader-blended modes', () => {
+  const mock = createMockGpuContext();
+  const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
+  const binding = createOffscreenBinding(mock.context);
+  const path = createPath2D(
+    { kind: 'moveTo', to: [16, 16] },
+    { kind: 'lineTo', to: [72, 16] },
+    { kind: 'lineTo', to: [72, 72] },
+    { kind: 'lineTo', to: [16, 72] },
+    { kind: 'close' },
+  );
+
+  for (const blendMode of ['multiply', 'overlay'] as const) {
+    const recorder = createDrawingRecorder(sharedContext);
+    recordDrawPath(
+      recorder,
+      path,
+      { style: 'fill', color: [0.2, 0.4, 0.8, 1], blendMode },
+    );
+    encodeDawnCommandBuffer(sharedContext, finishDrawingRecorder(recorder), binding);
+  }
+
+  assertEquals(mock.created.renderPipelines.length, 2);
+});
+
+Deno.test('dawn command buffer encodes arithmetic custom blender coefficients in step payload', () => {
+  const mock = createMockGpuContext();
+  const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
+  const recorder = createDrawingRecorder(sharedContext);
+  const binding = createOffscreenBinding(mock.context);
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [16, 16] },
+      { kind: 'lineTo', to: [72, 16] },
+      { kind: 'lineTo', to: [72, 72] },
+      { kind: 'lineTo', to: [16, 72] },
+      { kind: 'close' },
+    ),
+    {
+      style: 'fill',
+      blender: { kind: 'arithmetic', coefficients: [0.25, 0.5, 0.25, 0.1] },
+    },
+  );
+
+  encodeDawnCommandBuffer(sharedContext, finishDrawingRecorder(recorder), binding);
+
+  const payloadIndex = mock.created.buffers.findLastIndex((buffer) =>
+    buffer.label === 'drawing-step-payload'
+  );
+  const payload = new Float32Array(mock.created.mappedBuffers[payloadIndex]!);
+  assertAlmostEquals(payload[32]!, 0.25);
+  assertAlmostEquals(payload[33]!, 0.5);
+  assertAlmostEquals(payload[34]!, 0.25);
+  assertAlmostEquals(payload[35]!, 0.1);
+});
+
 Deno.test('dawn command buffer isolates tessellated stroke patches into a depth-tested render pass', () => {
   const mock = createMockGpuContext();
   const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
@@ -2169,12 +2706,11 @@ Deno.test('dawn command buffer isolates tessellated stroke patches into a depth-
     binding,
   );
 
-  assertEquals(commandBuffer.passCount, 2);
-  assertEquals(mock.created.renderPasses.length, 2);
+  assertEquals(commandBuffer.passCount, 1);
+  assertEquals(mock.created.renderPasses.length, 1);
   assertEquals(mock.created.drawCalls.length, 3);
   assertEquals(mock.created.stencilReferences, []);
-  assertEquals(mock.created.renderPasses[0]?.depthStencilAttachment, undefined);
-  assertEquals(mock.created.renderPasses[1]?.depthStencilAttachment !== undefined, true);
+  assertEquals(mock.created.renderPasses[0]?.depthStencilAttachment !== undefined, true);
 
   const strokePatchPipeline = mock.created.renderPipelines.find((pipeline) =>
     pipeline.label === 'drawing-path-stroke-patch-cover'

@@ -2,7 +2,14 @@ import type { PathFillRule2D } from '@rieul3d/geometry';
 import type { DawnCaps } from './caps.ts';
 import type { DrawingPreparedPatch } from './path_renderer.ts';
 
-export type DrawingPathRendererStrategy = 'tessellation';
+export type DrawingPathRendererStrategy =
+  | 'tessellation'
+  | 'tessellation-and-small-atlas'
+  | 'raster-atlas'
+  | 'compute-analytic-aa'
+  | 'compute-msaa16'
+  | 'compute-msaa8'
+  | 'cpu-sparse-strips-msaa8';
 
 export type DrawingRendererKind =
   | 'convex-tessellated-wedges'
@@ -61,10 +68,22 @@ export const isDrawingRendererProviderStrategySupported = (
   _caps: DawnCaps,
 ): boolean => strategy === 'tessellation';
 
+const selectDrawingRendererProviderStrategy = (
+  caps: DawnCaps,
+): DrawingPathRendererStrategy => {
+  if (
+    caps.requestedPathRendererStrategy &&
+    isDrawingRendererProviderStrategySupported(caps.requestedPathRendererStrategy, caps)
+  ) {
+    return caps.requestedPathRendererStrategy;
+  }
+  return 'tessellation';
+};
+
 export const createDrawingRendererProvider = (
   caps: DawnCaps,
 ): DrawingRendererProvider => {
-  const pathRendererStrategy: DrawingPathRendererStrategy = 'tessellation';
+  const pathRendererStrategy = selectDrawingRendererProviderStrategy(caps);
   if (!isDrawingRendererProviderStrategySupported(pathRendererStrategy, caps)) {
     throw new Error(`Unsupported drawing path renderer strategy: ${pathRendererStrategy}`);
   }

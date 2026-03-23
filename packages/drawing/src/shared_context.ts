@@ -4,6 +4,7 @@ import type { DrawingGraphicsPipelineDesc } from './draw_pass.ts';
 import { createDawnQueueManager, type DawnQueueManager } from './queue_manager.ts';
 import {
   createDrawingRendererProvider,
+  type DrawingPathRendererStrategy,
   type DrawingRendererProvider,
 } from './renderer_provider.ts';
 import { createDawnResourceProvider, type DawnResourceProvider } from './resource_provider.ts';
@@ -100,9 +101,12 @@ export const createDawnSharedContext = (
   backend: DawnBackendContext,
   options: Readonly<{
     resourceBudget?: number;
+    pathRendererStrategy?: DrawingPathRendererStrategy;
   }> = {},
 ): DawnSharedContext => {
-  const caps = createDawnCaps(backend);
+  const caps = createDawnCaps(backend, {
+    pathRendererStrategy: options.pathRendererStrategy,
+  });
   const rendererProvider = createDrawingRendererProvider(caps);
   const resourceProvider = createDawnResourceProvider(backend, {
     caps,

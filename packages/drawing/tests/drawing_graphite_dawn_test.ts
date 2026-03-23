@@ -14,6 +14,7 @@ import {
   addFinishedCallbackToDawnSubmission,
   appendDrawingClipStackElement,
   checkForFinishedDawnQueueManager,
+  checkForFinishedDawnQueueWork,
   clipDrawingRecorderPath,
   clipDrawingRecorderRect,
   clipDrawingRecorderShader,
@@ -30,6 +31,8 @@ import {
   encodeDawnCommandBuffer,
   encodePreparedDawnCommandBuffer,
   finishDrawingRecorder,
+  hasPendingDawnQueueWork,
+  hasUnfinishedDawnQueueWork,
   popDrawingClipStackSave,
   prepareDawnRecording,
   prepareDrawingRecording,
@@ -251,6 +254,16 @@ Deno.test('dawn shared context exposes resource provider over gpu device', () =>
   assertEquals(mock.created.samplers.length, 1);
 });
 
+Deno.test('dawn shared context threads requested path renderer strategy into caps', () => {
+  const mock = createMockGpuContext();
+  const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context), {
+    pathRendererStrategy: 'tessellation',
+  });
+
+  assertEquals(sharedContext.caps.requestedPathRendererStrategy, 'tessellation');
+  assertEquals(sharedContext.rendererProvider.pathRendererStrategy, 'tessellation');
+});
+
 Deno.test('drawing renderer provider follows graphite wedge versus curve heuristics', () => {
   const mock = createMockGpuContext();
   const provider = createDrawingRendererProvider(
@@ -419,6 +432,9 @@ Deno.test('dawn caps expose feature, format, and sample count policy', () => {
   assertEquals(caps.supportsShaderF16, false);
   assertEquals(caps.limits.maxTextureDimension2D, 8192);
   assertEquals(caps.limits.maxStorageBuffersPerShaderStage, 8);
+  assertEquals(caps.requestedPathRendererStrategy, null);
+  assertEquals(caps.avoidMSAA, false);
+  assertEquals(caps.minPathSizeForMSAA, 0);
   assertEquals(caps.supportsStorageBuffers, true);
   assertEquals(caps.isFormatRenderable('rgba8unorm'), true);
   assertEquals(caps.canUseAsResolveTarget('rgba8unorm'), true);
@@ -2539,6 +2555,73 @@ Deno.test('dawn queue manager can sync to the last outstanding submission like g
   assertEquals(queueManager.completedCount, 2);
   assertEquals(queueManager.inFlightCount, 0);
   assertEquals(queueManager.outstandingSubmissions.length, 0);
+});
+
+Deno.test('dawn queue manager exposes Graphite-like work query helpers', async () => {
+  const mock = createMockGpuContext();
+  const backend = createDawnBackendContext(mock.context);
+  const queueManager = createDawnQueueManager(backend);
+  const sharedContext = createDawnSharedContext(backend);
+  const recorder = createDrawingRecorder(sharedContext);
+  const binding = createOffscreenBinding(mock.context);
+
+  recordClear(recorder, [0, 0, 0, 1]);
+  const commandBuffer = encodeDawnCommandBuffer(
+    sharedContext,
+    finishDrawingRecorder(recorder),
+    binding,
+  );
+  submitToDawnQueueManager(queueManager, commandBuffer);
+
+  assertEquals(hasUnfinishedDawnQueueWork(queueManager), true);
+  assertEquals(hasPendingDawnQueueWork(queueManager), true);
+
+  mock.created.submissionDoneResolvers.shift()?.();
+  await queueManager.outstandingSubmissions[0]?.completionPromise;
+  await checkForFinishedDawnQueueWork(queueManager);
+
+  assertEquals(hasUnfinishedDawnQueueWork(queueManager), false);
+  assertEquals(hasPendingDawnQueueWork(queueManager), false);
+});
+
+Deno.test('dawn queue manager drains outstanding submissions in submission order', async () => {
+  const mock = createMockGpuContext();
+  const backend = createDawnBackendContext(mock.context);
+  const queueManager = createDawnQueueManager(backend);
+  const sharedContext = createDawnSharedContext(backend);
+  const binding = createOffscreenBinding(mock.context);
+
+  const submitClear = (color: readonly [number, number, number, number]) => {
+    const recorder = createDrawingRecorder(sharedContext);
+    recordClear(recorder, color);
+    return submitToDawnQueueManager(
+      queueManager,
+      encodeDawnCommandBuffer(sharedContext, finishDrawingRecorder(recorder), binding),
+    );
+  };
+
+  const first = submitClear([1, 0, 0, 1]);
+  const second = submitClear([0, 0, 1, 1]);
+
+  assertEquals(queueManager.outstandingSubmissions.length, 2);
+
+  mock.created.submissionDoneResolvers[1]?.();
+  await second.completionPromise;
+  await checkForFinishedDawnQueueWork(queueManager);
+
+  assertEquals(queueManager.completedCount, 0);
+  assertEquals(queueManager.inFlightCount, 2);
+  assertEquals(queueManager.outstandingSubmissions.length, 2);
+
+  mock.created.submissionDoneResolvers[0]?.();
+  await first.completionPromise;
+  await checkForFinishedDawnQueueWork(queueManager);
+
+  assertEquals(queueManager.completedCount, 2);
+  assertEquals(queueManager.inFlightCount, 0);
+  assertEquals(queueManager.outstandingSubmissions.length, 0);
+  assertEquals(queueManager.lastCompletedRecorderId, second.recorderId);
+  assertEquals(first.serial, 1);
 });
 
 Deno.test('dawn queue manager records submit failures without enqueuing work', () => {

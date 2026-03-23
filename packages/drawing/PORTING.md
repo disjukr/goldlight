@@ -727,6 +727,22 @@ The remaining work should be judged against Skia Graphite/Dawn structure, not ju
   - Remaining delta: translucent round cap/join coverage is still flat-color, and some
     `tessellate_stroked_curve()` safety branches remain less literal than Skia
   - Validation: `deno test tests/drawing_graphite_dawn_test.ts`
+- 2026-03-23
+  - Files: `src/caps.ts`, `src/context.ts`, `src/shared_context.ts`, `src/renderer_provider.ts`,
+    `tests/drawing_graphite_dawn_test.ts`
+  - Status transition: `Caps` now own the policy inputs for path renderer strategy selection, and
+    shared-context/context creation can thread an explicit requested strategy into the renderer
+    provider
+  - Remaining delta: only the tessellation strategy is still implemented for the WebGPU target, so
+    the new policy surface does not yet enable alternate atlas/compute families
+  - Validation: `deno test tests/drawing_graphite_dawn_test.ts`
+- 2026-03-23
+  - Files: `src/queue_manager.ts`, `tests/drawing_graphite_dawn_test.ts`
+  - Status transition: `QueueManager` now exposes explicit Graphite-like work queries and test
+    coverage for ordered front-drain of outstanding submissions
+  - Remaining delta: WebGPU completion is still promise-based, without Graphite's `WaitAny`,
+    command-buffer reuse, or resource/fence correlation
+  - Validation: `deno test tests/drawing_graphite_dawn_test.ts`
 
 ## Update Rules
 

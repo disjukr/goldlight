@@ -1,4 +1,5 @@
 import type { DawnBackendContext } from './dawn_backend_context.ts';
+import type { DrawingPathRendererStrategy } from './renderer_provider.ts';
 
 export type DrawingFeatureSet = ReadonlySet<string>;
 
@@ -77,6 +78,9 @@ export type DawnCaps = Readonly<{
   adapterFeatures: DrawingFeatureSet;
   deviceFeatures: DrawingFeatureSet;
   limits: DrawingLimits;
+  requestedPathRendererStrategy: DrawingPathRendererStrategy | null;
+  avoidMSAA: boolean;
+  minPathSizeForMSAA: number;
   preferredCanvasFormat: GPUTextureFormat;
   resourceBindingRequirements: DrawingResourceBindingRequirements;
   runtimeCapabilities: DrawingRuntimeCapabilities;
@@ -609,6 +613,9 @@ const createFormatTable = (
 
 export const createDawnCaps = (
   backend: DawnBackendContext,
+  options: Readonly<{
+    pathRendererStrategy?: DrawingPathRendererStrategy;
+  }> = {},
 ): DawnCaps => {
   const adapterFeatures = readFeatureSet(backend.adapter);
   const deviceFeatures = readFeatureSet(backend.device);
@@ -634,6 +641,7 @@ export const createDawnCaps = (
     backend.target.kind === 'offscreen' && backend.target.sampleCount === 4 && maxSampleCount === 4
       ? 4
       : 1;
+  const avoidMSAA = maxSampleCount < 4;
   const emulateLoadStoreResolve = !supportsPartialLoadResolve && !supportsTransientAttachments;
   const differentResolveAttachmentSizeSupport = supportsPartialLoadResolve ||
     emulateLoadStoreResolve;
@@ -676,6 +684,9 @@ export const createDawnCaps = (
     adapterFeatures,
     deviceFeatures,
     limits,
+    requestedPathRendererStrategy: options.pathRendererStrategy ?? null,
+    avoidMSAA,
+    minPathSizeForMSAA: 0,
     preferredCanvasFormat: choosePreferredCanvasFormat(backend),
     resourceBindingRequirements,
     runtimeCapabilities,

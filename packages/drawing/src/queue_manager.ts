@@ -29,6 +29,8 @@ export type DawnOutstandingSubmission = Readonly<{
   finishCallbacksNotified: boolean;
 }>;
 
+export type DrawingSyncToCpu = 'no' | 'yes';
+
 export type DawnQueueManager = Readonly<{
   backend: DawnBackendContext;
   submittedCount: number;
@@ -278,6 +280,15 @@ export const addFinishedCallbackToDawnQueueManager = (
   });
 };
 
+export const hasUnfinishedDawnQueueWork = (
+  queueManager: DawnQueueManager,
+): boolean => queueManager.outstandingSubmissions.length > 0;
+
+export const hasPendingDawnQueueWork = (
+  queueManager: DawnQueueManager,
+): boolean =>
+  queueManager.outstandingSubmissions.some((submission) => submission.state === 'pending');
+
 export const checkForFinishedDawnQueueManager = async (
   queueManager: DawnQueueManager,
   options: Readonly<{
@@ -304,6 +315,14 @@ export const checkForFinishedDawnQueueManager = async (
 
   drainFinishedSubmissions(queueManager);
 };
+
+export const checkForFinishedDawnQueueWork = (
+  queueManager: DawnQueueManager,
+  syncToCpu: DrawingSyncToCpu = 'no',
+): Promise<void> =>
+  checkForFinishedDawnQueueManager(queueManager, {
+    syncToCpu: syncToCpu === 'yes',
+  });
 
 export const tickDawnQueueManager = async (
   queueManager: DawnQueueManager,

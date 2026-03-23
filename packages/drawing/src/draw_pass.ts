@@ -41,6 +41,7 @@ export type DrawingVertexLayoutKey =
 
 export type DrawingDepthStencilKey =
   | 'none'
+  | 'direct'
   | 'direct-depth-less'
   | 'clip-stencil-write'
   | 'clip-stencil-intersect'
@@ -272,6 +273,7 @@ type DrawingBinding = {
 
 type DrawingLayer = {
   order: number;
+  paintOrder: number;
   head: DrawingBinding | null;
   tail: DrawingBinding | null;
 };
@@ -296,8 +298,10 @@ const findBindingByKey = (
   key: string,
   wrapperKind: DrawingClipStackWrapperKind,
   requiresBarrier: boolean,
+  startBinding: DrawingBinding | null = null,
 ): DrawingBinding | null => {
-  for (const binding of iterateBindings(layer)) {
+  const endBinding = startBinding?.prev ?? null;
+  for (let binding = layer.tail; binding && binding !== endBinding; binding = binding.prev) {
     if (
       binding.key === key &&
       binding.wrapperKind === wrapperKind &&
@@ -355,29 +359,8 @@ const renderStepRequiresBarrier = (
   step: Pick<DrawingPreparedRenderStep, 'requiresBarrier'>,
 ): boolean => step.requiresBarrier;
 
-const renderStepsHaveCompatibleBinding = (
-  left: DrawingPreparedRenderStep,
-  right: DrawingPreparedRenderStep,
-): boolean =>
-  left.pipelineDesc.label === right.pipelineDesc.label &&
-  left.requiresBarrier === right.requiresBarrier &&
-  left.usesStencil === right.usesStencil &&
-  left.usesFillStencil === right.usesFillStencil &&
-  left.usesDepth === right.usesDepth;
-
 const getClipKey = (step: Pick<DrawingPreparedRenderStep, 'draw'>): string =>
   step.draw.clip?.effectiveElementIds?.join(',') ?? '';
-
-const renderStepsRequireIsolation = (
-  left: DrawingPreparedRenderStep,
-  right: DrawingPreparedRenderStep,
-): boolean =>
-  left.dependsOnDst !== right.dependsOnDst ||
-  left.requiresBarrier !== right.requiresBarrier ||
-  left.stepIndex !== right.stepIndex && (left.kind === 'fill-inner' || right.kind === 'fill-inner') ||
-  left.stepIndex !== right.stepIndex && (left.usesFillStencil !== right.usesFillStencil) ||
-  left.stepIndex !== right.stepIndex && (left.usesDepth !== right.usesDepth) ||
-  getClipKey(left) !== getClipKey(right);
 
 const bindingCanMatchRenderStep = (
   binding: DrawingBinding,
@@ -385,6 +368,13 @@ const bindingCanMatchRenderStep = (
 ): boolean => binding.key === renderStepBindingKey(step) &&
   binding.wrapperKind === renderStepWrapperKind(step) &&
   binding.requiresBarrier === renderStepRequiresBarrier(step);
+
+const canRenderStepOverlapOwnBinding = (
+  step: DrawingPreparedRenderStep,
+): boolean =>
+  renderStepWrapperKind(step) === 'single' &&
+  !step.requiresBarrier &&
+  !step.dependsOnDst;
 
 const expandRenderSteps = (
   step: MutablePreparedStep,
@@ -451,7 +441,7 @@ const expandRenderSteps = (
           'path',
           'device-vertex',
           (step.draw.dstUsage & drawingDstUsage.dstReadRequired) !== 0 ? 'src' : step.draw.blendMode,
-          step.clipDrawIds.length > 0 ? 'clip-cover' : 'none',
+          step.clipDrawIds.length > 0 ? 'clip-cover' : 'direct',
         ), step.draw.innerFillBounds ? 2 : 1, false, false);
       }
     }
@@ -463,7 +453,7 @@ const expandRenderSteps = (
         'path',
         'device-vertex',
         (step.draw.dstUsage & drawingDstUsage.dstReadRequired) !== 0 ? 'src' : step.draw.blendMode,
-        step.clipDrawIds.length > 0 ? 'clip-cover' : 'none',
+        step.clipDrawIds.length > 0 ? 'clip-cover' : 'direct',
       ), 1, false, false);
     }
   }
@@ -490,26 +480,22 @@ const canInsertIntoLayer = (
   const stepRequiresBarrier = renderStepRequiresBarrier(step);
   let compatible = false;
   let bindingNode: DrawingBinding | null = null;
-  const bindings = [...iterateBindings(layer)];
-  const orderedBindings = direction === 'backward' ? bindings.reverse() : bindings;
-  let boundaryReached = boundaryNode === null;
+  let binding = direction === 'forward'
+    ? boundaryNode ?? layer.head
+    : layer.tail;
+  const endBinding = direction === 'forward'
+    ? null
+    : boundaryNode?.prev ?? null;
 
-  for (const binding of orderedBindings) {
-    if (!boundaryReached) {
-      if (binding === boundaryNode) {
-        boundaryReached = true;
-      } else {
+  for (; binding && binding !== endBinding; binding = direction === 'forward' ? binding.next : binding.prev) {
+    if (bindingCanMatchRenderStep(binding, step)) {
+      compatible = true;
+      bindingNode = binding;
+      if (canRenderStepOverlapOwnBinding(step)) {
         continue;
       }
     }
-    if (!bindingIntersectsStep(binding, step)) {
-      continue;
-    }
-    if (
-      binding.wrapperKind !== stepWrapperKind ||
-      binding.key !== stepKey ||
-      binding.requiresBarrier !== stepRequiresBarrier
-    ) {
+    if (bindingIntersectsStep(binding, step)) {
       return {
         acceptable: false,
         compatible: false,
@@ -517,22 +503,8 @@ const canInsertIntoLayer = (
         bindingNode: null,
       };
     }
-    for (const existing of binding.steps) {
-      if (!stepsOverlap(existing, step)) {
-        continue;
-      }
-      if (renderStepsRequireIsolation(existing, step) || !renderStepsHaveCompatibleBinding(existing, step)) {
-        return {
-          acceptable: false,
-          compatible: false,
-          incompatibleOverlap: true,
-          bindingNode: null,
-        };
-      }
-    }
-    compatible = true;
-    bindingNode = binding;
   }
+
   return {
     acceptable: true,
     compatible,
@@ -544,32 +516,29 @@ const canInsertIntoLayer = (
 const insertStepIntoLayer = (
   layer: DrawingLayer,
   step: MutablePreparedRenderStep,
-  boundaryNode: DrawingBinding | null = null,
+  matchingBinding: DrawingBinding | null,
+  insertAtHead = false,
 ): DrawingBinding => {
-  const stepKey = renderStepBindingKey(step);
-  const wrapperKind = renderStepWrapperKind(step);
-  const requiresBarrier = renderStepRequiresBarrier(step);
-  const searchBindings = boundaryNode
-    ? [...iterateBindings(layer)].slice(Math.max(0, [...iterateBindings(layer)].indexOf(boundaryNode)))
-    : [...iterateBindings(layer)];
-  const existingBinding = searchBindings.find((binding) => bindingCanMatchRenderStep(binding, step)) ??
-    (!boundaryNode ? findBindingByKey(layer, stepKey, wrapperKind, requiresBarrier) : null);
-  if (existingBinding) {
-    existingBinding.steps.push(step);
-    existingBinding.bounds = unionStepBounds(existingBinding.bounds, step.drawBounds);
-    return existingBinding;
+  if (matchingBinding) {
+    if (insertAtHead) {
+      matchingBinding.steps.unshift(step);
+    } else {
+      matchingBinding.steps.push(step);
+    }
+    matchingBinding.bounds = unionStepBounds(matchingBinding.bounds, step.drawBounds);
+    return matchingBinding;
   }
 
   const binding: DrawingBinding = {
-    key: stepKey,
-    wrapperKind,
-    requiresBarrier,
+    key: renderStepBindingKey(step),
+    wrapperKind: renderStepWrapperKind(step),
+    requiresBarrier: renderStepRequiresBarrier(step),
     bounds: step.drawBounds,
     steps: [step],
     prev: null,
     next: null,
   };
-  insertBindingAfter(layer, binding, boundaryNode ?? layer.tail);
+  insertBindingAfter(layer, binding, layer.tail);
   return binding;
 };
 
@@ -602,6 +571,28 @@ const createOrderingDevice = (): DrawingOrderingDevice => ({
   nextClipDrawId: 1,
   trackedRawElements: new Set(),
 });
+
+const computeCompressedPaintOrders = (
+  steps: readonly MutablePreparedStep[],
+): readonly number[] => {
+  const paintOrders: number[] = [];
+  for (let index = 0; index < steps.length; index += 1) {
+    const step = steps[index]!;
+    let paintOrder = noIntersectionPaintOrder;
+    if (step.dependsOnDst) {
+      for (let prevIndex = 0; prevIndex < index; prevIndex += 1) {
+        const prevStep = steps[prevIndex]!;
+        if (!rectsIntersect(prevStep.drawBounds, step.drawBounds)) {
+          continue;
+        }
+        paintOrder = Math.max(paintOrder, prevStep.paintOrder + 1);
+      }
+    }
+    paintOrders.push(paintOrder);
+    (step as { paintOrder: number }).paintOrder = paintOrder;
+  }
+  return Object.freeze(paintOrders);
+};
 
 const resetOrderingDevice = (
   device: DrawingOrderingDevice,
@@ -698,6 +689,7 @@ const assignLayeredOrder = (
     requiresBarrier: (step.draw.dstUsage & drawingDstUsage.dstReadRequired) !== 0,
     clipDrawIds: [] as number[],
   }));
+  computeCompressedPaintOrders(preparedSteps);
   const renderSteps = preparedSteps.flatMap((step, stepIndex) => expandRenderSteps(step, stepIndex));
 
   for (const [stepIndex, step] of preparedSteps.entries()) {
@@ -723,60 +715,8 @@ const assignLayeredOrder = (
       }
     }
     const drawRenderSteps = renderSteps.filter((candidate) => candidate.stepIndex === stepIndex);
-    let targetLayer: DrawingLayer | null = null;
-    let targetBindingNode: DrawingBinding | null = null;
-
-    if (dependsOnDst) {
-      const stopIndex = clipAnchorLayer ? device.layers.indexOf(clipAnchorLayer) : -1;
-      for (let index = device.layers.length - 1; index >= 0; index -= 1) {
-        const layer = device.layers[index]!;
-        const verdict = canInsertIntoLayer(layer, drawRenderSteps[0]!, clipAnchorBindingNode, 'backward');
-        if (verdict.acceptable) {
-          targetLayer = layer;
-          targetBindingNode = verdict.bindingNode;
-          if (verdict.compatible) {
-            break;
-          }
-          continue;
-        }
-        if (verdict.incompatibleOverlap) {
-          break;
-        }
-        if (index === stopIndex) {
-          break;
-        }
-      }
-    } else {
-      const startIndex = clipAnchorLayer ? Math.max(0, device.layers.indexOf(clipAnchorLayer)) : 0;
-      for (let index = startIndex; index < device.layers.length; index += 1) {
-        const layer = device.layers[index]!;
-        const verdict = canInsertIntoLayer(layer, drawRenderSteps[0]!, clipAnchorBindingNode, 'forward');
-        if (verdict.acceptable) {
-          targetLayer = layer;
-          targetBindingNode = verdict.bindingNode;
-          if (verdict.compatible) {
-            break;
-          }
-        }
-      }
-    }
-
-    if (!targetLayer) {
-      targetLayer = {
-        order: device.nextLayerOrder++,
-        head: null,
-        tail: null,
-      };
-      if (clipAnchorLayer && !dependsOnDst) {
-        const anchorIndex = device.layers.indexOf(clipAnchorLayer);
-        device.layers.splice(anchorIndex + 1, 0, targetLayer);
-      } else {
-        device.layers.push(targetLayer);
-      }
-    }
-
-    step.paintOrder = targetLayer.order - firstLayerOrder;
     let insertedBindingNode: DrawingBinding | null = null;
+    let insertedLayer: DrawingLayer | null = null;
     let lastInsertedRenderStep: MutablePreparedRenderStep | null = null;
     for (const renderStep of drawRenderSteps) {
       const orderedRenderStep: MutablePreparedRenderStep = {
@@ -784,10 +724,93 @@ const assignLayeredOrder = (
         paintOrder: step.paintOrder,
       };
       lastInsertedRenderStep = orderedRenderStep;
+      const candidateLayers = device.layers.filter((layer) => layer.paintOrder === step.paintOrder);
+      let targetLayer: DrawingLayer | null = null;
+      let targetBindingNode: DrawingBinding | null = null;
+
+      if (dependsOnDst) {
+        const stopIndex = clipAnchorLayer && clipAnchorLayer.paintOrder === step.paintOrder
+          ? candidateLayers.indexOf(clipAnchorLayer)
+          : -1;
+        for (let index = candidateLayers.length - 1; index >= 0; index -= 1) {
+          const layer = candidateLayers[index]!;
+          const boundaryNode = layer === clipAnchorLayer ? clipAnchorBindingNode : null;
+          const verdict = canInsertIntoLayer(layer, orderedRenderStep, boundaryNode, 'backward');
+          if (verdict.acceptable) {
+            targetLayer = layer;
+            targetBindingNode = verdict.bindingNode;
+            if (verdict.compatible) {
+              break;
+            }
+            continue;
+          }
+          if (verdict.incompatibleOverlap || index === stopIndex) {
+            break;
+          }
+        }
+      } else {
+        const startLayer = clipAnchorLayer && clipAnchorLayer.paintOrder === step.paintOrder
+          ? clipAnchorLayer
+          : candidateLayers[0] ?? null;
+        if (startLayer) {
+          const startBinding = startLayer === clipAnchorLayer ? clipAnchorBindingNode : null;
+          const searchMatch = !orderedRenderStep.usesFillStencil
+            ? findBindingByKey(
+              startLayer,
+              renderStepBindingKey(orderedRenderStep),
+              renderStepWrapperKind(orderedRenderStep),
+              renderStepRequiresBarrier(orderedRenderStep),
+              startBinding,
+            )
+            : null;
+          if (searchMatch) {
+            targetLayer = startLayer;
+            targetBindingNode = searchMatch;
+          } else {
+            const startIndex = candidateLayers.indexOf(startLayer);
+            for (let index = Math.max(startIndex, 0); index < candidateLayers.length; index += 1) {
+              const layer = candidateLayers[index]!;
+              const boundaryNode = layer === startLayer ? startBinding : null;
+              const verdict = canInsertIntoLayer(layer, orderedRenderStep, boundaryNode, 'forward');
+              if (verdict.acceptable) {
+                targetLayer = layer;
+                targetBindingNode = verdict.bindingNode;
+                if (verdict.compatible) {
+                  break;
+                }
+              }
+            }
+          }
+        }
+      }
+
+      if (!targetLayer) {
+        targetLayer = {
+          order: device.nextLayerOrder++,
+          paintOrder: step.paintOrder,
+          head: null,
+          tail: null,
+        };
+        if (clipAnchorLayer && !dependsOnDst && clipAnchorLayer.paintOrder === step.paintOrder) {
+          const anchorIndex = device.layers.indexOf(clipAnchorLayer);
+          device.layers.splice(anchorIndex + 1, 0, targetLayer);
+        } else {
+          const insertIndex = device.layers.findIndex((layer) => layer.paintOrder > step.paintOrder);
+          if (insertIndex < 0) {
+            device.layers.push(targetLayer);
+          } else {
+            device.layers.splice(insertIndex, 0, targetLayer);
+          }
+        }
+      }
+
+      insertedLayer = targetLayer;
       insertedBindingNode = insertStepIntoLayer(
         targetLayer,
         orderedRenderStep,
-        insertedBindingNode ?? (targetLayer === clipAnchorLayer ? clipAnchorBindingNode : targetBindingNode),
+        targetBindingNode,
+        !dependsOnDst &&
+          (!clipAnchorLayer || targetLayer !== clipAnchorLayer),
       );
     }
     for (let index = 0; index < clipElements.length; index += 1) {
@@ -803,7 +826,11 @@ const assignLayeredOrder = (
       const accumulatedUsageBounds = updateDrawingRawClipElementForDraw(
         rawElement,
         usageBounds,
-        createClipLatestInsertion(targetLayer, insertedBindingNode, lastInsertedRenderStep ?? drawRenderSteps[drawRenderSteps.length - 1]!),
+        createClipLatestInsertion(
+          insertedLayer!,
+          insertedBindingNode,
+          lastInsertedRenderStep ?? drawRenderSteps[drawRenderSteps.length - 1]!,
+        ),
       );
 
       if (!rawTriangles || rawTriangles.length === 0) {
@@ -822,7 +849,7 @@ const assignLayeredOrder = (
           maxDepth: depthAsFloat(
             Math.min(lastDepthIndex, Math.max(pendingDraw.maxDepthIndex, step.depthIndex) + 1),
           ),
-          paintOrder: targetLayer.order - firstLayerOrder,
+          paintOrder: step.paintOrder,
           sourceRenderStep: createClipSourceRenderStep(
             lastInsertedRenderStep ?? drawRenderSteps[drawRenderSteps.length - 1]!,
           ),
@@ -843,10 +870,10 @@ const assignLayeredOrder = (
         maxDepthIndex: step.depthIndex,
         maxDepth: depthAsFloat(Math.min(lastDepthIndex, step.depthIndex + 1)),
         firstUseOrder: step.originalOrder,
-        paintOrder: targetLayer.order - firstLayerOrder,
+        paintOrder: step.paintOrder,
         stencilIndex: index,
         latestInsertion: createClipLatestInsertion(
-          targetLayer,
+          insertedLayer!,
           insertedBindingNode,
           lastInsertedRenderStep ?? drawRenderSteps[drawRenderSteps.length - 1]!,
         ),
@@ -889,7 +916,7 @@ const createPipelineDesc = (
   shader: DrawingShaderKey,
   vertexLayout: DrawingVertexLayoutKey,
   blendMode: DrawingBlendMode,
-  depthStencil: DrawingDepthStencilKey = 'none',
+  depthStencil: DrawingDepthStencilKey = 'direct',
   colorWriteDisabled = false,
   topology: DrawingPrimitiveTopology = 'triangle-list',
 ): DrawingGraphicsPipelineDesc => ({

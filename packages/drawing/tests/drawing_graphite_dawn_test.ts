@@ -3224,6 +3224,31 @@ Deno.test('dawn stroke patch shader keeps Skia-like combined-edge solve structur
     strokeShaderSource.includes('step.matrix1.w'),
     true,
   );
+  assertEquals(strokeShaderSource.includes('return robust_normalize_diff(p1, p0);'), true);
+});
+
+Deno.test('dawn curve patch shader keeps line patches on the line code path', () => {
+  const mock = createMockGpuContext();
+  const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
+  sharedContext.resourceProvider.findOrCreateGraphicsPipeline({
+    label: 'curve-patch-test',
+    shader: 'curve-patch',
+    vertexLayout: 'curve-patch-instance',
+    blendMode: 'src-over',
+    colorWriteDisabled: false,
+    depthStencil: 'direct',
+    topology: 'triangle-list',
+  });
+
+  const curveShader = mock.created.shaderModules.find((module) =>
+    module.label === 'drawing-curve-patch-shader'
+  );
+  assertEquals(typeof curveShader?.code, 'string');
+  if (typeof curveShader?.code !== 'string') {
+    throw new Error('expected curve patch shader source');
+  }
+  const curveShaderSource = curveShader.code;
+  assertEquals(curveShaderSource.includes('if (curveType < 0.5) {\n    return mix(p0, p1, t);'), true);
 });
 
 Deno.test('dawn resource provider reuses pipelines across command buffers', () => {

@@ -406,7 +406,7 @@ fn local_to_device(position: vec2<f32>) -> vec2<f32> {
 
 
 fn device_to_ndc(position: vec2<f32>) -> vec4<f32> {
-  return vec4<f32>((position * viewport.scale) + viewport.translate, 0.0, 1.0);
+  return vec4<f32>((position * viewport.scale) + viewport.translate, step.matrix1.w, 1.0);
 }
 
 @vertex
@@ -582,7 +582,7 @@ struct VertexOut {
 };
 
 fn device_to_ndc(position: vec2<f32>) -> vec4<f32> {
-  return vec4<f32>((position * viewport.scale) + viewport.translate, 0.0, 1.0);
+  return vec4<f32>((position * viewport.scale) + viewport.translate, step.matrix1.w, 1.0);
 }
 
 fn local_to_device(position: vec2<f32>) -> vec2<f32> {
@@ -603,11 +603,7 @@ fn eval_patch(
 ) -> vec2<f32> {
   let oneMinusT = 1.0 - t;
   if (curveType < 0.5) {
-    return
-      (oneMinusT * oneMinusT * oneMinusT * p0) +
-      (3.0 * oneMinusT * oneMinusT * t * p1) +
-      (3.0 * oneMinusT * t * t * p2) +
-      (t * t * t * p3);
+    return mix(p0, p1, t);
   }
   if (curveType < 1.5) {
     return (oneMinusT * oneMinusT * p0) + (2.0 * oneMinusT * t * p1) + (t * t * p2);
@@ -714,7 +710,7 @@ struct VertexOut {
 };
 
 fn device_to_ndc(position: vec2<f32>) -> vec4<f32> {
-  return vec4<f32>((position * viewport.scale) + viewport.translate, 0.0, 1.0);
+  return vec4<f32>((position * viewport.scale) + viewport.translate, step.matrix1.w, 1.0);
 }
 
 fn local_to_device(position: vec2<f32>) -> vec2<f32> {
@@ -889,12 +885,7 @@ fn eval_patch_tangent(
   t: f32,
 ) -> vec2<f32> {
   if (curveType < 0.5) {
-    let oneMinusT = 1.0 - t;
-    let tangent =
-      (3.0 * oneMinusT * oneMinusT * (p1 - p0)) +
-      (6.0 * oneMinusT * t * (p2 - p1)) +
-      (3.0 * t * t * (p3 - p2));
-    return robust_normalize_diff(tangent, vec2<f32>(0.0, 0.0));
+    return robust_normalize_diff(p1, p0);
   }
   if (curveType < 1.5) {
     let tangent =
@@ -1263,6 +1254,14 @@ const createDirectDepthLessState = (): GPUDepthStencilState => ({
   depthCompare: 'less',
 });
 
+const createDirectState = (): GPUDepthStencilState => ({
+  format: stencilFormat,
+  depthWriteEnabled: false,
+  depthCompare: 'always',
+  stencilReadMask: 0x00,
+  stencilWriteMask: 0x00,
+});
+
 const createClipCoverDepthLessState = (): GPUDepthStencilState => ({
   format: stencilFormat,
   depthWriteEnabled: true,
@@ -1599,13 +1598,15 @@ export const createDawnResourceProvider = (
       ? createCurvePatchLayout()
       : createStrokePatchLayout();
 
-  const getDepthStencil = (
-    descriptor: DrawingGraphicsPipelineDesc,
-  ): GPUDepthStencilState | undefined =>
-    descriptor.depthStencil === 'none'
-      ? undefined
-      : descriptor.depthStencil === 'clip-stencil-write'
-      ? {
+const getDepthStencil = (
+  descriptor: DrawingGraphicsPipelineDesc,
+): GPUDepthStencilState | undefined =>
+  descriptor.depthStencil === 'none'
+    ? undefined
+    : descriptor.depthStencil === 'direct'
+    ? createDirectState()
+    : descriptor.depthStencil === 'clip-stencil-write'
+    ? {
         format: stencilFormat,
         depthWriteEnabled: false,
         depthCompare: 'always',

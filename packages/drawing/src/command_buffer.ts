@@ -310,14 +310,7 @@ export const encodePreparedDawnCommandBuffer = (
   const resolveView = acquireColorResolveView(binding);
   const unsupportedCommands: DrawingCommand[] = [...preparedWork.prepared.unsupportedCommands];
   let passCount = 0;
-  const hasDepthStencilSteps = preparedWork.tasks.tasks.some((task) =>
-    task.drawPasses.some((passInfo) =>
-      passInfo.renderSteps.some((step) => step.usesStencil || step.usesFillStencil || step.usesDepth)
-    )
-  );
-  const stencilView = hasDepthStencilSteps
-    ? sharedContext.resourceProvider.getStencilAttachmentView()
-    : undefined;
+  const stencilView = sharedContext.resourceProvider.getStencilAttachmentView();
 
   for (let taskIndex = 0; taskIndex < preparedWork.tasks.tasks.length; taskIndex += 1) {
     const task = preparedWork.tasks.tasks[taskIndex]!;
@@ -347,41 +340,8 @@ export const encodePreparedDawnCommandBuffer = (
       let stepIndex = 0;
       while (stepIndex < passInfo.renderSteps.length) {
         const step = passInfo.renderSteps[stepIndex]!;
-        const clipStencilCache: ClipStencilCache = { key: null, reference: 0 };
-        if (step.usesFillStencil) {
-          const clipTextureBindGroup = createStepClipTextureBindGroup(
-            sharedContext,
-            preparedWork.resources,
-            passResources.steps[stepIndex]!,
-          );
-          const pass = encoder.beginRenderPass(
-            createRenderPassDescriptor(
-              colorView,
-              resolveView,
-              passInfo.clearColor,
-              colorLoadOp,
-              stencilView,
-            ),
-          );
-          encodePreparedStep(
-            pass,
-            step,
-            passResources.steps[stepIndex]!,
-            passResources,
-            preparedWork.resources,
-            sharedContext.backend.target,
-            preparedWork.resources.viewportBindGroup,
-            clipTextureBindGroup,
-            clipStencilCache,
-          );
-          pass.end();
-          passCount += 1;
-          colorLoadOp = 'load';
-          stepIndex += 1;
-          continue;
-        }
-
         if (stepRequiresDstRead(step)) {
+          const clipStencilCache: ClipStencilCache = { key: null, reference: 0 };
           if (colorLoadOp === 'clear') {
             const clearPass = encoder.beginRenderPass(
               createRenderPassDescriptor(
@@ -445,13 +405,10 @@ export const encodePreparedDawnCommandBuffer = (
         let batchUsesDepth = false;
         for (let batchIndex = stepIndex; batchIndex < passInfo.renderSteps.length; batchIndex += 1) {
           const batchStep = passInfo.renderSteps[batchIndex]!;
-          if (
-            batchStep.usesFillStencil ||
-            stepRequiresDstRead(batchStep)
-          ) {
+          if (stepRequiresDstRead(batchStep)) {
             break;
           }
-          batchUsesDepth ||= batchStep.usesDepth || batchStep.usesStencil;
+          batchUsesDepth ||= batchStep.usesDepth || batchStep.usesStencil || batchStep.usesFillStencil;
         }
         const pass = encoder.beginRenderPass(
           createRenderPassDescriptor(
@@ -462,11 +419,9 @@ export const encodePreparedDawnCommandBuffer = (
             batchUsesDepth ? stencilView : undefined,
           ),
         );
-        clipStencilCache.key = null;
-        clipStencilCache.reference = 0;
+        const clipStencilCache: ClipStencilCache = { key: null, reference: 0 };
         while (
           stepIndex < passInfo.renderSteps.length &&
-          !passInfo.renderSteps[stepIndex]!.usesFillStencil &&
           !stepRequiresDstRead(passInfo.renderSteps[stepIndex]!)
         ) {
           const clipTextureBindGroup = createStepClipTextureBindGroup(

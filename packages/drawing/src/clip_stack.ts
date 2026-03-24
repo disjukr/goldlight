@@ -1,4 +1,4 @@
-import { type Point2D, type Rect, transformPoint2D } from '@rieul3d/geometry';
+import { type Point2D, type Rect, transformPoint2D } from '@goldlight/geometry';
 import type {
   DrawingClip,
   DrawingClipRect,

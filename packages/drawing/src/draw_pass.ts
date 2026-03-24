@@ -1,4 +1,4 @@
-import type { Point2D, Rect } from '@rieul3d/geometry';
+import type { Point2D, Rect } from '@goldlight/geometry';
 import type { DrawingRecording } from './recording.ts';
 import {
   captureDrawingRawClipElementDeferredDraw,

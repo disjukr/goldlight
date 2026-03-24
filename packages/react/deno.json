@@ -1,5 +1,5 @@
 {
-  "name": "@rieul3d/react",
+  "name": "@goldlight/react",
   "version": "0.0.0",
   "exports": {
     ".": "./mod.ts",

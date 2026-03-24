@@ -1,4 +1,4 @@
-import type { MeshAttribute, MeshPrimitive, Quat } from '@rieul3d/ir';
+import type { MeshAttribute, MeshPrimitive, Quat } from '@goldlight/ir';
 
 export type MeshBounds = Readonly<{
   min: Readonly<{ x: number; y: number; z: number }>;

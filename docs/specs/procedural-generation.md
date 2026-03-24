@@ -1,9 +1,9 @@
 # Procedural Generation
 
-`@rieul3d/procedural` provides deterministic CPU-side helpers for generating 2D textures and 3D
+`@goldlight/procedural` provides deterministic CPU-side helpers for generating 2D textures and 3D
 volumes without depending on checked-in source assets.
 
-Low-level deterministic samplers live in `@rieul3d/math`, while `@rieul3d/procedural` owns baked
+Low-level deterministic samplers live in `@goldlight/math`, while `@goldlight/procedural` owns baked
 resource generation on top of those samplers and no longer re-exports the math layer.
 
 ## Package Role

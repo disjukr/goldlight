@@ -3,7 +3,7 @@ import {
   type GpuLostInfo,
   type RenderTarget,
   requestGpuContext,
-} from '@rieul3d/gpu';
+} from '@goldlight/gpu';
 
 export type DawnBackendTick = (
   context: DawnBackendContext,

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This document defines the contract for reacting to WebGPU device loss in `rieul3d`. Recovery is
+This document defines the contract for reacting to WebGPU device loss in `goldlight`. Recovery is
 explicit: callers own device replacement, target rebinding, residency rebuild, and the first frame
 submitted on the new device.
 

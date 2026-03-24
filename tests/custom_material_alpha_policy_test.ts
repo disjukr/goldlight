@@ -1,7 +1,7 @@
 import { assert, assertEquals } from 'jsr:@std/assert@^1.0.14';
-import { evaluateScene } from '@rieul3d/core';
-import { createOffscreenBinding, createRuntimeResidency } from '@rieul3d/gpu';
-import { appendMaterial, appendMesh, appendNode, createNode, createSceneIr } from '@rieul3d/ir';
+import { evaluateScene } from '@goldlight/core';
+import { createOffscreenBinding, createRuntimeResidency } from '@goldlight/gpu';
+import { appendMaterial, appendMesh, appendNode, createNode, createSceneIr } from '@goldlight/ir';
 import {
   createMaterialRegistry,
   ensureMaterialPipeline,
@@ -12,7 +12,7 @@ import {
   registerWgslMaterialTemplate,
   renderForwardFrame,
   resolveMaterialVariant,
-} from '@rieul3d/renderer';
+} from '@goldlight/renderer';
 
 type MockBindGroup = Readonly<{
   entries: readonly GPUBindGroupEntry[];

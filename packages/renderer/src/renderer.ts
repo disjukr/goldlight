@@ -1,6 +1,6 @@
-import type { EvaluatedCamera, EvaluatedScene } from '@rieul3d/core';
-import type { Material } from '@rieul3d/ir';
-import { buildBvh, type BvhNode, type RaytraceTriangle } from '@rieul3d/raytrace';
+import type { EvaluatedCamera, EvaluatedScene } from '@goldlight/core';
+import type { Material } from '@goldlight/ir';
+import { buildBvh, type BvhNode, type RaytraceTriangle } from '@goldlight/raytrace';
 import {
   acquireColorAttachmentView,
   acquireDepthAttachmentView,
@@ -12,7 +12,7 @@ import {
   type RenderContextBinding,
   type RuntimeResidency,
   type TextureResidency,
-} from '@rieul3d/gpu';
+} from '@goldlight/gpu';
 import { EXRLoader } from 'npm:three@0.180.0/examples/jsm/loaders/EXRLoader.js';
 import builtInForwardShader from './shaders/built_in_forward_unlit.wgsl' with { type: 'text' };
 import builtInForwardLitShader from './shaders/built_in_forward_lit.wgsl' with { type: 'text' };

@@ -26,5 +26,5 @@ Requirements:
 - A runtime where `navigator.gpu` can request a WebGPU adapter/device
 
 The script builds a small indexed + non-indexed unlit scene, renders it through the existing forward
-renderer, reads back the offscreen texture, and exports the RGBA bytes with `@rieul3d/exporters`
+renderer, reads back the offscreen texture, and exports the RGBA bytes with `@goldlight/exporters`
 `exportPngRgba`.

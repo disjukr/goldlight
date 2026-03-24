@@ -1,7 +1,7 @@
 # BYOW Primitives Demo
 
-Windows-native BYOW example using the `@rieul3d/desktop` shell, `Deno.UnsafeWindowSurface`, and the
-built-in `@rieul3d/geometry` mesh generators.
+Windows-native BYOW example using the `@goldlight/desktop` shell, `Deno.UnsafeWindowSurface`, and the
+built-in `@goldlight/geometry` mesh generators.
 
 This demo renders the current primitive set through the runtime's mesh path with built-in `lit`
 materials and a directional light, following the same stable forward-rendering path used by the BYOW

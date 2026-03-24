@@ -6,7 +6,7 @@ Accepted
 
 ## Decision
 
-`@rieul3d/react` should introduce a real `react-reconciler` host on top of a package-owned scene
+`@goldlight/react` should introduce a real `react-reconciler` host on top of a package-owned scene
 document instead of driving live updates by rebuilding whole `SceneIr` snapshots directly from each
 React commit.
 
@@ -17,12 +17,12 @@ This scene document should be a React-adjacent but renderer-independent object g
 - preserves explicit parent/child relationships and resource bindings in a form that can be updated
   incrementally across React commits
 - can derive published data snapshots or update payloads for non-React runtime adapters
-- stays inside `@rieul3d/react` rather than becoming the new public source of truth for core
+- stays inside `@goldlight/react` rather than becoming the new public source of truth for core
   packages
 
 The proposed execution boundary is:
 
-- React components reconcile against host instances owned by `@rieul3d/react`
+- React components reconcile against host instances owned by `@goldlight/react`
 - host operations update an internal scene document instead of mutating GPU/runtime state directly
 - the scene document publishes data-only scene snapshots and/or partial-apply update payloads across
   the boundary preferred by ADR 0006
@@ -57,7 +57,7 @@ current architectural constraint that core runtime packages remain React-indepen
 
 ## Consequences
 
-- `@rieul3d/react` gains an internal mutable document/host-instance layer even though its published
+- `@goldlight/react` gains an internal mutable document/host-instance layer even though its published
   APIs should remain data-oriented
 - the current `createSceneRoot()` snapshot bridge becomes a compatibility waypoint instead of the
   only viable React integration path

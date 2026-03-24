@@ -1,4 +1,4 @@
-import type { Matrix2D, Path2D, Point2D, Rect, Shape2D, Size2D } from '@rieul3d/geometry';
+import type { Matrix2D, Path2D, Point2D, Rect, Shape2D, Size2D } from '@goldlight/geometry';
 
 export type DrawingPoint2D = Point2D;
 export type DrawingSize2D = Size2D;

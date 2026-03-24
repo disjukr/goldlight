@@ -1,5 +1,5 @@
 import CanvasKitModule from 'npm:canvaskit-wasm@^0.40.0';
-import { createPath2D, createRect, createRectPath2D, type Point2D } from '@rieul3d/geometry';
+import { createPath2D, createRect, createRectPath2D, type Point2D } from '@goldlight/geometry';
 
 const outputWidth = 960;
 const outputHeight = 720;

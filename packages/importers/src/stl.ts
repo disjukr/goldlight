@@ -1,5 +1,5 @@
-import { appendMesh, appendNode, createNode, createSceneIr } from '@rieul3d/ir';
-import type { MeshAttribute, SceneIr } from '@rieul3d/ir';
+import { appendMesh, appendNode, createNode, createSceneIr } from '@goldlight/ir';
+import type { MeshAttribute, SceneIr } from '@goldlight/ir';
 
 export const importStlFromText = (source: string, sceneId = 'stl-scene'): SceneIr => {
   const positions: number[] = [];

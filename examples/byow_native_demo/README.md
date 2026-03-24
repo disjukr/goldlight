@@ -1,8 +1,8 @@
 # BYOW Native Demo
 
-Windows-native BYOW example using the `@rieul3d/desktop` shell and `Deno.UnsafeWindowSurface`.
+Windows-native BYOW example using the `@goldlight/desktop` shell and `Deno.UnsafeWindowSurface`.
 
-This demo exercises more of the `rieul3d` runtime than the startup triangle by rendering:
+This demo exercises more of the `goldlight` runtime than the startup triangle by rendering:
 
 - an indexed quad through the built-in textured unlit path
 - an additional accent mesh with a separate material

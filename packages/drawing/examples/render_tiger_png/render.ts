@@ -1,5 +1,5 @@
 import { dirname, fromFileUrl, join } from '@std/path';
-import { exportPngRgba } from '@rieul3d/exporters';
+import { exportPngRgba } from '@goldlight/exporters';
 import {
   checkForFinishedDawnQueueWork,
   concatDrawingRecorderTransform,
@@ -11,15 +11,15 @@ import {
   restoreDrawingRecorder,
   saveDrawingRecorder,
   submitToDawnQueueManager,
-} from '@rieul3d/drawing';
-import { createOffscreenBinding, readOffscreenSnapshot } from '@rieul3d/gpu';
+} from '@goldlight/drawing';
+import { createOffscreenBinding, readOffscreenSnapshot } from '@goldlight/gpu';
 import {
   createPath2D,
   identityMatrix2D,
   multiplyMatrix2D,
   withPath2DFillRule,
-} from '@rieul3d/geometry';
-import type { Matrix2D, Path2D, PathVerb2D } from '@rieul3d/geometry';
+} from '@goldlight/geometry';
+import type { Matrix2D, Path2D, PathVerb2D } from '@goldlight/geometry';
 
 type SvgPaint = readonly [number, number, number, number] | null;
 

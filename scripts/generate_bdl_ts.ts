@@ -221,7 +221,7 @@ function renderDef(def: bdlIr.Def, module: bdlIr.Module): string {
       ].join('\n');
     }
     case 'Proc':
-      return `// Proc ${def.name} is omitted from generated type aliases in rieul3d.\n`;
+      return `// Proc ${def.name} is omitted from generated type aliases in goldlight.\n`;
   }
 }
 

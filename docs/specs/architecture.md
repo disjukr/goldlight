@@ -2,7 +2,7 @@
 
 ## Goal
 
-`rieul3d` is a WebGPU-only spatial runtime. It is not a gameplay engine and does not define a
+`goldlight` is a WebGPU-only spatial runtime. It is not a gameplay engine and does not define a
 behavior framework, physics system, or editor shell.
 
 ## Layers
@@ -21,7 +21,7 @@ The runtime is split into explicit data and execution stages:
 ## Packages
 
 - `packages/ir`: schema and generated types for serializable scene IR.
-- BDL schema files must declare an explicit standard. `rieul3d` currently uses the `conventional`
+- BDL schema files must declare an explicit standard. `goldlight` currently uses the `conventional`
   standard for scene IR modules.
 - `packages/math`: low-level deterministic math and sampling helpers, including reusable noise
   functions.

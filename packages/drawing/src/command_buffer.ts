@@ -2,7 +2,7 @@ import {
   acquireColorAttachmentTexture,
   acquireColorResolveView,
   type RenderContextBinding,
-} from '@rieul3d/gpu';
+} from '@goldlight/gpu';
 import type { DrawingPreparedRecording, DrawingPreparedRenderStep } from './draw_pass.ts';
 import {
   type DawnPreparedWork,

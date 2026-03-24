@@ -6,7 +6,7 @@ Accepted
 
 ## Decision
 
-`rieul3d` only targets WebGPU. WebGL fallback is out of scope for v1.
+`goldlight` only targets WebGPU. WebGL fallback is out of scope for v1.
 
 ## Consequences
 

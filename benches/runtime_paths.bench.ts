@@ -1,4 +1,4 @@
-import { evaluateScene } from '@rieul3d/core';
+import { evaluateScene } from '@goldlight/core';
 import {
   createMaterialUploadPlan,
   createOffscreenBinding,
@@ -8,7 +8,7 @@ import {
   ensureSceneMeshResidency,
   type GpuTextureUploadContext,
   uploadTextureResidency,
-} from '@rieul3d/gpu';
+} from '@goldlight/gpu';
 import {
   appendMaterial,
   appendMesh,
@@ -16,7 +16,7 @@ import {
   appendTexture,
   createNode,
   createSceneIr,
-} from '@rieul3d/ir';
+} from '@goldlight/ir';
 import {
   assertRendererSceneCapabilities,
   collectRendererCapabilityIssues,
@@ -24,7 +24,7 @@ import {
   createMaterialRegistry,
   type GpuRenderExecutionContext,
   renderForwardFrame,
-} from '@rieul3d/renderer';
+} from '@goldlight/renderer';
 
 const createBenchScene = () => {
   let scene = createSceneIr('bench-scene');

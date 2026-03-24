@@ -1,5 +1,5 @@
 import { assertAlmostEquals, assertEquals, assertThrows } from 'jsr:@std/assert@^1.0.14';
-import { createScreenWorldRay, evaluateScene, reevaluateSceneTransforms } from '@rieul3d/core';
+import { createScreenWorldRay, evaluateScene, reevaluateSceneTransforms } from '@goldlight/core';
 import {
   appendAnimationClip,
   appendCamera,
@@ -10,7 +10,7 @@ import {
   createPerspectiveCamera,
   createSceneIr,
   setActiveCamera,
-} from '@rieul3d/ir';
+} from '@goldlight/ir';
 
 Deno.test('evaluateScene computes world transforms across parent-child nodes', () => {
   let scene = createSceneIr('scene');

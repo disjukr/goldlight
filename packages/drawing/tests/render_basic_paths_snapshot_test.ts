@@ -1,5 +1,5 @@
 import { assertEquals } from 'jsr:@std/assert@^1.0.14';
-import { canUseWebGPU } from '@rieul3d/gpu';
+import { canUseWebGPU } from '@goldlight/gpu';
 import { renderBasicPathsSnapshot } from '../examples/render_basic_paths/render.ts';
 
 const expectedPngSha256 = 'caf4d25670dea72f877dae05147d25913dec524619f1b73e66fc33953bd051e4';

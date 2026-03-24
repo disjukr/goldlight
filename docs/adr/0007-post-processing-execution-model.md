@@ -6,7 +6,7 @@ Accepted
 
 ## Decision
 
-`rieul3d` should introduce post-processing as an explicit render-execution stage that runs between
+`goldlight` should introduce post-processing as an explicit render-execution stage that runs between
 scene rendering and final presentation instead of treating fullscreen effects as ad hoc renderer
 special cases.
 

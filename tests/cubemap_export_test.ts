@@ -1,5 +1,5 @@
 import { assertEquals, assertThrows } from 'jsr:@std/assert@^1.0.14';
-import { type CubemapSnapshotResult, exportCubemapSnapshot } from '@rieul3d/renderer';
+import { type CubemapSnapshotResult, exportCubemapSnapshot } from '@goldlight/renderer';
 
 const faceOrder = [
   'positive-x',

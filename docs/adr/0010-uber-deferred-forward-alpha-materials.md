@@ -6,7 +6,7 @@ Accepted
 
 ## Decision
 
-`@rieul3d` should model material alpha behavior as first-class Scene IR policy instead of inferring
+`@goldlight` should model material alpha behavior as first-class Scene IR policy instead of inferring
 render intent from whether a material happens to sample a texture.
 
 The renderer boundary should classify materials by explicit alpha policy:

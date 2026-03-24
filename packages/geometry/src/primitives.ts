@@ -1,4 +1,4 @@
-import type { MeshPrimitive } from '@rieul3d/ir';
+import type { MeshPrimitive } from '@goldlight/ir';
 
 type Vec2 = readonly [number, number];
 type Vec3 = readonly [number, number, number];

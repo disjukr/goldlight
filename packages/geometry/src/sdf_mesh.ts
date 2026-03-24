@@ -1,4 +1,4 @@
-import type { MeshPrimitive } from '@rieul3d/ir';
+import type { MeshPrimitive } from '@goldlight/ir';
 import { marchingCubesEdgeTable, marchingCubesTriTable } from './marching_cubes_tables.ts';
 
 type Vec3 = readonly [number, number, number];

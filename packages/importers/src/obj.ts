@@ -1,5 +1,5 @@
-import { appendMesh, appendNode, createNode, createSceneIr } from '@rieul3d/ir';
-import type { MeshAttribute, SceneIr } from '@rieul3d/ir';
+import { appendMesh, appendNode, createNode, createSceneIr } from '@goldlight/ir';
+import type { MeshAttribute, SceneIr } from '@goldlight/ir';
 
 export const importObjFromText = (source: string, sceneId = 'obj-scene'): SceneIr => {
   const positions: number[] = [];

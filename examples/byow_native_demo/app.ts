@@ -1,7 +1,7 @@
 /// <reference lib="deno.unstable" />
 
-import type { DesktopModuleContext } from '@rieul3d/desktop';
-import { evaluateScene } from '@rieul3d/core';
+import type { DesktopModuleContext } from '@goldlight/desktop';
+import { evaluateScene } from '@goldlight/core';
 import {
   type AssetSource,
   createRuntimeResidency,
@@ -11,7 +11,7 @@ import {
   ensureSceneTextureResidency,
   requestGpuContext,
   resizeSurfaceBindingTarget,
-} from '@rieul3d/gpu';
+} from '@goldlight/gpu';
 import {
   appendMaterial,
   appendMesh,
@@ -19,8 +19,8 @@ import {
   appendTexture,
   createNode,
   createSceneIr,
-} from '@rieul3d/ir';
-import { createMaterialRegistry, renderForwardFrame } from '@rieul3d/renderer';
+} from '@goldlight/ir';
+import { createMaterialRegistry, renderForwardFrame } from '@goldlight/renderer';
 
 const textureAssetId = 'checkerboard-image';
 const textureId = 'checkerboard-texture';

@@ -1,4 +1,4 @@
-import type { Path2D } from '@rieul3d/geometry';
+import type { Path2D } from '@goldlight/geometry';
 import { cloneDrawingClipStackSnapshot } from './clip_stack.ts';
 import type { DawnCaps } from './caps.ts';
 import type { DrawingRendererProvider } from './renderer_provider.ts';

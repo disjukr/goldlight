@@ -6,7 +6,7 @@ Open.
 
 ## Context
 
-`@rieul3d/desktop` now runs desktop modules in per-window Deno workers while a separate window
+`@goldlight/desktop` now runs desktop modules in per-window Deno workers while a separate window
 manager worker owns the Rust `winit` host and event pumping. That split isolates application logic,
 React updates, and WebGPU rendering from the main bootstrap isolate.
 

@@ -1,7 +1,7 @@
 /// <reference lib="deno.unstable" />
 
-import type { DesktopModuleContext } from '@rieul3d/desktop';
-import { evaluateScene } from '@rieul3d/core';
+import type { DesktopModuleContext } from '@goldlight/desktop';
+import { evaluateScene } from '@goldlight/core';
 import {
   createRuntimeResidency,
   createSurfaceBinding,
@@ -9,7 +9,7 @@ import {
   ensureSceneMeshResidency,
   requestGpuContext,
   resizeSurfaceBindingTarget,
-} from '@rieul3d/gpu';
+} from '@goldlight/gpu';
 import {
   appendCamera,
   appendLight,
@@ -20,7 +20,7 @@ import {
   createPerspectiveCamera,
   createSceneIr,
   setActiveCamera,
-} from '@rieul3d/ir';
+} from '@goldlight/ir';
 import {
   createBoxMesh,
   createCapsuleMesh,
@@ -32,8 +32,8 @@ import {
   createSphereMesh,
   createTetrahedronMesh,
   createTorusMesh,
-} from '@rieul3d/geometry';
-import { createMaterialRegistry, renderForwardFrame } from '@rieul3d/renderer';
+} from '@goldlight/geometry';
+import { createMaterialRegistry, renderForwardFrame } from '@goldlight/renderer';
 
 const cameraId = 'byow-primitives-camera';
 const lightId = 'byow-primitives-key-light';

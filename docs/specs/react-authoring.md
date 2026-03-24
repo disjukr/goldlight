@@ -6,7 +6,7 @@ React integration is a separate package. It must not become the source of truth 
 
 ## Contract
 
-- JSX authoring trees are built through `@rieul3d/react` primitives such as `<scene>` and `<node>`.
+- JSX authoring trees are built through `@goldlight/react` primitives such as `<scene>` and `<node>`.
 - Authored trees may also declare scene resources such as `<camera>`, `<mesh>`, `<material>`,
   `<light>`, `<texture>`, `<asset>`, and `<animationClip>`.
 - Node-like authoring elements may expose React-style shorthands such as `<group>` plus transform
@@ -24,13 +24,13 @@ React integration is a separate package. It must not become the source of truth 
 ## Scope
 
 The current package owns JSX authoring, lowering, the snapshot-style `createSceneRoot()`
-implementation, and an experimental `@rieul3d/react/reconciler` entrypoint that mounts normal React
+implementation, and an experimental `@goldlight/react/reconciler` entrypoint that mounts normal React
 components into the package-local scene document before publishing committed `SceneIr` snapshots.
 
 ## Direction
 
 The current package now supports normal TSX scene authoring and component composition, plus an
-experimental reconciler host that can drive rieul3d-owned scene data from normal React state and
+experimental reconciler host that can drive goldlight-owned scene data from normal React state and
 lifecycle updates. The remaining direction is to evolve that surface toward a fuller
 `react-three-fiber` style adapter with a smoother React-runtime JSX experience.
 
@@ -63,7 +63,7 @@ has a first implementation waypoint in `createSceneRoot()`, but ADR 0006 does no
 full-snapshot publication shape as the final contract.
 
 Issue `#112` has now reached its first experimental reconciler milestone through
-[`@rieul3d/react/reconciler`](../../packages/react/reconciler.ts), which mounts a real
+[`@goldlight/react/reconciler`](../../packages/react/reconciler.ts), which mounts a real
 `react-reconciler` host onto the internal scene document described by
 [`../adr/0008-react-reconciler-scene-document.md`](../adr/0008-react-reconciler-scene-document.md).
 Issue `#117` provided the first scene-document implementation slice that this host now targets.
@@ -89,7 +89,7 @@ Issue `#117` provided the first scene-document implementation slice that this ho
 - `createSceneRoot()` now keeps an internal React-owned scene document so stable resource and node
   host instances can survive repeated commits even though the published subscriber payload is still
   a data-only `SceneIr` snapshot.
-- `@rieul3d/react/reconciler` now provides an experimental real React renderer that accepts normal
+- `@goldlight/react/reconciler` now provides an experimental real React renderer that accepts normal
   React components, applies mount/update/unmount work to the internal scene document, and publishes
   live `SceneIr` snapshots plus the same derived summary/update-plan/update-payload commit metadata
   through `createReactSceneRoot()`.
@@ -103,7 +103,7 @@ Issue `#117` provided the first scene-document implementation slice that this ho
 - The reconciler entrypoint now also augments the normal React JSX runtime so `<scene>`, `<node>`,
   `<camera>`, `<light>`, `<mesh>`, `<material>`, `<texture>`, and `<asset>` can be authored in plain
   TSX on the live path.
-- `@rieul3d/react/reconciler` now exports React-runtime `PerspectiveCamera`, `OrthographicCamera`,
+- `@goldlight/react/reconciler` now exports React-runtime `PerspectiveCamera`, `OrthographicCamera`,
   and `DirectionalLight` convenience components so live reconciler scenes can keep the same
   high-level camera/light composition style as the snapshot authoring surface.
 - `createReactSceneRoot()` now exposes `flushUpdates()` so deterministic integrations can force
@@ -117,10 +117,10 @@ Issue `#117` provided the first scene-document implementation slice that this ho
 - `planSceneRootCommitUpdates()` now derives a data-only update plan from snapshot commits that
   separates node transform-only changes from parenting, resource-binding, and metadata changes so
   integrations can avoid full residency resets for high-frequency transform updates without pulling
-  GPU ownership into `@rieul3d/react`; descendant nodes whose world transforms move because an
+  GPU ownership into `@goldlight/react`; descendant nodes whose world transforms move because an
   ancestor changed are included in the transform buckets even when their local node data is
   otherwise unchanged.
-- `@rieul3d/gpu` now exposes ID-keyed targeted invalidation helpers, so snapshot consumers can drop
+- `@goldlight/gpu` now exposes ID-keyed targeted invalidation helpers, so snapshot consumers can drop
   changed mesh/material/texture residency entries before falling back to a full reset for
   scene-topology changes.
 - `commitSummaryNeedsResidencyReset()` captures the current safe residency-reset boundary for
@@ -150,7 +150,7 @@ Issue `#117` provided the first scene-document implementation slice that this ho
   intrinsics, so normal mapped JSX lists no longer need to fall back to lower-level
   `React.createElement()` calls.
 - [`../../examples/browser_react_authoring/README.md`](../../examples/browser_react_authoring/README.md)
-  shows the reference browser flow: author a tree with `@rieul3d/react` TSX, commit it through
+  shows the reference browser flow: author a tree with `@goldlight/react` TSX, commit it through
   `createSceneRoot()`, derive an update plan plus summary from that commit, drop targeted residency
   entries where stable resource IDs changed, avoid resets for transform-only node updates, fall back
   to a full reset for scene-topology or binding changes, then hand the published scene snapshot to

@@ -7,8 +7,8 @@ import {
   ensureTextureResidency,
   type GpuTextureUploadContext,
   uploadTextureResidency,
-} from '@rieul3d/gpu';
-import { createSceneIr } from '@rieul3d/ir';
+} from '@goldlight/gpu';
+import { createSceneIr } from '@goldlight/ir';
 
 type MockTexture = Readonly<{
   id: number;

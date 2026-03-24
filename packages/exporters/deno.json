@@ -1,5 +1,5 @@
 {
-  "name": "@rieul3d/exporters",
+  "name": "@goldlight/exporters",
   "version": "0.0.0",
   "exports": "./mod.ts"
 }

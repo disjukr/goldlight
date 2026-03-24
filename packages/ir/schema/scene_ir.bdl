@@ -1,6 +1,6 @@
 # standard - conventional
 # description
-| Serializable scene schema for rieul3d.
+| Serializable scene schema for goldlight.
 | This module contains only IR data and excludes runtime residency state.
 
 custom Id = string

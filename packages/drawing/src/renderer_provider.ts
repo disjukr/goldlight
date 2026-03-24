@@ -1,4 +1,4 @@
-import type { PathFillRule2D } from '@rieul3d/geometry';
+import type { PathFillRule2D } from '@goldlight/geometry';
 import type { DawnCaps } from './caps.ts';
 import type { DrawingPreparedPatch } from './path_renderer.ts';
 

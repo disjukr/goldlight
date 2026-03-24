@@ -1,5 +1,5 @@
 import type { DrawingPreparedClipElement } from './clip_stack.ts';
-import { identityMatrix2D, type Point2D } from '@rieul3d/geometry';
+import { identityMatrix2D, type Point2D } from '@goldlight/geometry';
 import {
   type DrawingPreparedClipDraw,
   type DrawingPreparedRecording,

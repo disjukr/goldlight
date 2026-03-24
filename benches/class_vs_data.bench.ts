@@ -1,4 +1,4 @@
-import { createScratchMatrixBuffer } from '@rieul3d/core';
+import { createScratchMatrixBuffer } from '@goldlight/core';
 
 const writeWithFunction = (target: Float32Array, iterations: number) => {
   for (let index = 0; index < iterations; index += 1) {

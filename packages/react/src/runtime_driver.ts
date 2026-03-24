@@ -1,6 +1,6 @@
-import { type EvaluatedScene, evaluateScene, reevaluateSceneTransforms } from '@rieul3d/core';
-import { applyRuntimeResidencyPlan, type RuntimeResidency } from '@rieul3d/gpu';
-import type { SceneIr } from '@rieul3d/ir';
+import { type EvaluatedScene, evaluateScene, reevaluateSceneTransforms } from '@goldlight/core';
+import { applyRuntimeResidencyPlan, type RuntimeResidency } from '@goldlight/gpu';
+import type { SceneIr } from '@goldlight/ir';
 
 import {
   canApplySceneRootTransformUpdates,

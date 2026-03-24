@@ -6,7 +6,7 @@ Accepted
 
 ## Decision
 
-`@rieul3d/react` exposes a JSX authoring surface that lowers into rieul3d-owned scene data. JSX is
+`@goldlight/react` exposes a JSX authoring surface that lowers into goldlight-owned scene data. JSX is
 the package's public authoring boundary, but React does not become the source of truth for core
 runtime state.
 

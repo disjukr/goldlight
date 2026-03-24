@@ -12,7 +12,7 @@ import {
   multiplyMatrix2D,
   type Path2D,
   type Rect,
-} from '@rieul3d/geometry';
+} from '@goldlight/geometry';
 import { createDrawingPath2DFromShape } from './geometry.ts';
 import { createDrawingRecording, type DrawingRecording } from './recording.ts';
 import { type DawnSharedContext, registerDawnRecorder } from './shared_context.ts';

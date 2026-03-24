@@ -6,7 +6,7 @@ Accepted
 
 ## Decision
 
-`@rieul3d/renderer` should expose cubemap capture as a first-class offscreen renderer output before
+`@goldlight/renderer` should expose cubemap capture as a first-class offscreen renderer output before
 adding any 2D reprojection or export layouts.
 
 The first capture boundary should:

@@ -5,7 +5,7 @@ import {
   createRectPath2D,
   type Point2D,
   withPath2DFillRule,
-} from '@rieul3d/geometry';
+} from '@goldlight/geometry';
 
 const outputWidth = 720;
 const outputHeight = 980;

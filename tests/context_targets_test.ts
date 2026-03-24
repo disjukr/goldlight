@@ -8,7 +8,7 @@ import {
   createSurfaceBinding,
   getRenderTargetByteSize,
   getRenderTargetSize,
-} from '@rieul3d/gpu';
+} from '@goldlight/gpu';
 type MockTexture = Readonly<{
   id: number;
   descriptor: GPUTextureDescriptor;

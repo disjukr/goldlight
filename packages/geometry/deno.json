@@ -1,5 +1,5 @@
 {
-  "name": "@rieul3d/geometry",
+  "name": "@goldlight/geometry",
   "version": "0.0.0",
   "exports": "./mod.ts"
 }

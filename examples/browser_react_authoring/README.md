@@ -1,11 +1,11 @@
 # Browser React Authoring Example
 
-This example shows the current bridge between `@rieul3d/react` and the existing runtime layers. It
+This example shows the current bridge between `@goldlight/react` and the existing runtime layers. It
 authors a scene with TSX, including the exported `PerspectiveCamera` convenience component plus node
 transform shorthands such as `position`, commits that tree through `createSceneRoot()`, then renders
 the published `SceneIr` snapshot through the browser forward pipeline. Because the bridge publishes
 whole-scene snapshots, the example also uses `planSceneRootResidencyInvalidation()` together with
-`@rieul3d/gpu`'s `applyRuntimeResidencyPlan()` helper so cached GPU residency can drop changed
+`@goldlight/gpu`'s `applyRuntimeResidencyPlan()` helper so cached GPU residency can drop changed
 mesh/material/texture entries by ID, keep transform-only node updates on the lighter path, and still
 fall back to a full reset for node topology or binding changes.
 
@@ -14,11 +14,11 @@ components while primitive JSX authoring stays closer to explicit Scene IR conce
 `<camera>`, `<light>`, and `<node>`. It intentionally documents the snapshot path, not the live
 reconciler path.
 
-`@rieul3d/react` now has two distinct integration surfaces:
+`@goldlight/react` now has two distinct integration surfaces:
 
 - `createSceneRoot()` for JSX authoring plus snapshot commits, summaries, and targeted update
   planning
-- `@rieul3d/react/reconciler` for the experimental live React host that publishes committed
+- `@goldlight/react/reconciler` for the experimental live React host that publishes committed
   `SceneIr` snapshots from normal React state and lifecycle updates
 
 If you want the live reconciler path instead of the snapshot bridge, use the BYOW React Bunny demo

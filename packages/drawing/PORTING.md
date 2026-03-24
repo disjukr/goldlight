@@ -9,7 +9,7 @@ stack that fits this repository's TypeScript and WebGPU architecture.
 
 - Source reference: Skia Graphite with the Dawn backend
 - Local target: `packages/drawing`
-- Shared geometry package: `@rieul3d/geometry`
+- Shared geometry package: `@goldlight/geometry`
 - Primary scope: 2D drawing only
 
 ## Status Legend
@@ -210,40 +210,40 @@ stack that fits this repository's TypeScript and WebGPU architecture.
 
 ## Geometry Model Progress
 
-Geometry that is reusable across packages should live in `@rieul3d/geometry`, not in `drawing`.
+Geometry that is reusable across packages should live in `@goldlight/geometry`, not in `drawing`.
 
-- `Point2D` in `@rieul3d/geometry/src/path2d.ts`
+- `Point2D` in `@goldlight/geometry/src/path2d.ts`
   - Status: `done`
   - Shared 2D point type
-- `Size2D` in `@rieul3d/geometry/src/path2d.ts`
+- `Size2D` in `@goldlight/geometry/src/path2d.ts`
   - Status: `done`
   - Shared 2D size type
-- `Rect` in `@rieul3d/geometry/src/path2d.ts`
+- `Rect` in `@goldlight/geometry/src/path2d.ts`
   - Status: `done`
   - Basic rectangle type
-- `RRect` in `@rieul3d/geometry/src/path2d.ts`
+- `RRect` in `@goldlight/geometry/src/path2d.ts`
   - Status: `started`
   - Shape model exists
-- `Circle` in `@rieul3d/geometry/src/path2d.ts`
+- `Circle` in `@goldlight/geometry/src/path2d.ts`
   - Status: `done`
   - Basic circle type
-- `Polygon` in `@rieul3d/geometry/src/path2d.ts`
+- `Polygon` in `@goldlight/geometry/src/path2d.ts`
   - Status: `done`
   - General polygon input
-- `Path2D` in `@rieul3d/geometry/src/path2d.ts`
+- `Path2D` in `@goldlight/geometry/src/path2d.ts`
   - Status: `started`
   - Supports `moveTo`, `lineTo`, `quadTo`, `conicTo`, `cubicTo`, `arcTo`, `close`, fill rule state,
     and transform helpers
-- Cubic curves in `@rieul3d/geometry/src/path2d.ts`
+- Cubic curves in `@goldlight/geometry/src/path2d.ts`
   - Status: `started`
   - `cubicTo` exists and is flattened in drawing path preparation
-- Conics/arcs in `@rieul3d/geometry/src/path2d.ts`
+- Conics/arcs in `@goldlight/geometry/src/path2d.ts`
   - Status: `started`
   - `conicTo` and `arcTo` are modeled and flattened in drawing path preparation
-- Path fill rules in `@rieul3d/geometry/src/path2d.ts`
+- Path fill rules in `@goldlight/geometry/src/path2d.ts`
   - Status: `started`
   - Fill rule metadata exists, and first stencil-based evenodd/nonzero execution path now exists
-- Path transforms/utilities in `@rieul3d/geometry/src/path2d.ts`
+- Path transforms/utilities in `@goldlight/geometry/src/path2d.ts`
   - Status: `started`
   - Matrix helpers and path transforms exist
 

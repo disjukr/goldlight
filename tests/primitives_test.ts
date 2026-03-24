@@ -1,11 +1,11 @@
 import { assert, assertEquals, assertThrows } from 'jsr:@std/assert@^1.0.14';
-import { evaluateScene } from '@rieul3d/core';
+import { evaluateScene } from '@goldlight/core';
 import {
   createRuntimeResidency,
   ensureSceneMeshResidency,
   type GpuUploadContext,
-} from '@rieul3d/gpu';
-import { appendMesh, appendNode, createNode, createSceneIr, type MeshPrimitive } from '@rieul3d/ir';
+} from '@goldlight/gpu';
+import { appendMesh, appendNode, createNode, createSceneIr, type MeshPrimitive } from '@goldlight/ir';
 import {
   createBoxMesh,
   createCapsuleMesh,
@@ -17,7 +17,7 @@ import {
   createSphereMesh,
   createTetrahedronMesh,
   createTorusMesh,
-} from '@rieul3d/geometry';
+} from '@goldlight/geometry';
 
 type MockBuffer = Readonly<{
   id: number;

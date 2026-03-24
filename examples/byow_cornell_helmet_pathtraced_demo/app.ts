@@ -1,7 +1,7 @@
 /// <reference lib="deno.unstable" />
 
-import { createQuaternionFromEulerDegrees, evaluateScene, getMeshBounds } from '@rieul3d/core';
-import type { DesktopModuleContext } from '@rieul3d/desktop';
+import { createQuaternionFromEulerDegrees, evaluateScene, getMeshBounds } from '@goldlight/core';
+import type { DesktopModuleContext } from '@goldlight/desktop';
 import {
   createRuntimeResidency,
   createSurfaceBinding,
@@ -10,7 +10,7 @@ import {
   ensureSceneTextureResidency,
   requestGpuContext,
   resizeSurfaceBindingTarget,
-} from '@rieul3d/gpu';
+} from '@goldlight/gpu';
 import {
   appendCamera,
   appendNode,
@@ -18,13 +18,13 @@ import {
   createPerspectiveCamera,
   createSceneIr,
   setActiveCamera,
-} from '@rieul3d/ir';
-import { importGltfFromGlbWithAssets } from '@rieul3d/importers';
+} from '@goldlight/ir';
+import { importGltfFromGlbWithAssets } from '@goldlight/importers';
 import {
   createMaterialRegistry,
   type PathtracedSceneExtension,
   renderPathtracedFrame,
-} from '@rieul3d/renderer';
+} from '@goldlight/renderer';
 
 const cameraId = 'cornell-helmet-camera';
 const helmetSource = await Deno.readFile(

@@ -1,8 +1,8 @@
 /// <reference lib="deno.unstable" />
 
-import { createQuaternionFromEulerDegrees, evaluateScene, getMeshBounds } from '@rieul3d/core';
-import type { DesktopModuleContext } from '@rieul3d/desktop';
-import { createBoxMesh } from '@rieul3d/geometry';
+import { createQuaternionFromEulerDegrees, evaluateScene, getMeshBounds } from '@goldlight/core';
+import type { DesktopModuleContext } from '@goldlight/desktop';
+import { createBoxMesh } from '@goldlight/geometry';
 import {
   createRuntimeResidency,
   createSurfaceBinding,
@@ -11,7 +11,7 @@ import {
   ensureSceneTextureResidency,
   requestGpuContext,
   resizeSurfaceBindingTarget,
-} from '@rieul3d/gpu';
+} from '@goldlight/gpu';
 import {
   appendCamera,
   appendLight,
@@ -22,9 +22,9 @@ import {
   createPerspectiveCamera,
   createSceneIr,
   setActiveCamera,
-} from '@rieul3d/ir';
-import { importGltfFromGlbWithAssets } from '@rieul3d/importers';
-import { createMaterialRegistry, renderPathtracedFrame } from '@rieul3d/renderer';
+} from '@goldlight/ir';
+import { importGltfFromGlbWithAssets } from '@goldlight/importers';
+import { createMaterialRegistry, renderPathtracedFrame } from '@goldlight/renderer';
 
 const cameraId = 'helmet-pathtraced-camera';
 const helmetSource = await Deno.readFile(

@@ -6,7 +6,7 @@ Accepted
 
 ## Decision
 
-`@rieul3d/renderer` should expose first-class alpha-policy data to custom WGSL materials through an
+`@goldlight/renderer` should expose first-class alpha-policy data to custom WGSL materials through an
 explicit optional material binding contract instead of packing that policy into the existing generic
 material uniform payload.
 

@@ -8,23 +8,23 @@ import {
   createMeshNormalsAttribute,
   createQuaternionFromEulerDegrees,
   getMeshBounds,
-} from '@rieul3d/core';
-import type { DesktopModuleCleanup, DesktopModuleContext } from '@rieul3d/desktop';
+} from '@goldlight/core';
+import type { DesktopModuleCleanup, DesktopModuleContext } from '@goldlight/desktop';
 import {
   createRuntimeResidency,
   createSurfaceBinding,
   requestGpuContext,
   resizeSurfaceBindingTarget,
-} from '@rieul3d/gpu';
-import type { MeshPrimitive } from '@rieul3d/ir';
-import { importPlyFromText } from '@rieul3d/importers';
+} from '@goldlight/gpu';
+import type { MeshPrimitive } from '@goldlight/ir';
+import { importPlyFromText } from '@goldlight/importers';
 import {
   createReactSceneRoot,
   createSceneRootForwardRenderer,
   DirectionalLight,
   PerspectiveCamera,
-} from '@rieul3d/react/reconciler';
-import { createMaterialRegistry } from '@rieul3d/renderer';
+} from '@goldlight/react/reconciler';
+import { createMaterialRegistry } from '@goldlight/renderer';
 
 const bunnySource = await Deno.readTextFile(
   new URL('../assets/stanford-bunny/bun_zipper.ply', import.meta.url),

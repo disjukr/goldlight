@@ -3,14 +3,14 @@ import type {
   GpuUploadContext,
   RenderContextBinding,
   RuntimeResidency,
-} from '@rieul3d/gpu';
+} from '@goldlight/gpu';
 import type {
   ForwardRenderResult,
   GpuRenderExecutionContext,
   MaterialRegistry,
   PostProcessPass,
-} from '@rieul3d/renderer';
-import { renderForwardFrame } from '@rieul3d/renderer';
+} from '@goldlight/renderer';
+import { renderForwardFrame } from '@goldlight/renderer';
 
 import { type SceneRootFrameDriverOptions } from './runtime_driver.ts';
 import {

@@ -1,11 +1,11 @@
 import { dirname, fromFileUrl, resolve } from '@std/path';
-import { evaluateScene } from '@rieul3d/core';
+import { evaluateScene } from '@goldlight/core';
 import {
   createOffscreenBinding,
   createRuntimeResidency,
   rebuildRuntimeResidency,
   requestGpuContext,
-} from '@rieul3d/gpu';
+} from '@goldlight/gpu';
 import {
   appendMaterial,
   appendMesh,
@@ -14,9 +14,9 @@ import {
   createSceneIr,
   createVec3,
   identityTransform,
-} from '@rieul3d/ir';
-import { exportPngRgba } from '@rieul3d/exporters';
-import { renderForwardSnapshot } from '@rieul3d/renderer';
+} from '@goldlight/ir';
+import { exportPngRgba } from '@goldlight/exporters';
+import { renderForwardSnapshot } from '@goldlight/renderer';
 
 const defaultWidth = 512;
 const defaultHeight = 512;

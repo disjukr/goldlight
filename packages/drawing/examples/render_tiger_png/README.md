@@ -3,7 +3,7 @@
 This example writes `tiger.png` next to `tiger.svg` without using `resvg`.
 
 It implements a small SVG ingest layer inside the example and renders the result through
-`@rieul3d/drawing`.
+`@goldlight/drawing`.
 
 The example currently supports the subset used by `tiger.svg`:
 

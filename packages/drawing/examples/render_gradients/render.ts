@@ -1,6 +1,6 @@
-import { exportPngRgba } from '@rieul3d/exporters';
-import { createOffscreenBinding, readOffscreenSnapshot } from '@rieul3d/gpu';
-import { createPath2D, createRect, createRectPath2D, type Point2D } from '@rieul3d/geometry';
+import { exportPngRgba } from '@goldlight/exporters';
+import { createOffscreenBinding, readOffscreenSnapshot } from '@goldlight/gpu';
+import { createPath2D, createRect, createRectPath2D, type Point2D } from '@goldlight/geometry';
 import {
   checkForFinishedDawnQueueWork,
   encodeDawnCommandBuffer,
@@ -11,7 +11,7 @@ import {
   saveDrawingRecorder,
   scaleDrawingRecorder,
   submitToDawnQueueManager,
-} from '@rieul3d/drawing';
+} from '@goldlight/drawing';
 
 const outputWidth = 960;
 const outputHeight = 720;

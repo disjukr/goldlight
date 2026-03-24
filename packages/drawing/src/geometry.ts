@@ -1,4 +1,4 @@
-import { createPath2DFromShape, type Path2D, type Shape2D } from '@rieul3d/geometry';
+import { createPath2DFromShape, type Path2D, type Shape2D } from '@goldlight/geometry';
 
 export const createDrawingPath2DFromShape = (shape: Shape2D): Path2D =>
   createPath2DFromShape(shape);

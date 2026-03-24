@@ -6,7 +6,7 @@ triangle-BVH mesh `pathtraced` renderer slice. This is the default mesh pathtrac
 This demo exercises:
 
 - GLB ingestion of the in-repo Damaged Helmet sample asset
-- mesh-local triangle BVH construction through `@rieul3d/raytrace`
+- mesh-local triangle BVH construction through `@goldlight/raytrace`
 - node-transform-aware fullscreen mesh path tracing with accumulation on a native
   `Deno.UnsafeWindowSurface`
 

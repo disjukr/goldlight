@@ -1,4 +1,4 @@
-/** @jsxImportSource @rieul3d/react */
+/** @jsxImportSource @goldlight/react */
 /** @jsxRuntime automatic */
 /// <reference lib="dom" />
 

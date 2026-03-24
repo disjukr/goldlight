@@ -1,5 +1,5 @@
 {
-  "name": "@rieul3d/gpu",
+  "name": "@goldlight/gpu",
   "version": "0.0.0",
   "exports": "./mod.ts"
 }

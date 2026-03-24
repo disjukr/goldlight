@@ -1,4 +1,4 @@
-import { createOrthographicCamera, createPerspectiveCamera, identityTransform } from '@rieul3d/ir';
+import { createOrthographicCamera, createPerspectiveCamera, identityTransform } from '@goldlight/ir';
 import type {
   AnimationClip,
   AssetRef,
@@ -14,7 +14,7 @@ import type {
   TextureRef,
   Transform,
   Vec3,
-} from '@rieul3d/ir';
+} from '@goldlight/ir';
 import {
   applySceneDocumentScene,
   createSceneDocument,

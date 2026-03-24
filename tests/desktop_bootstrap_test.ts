@@ -1,6 +1,6 @@
 import { assertEquals, assertExists } from 'jsr:@std/assert@^1.0.14';
 
-import { createDesktopWindowRuntime, installDesktopWindowGlobals } from '@rieul3d/desktop';
+import { createDesktopWindowRuntime, installDesktopWindowGlobals } from '@goldlight/desktop';
 
 Deno.test('desktop bootstrap installs runtime globals before dynamic imports observe them', async () => {
   const runtime = createDesktopWindowRuntime(1n, () => {});

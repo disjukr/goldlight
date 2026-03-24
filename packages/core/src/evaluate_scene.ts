@@ -6,7 +6,7 @@ import type {
   MeshPrimitive,
   Node,
   SceneIr,
-} from '@rieul3d/ir';
+} from '@goldlight/ir';
 
 export type Mat4 = readonly number[];
 

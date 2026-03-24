@@ -1,6 +1,6 @@
-import { exportPngRgba } from '@rieul3d/exporters';
-import { createOffscreenBinding, readOffscreenSnapshot } from '@rieul3d/gpu';
-import { createPath2D, createRect, createRectPath2D, withPath2DFillRule } from '@rieul3d/geometry';
+import { exportPngRgba } from '@goldlight/exporters';
+import { createOffscreenBinding, readOffscreenSnapshot } from '@goldlight/gpu';
+import { createPath2D, createRect, createRectPath2D, withPath2DFillRule } from '@goldlight/geometry';
 import {
   checkForFinishedDawnQueueWork,
   clipDrawingRecorderPath,
@@ -15,7 +15,7 @@ import {
   scaleDrawingRecorder,
   submitToDawnQueueManager,
   translateDrawingRecorder,
-} from '@rieul3d/drawing';
+} from '@goldlight/drawing';
 
 const outputSize = 512;
 const supersampleScale = 2;

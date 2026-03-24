@@ -1,7 +1,7 @@
 # Desktop Shell
 
-`@rieul3d/desktop` is a rendering-first desktop shell package. Render-target descriptors are passed
-as plain literals directly to `@rieul3d/gpu` instead of going through a separate platform package.
+`@goldlight/desktop` is a rendering-first desktop shell package. Render-target descriptors are passed
+as plain literals directly to `@goldlight/gpu` instead of going through a separate platform package.
 
 ## Scope
 

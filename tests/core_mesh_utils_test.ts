@@ -4,8 +4,8 @@ import {
   createMeshTangentsAttribute,
   createQuaternionFromEulerDegrees,
   getMeshBounds,
-} from '@rieul3d/core';
-import type { MeshPrimitive } from '@rieul3d/ir';
+} from '@goldlight/core';
+import type { MeshPrimitive } from '@goldlight/ir';
 
 const createMesh = (mesh: Partial<MeshPrimitive> & Pick<MeshPrimitive, 'id'>): MeshPrimitive => ({
   id: mesh.id,

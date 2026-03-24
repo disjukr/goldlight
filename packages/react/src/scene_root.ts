@@ -1,4 +1,4 @@
-import type { Node, SceneIr } from '@rieul3d/ir';
+import type { Node, SceneIr } from '@goldlight/ir';
 
 import { type AuthoringElement, authoringTreeToSceneDocument } from './authoring.ts';
 import {

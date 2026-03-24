@@ -1,4 +1,4 @@
-import type { Point2D, Rect } from '@rieul3d/geometry';
+import type { Point2D, Rect } from '@goldlight/geometry';
 import type { DrawingPreparedAtlasClip, DrawingPreparedClipElement } from './clip_stack.ts';
 import type { DawnBackendContext } from './dawn_backend_context.ts';
 import type { DawnResourceProvider } from './resource_provider.ts';

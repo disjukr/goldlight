@@ -10,7 +10,7 @@ const desktopHostLibrary = join(
   'native',
   'target',
   'debug',
-  'rieul3d_desktop_host.dll',
+  'goldlight_desktop_host.dll',
 );
 
 if (!entrypoint) {

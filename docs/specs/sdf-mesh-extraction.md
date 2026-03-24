@@ -2,7 +2,7 @@
 
 ## Goal
 
-`@rieul3d/geometry` exposes CPU-side helpers that convert supported signed distance field primitives
+`@goldlight/geometry` exposes CPU-side helpers that convert supported signed distance field primitives
 into `MeshPrimitive` geometry for baking, inspection, and mesh-pipeline reuse.
 
 ## Current Scope

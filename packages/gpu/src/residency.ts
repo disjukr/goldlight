@@ -1,11 +1,11 @@
-import type { EvaluatedScene } from '@rieul3d/core';
+import type { EvaluatedScene } from '@goldlight/core';
 import {
   resolveMeshSourceAssetId,
   resolveMeshSourceInline,
   resolveTextureSourceAssetId,
   resolveTextureSourceInlineImage,
-} from '@rieul3d/ir';
-import type { Material, MeshAttribute, MeshPrimitive, SceneIr } from '@rieul3d/ir';
+} from '@goldlight/ir';
+import type { Material, MeshAttribute, MeshPrimitive, SceneIr } from '@goldlight/ir';
 import jpeg from 'npm:jpeg-js@0.4.4';
 import { PNG } from 'npm:pngjs@7.0.0';
 

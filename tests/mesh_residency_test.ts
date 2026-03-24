@@ -1,5 +1,5 @@
 import { assertEquals, assertStrictEquals } from 'jsr:@std/assert@^1.0.14';
-import { evaluateScene } from '@rieul3d/core';
+import { evaluateScene } from '@goldlight/core';
 import {
   createMeshUploadPlan,
   createRuntimeResidency,
@@ -7,8 +7,8 @@ import {
   ensureSceneMeshResidency,
   type GpuUploadContext,
   uploadMeshResidency,
-} from '@rieul3d/gpu';
-import { appendMesh, appendNode, createNode, createSceneIr } from '@rieul3d/ir';
+} from '@goldlight/gpu';
+import { appendMesh, appendNode, createNode, createSceneIr } from '@goldlight/ir';
 
 type MockBuffer = Readonly<{
   id: number;

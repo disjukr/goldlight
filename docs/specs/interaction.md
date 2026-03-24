@@ -2,7 +2,7 @@
 
 ## Screen-To-World Ray Utility
 
-`@rieul3d/core` exposes `createScreenWorldRay()` for pointer-driven scene queries that need a
+`@goldlight/core` exposes `createScreenWorldRay()` for pointer-driven scene queries that need a
 world-space ray from the current evaluated camera.
 
 ## Contract
@@ -29,7 +29,7 @@ world-space ray from the current evaluated camera.
 
 ## Renderer-Side Picking
 
-`@rieul3d/renderer` exposes a mesh-node picking path that rasterizes stable encoded ids into an
+`@goldlight/renderer` exposes a mesh-node picking path that rasterizes stable encoded ids into an
 offscreen color target.
 
 ### Contract

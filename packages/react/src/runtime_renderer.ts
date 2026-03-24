@@ -3,14 +3,14 @@ import type {
   GpuUploadContext,
   RenderContextBinding,
   RuntimeResidency,
-} from '@rieul3d/gpu';
-import { ensureSceneMeshResidency, ensureSceneTextureResidency } from '@rieul3d/gpu';
+} from '@goldlight/gpu';
+import { ensureSceneMeshResidency, ensureSceneTextureResidency } from '@goldlight/gpu';
 import type {
   GpuRenderExecutionContext,
   MaterialRegistry,
   PostProcessPass,
-} from '@rieul3d/renderer';
-import { createMaterialRegistry } from '@rieul3d/renderer';
+} from '@goldlight/renderer';
+import { createMaterialRegistry } from '@goldlight/renderer';
 
 import {
   createSceneRootFrameDriver,

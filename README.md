@@ -1,24 +1,24 @@
-# rieul3d
+# goldlight
 
-`rieul3d` is a functional WebGPU spatial runtime for Deno and browsers.
+`goldlight` is a functional WebGPU spatial runtime for Deno and browsers.
 
 The repository is organized as a Deno workspace with packages for:
 
-- `@rieul3d/ir`: BDL-backed scene IR definitions
-- `@rieul3d/core`: scene evaluation and animation helpers
-- `@rieul3d/math`: low-level deterministic sampling and reusable math helpers
-- `@rieul3d/geometry`: shape definition, mesh primitive generation, and local SDF-to-mesh helpers
-- `@rieul3d/spatial`: spatial indexing and broad-phase query helpers
-- `@rieul3d/procedural`: deterministic procedural texture and volume generators
-- `@rieul3d/raytrace`: tracing acceleration and traversal helpers
-- `@rieul3d/gpu`: WebGPU context and runtime residency helpers
-- `@rieul3d/renderer`: forward/deferred frame planning and execution contracts
-- `@rieul3d/importers`: OBJ/STL/PLY/glTF ingestion into scene IR
-- `@rieul3d/react`: declarative authoring adapter
-- `@rieul3d/react/reconciler`: experimental React reconciler host over the package-local scene
+- `@goldlight/ir`: BDL-backed scene IR definitions
+- `@goldlight/core`: scene evaluation and animation helpers
+- `@goldlight/math`: low-level deterministic sampling and reusable math helpers
+- `@goldlight/geometry`: shape definition, mesh primitive generation, and local SDF-to-mesh helpers
+- `@goldlight/spatial`: spatial indexing and broad-phase query helpers
+- `@goldlight/procedural`: deterministic procedural texture and volume generators
+- `@goldlight/raytrace`: tracing acceleration and traversal helpers
+- `@goldlight/gpu`: WebGPU context and runtime residency helpers
+- `@goldlight/renderer`: forward/deferred frame planning and execution contracts
+- `@goldlight/importers`: OBJ/STL/PLY/glTF ingestion into scene IR
+- `@goldlight/react`: declarative authoring adapter
+- `@goldlight/react/reconciler`: experimental React reconciler host over the package-local scene
   document
-- `@rieul3d/exporters`: output encoders such as PNG
-- `@rieul3d/desktop`: single-process desktop shell bootstrap over a Rust `winit` FFI host
+- `@goldlight/exporters`: output encoders such as PNG
+- `@goldlight/desktop`: single-process desktop shell bootstrap over a Rust `winit` FFI host
 
 The design source of truth lives in [`docs/specs`](./docs/specs) and [`docs/adr`](./docs/adr).
 
@@ -59,9 +59,9 @@ Implemented today:
 - forward-renderer cubemap capture for mesh, SDF, and volume scenes as six ordered offscreen face
   snapshots, plus CPU-side export helpers for equirectangular, angular-map, cross, and strip layouts
   with optional filtered reprojection and caller-controlled output dimensions
-- Perlin gradient-noise samplers in `@rieul3d/math` plus grayscale texture/volume generators in
-  `@rieul3d/procedural` that share the existing deterministic seed model
-- triangle BVH construction in `@rieul3d/raytrace` plus a mesh pathtraced renderer slice for static
+- Perlin gradient-noise samplers in `@goldlight/math` plus grayscale texture/volume generators in
+  `@goldlight/procedural` that share the existing deterministic seed model
+- triangle BVH construction in `@goldlight/raytrace` plus a mesh pathtraced renderer slice for static
   mesh scenes
 - local-space SDF-to-mesh extraction for supported sphere and box primitives, including
   canonical-table marching-cubes and naive surface-nets contouring helpers for baking or inspection
@@ -86,9 +86,9 @@ Implemented today:
   path tracing
 - Windows BYOW Cornell Helmet pathtraced demo combining the Damaged Helmet mesh with Cornell-box SDF
   walls and light
-- Windows BYOW primitives demo using `@rieul3d/geometry`, a reusable BYOW runner script, built-in
+- Windows BYOW primitives demo using `@goldlight/geometry`, a reusable BYOW runner script, built-in
   `lit` materials, and directional-light shading
-- Windows BYOW Stanford Bunny demo authored through `@rieul3d/react`, loading the vendored ASCII PLY
+- Windows BYOW Stanford Bunny demo authored through `@goldlight/react`, loading the vendored ASCII PLY
   mesh, generating runtime normals for built-in lit shading, and publishing live bunny rotation
   updates through the experimental React reconciler host
 - a browser React authoring example plus the current `createSceneRoot()` snapshot path that commits
@@ -98,7 +98,7 @@ Implemented today:
   that preserves stable resource and node host instances across commits before publishing data-only
   snapshots, and commit-summary, update-plan, plus `updatePayload` helpers for targeted residency
   invalidation without forcing resets for transform-only node changes
-- an experimental `@rieul3d/react/reconciler` entrypoint that mounts normal React components into
+- an experimental `@goldlight/react/reconciler` entrypoint that mounts normal React components into
   the package-local scene document so hooks, state updates, and layout effects can publish live
   `SceneIr` snapshots without rebuilding authored trees by hand
 - that live reconciler path now supports typed TSX scene/resource intrinsics plus React-runtime
@@ -163,7 +163,7 @@ Read in this order when onboarding:
 - `deno task asset:damaged-helmet`: refresh the Khronos `DamagedHelmet.glb` sample
 - `deno task asset:sponza`: download the ignored Khronos `Sponza` sample under
   `examples/assets/sponza`
-- `deno task desktop:host:build`: compile the Rust `winit` FFI host for `@rieul3d/desktop`
+- `deno task desktop:host:build`: compile the Rust `winit` FFI host for `@goldlight/desktop`
 - `deno task desktop:host:check`: type-check the Rust `winit` host crate without producing a DLL
 - `deno task example:headless:check`: type-check the headless snapshot PNG workflow
 - `deno task example:headless:png`: render a headless frame and write

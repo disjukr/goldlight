@@ -4,7 +4,7 @@ import {
   type Point2D,
   type Rect,
   transformPoint2D,
-} from '@rieul3d/geometry';
+} from '@goldlight/geometry';
 import { type DrawingPreparedClip, visitDrawingClipStackForDraw } from './clip_stack.ts';
 import type {
   DrawingBlendMode,

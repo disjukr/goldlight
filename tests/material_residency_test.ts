@@ -7,9 +7,9 @@ import {
   ensureSceneMaterialResidency,
   type GpuUploadContext,
   uploadMaterialResidency,
-} from '@rieul3d/gpu';
-import { evaluateScene } from '@rieul3d/core';
-import { appendMaterial, appendMesh, appendNode, createNode, createSceneIr } from '@rieul3d/ir';
+} from '@goldlight/gpu';
+import { evaluateScene } from '@goldlight/core';
+import { appendMaterial, appendMesh, appendNode, createNode, createSceneIr } from '@goldlight/ir';
 
 type MockBuffer = Readonly<{
   id: number;

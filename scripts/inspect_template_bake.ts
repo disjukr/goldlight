@@ -1,4 +1,4 @@
-import { createMaterialRegistry, inspectMaterialTemplateBake } from '@rieul3d/renderer';
+import { createMaterialRegistry, inspectMaterialTemplateBake } from '@goldlight/renderer';
 
 const [templateId, variantJson] = Deno.args;
 

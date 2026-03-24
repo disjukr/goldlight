@@ -12,8 +12,8 @@ import {
   createSceneIr,
   createVec3,
   identityTransform,
-} from '@rieul3d/ir';
-import type { AssetSource, ImageAsset } from '@rieul3d/gpu';
+} from '@goldlight/ir';
+import type { AssetSource, ImageAsset } from '@goldlight/gpu';
 import type {
   AnimationChannel,
   AnimationClip,
@@ -24,7 +24,7 @@ import type {
   SceneIr,
   TextureRef,
   Vec4,
-} from '@rieul3d/ir';
+} from '@goldlight/ir';
 
 type GltfComponentType = 5120 | 5121 | 5122 | 5123 | 5125 | 5126;
 type GltfAccessorType = 'SCALAR' | 'VEC2' | 'VEC3' | 'VEC4';

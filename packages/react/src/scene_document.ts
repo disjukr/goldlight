@@ -9,7 +9,7 @@ import {
   appendTexture,
   createNode,
   createSceneIr,
-} from '@rieul3d/ir';
+} from '@goldlight/ir';
 import type {
   AnimationClip,
   AssetRef,
@@ -20,7 +20,7 @@ import type {
   Node,
   SceneIr,
   TextureRef,
-} from '@rieul3d/ir';
+} from '@goldlight/ir';
 
 type SceneDocumentScene = {
   id: string;

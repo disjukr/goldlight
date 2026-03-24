@@ -1,5 +1,5 @@
 import { assertEquals } from 'jsr:@std/assert@^1.0.14';
-import { buildBvh } from '@rieul3d/raytrace';
+import { buildBvh } from '@goldlight/raytrace';
 
 Deno.test('buildBvh returns a single leaf for a small triangle set', () => {
   const result = buildBvh([{

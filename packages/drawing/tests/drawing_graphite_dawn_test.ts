@@ -1,5 +1,5 @@
 import { assertAlmostEquals, assertEquals, assertThrows } from 'jsr:@std/assert@^1.0.14';
-import { createOffscreenBinding } from '@rieul3d/gpu';
+import { createOffscreenBinding } from '@goldlight/gpu';
 import {
   createPath2D,
   createRect,
@@ -9,7 +9,7 @@ import {
   createTranslationMatrix2D,
   identityMatrix2D,
   withPath2DFillRule,
-} from '@rieul3d/geometry';
+} from '@goldlight/geometry';
 import {
   addCommandBufferToDawnQueueManager,
   addFinishedCallbackToDawnQueueManager,
@@ -53,7 +53,7 @@ import {
   tickDawnQueueManager,
   translateDrawingRecorder,
   visitDrawingClipStackForDraw,
-} from '@rieul3d/drawing';
+} from '@goldlight/drawing';
 
 const createMockGpuContext = () => {
   type MockTextureCopy = {

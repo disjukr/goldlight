@@ -104,8 +104,8 @@ const getDefaultDesktopHostLibraryPath = (): string => {
     ? 'dylib'
     : 'so';
   const fileName = Deno.build.os === 'windows'
-    ? 'rieul3d_desktop_host.dll'
-    : `librieul3d_desktop_host.${extension}`;
+    ? 'goldlight_desktop_host.dll'
+    : `libgoldlight_desktop_host.${extension}`;
 
   return join(repoRoot, 'packages', 'desktop', 'native', 'target', 'debug', fileName);
 };
@@ -230,7 +230,7 @@ export const createDesktopHost = (options: DesktopHostOptions = {}): DesktopHost
 
   if (library.symbols.desktop_host_init() !== hostInitResultOk) {
     library.close();
-    throw new Error('Failed to initialize the rieul3d desktop host');
+    throw new Error('Failed to initialize the goldlight desktop host');
   }
 
   const createWindow = (windowOptions: DesktopWindowOptions): bigint => {

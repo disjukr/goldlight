@@ -6,12 +6,12 @@ Accepted
 
 ## Decision
 
-`@rieul3d/react` should evolve toward a scene update boundary that supports partial application of
+`@goldlight/react` should evolve toward a scene update boundary that supports partial application of
 authored changes instead of treating full-scene snapshot publication as the long-term live-update
 contract.
 
 React state should be able to drive frequent scene changes such as node transform updates without
-forcing full residency rebuilds for the whole scene. At the same time, rieul3d still needs to keep
+forcing full residency rebuilds for the whole scene. At the same time, goldlight still needs to keep
 scene evaluation, residency, rendering, offscreen targets, and multi-scene composition available
 outside React so features such as portals, minimaps, portraits, and scene-to-texture workflows do
 not become React-only concepts.
@@ -55,11 +55,11 @@ This keeps ADR 0004's ownership model intact while avoiding a path where React c
 either stay trapped behind full-scene snapshots or pull all render-graph concerns into the React
 package.
 
-Related discussion: `#85`, "ADR 0006: React scene update planning boundary for @rieul3d/react"
+Related discussion: `#85`, "ADR 0006: React scene update planning boundary for @goldlight/react"
 
 ## Consequences
 
-- `@rieul3d/react` can move beyond one-shot lowering without forcing frequent transform updates
+- `@goldlight/react` can move beyond one-shot lowering without forcing frequent transform updates
   through whole-scene snapshot replacement
 - the current `createSceneRoot()` snapshot bridge remains useful as an implementation waypoint, but
   it should not harden into the final live-update contract

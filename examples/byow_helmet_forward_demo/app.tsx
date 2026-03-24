@@ -4,28 +4,28 @@
 /// <reference lib="dom" />
 
 import React from 'npm:react@19.2.0';
-import { createQuaternionFromEulerDegrees, getMeshBounds } from '@rieul3d/core';
-import type { DesktopModuleCleanup, DesktopModuleContext } from '@rieul3d/desktop';
+import { createQuaternionFromEulerDegrees, getMeshBounds } from '@goldlight/core';
+import type { DesktopModuleCleanup, DesktopModuleContext } from '@goldlight/desktop';
 import {
   createRuntimeResidency,
   createSurfaceBinding,
   requestGpuContext,
   resizeSurfaceBindingTarget,
-} from '@rieul3d/gpu';
-import type { Material } from '@rieul3d/ir';
-import { importGltfFromGlb } from '@rieul3d/importers';
+} from '@goldlight/gpu';
+import type { Material } from '@goldlight/ir';
+import { importGltfFromGlb } from '@goldlight/importers';
 import {
   createReactSceneRoot,
   createSceneRootForwardRenderer,
   DirectionalLight,
   PerspectiveCamera,
-} from '@rieul3d/react/reconciler';
+} from '@goldlight/react/reconciler';
 import {
   createMaterialRegistry,
   type ForwardDebugView,
   type ForwardEnvironmentMap,
   renderForwardFrame,
-} from '@rieul3d/renderer';
+} from '@goldlight/renderer';
 
 const helmetSource = await Deno.readFile(
   new URL('../assets/damaged-helmet/DamagedHelmet.glb', import.meta.url),

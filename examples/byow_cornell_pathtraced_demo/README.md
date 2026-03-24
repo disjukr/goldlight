@@ -1,6 +1,6 @@
 # BYOW Cornell Pathtraced Demo
 
-Windows-native BYOW example that drives the `pathtraced` renderer through the `@rieul3d/desktop`
+Windows-native BYOW example that drives the `pathtraced` renderer through the `@goldlight/desktop`
 shell while supplying a Cornell-box SDF scene as a pathtraced renderer extension rather than as
 engine-owned scene IR.
 

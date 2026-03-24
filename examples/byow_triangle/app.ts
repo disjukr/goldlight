@@ -1,6 +1,6 @@
 /// <reference lib="deno.unstable" />
 
-import type { DesktopModuleContext } from '@rieul3d/desktop';
+import type { DesktopModuleContext } from '@goldlight/desktop';
 import triangleShader from './triangle.wgsl' with { type: 'text' };
 
 export default async ({ window }: DesktopModuleContext): Promise<() => void> => {

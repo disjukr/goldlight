@@ -1,13 +1,13 @@
 /// <reference lib="deno.unstable" />
 
-import type { DesktopModuleContext } from '@rieul3d/desktop';
-import { evaluateScene } from '@rieul3d/core';
+import type { DesktopModuleContext } from '@goldlight/desktop';
+import { evaluateScene } from '@goldlight/core';
 import {
   createRuntimeResidency,
   createSurfaceBinding,
   requestGpuContext,
   resizeSurfaceBindingTarget,
-} from '@rieul3d/gpu';
+} from '@goldlight/gpu';
 import {
   appendCamera,
   appendNode,
@@ -15,9 +15,9 @@ import {
   createPerspectiveCamera,
   createSceneIr,
   setActiveCamera,
-} from '@rieul3d/ir';
-import type { PathtracedSceneExtension } from '@rieul3d/renderer';
-import { renderPathtracedFrame } from '@rieul3d/renderer';
+} from '@goldlight/ir';
+import type { PathtracedSceneExtension } from '@goldlight/renderer';
+import { renderPathtracedFrame } from '@goldlight/renderer';
 
 const cameraId = 'cornell-camera';
 

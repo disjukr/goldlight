@@ -9,7 +9,7 @@ import {
   importStlFromText,
   listExternalGltfResourceUris,
   readDenoGltfExternalResources,
-} from '@rieul3d/importers';
+} from '@goldlight/importers';
 
 const textEncoder = new TextEncoder();
 

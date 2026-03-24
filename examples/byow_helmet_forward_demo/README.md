@@ -1,7 +1,7 @@
 # BYOW Helmet Forward Demo
 
 Windows-native BYOW example that renders the vendored Damaged Helmet GLB through the forward
-renderer's built-in `lit` template path via `@rieul3d/react/reconciler`.
+renderer's built-in `lit` template path via `@goldlight/react/reconciler`.
 
 This demo exists to validate the renderer template assembly system, forward PBR path, and
 environment-lighting setup against a real imported material set. The helmet material is remapped

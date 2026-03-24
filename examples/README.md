@@ -22,12 +22,12 @@ Runnable examples live here. Each example should document how to build, serve, o
   Windows-native BYOW demo mixing the Damaged Helmet mesh path with a Cornell-box SDF renderer
   extension
 - [`byow_react_bunny_demo/README.md`](./byow_react_bunny_demo/README.md): Windows-native BYOW demo
-  mounted through `@rieul3d/react/reconciler` and rendering the vendored Stanford Bunny PLY mesh
+  mounted through `@goldlight/react/reconciler` and rendering the vendored Stanford Bunny PLY mesh
 - [`assets/README.md`](./assets/README.md): in-repo small example assets plus refresh commands
   including the Stanford Bunny PLY source mesh
 - [`browser_forward/README.md`](./browser_forward/README.md): browser-based forward rendering flow
 - [`browser_react_authoring/README.md`](./browser_react_authoring/README.md): browser forward flow
-  with scene nodes authored through `@rieul3d/react` TSX and committed through the snapshot bridge
+  with scene nodes authored through `@goldlight/react` TSX and committed through the snapshot bridge
 - [`browser_textured_forward/README.md`](./browser_textured_forward/README.md): browser forward flow
   with uploaded texture residency and built-in unlit sampling
 - [`browser_custom_textured_forward/README.md`](./browser_custom_textured_forward/README.md):
@@ -70,12 +70,12 @@ Runnable examples live here. Each example should document how to build, serve, o
 
 ## Primitive Authoring
 
-`@rieul3d/geometry` exposes polygon mesh generators that return `MeshPrimitive` data. These are mesh
+`@goldlight/geometry` exposes polygon mesh generators that return `MeshPrimitive` data. These are mesh
 helpers, not SDF primitives.
 
 ```ts
-import { appendMesh, createSceneIr } from '@rieul3d/ir';
-import { createBoxMesh } from '@rieul3d/geometry';
+import { appendMesh, createSceneIr } from '@goldlight/ir';
+import { createBoxMesh } from '@goldlight/geometry';
 
 const scene = appendMesh(
   createSceneIr('primitive-scene'),
@@ -93,7 +93,7 @@ For React integrations, read the examples in this order:
 - [`browser_react_authoring/README.md`](./browser_react_authoring/README.md) for the data-only
   `createSceneRoot()` snapshot bridge
 - [`byow_react_bunny_demo/README.md`](./byow_react_bunny_demo/README.md) for the experimental
-  `@rieul3d/react/reconciler` live host
+  `@goldlight/react/reconciler` live host
 
 ## Related Docs
 

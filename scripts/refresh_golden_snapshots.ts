@@ -1,13 +1,13 @@
 import { dirname, fromFileUrl, join } from '@std/path';
-import { evaluateScene } from '@rieul3d/core';
+import { evaluateScene } from '@goldlight/core';
 import {
   createOffscreenBinding,
   createRuntimeResidency,
   rebuildRuntimeResidency,
   requestGpuContext,
-} from '@rieul3d/gpu';
-import { exportPngRgba } from '@rieul3d/exporters';
-import { renderForwardSnapshot } from '@rieul3d/renderer';
+} from '@goldlight/gpu';
+import { exportPngRgba } from '@goldlight/exporters';
+import { renderForwardSnapshot } from '@goldlight/renderer';
 import {
   createClearScene,
   createSdfBoxScene,

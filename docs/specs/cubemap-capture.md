@@ -2,7 +2,7 @@
 
 ## Goal
 
-`@rieul3d/renderer` exposes an offscreen cubemap capture path that renders scene content into six
+`@goldlight/renderer` exposes an offscreen cubemap capture path that renders scene content into six
 square faces without coupling that capture step to any 2D export layout.
 
 ## Current Scope

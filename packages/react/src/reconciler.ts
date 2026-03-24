@@ -21,7 +21,7 @@ import type {
 } from './authoring.ts';
 import { normalizeCameraJsxProps, normalizeNodeProps } from './authoring.ts';
 import { createSceneRootCommit, type SceneRootSubscriber } from './scene_root.ts';
-import type { SceneIr } from '@rieul3d/ir';
+import type { SceneIr } from '@goldlight/ir';
 import {
   applySceneDocumentScene,
   createSceneDocument,
@@ -177,7 +177,7 @@ const renderer = Reconciler({
   },
   shouldSetTextContent: () => false,
   createTextInstance: (_text: string) => {
-    throw new Error('@rieul3d/react reconciler does not support text children');
+    throw new Error('@goldlight/react reconciler does not support text children');
   },
   createInstance: (type: HostIntrinsicType, props: Record<string, unknown>) =>
     createHostInstance(type, props),
@@ -264,7 +264,7 @@ const assertHostIntrinsicType = (type: string): HostIntrinsicType => {
   if (supportedIntrinsicTypes.has(type as HostIntrinsicType)) {
     return type as HostIntrinsicType;
   }
-  throw new Error(`@rieul3d/react reconciler does not support the <${type}> intrinsic`);
+  throw new Error(`@goldlight/react reconciler does not support the <${type}> intrinsic`);
 };
 
 const createHostInstance = (
@@ -340,7 +340,7 @@ const appendChild = (parent: HostInstance, child: HostChild): void => {
 
 const assertSceneRootChild = (child: HostInstance): SceneHostInstance => {
   if (child.type !== 'scene') {
-    throw new Error('@rieul3d/react reconciler root must be a <scene> element');
+    throw new Error('@goldlight/react reconciler root must be a <scene> element');
   }
   return child;
 };
@@ -419,7 +419,7 @@ const syncContainerSceneDocument = (container: HostContainer): void => {
   }
 
   if (container.rootChildren.length > 1) {
-    throw new Error('@rieul3d/react reconciler expects a single <scene> root');
+    throw new Error('@goldlight/react reconciler expects a single <scene> root');
   }
 
   const sceneInstance = container.rootChildren[0];

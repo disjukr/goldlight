@@ -1,7 +1,7 @@
 # BYOW Triangle
 
 Windows-native triangle example using Deno BYOW (`Deno.UnsafeWindowSurface`) and the
-`@rieul3d/desktop` shell.
+`@goldlight/desktop` shell.
 
 Run with:
 

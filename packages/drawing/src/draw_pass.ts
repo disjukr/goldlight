@@ -626,6 +626,32 @@ const computeCompressedPaintOrders = (
         paintOrder = Math.max(paintOrder, prevStep.paintOrder + 1);
       }
     }
+    if (step.usesFillStencil) {
+      for (let prevIndex = 0; prevIndex < index; prevIndex += 1) {
+        const prevStep = steps[prevIndex]!;
+        if (!rectsIntersect(prevStep.drawBounds, step.drawBounds)) {
+          continue;
+        }
+        if (!prevStep.usesFillStencil) {
+          paintOrder = Math.max(paintOrder, prevStep.paintOrder + 1);
+          continue;
+        }
+        // Graphite can only reorder stencil-then-cover substeps across draws when their
+        // stencil usage is proven disjoint. Our scheduler does not carry a separate disjoint
+        // stencil index, so overlapping stencil fills must not share a compressed paint order.
+        paintOrder = Math.max(paintOrder, prevStep.paintOrder + 1);
+      }
+    } else {
+      for (let prevIndex = 0; prevIndex < index; prevIndex += 1) {
+        const prevStep = steps[prevIndex]!;
+        if (!prevStep.usesFillStencil || !rectsIntersect(prevStep.drawBounds, step.drawBounds)) {
+          continue;
+        }
+        // Regular draws also cannot be interleaved with an overlapping stencil-then-cover draw
+        // unless there is a separate disjoint-stencil ordering field.
+        paintOrder = Math.max(paintOrder, prevStep.paintOrder + 1);
+      }
+    }
     paintOrders.push(paintOrder);
     (step as { paintOrder: number }).paintOrder = paintOrder;
   }
@@ -776,7 +802,22 @@ const assignLayeredOrder = (
       let targetBindingNode: DrawingBinding | null = null;
       insertBeforeInTargetLayer = false;
 
-      if (dependsOnDst) {
+      if (insertedLayer) {
+        const startIndex = candidateLayers.indexOf(insertedLayer);
+        for (let index = Math.max(startIndex, 0); index < candidateLayers.length; index += 1) {
+          const layer = candidateLayers[index]!;
+          const boundaryNode = layer === insertedLayer ? insertedBindingNode : null;
+          const verdict = canInsertIntoLayer(layer, orderedRenderStep, boundaryNode, 'forward');
+          if (verdict.acceptable) {
+            targetLayer = layer;
+            targetBindingNode = verdict.bindingNode;
+            insertBeforeInTargetLayer = false;
+            if (verdict.compatible) {
+              break;
+            }
+          }
+        }
+      } else if (dependsOnDst) {
         const stopIndex = clipAnchorLayer && clipAnchorLayer.paintOrder === step.paintOrder
           ? candidateLayers.indexOf(clipAnchorLayer)
           : -1;

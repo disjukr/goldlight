@@ -1365,12 +1365,17 @@ const createWedgePatchInstanceData = (
   return data;
 };
 
+const getCurveFillPatches = (
+  patches: readonly DrawingPreparedPatch[],
+): readonly DrawingPreparedPatch[] => patches.filter((patch) => patch.kind !== 'line');
+
 const createCurvePatchInstanceData = (
   patches: readonly DrawingPreparedPatch[],
 ): Float32Array => {
-  const data = new Float32Array(patches.length * curvePatchFloats);
+  const curvePatches = getCurveFillPatches(patches);
+  const data = new Float32Array(curvePatches.length * curvePatchFloats);
   let offset = 0;
-  for (const patch of patches) {
+  for (const patch of curvePatches) {
     const points = getPatchPoints(patch);
     data[offset++] = points[0]![0];
     data[offset++] = points[0]![1];
@@ -1555,7 +1560,9 @@ const prepareStepResources = (
       : createVertexBuffer(sharedContext, activeVertices);
     const vertexCount = !activeVertices ? 0 : usesPatchInstances
       ? getPatchFillVertexCount(
-        step.draw.patches,
+        step.draw.renderer.patchMode === 'curve'
+          ? getCurveFillPatches(step.draw.patches)
+          : step.draw.patches,
         step.draw.renderer.patchMode === 'wedge' ? 'wedge' : 'curve',
       )
       : activeVertices.length / floatsPerVertex;

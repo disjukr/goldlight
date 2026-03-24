@@ -2974,6 +2974,14 @@ const preparePatches = (
       contourClosedExplicitly = false;
       return;
     }
+    if (
+      contourStart &&
+      currentPoint &&
+      !contourClosedExplicitly &&
+      !pointsEqual(currentPoint, contourStart)
+    ) {
+      contourPatches.push({ kind: 'line', points: [currentPoint, contourStart] });
+    }
     const fanPoint = computeContourMidpoint(contourPoints, !contourClosedExplicitly);
     for (const patch of contourPatches) {
       patches.push(finalizePatch(patch, { fanPoint }));

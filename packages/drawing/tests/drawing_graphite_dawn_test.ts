@@ -396,6 +396,39 @@ Deno.test('curve stencil fills use Graphite middle-out fan triangles', () => {
   ]);
 });
 
+Deno.test('curve stencil fills do not encode line patches into Graphite curve instances', () => {
+  const mock = createMockGpuContext();
+  const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
+  const binding = createOffscreenBinding(mock.context);
+  const recorder = createDrawingRecorder(sharedContext);
+  const provider = createDrawingRendererProvider(sharedContext.caps);
+  (sharedContext as { rendererProvider: typeof provider }).rendererProvider = {
+    ...provider,
+    getPathFillRenderer: (options) => provider.stencilTessellatedCurves(options.fillRule),
+  };
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [16, 16] },
+      { kind: 'lineTo', to: [96, 16] },
+      { kind: 'quadTo', control: [128, 48], to: [96, 96] },
+      { kind: 'lineTo', to: [16, 96] },
+      { kind: 'close' },
+    ),
+    { style: 'fill' },
+  );
+
+  encodeDawnCommandBuffer(sharedContext, finishDrawingRecorder(recorder), binding);
+
+  const curveStep = mock.created.renderPasses.length > 0
+    ? mock.created.buffers.find((buffer) =>
+      buffer.label === 'drawing-vertices' && buffer.size === (12 * 4)
+    )
+    : undefined;
+  assertEquals(curveStep !== undefined, true);
+});
+
 Deno.test('dawn resource provider uses replace for first clip writes', () => {
   const mock = createMockGpuContext();
   const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
@@ -1147,6 +1180,113 @@ Deno.test('drawing prepared recording compresses disjoint opaque fills to same p
   assertEquals(steps[1]?.dependsOnDst, false);
   assertEquals(steps[0]?.paintOrder, 0);
   assertEquals(steps[1]?.paintOrder, 0);
+});
+
+Deno.test('drawing prepared recording separates overlapping stencil fills into later paint orders', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [0, 0] },
+      { kind: 'cubicTo', control1: [60, -20], control2: [60, 80], to: [0, 60] },
+      { kind: 'lineTo', to: [10, 10] },
+      { kind: 'close' },
+    ),
+    { style: 'fill', color: [1, 0.5, 0, 1] },
+  );
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [20, 0] },
+      { kind: 'cubicTo', control1: [80, -20], control2: [80, 80], to: [20, 60] },
+      { kind: 'lineTo', to: [30, 10] },
+      { kind: 'close' },
+    ),
+    { style: 'fill', color: [0, 0, 0, 1] },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const steps = prepared.passes[0]?.steps ?? [];
+
+  assertEquals(steps.length, 2);
+  assertEquals(steps[0]?.usesFillStencil, true);
+  assertEquals(steps[1]?.usesFillStencil, true);
+  assertEquals(steps[0]?.paintOrder, 0);
+  assertEquals(steps[1]?.paintOrder, 1);
+});
+
+Deno.test('drawing prepared recording separates overlapping direct fills after stencil fills', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [0, 0] },
+      { kind: 'cubicTo', control1: [60, -20], control2: [60, 80], to: [0, 60] },
+      { kind: 'lineTo', to: [10, 10] },
+      { kind: 'close' },
+    ),
+    { style: 'fill', color: [1, 0.5, 0, 1] },
+  );
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [10, 10] },
+      { kind: 'lineTo', to: [50, 10] },
+      { kind: 'lineTo', to: [50, 50] },
+      { kind: 'close' },
+    ),
+    { style: 'fill', color: [0, 0, 0, 1] },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const steps = prepared.passes[0]?.steps ?? [];
+
+  assertEquals(steps.length, 2);
+  assertEquals(steps[0]?.usesFillStencil, true);
+  assertEquals(steps[1]?.usesFillStencil, false);
+  assertEquals(steps[0]?.paintOrder, 0);
+  assertEquals(steps[1]?.paintOrder, 1);
+});
+
+Deno.test('drawing prepared recording preserves stencil step order within a single draw', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [0, 0] },
+      { kind: 'cubicTo', control1: [60, -20], control2: [60, 80], to: [0, 60] },
+      { kind: 'lineTo', to: [10, 10] },
+      { kind: 'close' },
+    ),
+    { style: 'fill', color: [1, 0.5, 0, 1] },
+  );
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [80, 0] },
+      { kind: 'lineTo', to: [120, 0] },
+      { kind: 'lineTo', to: [120, 40] },
+      { kind: 'close' },
+    ),
+    { style: 'fill', color: [0.5, 0.2, 0.8, 0.8] },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const renderSteps = prepared.passes[0]?.renderSteps ?? [];
+  const stencilDrawSteps = renderSteps
+    .filter((step) => step.stepIndex === 0)
+    .map((step) => step.kind);
+
+  assertEquals(stencilDrawSteps, ['fill-stencil', 'fill-cover']);
 });
 
 Deno.test('drawing prepared recording compresses disjoint translucent draws to same paint order', () => {
@@ -1938,6 +2078,40 @@ Deno.test('drawing prepared recording uses Graphite contour midpoint for wedge f
   assertEquals(wedgePatches.length > 0, true);
   assertEquals(wedgePatches[0]!.fanPoint, [104, 88]);
   assertEquals(preparedWork.resources.tasks[0]!.passes[0]!.steps[0]!.instanceCount, 8);
+});
+
+Deno.test('drawing prepared wedge fills implicitly close open contours like Graphite', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [16, 16] },
+      { kind: 'lineTo', to: [96, 16] },
+      { kind: 'lineTo', to: [96, 96] },
+    ),
+    { style: 'fill', color: [0.8, 0.4, 0.2, 1] },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const draw = prepared.passes[0]!.steps[0]!.draw;
+
+  if (draw.kind !== 'pathFill') {
+    throw new Error(`expected pathFill draw, got ${draw.kind}`);
+  }
+
+  assertEquals(
+    draw.patches.some((patch) =>
+      patch.kind === 'line' &&
+      patch.points[0][0] === 96 &&
+      patch.points[0][1] === 96 &&
+      patch.points[1][0] === 16 &&
+      patch.points[1][1] === 16
+    ),
+    true,
+  );
 });
 
 Deno.test('drawing prepared recording preserves evenodd fill rule through draw step metadata', () => {

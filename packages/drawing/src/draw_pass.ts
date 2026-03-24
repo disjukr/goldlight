@@ -258,21 +258,50 @@ type MutablePreparedRenderStep = Omit<DrawingPreparedRenderStep, 'clipDrawIds'> 
   clipDrawIds: number[];
 };
 
-type DrawingBinding = {
-  key: string;
-  wrapperKind: DrawingClipStackWrapperKind;
+type DrawingBoundsTest = 'disjoint' | 'compatible-overlap' | 'incompatible-overlap';
+
+type DrawingBindingListType = 'single' | 'stencil';
+
+type DrawingLayerKey = Readonly<{
+  pipelineKey: string;
   requiresBarrier: boolean;
+}>;
+
+type DrawingBindingWrapperBase = {
+  listType: DrawingBindingListType;
+  listOrder: number;
   bounds: Rect;
-  steps: MutablePreparedRenderStep[];
-  prev: DrawingBinding | null;
-  next: DrawingBinding | null;
+  prev: DrawingBindingWrapper | null;
+  next: DrawingBindingWrapper | null;
 };
+
+type DrawingSingleDrawList = DrawingBindingWrapperBase & {
+  listType: 'single';
+  key: DrawingLayerKey;
+  step: DrawingPreparedRenderStep;
+  draws: MutablePreparedRenderStep[];
+};
+
+type DrawingStencilDraws = Readonly<{
+  key: DrawingLayerKey;
+  step: DrawingPreparedRenderStep;
+  draws: MutablePreparedRenderStep[];
+}>;
+
+type DrawingStencilDrawList = DrawingBindingWrapperBase & {
+  listType: 'stencil';
+  groups: DrawingStencilDraws[];
+};
+
+type DrawingBindingWrapper = DrawingSingleDrawList | DrawingStencilDrawList;
 
 type DrawingLayer = {
   order: number;
   paintOrder: number;
-  head: DrawingBinding | null;
-  tail: DrawingBinding | null;
+  stencilIndex: number;
+  nextListOrder: number;
+  head: DrawingBindingWrapper | null;
+  tail: DrawingBindingWrapper | null;
 };
 
 type DrawingOrderingDevice = {
@@ -286,26 +315,49 @@ type DrawingOrderingDevice = {
 
 const iterateBindings = function* (
   layer: DrawingLayer,
-): Generator<DrawingBinding, void, undefined> {
+): Generator<DrawingBindingWrapper, void, undefined> {
   for (let current = layer.head; current; current = current.next) {
     yield current;
   }
 };
 
+const iterateBindingRenderSteps = function* (
+  binding: DrawingBindingWrapper,
+): Generator<MutablePreparedRenderStep, void, undefined> {
+  if (binding.listType === 'single') {
+    yield* binding.draws;
+    return;
+  }
+  for (const group of binding.groups) {
+    yield* group.draws;
+  }
+};
+
+const createLayerKey = (
+  step: Pick<DrawingPreparedRenderStep, 'pipelineDesc' | 'requiresBarrier'>,
+): DrawingLayerKey => ({
+  pipelineKey: step.pipelineDesc.label,
+  requiresBarrier: step.requiresBarrier,
+});
+
+const layerKeysEqual = (left: DrawingLayerKey, right: DrawingLayerKey): boolean =>
+  left.pipelineKey === right.pipelineKey && left.requiresBarrier === right.requiresBarrier;
+
+const getBindingWrapperKey = (
+  binding: DrawingBindingWrapper,
+): string =>
+  binding.listType === 'single'
+    ? binding.key.pipelineKey
+    : binding.groups[binding.groups.length - 1]?.key.pipelineKey ?? 'stencil';
+
 const findBindingByKey = (
   layer: DrawingLayer,
-  key: string,
-  wrapperKind: DrawingClipStackWrapperKind,
-  requiresBarrier: boolean,
-  startBinding: DrawingBinding | null = null,
-): DrawingBinding | null => {
+  key: DrawingLayerKey,
+  startBinding: DrawingBindingWrapper | null = null,
+): DrawingBindingWrapper | null => {
   const endBinding = startBinding?.prev ?? null;
   for (let binding = layer.tail; binding && binding !== endBinding; binding = binding.prev) {
-    if (
-      binding.key === key &&
-      binding.wrapperKind === wrapperKind &&
-      binding.requiresBarrier === requiresBarrier
-    ) {
+    if (binding.listType === 'single' && layerKeysEqual(binding.key, key)) {
       return binding;
     }
   }
@@ -314,8 +366,8 @@ const findBindingByKey = (
 
 const insertBindingAfter = (
   layer: DrawingLayer,
-  binding: DrawingBinding,
-  previous: DrawingBinding | null,
+  binding: DrawingBindingWrapper,
+  previous: DrawingBindingWrapper | null,
 ): void => {
   if (!previous) {
     binding.prev = null;
@@ -340,28 +392,21 @@ const insertBindingAfter = (
 };
 
 const bindingIntersectsStep = (
-  binding: DrawingBinding,
+  binding: DrawingBindingWrapper,
   step: DrawingPreparedRenderStep,
 ): boolean => rectsIntersect(binding.bounds, step.drawBounds);
-
-const renderStepBindingKey = (step: Pick<DrawingPreparedRenderStep, 'pipelineDesc'>): string =>
-  step.pipelineDesc.label;
 
 const renderStepWrapperKind = (
   step: Pick<DrawingPreparedRenderStep, 'usesFillStencil'>,
 ): DrawingClipStackWrapperKind => step.usesFillStencil ? 'stencil' : 'single';
 
-const renderStepRequiresBarrier = (
-  step: Pick<DrawingPreparedRenderStep, 'requiresBarrier'>,
-): boolean => step.requiresBarrier;
-
 const bindingCanMatchRenderStep = (
-  binding: DrawingBinding,
+  binding: DrawingBindingWrapper,
   step: DrawingPreparedRenderStep,
 ): boolean =>
-  binding.key === renderStepBindingKey(step) &&
-  binding.wrapperKind === renderStepWrapperKind(step) &&
-  binding.requiresBarrier === renderStepRequiresBarrier(step);
+  binding.listType === 'single'
+    ? layerKeysEqual(binding.key, createLayerKey(step))
+    : binding.groups.some((group) => layerKeysEqual(group.key, createLayerKey(step)));
 
 const canRenderStepOverlapOwnBinding = (
   step: DrawingPreparedRenderStep,
@@ -508,16 +553,13 @@ const expandRenderSteps = (
 const canInsertIntoLayer = (
   layer: DrawingLayer,
   step: DrawingPreparedRenderStep,
-  boundaryNode: DrawingBinding | null = null,
+  boundaryNode: DrawingBindingWrapper | null = null,
   direction: 'forward' | 'backward' = 'forward',
 ): Readonly<{
-  acceptable: boolean;
-  compatible: boolean;
-  incompatibleOverlap: boolean;
-  bindingNode: DrawingBinding | null;
+  boundsTest: DrawingBoundsTest;
+  bindingNode: DrawingBindingWrapper | null;
 }> => {
-  let compatible = false;
-  let bindingNode: DrawingBinding | null = null;
+  let bindingNode: DrawingBindingWrapper | null = null;
   let binding = direction === 'forward' ? boundaryNode ?? layer.head : layer.tail;
   const endBinding = direction === 'forward' ? null : boundaryNode?.prev ?? null;
 
@@ -527,7 +569,6 @@ const canInsertIntoLayer = (
     binding = direction === 'forward' ? binding.next : binding.prev
   ) {
     if (bindingCanMatchRenderStep(binding, step)) {
-      compatible = true;
       bindingNode = binding;
       if (canRenderStepOverlapOwnBinding(step)) {
         continue;
@@ -535,18 +576,14 @@ const canInsertIntoLayer = (
     }
     if (bindingIntersectsStep(binding, step)) {
       return {
-        acceptable: false,
-        compatible: false,
-        incompatibleOverlap: true,
+        boundsTest: 'incompatible-overlap',
         bindingNode: null,
       };
     }
   }
 
   return {
-    acceptable: true,
-    compatible,
-    incompatibleOverlap: false,
+    boundsTest: bindingNode ? 'compatible-overlap' : 'disjoint',
     bindingNode,
   };
 };
@@ -554,30 +591,74 @@ const canInsertIntoLayer = (
 const insertStepIntoLayer = (
   layer: DrawingLayer,
   step: MutablePreparedRenderStep,
-  matchingBinding: DrawingBinding | null,
+  matchingBinding: DrawingBindingWrapper | null,
+  stencilGroupStartIndex: number | null,
   insertAtHead = false,
-): DrawingBinding => {
-  if (matchingBinding) {
-    if (insertAtHead) {
-      matchingBinding.steps.unshift(step);
+): Readonly<{
+  binding: DrawingBindingWrapper;
+  stencilGroupIndex: number | null;
+}> => {
+  if (step.usesFillStencil) {
+    const key = createLayerKey(step);
+    let binding: DrawingStencilDrawList;
+    if (matchingBinding?.listType === 'stencil') {
+      binding = matchingBinding;
+      binding.bounds = unionStepBounds(binding.bounds, step.drawBounds);
     } else {
-      matchingBinding.steps.push(step);
+      binding = {
+        listType: 'stencil',
+        listOrder: layer.nextListOrder++,
+        bounds: step.drawBounds,
+        groups: [],
+        prev: null,
+        next: null,
+      };
+      insertBindingAfter(layer, binding, layer.tail);
     }
-    matchingBinding.bounds = unionStepBounds(matchingBinding.bounds, step.drawBounds);
-    return matchingBinding;
+
+    const searchStart = stencilGroupStartIndex === null ? 0 : stencilGroupStartIndex + 1;
+    let groupIndex = -1;
+    for (let index = searchStart; index < binding.groups.length; index += 1) {
+      if (layerKeysEqual(binding.groups[index]!.key, key)) {
+        groupIndex = index;
+        break;
+      }
+    }
+    if (groupIndex < 0) {
+      binding.groups.push({
+        key,
+        step,
+        draws: [step],
+      });
+      groupIndex = binding.groups.length - 1;
+    } else {
+      binding.groups[groupIndex]!.draws.push(step);
+    }
+    return { binding, stencilGroupIndex: groupIndex };
   }
 
-  const binding: DrawingBinding = {
-    key: renderStepBindingKey(step),
-    wrapperKind: renderStepWrapperKind(step),
-    requiresBarrier: renderStepRequiresBarrier(step),
+  if (matchingBinding?.listType === 'single') {
+    matchingBinding.bounds = unionStepBounds(matchingBinding.bounds, step.drawBounds);
+    if (insertAtHead) {
+      matchingBinding.draws.unshift(step);
+    } else {
+      matchingBinding.draws.push(step);
+    }
+    return { binding: matchingBinding, stencilGroupIndex: null };
+  }
+
+  const binding: DrawingSingleDrawList = {
+    listType: 'single',
+    listOrder: layer.nextListOrder++,
+    key: createLayerKey(step),
+    step,
     bounds: step.drawBounds,
-    steps: [step],
+    draws: [step],
     prev: null,
     next: null,
   };
   insertBindingAfter(layer, binding, layer.tail);
-  return binding;
+  return { binding, stencilGroupIndex: null };
 };
 
 const createClipPipelineDescForElement = (
@@ -610,6 +691,42 @@ const createOrderingDevice = (): DrawingOrderingDevice => ({
   trackedRawElements: new Set(),
 });
 
+const assignDisjointStencilIndices = (
+  steps: readonly MutablePreparedStep[],
+): readonly number[] => {
+  const buckets = new Map<number, Rect[][]>();
+  const stencilIndices: number[] = [];
+
+  for (const step of steps) {
+    if (!step.usesFillStencil) {
+      stencilIndices.push(unassignedStencilIndex);
+      (step as { stencilIndex: number }).stencilIndex = unassignedStencilIndex;
+      continue;
+    }
+
+    const sets = buckets.get(step.paintOrder) ?? [];
+    let assigned = -1;
+    for (let index = 0; index < sets.length; index += 1) {
+      const setBounds = sets[index]!;
+      if (setBounds.every((bounds) => !rectsIntersect(bounds, step.drawBounds))) {
+        setBounds.push(step.drawBounds);
+        assigned = index;
+        break;
+      }
+    }
+    if (assigned < 0) {
+      assigned = sets.length;
+      sets.push([step.drawBounds]);
+      buckets.set(step.paintOrder, sets);
+    }
+
+    stencilIndices.push(assigned);
+    (step as { stencilIndex: number }).stencilIndex = assigned;
+  }
+
+  return Object.freeze(stencilIndices);
+};
+
 const computeCompressedPaintOrders = (
   steps: readonly MutablePreparedStep[],
 ): readonly number[] => {
@@ -623,32 +740,6 @@ const computeCompressedPaintOrders = (
         if (!rectsIntersect(prevStep.drawBounds, step.drawBounds)) {
           continue;
         }
-        paintOrder = Math.max(paintOrder, prevStep.paintOrder + 1);
-      }
-    }
-    if (step.usesFillStencil) {
-      for (let prevIndex = 0; prevIndex < index; prevIndex += 1) {
-        const prevStep = steps[prevIndex]!;
-        if (!rectsIntersect(prevStep.drawBounds, step.drawBounds)) {
-          continue;
-        }
-        if (!prevStep.usesFillStencil) {
-          paintOrder = Math.max(paintOrder, prevStep.paintOrder + 1);
-          continue;
-        }
-        // Graphite can only reorder stencil-then-cover substeps across draws when their
-        // stencil usage is proven disjoint. Our scheduler does not carry a separate disjoint
-        // stencil index, so overlapping stencil fills must not share a compressed paint order.
-        paintOrder = Math.max(paintOrder, prevStep.paintOrder + 1);
-      }
-    } else {
-      for (let prevIndex = 0; prevIndex < index; prevIndex += 1) {
-        const prevStep = steps[prevIndex]!;
-        if (!prevStep.usesFillStencil || !rectsIntersect(prevStep.drawBounds, step.drawBounds)) {
-          continue;
-        }
-        // Regular draws also cannot be interleaved with an overlapping stencil-then-cover draw
-        // unless there is a separate disjoint-stencil ordering field.
         paintOrder = Math.max(paintOrder, prevStep.paintOrder + 1);
       }
     }
@@ -704,7 +795,7 @@ const finalizeDeferredClipDraws = (
 
 const createClipLatestInsertion = (
   layer: DrawingLayer,
-  bindingNode: DrawingBinding | null,
+  bindingNode: DrawingBindingWrapper | null,
   renderStep: DrawingPreparedRenderStep,
 ): Readonly<{
   layerOrder: number;
@@ -713,13 +804,13 @@ const createClipLatestInsertion = (
   pipelineKey: string;
   bindingKey: string;
   wrapperKind: DrawingClipStackWrapperKind;
-  bindingNode: DrawingBinding | null;
+  bindingNode: DrawingBindingWrapper | null;
 }> => ({
   layerOrder: layer.order,
   renderStepIndex: renderStep.renderStepIndex,
   renderStepKind: renderStep.kind,
   pipelineKey: renderStep.pipelineDesc.label,
-  bindingKey: bindingNode?.key ?? renderStep.pipelineDesc.label,
+  bindingKey: bindingNode ? getBindingWrapperKey(bindingNode) : renderStep.pipelineDesc.label,
   wrapperKind: 'depth-only',
   bindingNode,
 });
@@ -752,12 +843,13 @@ const assignLayeredOrder = (
     depth: depthAsFloat(originalOrder + 1),
     originalOrder,
     paintOrder: noIntersectionPaintOrder,
-    stencilIndex: step.usesStencil || step.usesFillStencil ? originalOrder : unassignedStencilIndex,
+    stencilIndex: unassignedStencilIndex,
     dependsOnDst: stepDependsOnDst(step),
     requiresBarrier: (step.draw.dstUsage & drawingDstUsage.dstReadRequired) !== 0,
     clipDrawIds: [] as number[],
   }));
   computeCompressedPaintOrders(preparedSteps);
+  assignDisjointStencilIndices(preparedSteps);
   const renderSteps = preparedSteps.flatMap((step, stepIndex) =>
     expandRenderSteps(step, stepIndex)
   );
@@ -766,7 +858,7 @@ const assignLayeredOrder = (
     const dependsOnDst = step.dependsOnDst;
     const clipElements = step.draw.clip?.effectiveElements ?? [];
     let clipAnchorLayer: DrawingLayer | null = null;
-    let clipAnchorBindingNode: DrawingBinding | null = null;
+    let clipAnchorBindingNode: DrawingBindingWrapper | null = null;
     for (const element of clipElements) {
       const latestInsertion = getDrawingRawClipElementLatestInsertion(element.rawElement);
       const latestLayerOrder = latestInsertion?.layerOrder;
@@ -782,14 +874,15 @@ const assignLayeredOrder = (
       if (candidateLayer && (!clipAnchorLayer || candidateLayer.order > clipAnchorLayer.order)) {
         clipAnchorLayer = candidateLayer;
         clipAnchorBindingNode =
-          (latestInsertion?.bindingNode as DrawingBinding | null | undefined) ??
+          (latestInsertion?.bindingNode as DrawingBindingWrapper | null | undefined) ??
             null;
       }
     }
     const drawRenderSteps = renderSteps.filter((candidate) => candidate.stepIndex === stepIndex);
-    let insertedBindingNode: DrawingBinding | null = null;
+    let insertedBindingNode: DrawingBindingWrapper | null = null;
     let insertedLayer: DrawingLayer | null = null;
     let lastInsertedRenderStep: MutablePreparedRenderStep | null = null;
+    let insertedStencilGroupIndex: number | null = null;
     let insertBeforeInTargetLayer = false;
     for (const renderStep of drawRenderSteps) {
       const orderedRenderStep: MutablePreparedRenderStep = {
@@ -797,9 +890,11 @@ const assignLayeredOrder = (
         paintOrder: step.paintOrder,
       };
       lastInsertedRenderStep = orderedRenderStep;
-      const candidateLayers = device.layers.filter((layer) => layer.paintOrder === step.paintOrder);
+      const candidateLayers = device.layers.filter((layer) =>
+        layer.paintOrder === step.paintOrder && layer.stencilIndex === step.stencilIndex
+      );
       let targetLayer: DrawingLayer | null = null;
-      let targetBindingNode: DrawingBinding | null = null;
+      let targetBindingNode: DrawingBindingWrapper | null = null;
       insertBeforeInTargetLayer = false;
 
       if (insertedLayer) {
@@ -808,11 +903,11 @@ const assignLayeredOrder = (
           const layer = candidateLayers[index]!;
           const boundaryNode = layer === insertedLayer ? insertedBindingNode : null;
           const verdict = canInsertIntoLayer(layer, orderedRenderStep, boundaryNode, 'forward');
-          if (verdict.acceptable) {
+          if (verdict.boundsTest !== 'incompatible-overlap') {
             targetLayer = layer;
             targetBindingNode = verdict.bindingNode;
             insertBeforeInTargetLayer = false;
-            if (verdict.compatible) {
+            if (verdict.boundsTest === 'compatible-overlap') {
               break;
             }
           }
@@ -825,15 +920,15 @@ const assignLayeredOrder = (
           const layer = candidateLayers[index]!;
           const boundaryNode = layer === clipAnchorLayer ? clipAnchorBindingNode : null;
           const verdict = canInsertIntoLayer(layer, orderedRenderStep, boundaryNode, 'backward');
-          if (verdict.acceptable) {
+          if (verdict.boundsTest !== 'incompatible-overlap') {
             targetLayer = layer;
             targetBindingNode = verdict.bindingNode;
-            if (verdict.compatible) {
+            if (verdict.boundsTest === 'compatible-overlap') {
               break;
             }
             continue;
           }
-          if (verdict.incompatibleOverlap || index === stopIndex) {
+          if (verdict.boundsTest === 'incompatible-overlap' || index === stopIndex) {
             break;
           }
         }
@@ -846,9 +941,7 @@ const assignLayeredOrder = (
           const searchMatch = !orderedRenderStep.usesFillStencil
             ? findBindingByKey(
               startLayer,
-              renderStepBindingKey(orderedRenderStep),
-              renderStepWrapperKind(orderedRenderStep),
-              renderStepRequiresBarrier(orderedRenderStep),
+              createLayerKey(orderedRenderStep),
               startBinding,
             )
             : null;
@@ -861,11 +954,11 @@ const assignLayeredOrder = (
               const layer = candidateLayers[index]!;
               const boundaryNode = layer === startLayer ? startBinding : null;
               const verdict = canInsertIntoLayer(layer, orderedRenderStep, boundaryNode, 'forward');
-              if (verdict.acceptable) {
+              if (verdict.boundsTest !== 'incompatible-overlap') {
                 targetLayer = layer;
                 targetBindingNode = verdict.bindingNode;
                 insertBeforeInTargetLayer = layer !== startLayer;
-                if (verdict.compatible) {
+                if (verdict.boundsTest === 'compatible-overlap') {
                   break;
                 }
               }
@@ -878,15 +971,23 @@ const assignLayeredOrder = (
         targetLayer = {
           order: device.nextLayerOrder++,
           paintOrder: step.paintOrder,
+          stencilIndex: step.stencilIndex,
+          nextListOrder: 1,
           head: null,
           tail: null,
         };
-        if (clipAnchorLayer && !dependsOnDst && clipAnchorLayer.paintOrder === step.paintOrder) {
+        if (
+          clipAnchorLayer &&
+          !dependsOnDst &&
+          clipAnchorLayer.paintOrder === step.paintOrder &&
+          clipAnchorLayer.stencilIndex === step.stencilIndex
+        ) {
           const anchorIndex = device.layers.indexOf(clipAnchorLayer);
           device.layers.splice(anchorIndex + 1, 0, targetLayer);
         } else {
           const insertIndex = device.layers.findIndex((layer) =>
-            layer.paintOrder > step.paintOrder
+            layer.paintOrder > step.paintOrder ||
+            (layer.paintOrder === step.paintOrder && layer.stencilIndex > step.stencilIndex)
           );
           if (insertIndex < 0) {
             device.layers.push(targetLayer);
@@ -897,12 +998,15 @@ const assignLayeredOrder = (
       }
 
       insertedLayer = targetLayer;
-      insertedBindingNode = insertStepIntoLayer(
+      const insertion = insertStepIntoLayer(
         targetLayer,
         orderedRenderStep,
         targetBindingNode,
+        insertedStencilGroupIndex,
         !dependsOnDst && insertBeforeInTargetLayer,
       );
+      insertedBindingNode = insertion.binding;
+      insertedStencilGroupIndex = insertion.stencilGroupIndex;
     }
     for (let index = 0; index < clipElements.length; index += 1) {
       const clipElement = clipElements[index]!;
@@ -980,7 +1084,7 @@ const assignLayeredOrder = (
   }
 
   const orderedRenderSteps = device.layers.flatMap((layer) =>
-    [...iterateBindings(layer)].flatMap((binding) => binding.steps)
+    [...iterateBindings(layer)].flatMap((binding) => [...iterateBindingRenderSteps(binding)])
   ).map((step) =>
     Object.freeze({
       ...step,

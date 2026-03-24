@@ -1182,7 +1182,7 @@ Deno.test('drawing prepared recording compresses disjoint opaque fills to same p
   assertEquals(steps[1]?.paintOrder, 0);
 });
 
-Deno.test('drawing prepared recording separates overlapping stencil fills into later paint orders', () => {
+Deno.test('drawing prepared recording assigns distinct disjoint stencil indices to overlapping stencil fills', () => {
   const mock = createMockGpuContext();
   const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
   const recorder = drawingContext.createRecorder();
@@ -1215,10 +1215,11 @@ Deno.test('drawing prepared recording separates overlapping stencil fills into l
   assertEquals(steps[0]?.usesFillStencil, true);
   assertEquals(steps[1]?.usesFillStencil, true);
   assertEquals(steps[0]?.paintOrder, 0);
-  assertEquals(steps[1]?.paintOrder, 1);
+  assertEquals(steps[1]?.paintOrder, 0);
+  assertEquals((steps[0]?.stencilIndex ?? -1) !== (steps[1]?.stencilIndex ?? -1), true);
 });
 
-Deno.test('drawing prepared recording separates overlapping direct fills after stencil fills', () => {
+Deno.test('drawing prepared recording keeps direct fills after stencil buckets at the same paint order', () => {
   const mock = createMockGpuContext();
   const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
   const recorder = drawingContext.createRecorder();
@@ -1246,12 +1247,16 @@ Deno.test('drawing prepared recording separates overlapping direct fills after s
 
   const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
   const steps = prepared.passes[0]?.steps ?? [];
+  const renderSteps = prepared.passes[0]?.renderSteps ?? [];
 
   assertEquals(steps.length, 2);
   assertEquals(steps[0]?.usesFillStencil, true);
   assertEquals(steps[1]?.usesFillStencil, false);
   assertEquals(steps[0]?.paintOrder, 0);
-  assertEquals(steps[1]?.paintOrder, 1);
+  assertEquals(steps[1]?.paintOrder, 0);
+  assertEquals(steps[0]?.stencilIndex === 0, true);
+  assertEquals(steps[1]?.stencilIndex, 0xffff);
+  assertEquals(renderSteps.map((step) => step.stepIndex), [0, 0, 1]);
 });
 
 Deno.test('drawing prepared recording preserves stencil step order within a single draw', () => {

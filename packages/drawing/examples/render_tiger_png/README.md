@@ -2,17 +2,18 @@
 
 This example writes `tiger.png` next to `tiger.svg` without using `resvg`.
 
-Right now it is a progress scaffold for `@rieul3d/drawing`, not a real tiger renderer.
+It implements a small SVG ingest layer inside the example and renders the result through
+`@rieul3d/drawing`.
 
-The script:
+The example currently supports the subset used by `tiger.svg`:
 
-- reads `tiger.svg`
-- reports how much SVG structure is present
-- uses `@rieul3d/drawing` path construction for the placeholder frame
-- writes a PNG through `@rieul3d/exporters`
+- tags: `svg`, `g`, `path`
+- attributes: `viewBox`, `fill`, `stroke`, `stroke-width`, `transform`
+- transforms: `matrix(...)`, `translate(...)`, `scale(...)`
+- path commands: `M/m`, `L/l`, `C/c`, `S/s`, `V/v`, `Z/z`
 
-It deliberately does not call any external SVG rasterizer. Real tiger output is blocked until
-`drawing` has SVG path ingestion plus fill/stroke rendering.
+The tiger asset does not need gradients, text, masks, clip paths, or patterns, so those are not
+implemented here.
 
 ## Run
 

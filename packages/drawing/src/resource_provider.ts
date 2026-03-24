@@ -984,10 +984,9 @@ fn tessellate_filled_curve(
   curveType: f32,
   weight: f32,
 ) -> vec2<f32> {
-  var localcoord: vec2<f32>;
-  if (curveType < 0.5) {
-    let fixedVertexID = floor(0.5 + (idxInResolveLevel * exp2(MAX_RESOLVE_LEVEL - resolveLevel)));
-    return select(p0, p3, fixedVertexID > 0.0);
+  _ = weight;
+  if (curveType > 1.5) {
+    return select(select(p0, p2, idxInResolveLevel != 0.0), p1, resolveLevel != 0.0);
   }
 
   var localP0 = p0;
@@ -996,19 +995,8 @@ fn tessellate_filled_curve(
   var localP3 = p3;
   var w = -1.0;
   var maxResolveLevel = 0.0;
-  if (curveType < 1.5) {
-    maxResolveLevel = wangs_formula_cubic_log2(
-      localP0,
-      mix(localP0, localP1, 2.0 / 3.0),
-      mix(localP2, localP1, 2.0 / 3.0),
-      localP2,
-      vectorXform,
-    );
-    localP1 = mix(localP0, localP1, 2.0 / 3.0);
-    localP2 = mix(localP2, p1, 2.0 / 3.0);
-    localP3 = p2;
-  } else if (curveType < 2.5) {
-    w = weight;
+  if (curveType > 0.5) {
+    w = localP3.x;
     maxResolveLevel = wangs_formula_conic_log2(localP0, localP1, localP2, w, vectorXform);
     localP1 *= w;
     localP3 = localP2;
@@ -1034,11 +1022,10 @@ fn tessellate_filled_curve(
     let u = mix(1.0, w, T);
     let v = w + 1.0 - u;
     let uv = mix(u, v, T);
-    localcoord = select(abc / uv, abcd, w < 0.0);
+    return select(abc / uv, abcd, w < 0.0);
   } else {
-    localcoord = select(localP0, localP3, fixedVertexID > 0.0);
+    return select(localP0, localP3, fixedVertexID > 0.0);
   }
-  return localcoord;
 }
 
 @vertex
@@ -1221,9 +1208,9 @@ fn tessellate_filled_curve(
   curveType: f32,
   weight: f32,
 ) -> vec2<f32> {
-  if (curveType < 0.5) {
-    let fixedVertexID = floor(0.5 + (idxInResolveLevel * exp2(MAX_RESOLVE_LEVEL - resolveLevel)));
-    return select(p0, p3, fixedVertexID > 0.0);
+  _ = weight;
+  if (curveType > 1.5) {
+    return select(select(p0, p2, idxInResolveLevel != 0.0), p1, resolveLevel != 0.0);
   }
   var localP0 = p0;
   var localP1 = p1;
@@ -1231,21 +1218,8 @@ fn tessellate_filled_curve(
   var localP3 = p3;
   var w = -1.0;
   var maxResolveLevel = 0.0;
-  if (curveType < 0.5) {
-    return select(localP0, localP3, idxInResolveLevel > 0.0);
-  } else if (curveType < 1.5) {
-    maxResolveLevel = wangs_formula_cubic_log2(
-      localP0,
-      mix(localP0, localP1, 2.0 / 3.0),
-      mix(localP2, localP1, 2.0 / 3.0),
-      localP2,
-      vectorXform,
-    );
-    localP1 = mix(localP0, localP1, 2.0 / 3.0);
-    localP2 = mix(localP2, p1, 2.0 / 3.0);
-    localP3 = p2;
-  } else if (curveType < 2.5) {
-    w = weight;
+  if (curveType > 0.5) {
+    w = localP3.x;
     maxResolveLevel = wangs_formula_conic_log2(localP0, localP1, localP2, w, vectorXform);
     localP1 *= w;
     localP3 = localP2;

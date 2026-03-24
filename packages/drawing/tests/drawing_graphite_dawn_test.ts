@@ -390,6 +390,37 @@ Deno.test('curve stencil fills use Graphite middle-out fan triangles', () => {
   ]);
 });
 
+Deno.test('curve stencil fills keep a non-empty fan draw step', () => {
+  const mock = createMockGpuContext();
+  const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
+  const recorder = createDrawingRecorder(sharedContext);
+  const provider = createDrawingRendererProvider(sharedContext.caps);
+  (sharedContext as { rendererProvider: typeof provider }).rendererProvider = {
+    ...provider,
+    getPathFillRenderer: (options) => provider.stencilTessellatedCurves(options.fillRule),
+  };
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [16, 16] },
+      { kind: 'lineTo', to: [96, 16] },
+      { kind: 'lineTo', to: [96, 96] },
+      { kind: 'lineTo', to: [16, 96] },
+      { kind: 'close' },
+    ),
+    { style: 'fill' },
+  );
+
+  const prepared = prepareDawnRecording(sharedContext, finishDrawingRecorder(recorder));
+  assertEquals(
+    prepared.prepared.passes[0]?.renderSteps.map((step) => step.kind),
+    ['fill-stencil-fan', 'fill-stencil', 'fill-cover'],
+  );
+  assertEquals(prepared.resources.tasks[0]?.passes[0]?.steps[0]?.vertexCount, 6);
+  assertEquals(prepared.resources.tasks[0]?.passes[0]?.steps[0]?.instanceCount, 1);
+});
+
 Deno.test('curve stencil fills do not encode line patches into Graphite curve instances', () => {
   const mock = createMockGpuContext();
   const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
@@ -421,6 +452,68 @@ Deno.test('curve stencil fills do not encode line patches into Graphite curve in
     )
     : undefined;
   assertEquals(curveStep !== undefined, true);
+});
+
+Deno.test('curve stencil fills encode chopped helper triangles as curve patches', () => {
+  const mock = createMockGpuContext();
+  const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
+  const recorder = createDrawingRecorder(sharedContext);
+  const provider = createDrawingRendererProvider(sharedContext.caps);
+  (sharedContext as { rendererProvider: typeof provider }).rendererProvider = {
+    ...provider,
+    getPathFillRenderer: (options) => provider.stencilTessellatedCurves(options.fillRule),
+  };
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [0, 0] },
+      { kind: 'cubicTo', control1: [0, 2400], control2: [2400, 2400], to: [2400, 0] },
+      { kind: 'close' },
+    ),
+    { style: 'fill' },
+  );
+
+  const prepared = prepareDawnRecording(sharedContext, finishDrawingRecorder(recorder));
+  const draw = prepared.prepared.passes[0]?.steps[0]?.draw;
+  assertEquals(draw?.kind, 'pathFill');
+  if (draw?.kind !== 'pathFill') {
+    throw new Error('expected pathFill draw');
+  }
+  assertEquals(draw.renderer.kind, 'stencil-tessellated-curves');
+  assertEquals(draw.patches.some((patch) => patch.kind === 'triangle'), true);
+});
+
+Deno.test('wedge stencil fills chop large cubics into Graphite fan patches', () => {
+  const mock = createMockGpuContext();
+  const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
+  const recorder = createDrawingRecorder(sharedContext);
+  const provider = createDrawingRendererProvider(sharedContext.caps);
+  (sharedContext as { rendererProvider: typeof provider }).rendererProvider = {
+    ...provider,
+    getPathFillRenderer: (options) => provider.stencilTessellatedWedges(options.fillRule),
+  };
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [0, 0] },
+      { kind: 'cubicTo', control1: [0, 2400], control2: [2400, 2400], to: [2400, 0] },
+      { kind: 'close' },
+    ),
+    { style: 'fill' },
+  );
+
+  const prepared = prepareDawnRecording(sharedContext, finishDrawingRecorder(recorder));
+  const draw = prepared.prepared.passes[0]?.steps[0]?.draw;
+  assertEquals(draw?.kind, 'pathFill');
+  if (draw?.kind !== 'pathFill') {
+    throw new Error('expected pathFill draw');
+  }
+  assertEquals(draw.renderer.kind, 'stencil-tessellated-wedges');
+  assertEquals(draw.patches.every((patch) => patch.kind === 'cubic' || patch.kind === 'line'), true);
+  assertEquals(draw.patches.filter((patch) => patch.kind === 'cubic').length, 4);
+  assertEquals(draw.patches.some((patch) => patch.kind === 'triangle'), false);
 });
 
 Deno.test('dawn resource provider uses replace for first clip writes', () => {
@@ -3840,7 +3933,7 @@ Deno.test('dawn stroke patch shader keeps Skia-like combined-edge solve structur
   assertEquals(strokeShaderSource.includes('return robust_normalize_diff(p1, p0);'), true);
 });
 
-Deno.test('dawn curve patch shader keeps line patches on the line code path', () => {
+Deno.test('dawn curve patch shader follows Graphite cubic/conic patch dispatch', () => {
   const mock = createMockGpuContext();
   const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
   sharedContext.resourceProvider.findOrCreateGraphicsPipeline({
@@ -3861,8 +3954,9 @@ Deno.test('dawn curve patch shader keeps line patches on the line code path', ()
     throw new Error('expected curve patch shader source');
   }
   const curveShaderSource = curveShader.code;
-  assertEquals(curveShaderSource.includes('if (curveType < 0.5) {'), true);
-  assertEquals(curveShaderSource.includes('return select(p0, p3, fixedVertexID > 0.0);'), true);
+  assertEquals(curveShaderSource.includes('if (curveType > 1.5) {'), true);
+  assertEquals(curveShaderSource.includes('w = localP3.x;'), true);
+  assertEquals(curveShaderSource.includes('return select(localP0, localP3, fixedVertexID > 0.0);'), true);
 });
 
 Deno.test('dawn resource provider reuses pipelines across command buffers', () => {

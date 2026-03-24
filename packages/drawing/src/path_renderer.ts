@@ -170,6 +170,10 @@ export type DrawingPreparedPatch = Readonly<
     points: readonly [Point2D, Point2D];
   })
   | (DrawingPreparedPatchBase & {
+    kind: 'triangle';
+    points: readonly [Point2D, Point2D, Point2D];
+  })
+  | (DrawingPreparedPatchBase & {
     kind: 'quadratic';
     points: readonly [Point2D, Point2D, Point2D];
   })
@@ -198,6 +202,11 @@ type DrawingPatchDefinition =
   | Readonly<{
     kind: 'line';
     points: readonly [Point2D, Point2D];
+    fanPoint?: Point2D;
+  }>
+  | Readonly<{
+    kind: 'triangle';
+    points: readonly [Point2D, Point2D, Point2D];
     fanPoint?: Point2D;
   }>
   | Readonly<{
@@ -654,6 +663,8 @@ const patchWangsFormulaP4 = (patch: DrawingPatchDefinition): number => {
   switch (patch.kind) {
     case 'line':
       return 1;
+    case 'triangle':
+      return 16;
     case 'quadratic': {
       return quadraticWangsFormulaP4(patch.points[0], patch.points[1], patch.points[2]);
     }
@@ -689,6 +700,15 @@ const transformPatch = (
         transformPoint2D(patch.points[2], transform),
       ],
       weight: patch.weight,
+    }
+    : patch.kind === 'triangle'
+    ? {
+      kind: 'triangle',
+      points: [
+        transformPoint2D(patch.points[0], transform),
+        transformPoint2D(patch.points[1], transform),
+        transformPoint2D(patch.points[2], transform),
+      ],
     }
     : patch.kind === 'quadratic'
     ? {
@@ -731,49 +751,12 @@ const accountForFillCurve = (wangsFormulaP4: number): number => {
   );
 };
 
-const maybeChopFillPatch = (
-  patch: DrawingPatchDefinition,
-  transform: readonly [number, number, number, number, number, number],
-): readonly DrawingPatchDefinition[] => {
-  const numPatches = accountForFillCurve(transformedPatchWangsFormulaP4(patch, transform));
-  if (numPatches <= 1) {
-    return [patch];
-  }
-  const ts = Array.from({ length: numPatches - 1 }, (_, index) => (index + 1) / numPatches);
-  switch (patch.kind) {
-    case 'line':
-      return [patch];
-    case 'quadratic':
-      return splitQuadraticAtMany(patch.points[0], patch.points[1], patch.points[2], ts).map(
-        (points) => ({ kind: 'quadratic', points }),
-      );
-    case 'conic':
-      return splitConicAtMany(
-        patch.points[0],
-        patch.points[1],
-        patch.points[2],
-        patch.weight,
-        ts,
-      ).map((segment) => ({
-        kind: 'conic',
-        points: segment.points,
-        weight: segment.weight,
-      }));
-    case 'cubic':
-      return splitCubicAtMany(
-        patch.points[0],
-        patch.points[1],
-        patch.points[2],
-        patch.points[3],
-        ts,
-      ).map((points) => ({ kind: 'cubic', points }));
-  }
-};
-
 const resolvePatchLevel = (patch: DrawingPatchDefinition): number => {
   switch (patch.kind) {
     case 'line':
       return 0;
+    case 'triangle':
+      return 1;
     case 'quadratic':
       return resolveLevelFromWangsFormulaP4(
         quadraticWangsFormulaP4(patch.points[0], patch.points[1], patch.points[2]),
@@ -797,6 +780,8 @@ const finalizePatch = (
   const wangsFormulaP4 = patchWangsFormulaP4(patch);
   switch (patch.kind) {
     case 'line':
+      return { ...patch, ...extras, resolveLevel, wangsFormulaP4 };
+    case 'triangle':
       return { ...patch, ...extras, resolveLevel, wangsFormulaP4 };
     case 'quadratic':
       return { ...patch, ...extras, resolveLevel, wangsFormulaP4 };
@@ -982,6 +967,7 @@ const subdivideStrokePreparedPatch = (
 const getPatchStartPoint = (patch: DrawingPreparedPatch): Point2D => {
   switch (patch.kind) {
     case 'line':
+    case 'triangle':
       return patch.points[0];
     case 'quadratic':
       return patch.points[0];
@@ -996,6 +982,8 @@ const getPatchEndPoint = (patch: DrawingPreparedPatch): Point2D => {
   switch (patch.kind) {
     case 'line':
       return patch.points[1];
+    case 'triangle':
+      return patch.points[2];
     case 'quadratic':
       return patch.points[2];
     case 'conic':
@@ -1010,6 +998,8 @@ const getPatchPoints4 = (
 ): readonly [Point2D, Point2D, Point2D, Point2D] =>
   patch.kind === 'line'
     ? [patch.points[0], patch.points[0], patch.points[1], patch.points[1]]
+    : patch.kind === 'triangle'
+    ? [patch.points[0], patch.points[1], patch.points[2], patch.points[2]]
     : patch.kind === 'quadratic'
     ? quadraticToCubicPoints(patch.points[0], patch.points[1], patch.points[2])
     : patch.kind === 'conic'
@@ -3176,28 +3166,6 @@ const preparePatches = (
     return Object.freeze([]);
   }
 
-  const pushPreparedPatch = (patch: DrawingPatchDefinition, fanPoint?: Point2D): void => {
-    for (const preparedPatch of maybeChopFillPatch(patch, approxTransform)) {
-      const transformedWangsFormulaP4 = transformedPatchWangsFormulaP4(
-        preparedPatch,
-        approxTransform,
-      );
-      const extras = {
-        ...(fanPoint ? { fanPoint } : {}),
-        resolveLevel: resolveLevelFromWangsFormulaP4(transformedWangsFormulaP4),
-        wangsFormulaP4: transformedWangsFormulaP4,
-      };
-      switch (preparedPatch.kind) {
-        case 'line':
-        case 'quadratic':
-        case 'conic':
-        case 'cubic':
-          patches.push({ ...preparedPatch, ...extras });
-          break;
-      }
-    }
-  };
-
   for (const contour of contours) {
     const fanPoint = includeFanPoint ? contour.midpoint : undefined;
     let currentPoint = contour.startPoint;
@@ -3207,35 +3175,58 @@ const preparePatches = (
         case 'close':
           break;
         case 'lineTo':
-          pushPreparedPatch({ kind: 'line', points: [currentPoint, verb.to] }, fanPoint);
+          appendFanPatch(
+            patches,
+            { kind: 'line', points: [currentPoint, verb.to] },
+            fanPoint,
+            approxTransform,
+          );
           currentPoint = verb.to;
           break;
         case 'quadTo':
-          pushPreparedPatch(
-            { kind: 'quadratic', points: [currentPoint, verb.control, verb.to] },
+          writeQuadraticFanPatches(
+            patches,
+            currentPoint,
+            verb.control,
+            verb.to,
             fanPoint,
+            approxTransform,
           );
           currentPoint = verb.to;
           break;
         case 'conicTo':
-          pushPreparedPatch({
-            kind: 'conic',
-            points: [currentPoint, verb.control, verb.to],
-            weight: verb.weight,
-          }, fanPoint);
+          writeConicFanPatches(
+            patches,
+            currentPoint,
+            verb.control,
+            verb.to,
+            verb.weight,
+            fanPoint,
+            approxTransform,
+          );
           currentPoint = verb.to;
           break;
         case 'cubicTo':
-          pushPreparedPatch(
-            { kind: 'cubic', points: [currentPoint, verb.control1, verb.control2, verb.to] },
+          writeCubicFanPatches(
+            patches,
+            currentPoint,
+            verb.control1,
+            verb.control2,
+            verb.to,
             fanPoint,
+            approxTransform,
           );
           currentPoint = verb.to;
           break;
       }
     }
     if (!pointsEqual(currentPoint, contour.startPoint)) {
-      pushPreparedPatch({ kind: 'line', points: [currentPoint, contour.startPoint] }, fanPoint);
+      appendFanPatch(
+        patches,
+        { kind: 'line', points: [currentPoint, contour.startPoint] },
+        fanPoint,
+        approxTransform,
+      );
     }
   }
   return Object.freeze(patches);
@@ -3502,13 +3493,280 @@ const transformedCubicWangsFormulaP4 = (
     transformPoint2D(p3, transform),
   );
 
-const writeChoppedQuadraticTriangles = (
-  triangles: Point2D[],
+const appendChoppedTrianglePatches = (
+  patches: DrawingPreparedPatch[],
+  stack: MiddleOutPoppedTriangleStack,
+): void => {
+  for (const [p0, p1, p2] of stack) {
+    patches.push(finalizePatch({ kind: 'triangle', points: [p0, p1, p2] }));
+  }
+  stack.commit();
+};
+
+const appendCurvePatch = (
+  patches: DrawingPreparedPatch[],
+  patch: DrawingPatchDefinition,
+  transform: readonly [number, number, number, number, number, number],
+): void => {
+  const transformedWangsFormulaP4 = transformedPatchWangsFormulaP4(patch, transform);
+  const extras = {
+    resolveLevel: resolveLevelFromWangsFormulaP4(transformedWangsFormulaP4),
+    wangsFormulaP4: transformedWangsFormulaP4,
+  };
+  switch (patch.kind) {
+    case 'line':
+    case 'triangle':
+    case 'quadratic':
+    case 'conic':
+    case 'cubic':
+      patches.push({ ...patch, ...extras });
+      break;
+  }
+};
+
+const appendFanPatch = (
+  patches: DrawingPreparedPatch[],
+  patch: DrawingPatchDefinition,
+  fanPoint: Point2D | undefined,
+  transform: readonly [number, number, number, number, number, number],
+): void => {
+  const transformedWangsFormulaP4 = transformedPatchWangsFormulaP4(patch, transform);
+  const extras = {
+    ...(fanPoint ? { fanPoint } : {}),
+    resolveLevel: resolveLevelFromWangsFormulaP4(transformedWangsFormulaP4),
+    wangsFormulaP4: transformedWangsFormulaP4,
+  };
+  switch (patch.kind) {
+    case 'line':
+    case 'triangle':
+    case 'quadratic':
+    case 'conic':
+    case 'cubic':
+      patches.push({ ...patch, ...extras });
+      break;
+  }
+};
+
+const writeQuadraticFanPatches = (
+  patches: DrawingPreparedPatch[],
   p0: Point2D,
   p1: Point2D,
   p2: Point2D,
-  numPatches: number,
+  fanPoint: Point2D | undefined,
+  transform: readonly [number, number, number, number, number, number],
 ): void => {
+  let numPatches = accountForFillCurve(transformedQuadraticWangsFormulaP4(p0, p1, p2, transform));
+  if (numPatches <= 0) {
+    appendFanPatch(patches, { kind: 'quadratic', points: [p0, p1, p2] }, fanPoint, transform);
+    return;
+  }
+  let currentP0 = p0;
+  let currentP1 = p1;
+  const currentP2 = p2;
+  for (; numPatches >= 3; numPatches -= 2) {
+    const t0 = 1 / numPatches;
+    const t1 = 2 / numPatches;
+    const ab0 = lerp(currentP0, currentP1, t0);
+    const bc0 = lerp(currentP1, currentP2, t0);
+    const abc0 = lerp(ab0, bc0, t0);
+    const ab1 = lerp(currentP0, currentP1, t1);
+    const bc1 = lerp(currentP1, currentP2, t1);
+    const abc1 = lerp(ab1, bc1, t1);
+    appendFanPatch(
+      patches,
+      { kind: 'quadratic', points: [currentP0, ab0, abc0] },
+      fanPoint,
+      transform,
+    );
+    appendFanPatch(
+      patches,
+      { kind: 'cubic', points: [abc0, lerp(abc0, bc0, 2 / 3), lerp(abc1, bc1, 1 / 3), abc1] },
+      fanPoint,
+      transform,
+    );
+    currentP0 = abc1;
+    currentP1 = bc1;
+  }
+  if (numPatches === 2) {
+    const ab = midpoint(currentP0, currentP1);
+    const bc = midpoint(currentP1, currentP2);
+    const abc = midpoint(ab, bc);
+    appendFanPatch(
+      patches,
+      { kind: 'quadratic', points: [currentP0, ab, abc] },
+      fanPoint,
+      transform,
+    );
+    appendFanPatch(
+      patches,
+      { kind: 'quadratic', points: [abc, bc, currentP2] },
+      fanPoint,
+      transform,
+    );
+  } else {
+    appendFanPatch(
+      patches,
+      { kind: 'quadratic', points: [currentP0, currentP1, currentP2] },
+      fanPoint,
+      transform,
+    );
+  }
+};
+
+const writeConicFanPatches = (
+  patches: DrawingPreparedPatch[],
+  p0: Point2D,
+  p1: Point2D,
+  p2: Point2D,
+  weight: number,
+  fanPoint: Point2D | undefined,
+  transform: readonly [number, number, number, number, number, number],
+): void => {
+  let numPatches = accountForFillCurve(
+    transformedConicWangsFormulaP4(p0, p1, p2, weight, transform),
+  );
+  if (numPatches <= 0) {
+    appendFanPatch(patches, { kind: 'conic', points: [p0, p1, p2], weight }, fanPoint, transform);
+    return;
+  }
+  let h0: [number, number, number] = [p0[0], p0[1], 1];
+  let h1: [number, number, number] = [p1[0] * weight, p1[1] * weight, weight];
+  const h2: [number, number, number] = [p2[0], p2[1], 1];
+  for (; numPatches >= 2; numPatches -= 1) {
+    const t = 1 / numPatches;
+    const ab: [number, number, number] = [
+      h0[0] + ((h1[0] - h0[0]) * t),
+      h0[1] + ((h1[1] - h0[1]) * t),
+      h0[2] + ((h1[2] - h0[2]) * t),
+    ];
+    const bc: [number, number, number] = [
+      h1[0] + ((h2[0] - h1[0]) * t),
+      h1[1] + ((h2[1] - h1[1]) * t),
+      h1[2] + ((h2[2] - h1[2]) * t),
+    ];
+    const abc: [number, number, number] = [
+      ab[0] + ((bc[0] - ab[0]) * t),
+      ab[1] + ((bc[1] - ab[1]) * t),
+      ab[2] + ((bc[2] - ab[2]) * t),
+    ];
+    const midpoint: Point2D = [abc[0] / abc[2], abc[1] / abc[2]];
+    appendFanPatch(patches, {
+      kind: 'conic',
+      points: [
+        [h0[0] / h0[2], h0[1] / h0[2]],
+        [ab[0] / ab[2], ab[1] / ab[2]],
+        midpoint,
+      ],
+      weight: ab[2] / Math.sqrt(Math.max(h0[2] * abc[2], epsilon)),
+    }, fanPoint, transform);
+    h0 = abc;
+    h1 = bc;
+  }
+  appendFanPatch(patches, {
+    kind: 'conic',
+    points: [
+      [h0[0] / h0[2], h0[1] / h0[2]],
+      [h1[0] / h1[2], h1[1] / h1[2]],
+      [h2[0], h2[1]],
+    ],
+    weight: h1[2] / Math.sqrt(Math.max(h0[2], epsilon)),
+  }, fanPoint, transform);
+};
+
+const writeCubicFanPatches = (
+  patches: DrawingPreparedPatch[],
+  p0: Point2D,
+  p1: Point2D,
+  p2: Point2D,
+  p3: Point2D,
+  fanPoint: Point2D | undefined,
+  transform: readonly [number, number, number, number, number, number],
+): void => {
+  let numPatches = accountForFillCurve(transformedCubicWangsFormulaP4(p0, p1, p2, p3, transform));
+  if (numPatches <= 0) {
+    appendFanPatch(patches, { kind: 'cubic', points: [p0, p1, p2, p3] }, fanPoint, transform);
+    return;
+  }
+  let currentP0 = p0;
+  let currentP1 = p1;
+  let currentP2 = p2;
+  const currentP3 = p3;
+  for (; numPatches >= 3; numPatches -= 2) {
+    const t0 = 1 / numPatches;
+    const t1 = 2 / numPatches;
+    const ab0 = lerp(currentP0, currentP1, t0);
+    const bc0 = lerp(currentP1, currentP2, t0);
+    const cd0 = lerp(currentP2, currentP3, t0);
+    const abc0 = lerp(ab0, bc0, t0);
+    const bcd0 = lerp(bc0, cd0, t0);
+    const abcd0 = lerp(abc0, bcd0, t0);
+    const ab1 = lerp(currentP0, currentP1, t1);
+    const bc1 = lerp(currentP1, currentP2, t1);
+    const cd1 = lerp(currentP2, currentP3, t1);
+    const abc1 = lerp(ab1, bc1, t1);
+    const bcd1 = lerp(bc1, cd1, t1);
+    const abcd1 = lerp(abc1, bcd1, t1);
+    appendFanPatch(
+      patches,
+      { kind: 'cubic', points: [currentP0, ab0, abc0, abcd0] },
+      fanPoint,
+      transform,
+    );
+    appendFanPatch(
+      patches,
+      { kind: 'cubic', points: [abcd0, lerp(abc0, bcd0, t1), lerp(abc1, bcd1, t0), abcd1] },
+      fanPoint,
+      transform,
+    );
+    currentP0 = abcd1;
+    currentP1 = bcd1;
+    currentP2 = cd1;
+  }
+  if (numPatches === 2) {
+    const ab = midpoint(currentP0, currentP1);
+    const bc = midpoint(currentP1, currentP2);
+    const cd = midpoint(currentP2, currentP3);
+    const abc = midpoint(ab, bc);
+    const bcd = midpoint(bc, cd);
+    const abcd = midpoint(abc, bcd);
+    appendFanPatch(
+      patches,
+      { kind: 'cubic', points: [currentP0, ab, abc, abcd] },
+      fanPoint,
+      transform,
+    );
+    appendFanPatch(
+      patches,
+      { kind: 'cubic', points: [abcd, bcd, cd, currentP3] },
+      fanPoint,
+      transform,
+    );
+  } else {
+    appendFanPatch(
+      patches,
+      { kind: 'cubic', points: [currentP0, currentP1, currentP2, currentP3] },
+      fanPoint,
+      transform,
+    );
+  }
+};
+
+const writeQuadraticPatches = (
+  patches: DrawingPreparedPatch[],
+  p0: Point2D,
+  p1: Point2D,
+  p2: Point2D,
+  transform: readonly [number, number, number, number, number, number],
+): void => {
+  const n4 = transformedQuadraticWangsFormulaP4(p0, p1, p2, transform);
+  if (n4 <= 1) {
+    return;
+  }
+  let numPatches = accountForFillCurve(n4);
+  if (numPatches <= 0) {
+    appendCurvePatch(patches, { kind: 'quadratic', points: [p0, p1, p2] }, transform);
+    return;
+  }
   const triangulator = new MiddleOutPolygonTriangulator(numPatches, p0);
   let currentP0 = p0;
   let currentP1 = p1;
@@ -3522,8 +3780,18 @@ const writeChoppedQuadraticTriangles = (
     const ab1 = lerp(currentP0, currentP1, t1);
     const bc1 = lerp(currentP1, currentP2, t1);
     const abc1 = lerp(ab1, bc1, t1);
-    pushTriangle(triangles, currentP0, abc0, abc1);
-    writeTriangleStack(triangles, triangulator.pushVertex(abc1));
+    const middleP1 = lerp(abc0, bc0, 2 / 3);
+    const middleP2 = lerp(abc1, bc1, 1 / 3);
+    appendCurvePatch(patches, { kind: 'quadratic', points: [currentP0, ab0, abc0] }, transform);
+    appendCurvePatch(patches, {
+      kind: 'triangle',
+      points: [currentP0, abc0, abc1],
+    }, transform);
+    appendCurvePatch(patches, {
+      kind: 'cubic',
+      points: [abc0, middleP1, middleP2, abc1],
+    }, transform);
+    appendChoppedTrianglePatches(patches, triangulator.pushVertex(abc1));
     currentP0 = abc1;
     currentP1 = bc1;
   }
@@ -3531,22 +3799,40 @@ const writeChoppedQuadraticTriangles = (
     const ab = midpoint(currentP0, currentP1);
     const bc = midpoint(currentP1, currentP2);
     const abc = midpoint(ab, bc);
-    pushTriangle(triangles, currentP0, abc, currentP2);
-    writeTriangleStack(triangles, triangulator.pushVertex(currentP2));
+    appendCurvePatch(patches, { kind: 'quadratic', points: [currentP0, ab, abc] }, transform);
+    appendCurvePatch(patches, {
+      kind: 'triangle',
+      points: [currentP0, abc, currentP2],
+    }, transform);
+    appendCurvePatch(patches, { kind: 'quadratic', points: [abc, bc, currentP2] }, transform);
+    appendChoppedTrianglePatches(patches, triangulator.pushVertex(currentP2));
   } else {
-    writeTriangleStack(triangles, triangulator.pushVertex(currentP2));
+    appendCurvePatch(patches, {
+      kind: 'quadratic',
+      points: [currentP0, currentP1, currentP2],
+    }, transform);
+    appendChoppedTrianglePatches(patches, triangulator.pushVertex(currentP2));
   }
-  writeTriangleStack(triangles, triangulator.close());
+  appendChoppedTrianglePatches(patches, triangulator.close());
 };
 
-const writeChoppedConicTriangles = (
-  triangles: Point2D[],
+const writeConicPatches = (
+  patches: DrawingPreparedPatch[],
   p0: Point2D,
   p1: Point2D,
   p2: Point2D,
   weight: number,
-  numPatches: number,
+  transform: readonly [number, number, number, number, number, number],
 ): void => {
+  const n4 = transformedConicWangsFormulaP4(p0, p1, p2, weight, transform);
+  if (n4 <= 1) {
+    return;
+  }
+  let numPatches = accountForFillCurve(n4);
+  if (numPatches <= 0) {
+    appendCurvePatch(patches, { kind: 'conic', points: [p0, p1, p2], weight }, transform);
+    return;
+  }
   const triangulator = new MiddleOutPolygonTriangulator(numPatches, p0);
   let h0: [number, number, number] = [p0[0], p0[1], 1];
   let h1: [number, number, number] = [p1[0] * weight, p1[1] * weight, weight];
@@ -3569,22 +3855,49 @@ const writeChoppedConicTriangles = (
       ab[2] + ((bc[2] - ab[2]) * t),
     ];
     const midpoint: Point2D = [abc[0] / abc[2], abc[1] / abc[2]];
-    writeTriangleStack(triangles, triangulator.pushVertex(midpoint));
+    appendCurvePatch(patches, {
+      kind: 'conic',
+      points: [
+        [h0[0] / h0[2], h0[1] / h0[2]],
+        [ab[0] / ab[2], ab[1] / ab[2]],
+        midpoint,
+      ],
+      weight: ab[2] / Math.sqrt(Math.max(h0[2] * abc[2], epsilon)),
+    }, transform);
+    appendChoppedTrianglePatches(patches, triangulator.pushVertex(midpoint));
     h0 = abc;
     h1 = bc;
   }
-  writeTriangleStack(triangles, triangulator.pushVertex(p2));
-  writeTriangleStack(triangles, triangulator.close());
+  appendCurvePatch(patches, {
+    kind: 'conic',
+    points: [
+      [h0[0] / h0[2], h0[1] / h0[2]],
+      [h1[0] / h1[2], h1[1] / h1[2]],
+      [h2[0], h2[1]],
+    ],
+    weight: h1[2] / Math.sqrt(Math.max(h0[2], epsilon)),
+  }, transform);
+  appendChoppedTrianglePatches(patches, triangulator.pushVertex(p2));
+  appendChoppedTrianglePatches(patches, triangulator.close());
 };
 
-const writeChoppedCubicTriangles = (
-  triangles: Point2D[],
+const writeCubicPatches = (
+  patches: DrawingPreparedPatch[],
   p0: Point2D,
   p1: Point2D,
   p2: Point2D,
   p3: Point2D,
-  numPatches: number,
+  transform: readonly [number, number, number, number, number, number],
 ): void => {
+  const n4 = transformedCubicWangsFormulaP4(p0, p1, p2, p3, transform);
+  if (n4 <= 1) {
+    return;
+  }
+  let numPatches = accountForFillCurve(n4);
+  if (numPatches <= 0) {
+    appendCurvePatch(patches, { kind: 'cubic', points: [p0, p1, p2, p3] }, transform);
+    return;
+  }
   const triangulator = new MiddleOutPolygonTriangulator(numPatches, p0);
   let currentP0 = p0;
   let currentP1 = p1;
@@ -3605,8 +3918,19 @@ const writeChoppedCubicTriangles = (
     const abc1 = lerp(ab1, bc1, t1);
     const bcd1 = lerp(bc1, cd1, t1);
     const abcd1 = lerp(abc1, bcd1, t1);
-    pushTriangle(triangles, currentP0, abcd0, abcd1);
-    writeTriangleStack(triangles, triangulator.pushVertex(abcd1));
+    appendCurvePatch(patches, {
+      kind: 'cubic',
+      points: [currentP0, ab0, abc0, abcd0],
+    }, transform);
+    appendCurvePatch(patches, {
+      kind: 'triangle',
+      points: [currentP0, abcd0, abcd1],
+    }, transform);
+    appendCurvePatch(patches, {
+      kind: 'cubic',
+      points: [abcd0, lerp(abc0, bcd0, t1), lerp(abc1, bcd1, t0), abcd1],
+    }, transform);
+    appendChoppedTrianglePatches(patches, triangulator.pushVertex(abcd1));
     currentP0 = abcd1;
     currentP1 = bcd1;
     currentP2 = cd1;
@@ -3618,111 +3942,96 @@ const writeChoppedCubicTriangles = (
     const abc = midpoint(ab, bc);
     const bcd = midpoint(bc, cd);
     const abcd = midpoint(abc, bcd);
-    pushTriangle(triangles, currentP0, abcd, currentP3);
-    writeTriangleStack(triangles, triangulator.pushVertex(currentP3));
+    appendCurvePatch(patches, { kind: 'cubic', points: [currentP0, ab, abc, abcd] }, transform);
+    appendCurvePatch(patches, {
+      kind: 'triangle',
+      points: [currentP0, abcd, currentP3],
+    }, transform);
+    appendCurvePatch(patches, { kind: 'cubic', points: [abcd, bcd, cd, currentP3] }, transform);
+    appendChoppedTrianglePatches(patches, triangulator.pushVertex(currentP3));
   } else {
-    writeTriangleStack(triangles, triangulator.pushVertex(currentP3));
+    appendCurvePatch(patches, {
+      kind: 'cubic',
+      points: [currentP0, currentP1, currentP2, currentP3],
+    }, transform);
+    appendChoppedTrianglePatches(patches, triangulator.pushVertex(currentP3));
   }
-  writeTriangleStack(triangles, triangulator.close());
+  appendChoppedTrianglePatches(patches, triangulator.close());
 };
 
-const prepareCurveTrianglesWhenChopping = (
+const prepareCurvePatches = (
   path: DrawingPath2D,
   transform: readonly [number, number, number, number, number, number],
-): readonly Point2D[] => {
-  const triangles: Point2D[] = [];
+): readonly DrawingPreparedPatch[] => {
+  const patches: DrawingPreparedPatch[] = [];
+  let currentPoint: Point2D | null = null;
+  let contourStart: Point2D | null = null;
 
-  const contours = parseMidpointContours(path, identityMatrix2D);
-  if (!contours) {
-    return Object.freeze(triangles);
-  }
-
-  for (const contour of contours) {
-    let currentPoint = contour.startPoint;
-    for (const verb of contour.verbs) {
-      switch (verb.kind) {
-        case 'moveTo':
-        case 'lineTo':
-        case 'close':
-          if (verb.kind === 'lineTo') {
-            currentPoint = verb.to;
-          }
-          break;
-        case 'quadTo': {
-          const n4 = transformedQuadraticWangsFormulaP4(
-            currentPoint,
-            verb.control,
-            verb.to,
-            transform,
-          );
-          if (n4 > 1) {
-            const numPatches = accountForFillCurve(n4);
-            if (numPatches > 0) {
-              writeChoppedQuadraticTriangles(
-                triangles,
-                currentPoint,
-                verb.control,
-                verb.to,
-                numPatches,
-              );
-            }
-          }
-          currentPoint = verb.to;
-          break;
+  for (const verb of path.verbs) {
+    switch (verb.kind) {
+      case 'moveTo':
+        currentPoint = verb.to;
+        contourStart = verb.to;
+        break;
+      case 'lineTo':
+        currentPoint = verb.to;
+        break;
+      case 'quadTo':
+        if (currentPoint) {
+          writeQuadraticPatches(patches, currentPoint, verb.control, verb.to, transform);
         }
-        case 'conicTo': {
-          const n4 = transformedConicWangsFormulaP4(
-            currentPoint,
-            verb.control,
-            verb.to,
-            verb.weight,
-            transform,
-          );
-          if (n4 > 1) {
-            const numPatches = accountForFillCurve(n4);
-            if (numPatches > 0) {
-              writeChoppedConicTriangles(
-                triangles,
-                currentPoint,
-                verb.control,
-                verb.to,
-                verb.weight,
-                numPatches,
-              );
-            }
-          }
-          currentPoint = verb.to;
-          break;
+        currentPoint = verb.to;
+        break;
+      case 'conicTo':
+        if (currentPoint) {
+          writeConicPatches(patches, currentPoint, verb.control, verb.to, verb.weight, transform);
         }
-        case 'cubicTo': {
-          const n4 = transformedCubicWangsFormulaP4(
+        currentPoint = verb.to;
+        break;
+      case 'cubicTo':
+        if (currentPoint) {
+          writeCubicPatches(
+            patches,
             currentPoint,
             verb.control1,
             verb.control2,
             verb.to,
             transform,
           );
-          if (n4 > 1) {
-            const numPatches = accountForFillCurve(n4);
-            if (numPatches > 0) {
-              writeChoppedCubicTriangles(
-                triangles,
-                currentPoint,
-                verb.control1,
-                verb.control2,
-                verb.to,
-                numPatches,
-              );
-            }
-          }
-          currentPoint = verb.to;
-          break;
         }
+        currentPoint = verb.to;
+        break;
+      case 'close':
+        currentPoint = contourStart;
+        break;
+      case 'arcTo': {
+        const arcPatches = createArcConicPatches(
+          verb.center,
+          verb.radius,
+          verb.startAngle,
+          verb.endAngle,
+          verb.counterClockwise ?? false,
+          identityMatrix2D,
+        );
+        for (const patch of arcPatches) {
+          if (patch.kind !== 'conic') {
+            continue;
+          }
+          writeConicPatches(
+            patches,
+            patch.points[0],
+            patch.points[1],
+            patch.points[2],
+            patch.weight,
+            transform,
+          );
+        }
+        currentPoint = arcPatches.at(-1)?.points[2] ?? currentPoint;
+        break;
       }
     }
   }
-
-  return Object.freeze(triangles);
+  return Object.freeze(patches);
 };
 
 const closeSubpathsForFill = (
@@ -4450,7 +4759,6 @@ const preparePathFill = (
   const preparedClip = createPreparedDrawClip(preparedClipStack);
   if (style === 'fill') {
     const fillSubpaths = closeSubpathsForFill(midpointContourSubpaths);
-    const patches = preparePatches(command.path, identityMatrix2D, true, command.transform);
     const transformedFillBounds = computePathBounds(command.path, command.transform);
     const isConvex = fillSubpaths.length === 1 &&
       fillSubpaths[0]!.points.length >= 3 &&
@@ -4462,18 +4770,18 @@ const preparePathFill = (
       drawBoundsArea: transformedFillBounds.size.width * transformedFillBounds.size.height,
     });
 
+    let patches: readonly DrawingPreparedPatch[] = [];
     let baseTriangles: readonly Point2D[] = [];
     switch (renderer.kind) {
       case 'convex-tessellated-wedges':
       case 'stencil-tessellated-wedges':
+        patches = preparePatches(command.path, identityMatrix2D, true, command.transform);
         baseTriangles = tessellateFillFromPatches(patches) ??
           prepareFillTriangles(fillSubpaths, command.path.fillRule) ?? [];
         break;
       case 'stencil-tessellated-curves':
-        baseTriangles = Object.freeze([
-          ...prepareMiddleOutFanTriangles(command.path),
-          ...prepareCurveTrianglesWhenChopping(command.path, command.transform),
-        ]);
+        patches = prepareCurvePatches(command.path, command.transform);
+        baseTriangles = prepareMiddleOutFanTriangles(command.path);
         break;
       default:
         baseTriangles = prepareFillTriangles(fillSubpaths, command.path.fillRule) ?? [];

@@ -496,6 +496,8 @@ const toCurveType = (patch: DrawingPreparedPatch): number => {
   switch (patch.kind) {
     case 'line':
       return 0;
+    case 'triangle':
+      return 2;
     case 'quadratic':
       return 1;
     case 'conic':
@@ -520,6 +522,49 @@ const quadraticToCubicPoints = (
   ];
   return [p0, c1, c2, p2];
 };
+
+const lineToCubicPatchPoints = (
+  p0: Point2D,
+  p1: Point2D,
+): readonly [Point2D, Point2D, Point2D, Point2D] => {
+  const c1: Point2D = [
+    p0[0] + ((p1[0] - p0[0]) / 3),
+    p0[1] + ((p1[1] - p0[1]) / 3),
+  ];
+  const c2: Point2D = [
+    p1[0] + ((p0[0] - p1[0]) / 3),
+    p1[1] + ((p0[1] - p1[1]) / 3),
+  ];
+  return [p0, c1, c2, p1];
+};
+
+const conicPatchPoints = (
+  p0: Point2D,
+  p1: Point2D,
+  p2: Point2D,
+  weight: number,
+): readonly [Point2D, Point2D, Point2D, Point2D] => [
+  p0,
+  p1,
+  p2,
+  [weight, Number.POSITIVE_INFINITY],
+];
+
+const getFillPatchPoints = (
+  patch: DrawingPreparedPatch,
+): readonly [Point2D, Point2D, Point2D, Point2D] =>
+  patch.kind === 'line'
+    ? lineToCubicPatchPoints(patch.points[0], patch.points[1])
+    : patch.kind === 'triangle'
+    ? [patch.points[0], patch.points[1], patch.points[2], [Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY]]
+    : patch.kind === 'quadratic'
+    ? quadraticToCubicPoints(patch.points[0], patch.points[1], patch.points[2])
+    : patch.kind === 'conic'
+    ? conicPatchPoints(patch.points[0], patch.points[1], patch.points[2], patch.weight)
+    : [patch.points[0], patch.points[1], patch.points[2], patch.points[3]];
+
+const toFillCurveType = (patch: DrawingPreparedPatch): number =>
+  patch.kind === 'triangle' ? 2 : patch.kind === 'conic' ? 1 : 0;
 
 const transformPoint = (
   point: Point2D,
@@ -1323,6 +1368,8 @@ const getPatchPoints = (
 ): readonly [Point2D, Point2D, Point2D, Point2D] =>
   patch.kind === 'line'
     ? [patch.points[0], patch.points[0], patch.points[1], patch.points[1]]
+    : patch.kind === 'triangle'
+    ? [patch.points[0], patch.points[1], patch.points[2], patch.points[2]]
     : patch.kind === 'quadratic'
     ? [patch.points[0], patch.points[1], patch.points[2], patch.points[2]]
     : patch.kind === 'conic'
@@ -1346,7 +1393,7 @@ const createWedgePatchInstanceData = (
   const data = new Float32Array(wedgePatches.length * wedgePatchFloats);
   let offset = 0;
   for (const patch of wedgePatches) {
-    const points = getPatchPoints(patch);
+    const points = getFillPatchPoints(patch);
     data[offset++] = points[0][0];
     data[offset++] = points[0][1];
     data[offset++] = points[1][0];
@@ -1355,8 +1402,8 @@ const createWedgePatchInstanceData = (
     data[offset++] = points[2][1];
     data[offset++] = points[3][0];
     data[offset++] = points[3][1];
-    data[offset++] = toCurveType(patch);
-    data[offset++] = patch.kind === 'conic' ? patch.weight : 1;
+    data[offset++] = toFillCurveType(patch);
+    data[offset++] = 0;
     data[offset++] = Math.min(maxPatchResolveLevel, Math.max(0, patch.resolveLevel));
     data[offset++] = 0;
     data[offset++] = patch.fanPoint![0];
@@ -1376,7 +1423,7 @@ const createCurvePatchInstanceData = (
   const data = new Float32Array(curvePatches.length * curvePatchFloats);
   let offset = 0;
   for (const patch of curvePatches) {
-    const points = getPatchPoints(patch);
+    const points = getFillPatchPoints(patch);
     data[offset++] = points[0]![0];
     data[offset++] = points[0]![1];
     data[offset++] = points[1]![0];
@@ -1385,8 +1432,8 @@ const createCurvePatchInstanceData = (
     data[offset++] = points[2]![1];
     data[offset++] = points[3]![0];
     data[offset++] = points[3]![1];
-    data[offset++] = toCurveType(patch);
-    data[offset++] = patch.kind === 'conic' ? patch.weight : 1;
+    data[offset++] = toFillCurveType(patch);
+    data[offset++] = 0;
     data[offset++] = Math.min(maxPatchResolveLevel, Math.max(0, patch.resolveLevel));
     data[offset++] = 0;
   }
@@ -1519,9 +1566,7 @@ const prepareStepResources = (
 
   if (step.draw.kind === 'pathFill') {
     const usesPatchFill = isDrawingPatchFillRenderer(step.draw.renderer);
-    const fillVertices = usesPatchFill
-      ? null
-      : createVertexModulationData(step.draw.triangles, [1, 1, 1, 1]);
+    const fillVertices = createVertexModulationData(step.draw.triangles, [1, 1, 1, 1]);
     const patchVertices = step.draw.renderer.patchMode === 'wedge'
       ? createWedgePatchInstanceData(step.draw.patches)
       : step.draw.renderer.patchMode === 'curve'

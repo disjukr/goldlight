@@ -90,6 +90,7 @@
     "example:drawing:gradients:ckpng": "deno run -A --unstable-raw-imports ./packages/drawing/examples/render_gradients/canvaskit_main.ts",
     "example:drawing:tiger:check": "deno check --unstable-raw-imports ./packages/drawing/examples/render_tiger_png/main.ts",
     "example:drawing:tiger:png": "deno run -A --unstable-raw-imports ./packages/drawing/examples/render_tiger_png/main.ts",
+    "example:drawing:png": "deno task example:drawing:basic-paths:png && deno task example:drawing:strokes:png && deno task example:drawing:fills:png && deno task example:drawing:gradients:png && deno task example:drawing:tiger:png",
     "example:browser:serve": "deno run -A jsr:@std/http@1/file-server ."
   },
   "fmt": {

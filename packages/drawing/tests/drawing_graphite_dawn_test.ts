@@ -360,6 +360,42 @@ Deno.test('prepareDawnRecording uses the shared-context renderer provider', () =
   assertEquals(draw?.renderer.kind, 'stencil-tessellated-curves');
 });
 
+Deno.test('curve stencil fills use Graphite middle-out fan triangles', () => {
+  const mock = createMockGpuContext();
+  const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
+  const recorder = createDrawingRecorder(sharedContext);
+  const provider = createDrawingRendererProvider(sharedContext.caps);
+  (sharedContext as { rendererProvider: typeof provider }).rendererProvider = {
+    ...provider,
+    getPathFillRenderer: (options) => provider.stencilTessellatedCurves(options.fillRule),
+  };
+
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [16, 16] },
+      { kind: 'lineTo', to: [96, 16] },
+      { kind: 'lineTo', to: [96, 96] },
+      { kind: 'lineTo', to: [16, 96] },
+      { kind: 'close' },
+    ),
+    { style: 'fill' },
+  );
+
+  const prepared = prepareDawnRecording(sharedContext, finishDrawingRecorder(recorder));
+  const draw = prepared.prepared.passes[0]?.steps[0]?.draw;
+  assertEquals(draw?.kind, 'pathFill');
+  assertEquals(draw?.renderer.kind, 'stencil-tessellated-curves');
+  assertEquals(draw?.triangles, [
+    [16, 16],
+    [96, 16],
+    [96, 96],
+    [96, 96],
+    [16, 96],
+    [16, 16],
+  ]);
+});
+
 Deno.test('dawn resource provider uses replace for first clip writes', () => {
   const mock = createMockGpuContext();
   const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));

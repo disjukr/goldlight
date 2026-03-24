@@ -3115,6 +3115,74 @@ const prepareFillTriangles = (
   return Object.freeze(triangles);
 };
 
+type MiddleOutStackVertex = Readonly<{
+  point: Point2D;
+  vertexIndexDelta: number;
+}>;
+
+const emitMiddleOutTriangles = (
+  stack: readonly MiddleOutStackVertex[],
+  endIndex: number,
+  lastPoint: Point2D,
+  triangles: Point2D[],
+): void => {
+  for (let index = stack.length - 1; index > endIndex; index -= 1) {
+    triangles.push(stack[index - 1]!.point, stack[index]!.point, lastPoint);
+  }
+};
+
+const prepareMiddleOutFanTriangles = (
+  path: DrawingPath2D,
+): readonly Point2D[] => {
+  const triangles: Point2D[] = [];
+  let stack: MiddleOutStackVertex[] = [{ point: [0, 0], vertexIndexDelta: 0 }];
+  let subpathStart = stack[0]!.point;
+
+  const closeAndMove = (nextStart: Point2D): void => {
+    emitMiddleOutTriangles(stack, Math.min(stack.length - 1, 1), subpathStart, triangles);
+    stack = [{ point: nextStart, vertexIndexDelta: 0 }];
+    subpathStart = nextStart;
+  };
+
+  const pushVertex = (point: Point2D): void => {
+    let endIndex = stack.length - 1;
+    let vertexIndexDelta = 1;
+    while (endIndex >= 0 && stack[endIndex]!.vertexIndexDelta === vertexIndexDelta) {
+      endIndex -= 1;
+      vertexIndexDelta *= 2;
+    }
+    emitMiddleOutTriangles(stack, endIndex, point, triangles);
+    stack.splice(endIndex + 1);
+    stack.push({ point, vertexIndexDelta });
+  };
+
+  for (const verb of path.verbs) {
+    switch (verb.kind) {
+      case 'moveTo':
+        closeAndMove(verb.to);
+        break;
+      case 'lineTo':
+      case 'quadTo':
+      case 'conicTo':
+      case 'cubicTo':
+        pushVertex(verb.to);
+        break;
+      case 'arcTo':
+        pushVertex([
+          verb.center[0] + (Math.cos(verb.endAngle) * verb.radius),
+          verb.center[1] + (Math.sin(verb.endAngle) * verb.radius),
+        ]);
+        break;
+      case 'close':
+        closeAndMove(subpathStart);
+        break;
+    }
+  }
+
+  emitMiddleOutTriangles(stack, Math.min(stack.length - 1, 1), subpathStart, triangles);
+  return Object.freeze(triangles);
+};
+
 const tessellateFillFromPatches = (
   patches: readonly DrawingPreparedPatch[],
 ): readonly Point2D[] | null => {
@@ -3875,7 +3943,7 @@ const preparePathFill = (
           prepareFillTriangles(subpaths, command.path.fillRule) ?? [];
         break;
       case 'stencil-tessellated-curves':
-        baseTriangles = prepareFillTriangles(subpaths, command.path.fillRule) ??
+        baseTriangles = prepareMiddleOutFanTriangles(command.path) ??
           tessellateFillFromPatches(patches) ?? [];
         break;
       default:

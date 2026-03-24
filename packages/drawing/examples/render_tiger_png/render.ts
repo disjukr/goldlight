@@ -46,7 +46,7 @@ type SvgScene = Readonly<{
 
 const exampleDir = dirname(fromFileUrl(import.meta.url));
 const inputPath = join(exampleDir, 'tiger.svg');
-const defaultBackground = [0.97, 0.95, 0.91, 1] as const;
+const defaultBackground = [0, 0, 0, 0] as const;
 const defaultFill = [0, 0, 0, 1] as const;
 const defaultStyleState: SvgStyleState = {
   fill: defaultFill,

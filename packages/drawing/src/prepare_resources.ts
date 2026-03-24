@@ -556,7 +556,10 @@ const getFillPatchPoints = (
   patch.kind === 'line'
     ? lineToCubicPatchPoints(patch.points[0], patch.points[1])
     : patch.kind === 'triangle'
-    ? [patch.points[0], patch.points[1], patch.points[2], [Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY]]
+    ? [patch.points[0], patch.points[1], patch.points[2], [
+      Number.POSITIVE_INFINITY,
+      Number.POSITIVE_INFINITY,
+    ]]
     : patch.kind === 'quadratic'
     ? quadraticToCubicPoints(patch.points[0], patch.points[1], patch.points[2])
     : patch.kind === 'conic'

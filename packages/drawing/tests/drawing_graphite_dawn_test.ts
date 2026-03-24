@@ -511,7 +511,10 @@ Deno.test('wedge stencil fills chop large cubics into Graphite fan patches', () 
     throw new Error('expected pathFill draw');
   }
   assertEquals(draw.renderer.kind, 'stencil-tessellated-wedges');
-  assertEquals(draw.patches.every((patch) => patch.kind === 'cubic' || patch.kind === 'line'), true);
+  assertEquals(
+    draw.patches.every((patch) => patch.kind === 'cubic' || patch.kind === 'line'),
+    true,
+  );
   assertEquals(draw.patches.filter((patch) => patch.kind === 'cubic').length, 4);
   assertEquals(draw.patches.some((patch) => patch.kind === 'triangle'), false);
 });
@@ -3956,7 +3959,10 @@ Deno.test('dawn curve patch shader follows Graphite cubic/conic patch dispatch',
   const curveShaderSource = curveShader.code;
   assertEquals(curveShaderSource.includes('if (curveType > 1.5) {'), true);
   assertEquals(curveShaderSource.includes('w = localP3.x;'), true);
-  assertEquals(curveShaderSource.includes('return select(localP0, localP3, fixedVertexID > 0.0);'), true);
+  assertEquals(
+    curveShaderSource.includes('return select(localP0, localP3, fixedVertexID > 0.0);'),
+    true,
+  );
 });
 
 Deno.test('dawn resource provider reuses pipelines across command buffers', () => {

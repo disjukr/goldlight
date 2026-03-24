@@ -1756,110 +1756,6 @@ const splitQuadraticAt = (
   ];
 };
 
-const splitQuadraticAtMany = (
-  from: Point2D,
-  control: Point2D,
-  to: Point2D,
-  ts: readonly number[],
-): readonly (readonly [Point2D, Point2D, Point2D])[] => {
-  if (ts.length === 0) {
-    return Object.freeze([[from, control, to]]);
-  }
-  const sorted = [...ts].filter((t) => t > epsilon && t < 1 - epsilon).sort((a, b) => a - b);
-  if (sorted.length === 0) {
-    return Object.freeze([[from, control, to]]);
-  }
-  const segments: (readonly [Point2D, Point2D, Point2D])[] = [];
-  let current: readonly [Point2D, Point2D, Point2D] = [from, control, to];
-  let lastT = 0;
-  for (const t of sorted) {
-    const localT = (t - lastT) / Math.max(1 - lastT, epsilon);
-    const [left, right] = splitQuadraticAt(current[0], current[1], current[2], localT);
-    segments.push(left);
-    current = right;
-    lastT = t;
-  }
-  segments.push(current);
-  return Object.freeze(segments);
-};
-
-const splitConicAt = (
-  from: Point2D,
-  control: Point2D,
-  to: Point2D,
-  weight: number,
-  t: number,
-): readonly [
-  Readonly<{ points: readonly [Point2D, Point2D, Point2D]; weight: number }>,
-  Readonly<{ points: readonly [Point2D, Point2D, Point2D]; weight: number }>,
-] => {
-  const h0: readonly [number, number, number] = [from[0], from[1], 1];
-  const h1: readonly [number, number, number] = [control[0] * weight, control[1] * weight, weight];
-  const h2: readonly [number, number, number] = [to[0], to[1], 1];
-  const mix3 = (
-    a: readonly [number, number, number],
-    b: readonly [number, number, number],
-  ): [number, number, number] => [
-    a[0] + ((b[0] - a[0]) * t),
-    a[1] + ((b[1] - a[1]) * t),
-    a[2] + ((b[2] - a[2]) * t),
-  ];
-  const ab = mix3(h0, h1);
-  const bc = mix3(h1, h2);
-  const abc = mix3(ab, bc);
-  const project = (value: readonly [number, number, number]): Point2D => [
-    value[0] / value[2],
-    value[1] / value[2],
-  ];
-  const midpoint = project(abc);
-  return [
-    {
-      points: [from, project(ab), midpoint],
-      weight: ab[2] / Math.sqrt(Math.max(h0[2] * abc[2], epsilon)),
-    },
-    {
-      points: [midpoint, project(bc), to],
-      weight: bc[2] / Math.sqrt(Math.max(abc[2] * h2[2], epsilon)),
-    },
-  ];
-};
-
-const splitConicAtMany = (
-  from: Point2D,
-  control: Point2D,
-  to: Point2D,
-  weight: number,
-  ts: readonly number[],
-): readonly Readonly<{ points: readonly [Point2D, Point2D, Point2D]; weight: number }>[] => {
-  if (ts.length === 0) {
-    return Object.freeze([{ points: [from, control, to], weight }]);
-  }
-  const sorted = [...ts].filter((t) => t > epsilon && t < 1 - epsilon).sort((a, b) => a - b);
-  if (sorted.length === 0) {
-    return Object.freeze([{ points: [from, control, to], weight }]);
-  }
-  const segments: Array<
-    Readonly<{ points: readonly [Point2D, Point2D, Point2D]; weight: number }>
-  > = [];
-  let current = { points: [from, control, to] as const, weight };
-  let lastT = 0;
-  for (const t of sorted) {
-    const localT = (t - lastT) / Math.max(1 - lastT, epsilon);
-    const [left, right] = splitConicAt(
-      current.points[0],
-      current.points[1],
-      current.points[2],
-      current.weight,
-      localT,
-    );
-    segments.push(left);
-    current = right;
-    lastT = t;
-  }
-  segments.push(current);
-  return Object.freeze(segments);
-};
-
 const splitCubicAt = (
   from: Point2D,
   control1: Point2D,
@@ -3432,25 +3328,6 @@ const prepareMiddleOutFanTriangles = (
   return Object.freeze(triangles);
 };
 
-const pushTriangle = (
-  triangles: Point2D[],
-  p0: Point2D,
-  p1: Point2D,
-  p2: Point2D,
-): void => {
-  triangles.push(p0, p1, p2);
-};
-
-const writeTriangleStack = (
-  triangles: Point2D[],
-  stack: MiddleOutPoppedTriangleStack,
-): void => {
-  for (const [p0, p1, p2] of stack) {
-    pushTriangle(triangles, p0, p1, p2);
-  }
-  stack.commit();
-};
-
 const transformedQuadraticWangsFormulaP4 = (
   p0: Point2D,
   p1: Point2D,
@@ -3650,27 +3527,37 @@ const writeConicFanPatches = (
       ab[2] + ((bc[2] - ab[2]) * t),
     ];
     const midpoint: Point2D = [abc[0] / abc[2], abc[1] / abc[2]];
-    appendFanPatch(patches, {
-      kind: 'conic',
-      points: [
-        [h0[0] / h0[2], h0[1] / h0[2]],
-        [ab[0] / ab[2], ab[1] / ab[2]],
-        midpoint,
-      ],
-      weight: ab[2] / Math.sqrt(Math.max(h0[2] * abc[2], epsilon)),
-    }, fanPoint, transform);
+    appendFanPatch(
+      patches,
+      {
+        kind: 'conic',
+        points: [
+          [h0[0] / h0[2], h0[1] / h0[2]],
+          [ab[0] / ab[2], ab[1] / ab[2]],
+          midpoint,
+        ],
+        weight: ab[2] / Math.sqrt(Math.max(h0[2] * abc[2], epsilon)),
+      },
+      fanPoint,
+      transform,
+    );
     h0 = abc;
     h1 = bc;
   }
-  appendFanPatch(patches, {
-    kind: 'conic',
-    points: [
-      [h0[0] / h0[2], h0[1] / h0[2]],
-      [h1[0] / h1[2], h1[1] / h1[2]],
-      [h2[0], h2[1]],
-    ],
-    weight: h1[2] / Math.sqrt(Math.max(h0[2], epsilon)),
-  }, fanPoint, transform);
+  appendFanPatch(
+    patches,
+    {
+      kind: 'conic',
+      points: [
+        [h0[0] / h0[2], h0[1] / h0[2]],
+        [h1[0] / h1[2], h1[1] / h1[2]],
+        [h2[0], h2[1]],
+      ],
+      weight: h1[2] / Math.sqrt(Math.max(h0[2], epsilon)),
+    },
+    fanPoint,
+    transform,
+  );
 };
 
 const writeCubicFanPatches = (

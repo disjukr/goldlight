@@ -2372,7 +2372,7 @@ export const createDawnResourceProvider = (
     primitive: {
       topology: descriptor.topology,
       cullMode: 'none',
-      frontFace: descriptor.colorWriteDisabled ? 'ccw' : undefined,
+      frontFace: 'ccw',
     },
     multisample: {
       count: sampleCount,

@@ -38,9 +38,7 @@ export type DrawingRendererProvider = Readonly<{
   getPathFillRenderer: (
     options: Readonly<{
       fillRule: PathFillRule2D;
-      patchCount: number;
-      hasWedges: boolean;
-      isSingleConvexContour: boolean;
+      isConvex: boolean;
       verbCount: number;
       drawBoundsArea: number;
     }>,
@@ -164,13 +162,13 @@ export const createDrawingRendererProvider = (
     stencilTessellatedCurves: (fillRule) => selectFillRuleRenderer(stencilCurves, fillRule),
     tessellatedStrokes: () => tessellatedStrokes,
     getPathFillRenderer: (options) => {
-      if (options.isSingleConvexContour && options.hasWedges && options.patchCount > 0) {
+      if (options.isConvex) {
         return convexWedges;
       }
 
       const preferWedges = options.verbCount < preferredWedgeVerbThreshold ||
         options.drawBoundsArea <= preferredWedgeAreaThreshold;
-      if (preferWedges && options.hasWedges && options.patchCount > 0) {
+      if (preferWedges) {
         return selectFillRuleRenderer(stencilWedges, options.fillRule);
       }
 

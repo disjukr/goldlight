@@ -292,9 +292,7 @@ Deno.test('drawing renderer provider follows graphite wedge versus curve heurist
   assertEquals(
     provider.getPathFillRenderer({
       fillRule: 'nonzero',
-      patchCount: 8,
-      hasWedges: true,
-      isSingleConvexContour: true,
+      isConvex: true,
       verbCount: 12,
       drawBoundsArea: 4096,
     }).kind,
@@ -303,9 +301,7 @@ Deno.test('drawing renderer provider follows graphite wedge versus curve heurist
   assertEquals(
     provider.getPathFillRenderer({
       fillRule: 'nonzero',
-      patchCount: 80,
-      hasWedges: true,
-      isSingleConvexContour: false,
+      isConvex: false,
       verbCount: 60,
       drawBoundsArea: 512 * 512,
     }).kind,
@@ -314,9 +310,7 @@ Deno.test('drawing renderer provider follows graphite wedge versus curve heurist
   assertEquals(
     provider.getPathFillRenderer({
       fillRule: 'evenodd',
-      patchCount: 12,
-      hasWedges: true,
-      isSingleConvexContour: false,
+      isConvex: false,
       verbCount: 20,
       drawBoundsArea: 128 * 128,
     }).kind,
@@ -2030,10 +2024,14 @@ Deno.test('drawing prepared recording computes Wang-style resolve levels for pat
 
     const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
     const draw = prepared.passes[0]?.steps[0]?.draw;
-    const cubicPatch = draw?.kind === 'pathFill'
-      ? draw.patches.find((patch) => patch.kind === 'cubic')
+    const highestResolvePatch = draw?.kind === 'pathFill'
+      ? draw.patches.reduce<(typeof draw.patches)[number] | undefined>(
+        (highest, candidate) =>
+          !highest || candidate.resolveLevel > highest.resolveLevel ? candidate : highest,
+        undefined,
+      )
       : undefined;
-    return cubicPatch?.resolveLevel ?? 0;
+    return highestResolvePatch?.resolveLevel ?? 0;
   };
 
   const baseResolveLevel = createResolveLevel();
@@ -2081,7 +2079,7 @@ Deno.test('drawing prepared recording uses Graphite contour midpoint for wedge f
       'fanPoint' in patch && patch.fanPoint !== undefined,
   );
   assertEquals(wedgePatches.length > 0, true);
-  assertEquals(wedgePatches[0]!.fanPoint, [104, 88]);
+  assertEquals(wedgePatches[0]!.fanPoint, [84, 72]);
   assertEquals(preparedWork.resources.tasks[0]!.passes[0]!.steps[0]!.instanceCount, 8);
 });
 

@@ -1176,11 +1176,11 @@ const createGradientPayload = (
 
   const colorSpaceCode = toGradientColorSpaceCode(shader);
   const gradientStops = getGradientStopBufferEntry(builder, shader);
-  const specialization = {
+  const specialization = gradientStops.numStops <= 8 ? toInlineGradientData(gradientStops.stops) : {
     layoutCode: 3,
     inlineOffsets: identityGradientInlineOffsets,
     inlineColors: identityGradientInlineColors,
-  } as const;
+  };
   const common = {
     layoutCode: specialization.layoutCode,
     numStops: gradientStops.numStops,

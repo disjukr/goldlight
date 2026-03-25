@@ -70,8 +70,8 @@ Runnable examples live here. Each example should document how to build, serve, o
 
 ## Primitive Authoring
 
-`@goldlight/geometry` exposes polygon mesh generators that return `MeshPrimitive` data. These are mesh
-helpers, not SDF primitives.
+`@goldlight/geometry` exposes polygon mesh generators that return `MeshPrimitive` data. These are
+mesh helpers, not SDF primitives.
 
 ```ts
 import { appendMesh, createSceneIr } from '@goldlight/ir';

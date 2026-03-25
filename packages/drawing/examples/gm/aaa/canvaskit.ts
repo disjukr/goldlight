@@ -81,7 +81,12 @@ const addPolygon = (path: CanvasKitPath, points: readonly Point[]): void => {
   path.close();
 };
 
-const addCirclePolygon = (path: CanvasKitPath, center: Point, radius: number, segments = 256): void => {
+const addCirclePolygon = (
+  path: CanvasKitPath,
+  center: Point,
+  radius: number,
+  segments = 256,
+): void => {
   const points: Point[] = [];
   for (let index = 0; index < segments; index += 1) {
     const theta = (index / segments) * Math.PI * 2;

@@ -41,41 +41,6 @@ const createRotationMatrix2D = (degrees: number): Matrix2D => {
   return [c, s, -s, c, 0, 0];
 };
 
-const transformPoint = (matrix: Matrix2D, point: Point): Point => [
-  (matrix[0] * point[0]) + (matrix[2] * point[1]) + matrix[4],
-  (matrix[1] * point[0]) + (matrix[3] * point[1]) + matrix[5],
-];
-
-const transformPath = (
-  path: ReturnType<typeof createPath2D>,
-  matrix: Matrix2D,
-) => withPath2DFillRule(createPath2D(
-  ...path.verbs.map((verb): PathVerb => {
-    switch (verb.kind) {
-      case 'moveTo':
-      case 'lineTo':
-        return { ...verb, to: transformPoint(matrix, verb.to) };
-      case 'quadTo':
-        return {
-          ...verb,
-          control: transformPoint(matrix, verb.control),
-          to: transformPoint(matrix, verb.to),
-        };
-      case 'cubicTo':
-        return {
-          ...verb,
-          control1: transformPoint(matrix, verb.control1),
-          control2: transformPoint(matrix, verb.control2),
-          to: transformPoint(matrix, verb.to),
-        };
-      case 'close':
-        return verb;
-      default:
-        throw new Error(`Unsupported path verb: ${(verb as { kind: string }).kind}`);
-    }
-  }),
-), path.fillRule);
-
 const drawAnalyticAntialiasConvex = (recorder: DrawingRecorder): void => {
   const rotation = createRotationMatrix2D(1);
 
@@ -119,13 +84,17 @@ const drawAnalyticAntialiasConvex = (recorder: DrawingRecorder): void => {
 
   saveDrawingRecorder(recorder);
   translateDrawingRecorder(recorder, 0, 400);
-  recordDrawPath(recorder, createPath2D(
-    { kind: 'moveTo', to: [1.98009784, 9.0162744] },
-    { kind: 'lineTo', to: [47.843992, 10.1922744] },
-    { kind: 'lineTo', to: [47.804008, 11.7597256] },
-    { kind: 'lineTo', to: [1.93990216, 10.5837256] },
-    { kind: 'close' },
-  ), { style: 'fill', color: red });
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      { kind: 'moveTo', to: [1.98009784, 9.0162744] },
+      { kind: 'lineTo', to: [47.843992, 10.1922744] },
+      { kind: 'lineTo', to: [47.804008, 11.7597256] },
+      { kind: 'lineTo', to: [1.93990216, 10.5837256] },
+      { kind: 'close' },
+    ),
+    { style: 'fill', color: red },
+  );
   restoreDrawingRecorder(recorder);
 
   recordDrawPath(recorder, createRectPath2D(createRect(700, 266, 10, 268)), {
@@ -168,26 +137,37 @@ const drawAnalyticAntialiasGeneral = (recorder: DrawingRecorder): void => {
 
   saveDrawingRecorder(recorder);
   translateDrawingRecorder(recorder, 0, 300);
-  recordDrawPath(recorder, createPath2D(
-    ...createRectPath2D(createRect(20, 20, 80.4999, 80)).verbs,
-    ...createRectPath2D(createRect(100.5001, 20, 99.4999, 80)).verbs,
-  ), { style: 'fill', color: red });
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      ...createRectPath2D(createRect(20, 20, 80.4999, 80)).verbs,
+      ...createRectPath2D(createRect(100.5001, 20, 99.4999, 80)).verbs,
+    ),
+    { style: 'fill', color: red },
+  );
   restoreDrawingRecorder(recorder);
 
   saveDrawingRecorder(recorder);
   translateDrawingRecorder(recorder, 300, 300);
-  recordDrawPath(recorder, createPath2D(
-    ...createRectPath2D(createRect(20, 20, 80.1, 80)).verbs,
-    ...createRectPath2D(createRect(100.9, 20, 99.1, 80)).verbs,
-  ), { style: 'fill', color: red });
+  recordDrawPath(
+    recorder,
+    createPath2D(
+      ...createRectPath2D(createRect(20, 20, 80.1, 80)).verbs,
+      ...createRectPath2D(createRect(100.9, 20, 99.1, 80)).verbs,
+    ),
+    { style: 'fill', color: red },
+  );
   restoreDrawingRecorder(recorder);
 };
 
 const drawAnalyticAntialiasInverse = (recorder: DrawingRecorder): void => {
-  const path = withPath2DFillRule(createPath2D(
-    ...createRectPath2D(createRect(0, 0, gmWidth, gmHeight)).verbs,
-    ...createCirclePath2D({ center: [100, 100], radius: 30 }, 256).verbs,
-  ), 'evenodd');
+  const path = withPath2DFillRule(
+    createPath2D(
+      ...createRectPath2D(createRect(0, 0, gmWidth, gmHeight)).verbs,
+      ...createCirclePath2D({ center: [100, 100], radius: 30 }, 256).verbs,
+    ),
+    'evenodd',
+  );
   recordDrawPath(recorder, path, {
     style: 'fill',
     color: red,

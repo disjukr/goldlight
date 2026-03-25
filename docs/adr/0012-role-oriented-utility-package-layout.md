@@ -43,8 +43,8 @@ into the same package or namespace, and the current workspace already reflects t
 
 - stable runtime packages remain separate from generation/tooling packages: `ir`, `core`, `gpu`,
   `renderer`, `react`, and `desktop` stay distinct from utility roles
-- role-oriented utilities publish through dedicated packages: `@goldlight/math`, `@goldlight/geometry`,
-  `@goldlight/spatial`, `@goldlight/procedural`, and `@goldlight/raytrace`
+- role-oriented utilities publish through dedicated packages: `@goldlight/math`,
+  `@goldlight/geometry`, `@goldlight/spatial`, `@goldlight/procedural`, and `@goldlight/raytrace`
 - legacy catch-all package names such as `primitives` are no longer the primary public boundary
 - mesh primitives live under geometry-oriented modules
 - SDF and field-generation helpers live under procedural-oriented modules

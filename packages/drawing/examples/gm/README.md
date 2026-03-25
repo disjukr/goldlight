@@ -19,7 +19,7 @@ Progress order: alphabetical by Skia `gm/*.cpp`.
 
 Current queue:
 
-- `3d`: blocked, current `packages/drawing` scope is 2D-only
+- `3d`: blocked, out of scope for the 2D `packages/drawing` package
 - `aaa`: done
 - `aaclip`: pending
 - `aarecteffect`: pending

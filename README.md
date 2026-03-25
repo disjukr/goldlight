@@ -61,8 +61,8 @@ Implemented today:
   with optional filtered reprojection and caller-controlled output dimensions
 - Perlin gradient-noise samplers in `@goldlight/math` plus grayscale texture/volume generators in
   `@goldlight/procedural` that share the existing deterministic seed model
-- triangle BVH construction in `@goldlight/raytrace` plus a mesh pathtraced renderer slice for static
-  mesh scenes
+- triangle BVH construction in `@goldlight/raytrace` plus a mesh pathtraced renderer slice for
+  static mesh scenes
 - local-space SDF-to-mesh extraction for supported sphere and box primitives, including
   canonical-table marching-cubes and naive surface-nets contouring helpers for baking or inspection
   workflows
@@ -88,8 +88,8 @@ Implemented today:
   walls and light
 - Windows BYOW primitives demo using `@goldlight/geometry`, a reusable BYOW runner script, built-in
   `lit` materials, and directional-light shading
-- Windows BYOW Stanford Bunny demo authored through `@goldlight/react`, loading the vendored ASCII PLY
-  mesh, generating runtime normals for built-in lit shading, and publishing live bunny rotation
+- Windows BYOW Stanford Bunny demo authored through `@goldlight/react`, loading the vendored ASCII
+  PLY mesh, generating runtime normals for built-in lit shading, and publishing live bunny rotation
   updates through the experimental React reconciler host
 - a browser React authoring example plus the current `createSceneRoot()` snapshot path that commits
   JSX-authored trees into `SceneIr` snapshots before rendering, including JSX-authored scene

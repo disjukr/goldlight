@@ -1,5 +1,10 @@
 import CanvasKitModule from 'npm:canvaskit-wasm@^0.40.0';
-import { createPath2D, createRect, createRectPath2D, withPath2DFillRule } from '@goldlight/geometry';
+import {
+  createPath2D,
+  createRect,
+  createRectPath2D,
+  withPath2DFillRule,
+} from '@goldlight/geometry';
 
 const outputSize = 512;
 type CanvasKitPath = {

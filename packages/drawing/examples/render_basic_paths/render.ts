@@ -1,6 +1,11 @@
 import { exportPngRgba } from '@goldlight/exporters';
 import { createOffscreenBinding, readOffscreenSnapshot } from '@goldlight/gpu';
-import { createPath2D, createRect, createRectPath2D, withPath2DFillRule } from '@goldlight/geometry';
+import {
+  createPath2D,
+  createRect,
+  createRectPath2D,
+  withPath2DFillRule,
+} from '@goldlight/geometry';
 import {
   checkForFinishedDawnQueueWork,
   clipDrawingRecorderPath,

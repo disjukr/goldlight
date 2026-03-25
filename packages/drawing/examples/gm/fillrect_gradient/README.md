@@ -1,7 +1,8 @@
 # GM Fillrect Gradient
 
-This example ports Skia [`gm/fillrect_gradient.cpp`](/C:/Users/user/github/google/skia/gm/fillrect_gradient.cpp)
-into `packages/drawing/examples/gm/fillrect_gradient`.
+This example ports Skia
+[`gm/fillrect_gradient.cpp`](/C:/Users/user/github/google/skia/gm/fillrect_gradient.cpp) into
+`packages/drawing/examples/gm/fillrect_gradient`.
 
 It renders the same 2-column grid of linear and radial rectangle gradients and writes:
 

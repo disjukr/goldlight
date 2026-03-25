@@ -1,4 +1,8 @@
-import { createOrthographicCamera, createPerspectiveCamera, identityTransform } from '@goldlight/ir';
+import {
+  createOrthographicCamera,
+  createPerspectiveCamera,
+  identityTransform,
+} from '@goldlight/ir';
 import type {
   AnimationClip,
   AssetRef,

@@ -1,4 +1,4 @@
-import { basename, fromFileUrl, join } from '@std/path';
+import { fromFileUrl, join } from '@std/path';
 
 type Action = 'check' | 'png' | 'ckpng';
 
@@ -11,14 +11,6 @@ type ExampleEntry = Readonly<{
 
 const repoRoot = fromFileUrl(new URL('../', import.meta.url));
 const drawingExamplesRoot = join(repoRoot, 'packages', 'drawing', 'examples');
-
-const isDirectory = async (path: string): Promise<boolean> => {
-  try {
-    return (await Deno.stat(path)).isDirectory;
-  } catch {
-    return false;
-  }
-};
 
 const fileExists = async (path: string): Promise<boolean> => {
   try {
@@ -100,9 +92,7 @@ const resolveExample = (
   examples: readonly ExampleEntry[],
   query: string,
 ): ExampleEntry | undefined => {
-  return examples.find((example) =>
-    example.id === query || example.aliases.includes(query)
-  );
+  return examples.find((example) => example.id === query || example.aliases.includes(query));
 };
 
 const runExample = async (example: ExampleEntry, action: Action): Promise<number> => {

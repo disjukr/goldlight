@@ -5,7 +5,13 @@ import {
   ensureSceneMeshResidency,
   type GpuUploadContext,
 } from '@goldlight/gpu';
-import { appendMesh, appendNode, createNode, createSceneIr, type MeshPrimitive } from '@goldlight/ir';
+import {
+  appendMesh,
+  appendNode,
+  createNode,
+  createSceneIr,
+  type MeshPrimitive,
+} from '@goldlight/ir';
 import {
   createBoxMesh,
   createCapsuleMesh,

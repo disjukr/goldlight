@@ -57,8 +57,8 @@ current architectural constraint that core runtime packages remain React-indepen
 
 ## Consequences
 
-- `@goldlight/react` gains an internal mutable document/host-instance layer even though its published
-  APIs should remain data-oriented
+- `@goldlight/react` gains an internal mutable document/host-instance layer even though its
+  published APIs should remain data-oriented
 - the current `createSceneRoot()` snapshot bridge becomes a compatibility waypoint instead of the
   only viable React integration path
 - reconciler work can be split into bounded slices: scene document first, host config second,

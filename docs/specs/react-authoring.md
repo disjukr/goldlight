@@ -6,7 +6,8 @@ React integration is a separate package. It must not become the source of truth 
 
 ## Contract
 
-- JSX authoring trees are built through `@goldlight/react` primitives such as `<scene>` and `<node>`.
+- JSX authoring trees are built through `@goldlight/react` primitives such as `<scene>` and
+  `<node>`.
 - Authored trees may also declare scene resources such as `<camera>`, `<mesh>`, `<material>`,
   `<light>`, `<texture>`, `<asset>`, and `<animationClip>`.
 - Node-like authoring elements may expose React-style shorthands such as `<group>` plus transform
@@ -24,8 +25,9 @@ React integration is a separate package. It must not become the source of truth 
 ## Scope
 
 The current package owns JSX authoring, lowering, the snapshot-style `createSceneRoot()`
-implementation, and an experimental `@goldlight/react/reconciler` entrypoint that mounts normal React
-components into the package-local scene document before publishing committed `SceneIr` snapshots.
+implementation, and an experimental `@goldlight/react/reconciler` entrypoint that mounts normal
+React components into the package-local scene document before publishing committed `SceneIr`
+snapshots.
 
 ## Direction
 
@@ -120,8 +122,8 @@ Issue `#117` provided the first scene-document implementation slice that this ho
   GPU ownership into `@goldlight/react`; descendant nodes whose world transforms move because an
   ancestor changed are included in the transform buckets even when their local node data is
   otherwise unchanged.
-- `@goldlight/gpu` now exposes ID-keyed targeted invalidation helpers, so snapshot consumers can drop
-  changed mesh/material/texture residency entries before falling back to a full reset for
+- `@goldlight/gpu` now exposes ID-keyed targeted invalidation helpers, so snapshot consumers can
+  drop changed mesh/material/texture residency entries before falling back to a full reset for
   scene-topology changes.
 - `commitSummaryNeedsResidencyReset()` captures the current safe residency-reset boundary for
   snapshot consumers: resource changes plus node/topology changes still require a full reset until

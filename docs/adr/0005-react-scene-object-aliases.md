@@ -6,8 +6,8 @@ Accepted
 
 ## Decision
 
-`@goldlight/react` may provide convenience React components for common scene-object composition while
-keeping the underlying JSX primitives aligned with existing Scene IR concepts.
+`@goldlight/react` may provide convenience React components for common scene-object composition
+while keeping the underlying JSX primitives aligned with existing Scene IR concepts.
 
 The proposed boundary is:
 
@@ -24,7 +24,8 @@ The proposed boundary is:
 Mesh, material, rig, and other higher-level composition may evolve independently as React components
 without forcing a new primitive decision for each combined object shape.
 
-Related discussion: `#81`, "ADR 0005: React scene-object convenience components for @goldlight/react"
+Related discussion: `#81`, "ADR 0005: React scene-object convenience components for
+@goldlight/react"
 
 ## Consequences
 

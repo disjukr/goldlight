@@ -22,6 +22,11 @@ export type DesktopWorkerHostEventMessage = Readonly<{
   event: DesktopWindowEvent;
 }>;
 
+export type DesktopWorkerPostMessageMessage = Readonly<{
+  kind: 'post-message';
+  message: unknown;
+}>;
+
 export type DesktopWorkerShutdownMessage = Readonly<{
   kind: 'shutdown';
 }>;
@@ -29,6 +34,7 @@ export type DesktopWorkerShutdownMessage = Readonly<{
 export type DesktopWorkerInboundMessage =
   | DesktopWorkerInitMessage
   | DesktopWorkerHostEventMessage
+  | DesktopWorkerPostMessageMessage
   | DesktopWorkerShutdownMessage;
 
 export type DesktopWorkerReadyMessage = Readonly<{
@@ -53,9 +59,15 @@ export type DesktopWorkerErrorMessage = Readonly<{
   stack?: string;
 }>;
 
+export type DesktopWorkerMessageMessage = Readonly<{
+  kind: 'message';
+  message: unknown;
+}>;
+
 export type DesktopWorkerOutboundMessage =
   | DesktopWorkerReadyMessage
   | DesktopWorkerRequestRedrawMessage
   | DesktopWorkerCloseWindowMessage
   | DesktopWorkerShutdownCompleteMessage
-  | DesktopWorkerErrorMessage;
+  | DesktopWorkerErrorMessage
+  | DesktopWorkerMessageMessage;

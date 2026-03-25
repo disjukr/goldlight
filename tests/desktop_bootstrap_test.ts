@@ -4,7 +4,7 @@ import { createDesktopWindowRuntime, installDesktopWindowGlobals } from '@goldli
 
 Deno.test('desktop bootstrap installs runtime globals before dynamic imports observe them', async () => {
   const runtime = createDesktopWindowRuntime(1n, () => {});
-  const restore = installDesktopWindowGlobals(runtime);
+  const restore = installDesktopWindowGlobals(runtime, () => {});
 
   try {
     const module = await import(

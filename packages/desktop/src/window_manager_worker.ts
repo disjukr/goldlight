@@ -2,11 +2,7 @@
 
 import { createDesktopHost } from './ffi.ts';
 import type { DesktopWindowEvent, DesktopWindowSurfaceInfo } from './types.ts';
-import type {
-  DesktopWorkerInboundMessage,
-  DesktopWorkerOutboundMessage,
-  DesktopWorkerSurfaceInfo,
-} from './worker_protocol.ts';
+import type { DesktopWorkerSurfaceInfo } from './worker_protocol.ts';
 import type {
   DesktopWindowManagerInboundMessage,
   DesktopWindowManagerOutboundMessage,
@@ -24,11 +20,7 @@ type ManagerState = {
   managerShutdownRequested: boolean;
   windowId?: bigint;
   windowDestroyed: boolean;
-  moduleWorker?: Worker;
   host?: ReturnType<typeof createDesktopHost>;
-  moduleReady: boolean;
-  moduleShutdownComplete: boolean;
-  moduleError?: Error;
   exitReason?: string;
 };
 
@@ -37,8 +29,16 @@ const state: ManagerState = {
   running: false,
   managerShutdownRequested: false,
   windowDestroyed: false,
-  moduleReady: false,
-  moduleShutdownComplete: false,
+};
+
+const resetManagerState = (): void => {
+  state.initialized = false;
+  state.running = false;
+  state.managerShutdownRequested = false;
+  state.windowId = undefined;
+  state.windowDestroyed = false;
+  state.host = undefined;
+  state.exitReason = undefined;
 };
 
 const postToMain = (message: DesktopWindowManagerOutboundMessage): void => {
@@ -128,10 +128,6 @@ const coalesceDesktopWindowEvents = (
   return coalescedEvents;
 };
 
-const postToModule = (message: DesktopWorkerInboundMessage): void => {
-  state.moduleWorker?.postMessage(message);
-};
-
 const destroyHostWindow = (): void => {
   if (!state.host || state.windowId === undefined || state.windowDestroyed) {
     return;
@@ -145,26 +141,15 @@ const destroyHostWindow = (): void => {
   state.windowDestroyed = true;
 };
 
-const cleanupManager = async (): Promise<void> => {
+const cleanupManager = (): void => {
   state.running = false;
-  if (state.moduleWorker) {
-    if (!state.moduleShutdownComplete && !state.moduleError) {
-      postToModule({ kind: 'shutdown' });
-      while (!state.moduleShutdownComplete && !state.moduleError) {
-        await new Promise((resolve) => setTimeout(resolve, 5));
-      }
-    }
-    state.moduleWorker.terminate();
-    state.moduleWorker = undefined;
-  }
-
   destroyHostWindow();
   state.host?.close();
   state.host = undefined;
   state.windowId = undefined;
 };
 
-const failManager = async (error: unknown): Promise<void> => {
+const failManager = (error: unknown): void => {
   const normalized = error instanceof Error ? error : new Error(String(error));
   state.exitReason = `manager-error: ${normalized.message}`;
   postToMain({
@@ -172,9 +157,9 @@ const failManager = async (error: unknown): Promise<void> => {
     message: normalized.message,
     stack: normalized.stack,
   });
-  await cleanupManager();
+  cleanupManager();
   postToMain({ kind: 'exited', reason: state.exitReason });
-  globalThis.close();
+  resetManagerState();
 };
 
 const runManager = async (
@@ -184,86 +169,28 @@ const runManager = async (
   const windowId = host.createWindow(message.options);
   const surfaceInfo = host.getWindowSurfaceInfo(windowId);
   const windowState = host.getWindowState(windowId);
-  const moduleWorker = new Worker(new URL('./worker_module.ts', import.meta.url).href, {
-    type: 'module',
-  });
 
   state.initialized = true;
   state.running = true;
   state.host = host;
   state.windowId = windowId;
   state.windowDestroyed = false;
-  state.moduleWorker = moduleWorker;
 
-  moduleWorker.onmessage = (event: MessageEvent<DesktopWorkerOutboundMessage>) => {
-    switch (event.data.kind) {
-      case 'ready':
-        state.moduleReady = true;
-        postToMain({ kind: 'ready' });
-        return;
-      case 'request-redraw':
-        if (!state.windowDestroyed && state.running) {
-          try {
-            host.requestRedraw(windowId);
-          } catch {
-            // The native window may already be gone when late redraw requests race with close.
-            state.windowDestroyed = true;
-            state.exitReason = state.exitReason ?? 'host-close-requested';
-            state.running = false;
-          }
-        }
-        return;
-      case 'close-window':
-        state.exitReason = 'module-requested-close';
-        state.running = false;
-        destroyHostWindow();
-        return;
-      case 'shutdown-complete':
-        state.moduleShutdownComplete = true;
-        return;
-      case 'error':
-        state.moduleError = new Error(event.data.message);
-        if (event.data.stack) {
-          state.moduleError.stack = event.data.stack;
-        }
-        state.exitReason = `module-error: ${state.moduleError.message}`;
-        state.running = false;
-        return;
-    }
-  };
-  moduleWorker.onerror = (event: ErrorEvent) => {
-    state.moduleError = event.error instanceof Error
-      ? event.error
-      : new Error(event.message || 'Desktop module worker failed');
-    state.exitReason = `module-worker-error: ${state.moduleError.message}`;
-    state.running = false;
-  };
-  moduleWorker.onmessageerror = () => {
-    state.moduleError = new Error('Desktop module worker message deserialization failed');
-    state.exitReason = `module-worker-message-error: ${state.moduleError.message}`;
-    state.running = false;
-  };
-
-  postToModule({
-    kind: 'init',
-    module: message.module,
+  postToMain({
+    kind: 'ready',
     windowId,
     surfaceInfo: toWorkerSurfaceInfo(surfaceInfo),
     windowState,
   });
 
   while (state.running) {
-    if (state.moduleError) {
-      throw state.moduleError;
-    }
-
     const events = coalesceDesktopWindowEvents(host.pollEvents(4));
     for (const hostEvent of events) {
       if (hostEvent.windowId !== windowId) {
         continue;
       }
 
-      postToModule({
+      postToMain({
         kind: 'event',
         event: hostEvent,
       });
@@ -277,9 +204,9 @@ const runManager = async (
     await new Promise((resolve) => setTimeout(resolve, 1));
   }
 
-  await cleanupManager();
+  cleanupManager();
   postToMain({ kind: 'exited', reason: state.exitReason ?? 'manager-loop-complete' });
-  globalThis.close();
+  resetManagerState();
 };
 
 globalThis.onmessage = (event: MessageEvent<DesktopWindowManagerInboundMessage>) => {
@@ -290,7 +217,7 @@ globalThis.onmessage = (event: MessageEvent<DesktopWindowManagerInboundMessage>)
     }
 
     void runManager(message).catch((error) => {
-      void failManager(error);
+      failManager(error);
     });
     return;
   }
@@ -299,5 +226,26 @@ globalThis.onmessage = (event: MessageEvent<DesktopWindowManagerInboundMessage>)
     state.managerShutdownRequested = true;
     state.exitReason = state.exitReason ?? 'manager-shutdown-requested';
     state.running = false;
+    return;
+  }
+
+  if (message.kind === 'request-redraw') {
+    if (!state.host || state.windowId === undefined || state.windowDestroyed || !state.running) {
+      return;
+    }
+    try {
+      state.host.requestRedraw(state.windowId);
+    } catch {
+      state.windowDestroyed = true;
+      state.exitReason = state.exitReason ?? 'host-close-requested';
+      state.running = false;
+    }
+    return;
+  }
+
+  if (message.kind === 'close-window') {
+    state.exitReason = state.exitReason ?? 'host-close-requested';
+    state.running = false;
+    destroyHostWindow();
   }
 };

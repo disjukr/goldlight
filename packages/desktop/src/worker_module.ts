@@ -28,6 +28,7 @@ type WorkerState = {
   runtimeWindowState?: { current: DesktopWindowState };
   initialized: boolean;
   pendingHostEvents: DesktopWindowEvent[];
+  pendingMessages: unknown[];
   shutdownRequested: boolean;
   closed: boolean;
 };
@@ -35,6 +36,7 @@ type WorkerState = {
 const workerState: WorkerState = {
   initialized: false,
   pendingHostEvents: [],
+  pendingMessages: [],
   shutdownRequested: false,
   closed: false,
 };
@@ -175,7 +177,12 @@ const runModule = async (
 ): Promise<void> => {
   await ensureWorkerWebGpuContext();
   const context = createWorkerDesktopContext(message);
-  const restoreGlobals = installDesktopWindowGlobals(context.window.runtime);
+  const restoreGlobals = installDesktopWindowGlobals(context.window.runtime, (payload) => {
+    postToHost({
+      kind: 'message',
+      message: payload,
+    });
+  });
   workerState.context = context;
   workerState.restoreGlobals = restoreGlobals;
 
@@ -192,6 +199,11 @@ const runModule = async (
   workerState.pendingHostEvents = [];
   for (const pendingEvent of pendingHostEvents) {
     handleHostEvent(pendingEvent);
+  }
+  const pendingMessages = workerState.pendingMessages;
+  workerState.pendingMessages = [];
+  for (const pendingMessage of pendingMessages) {
+    context.window.runtime.postMessage(pendingMessage);
   }
   if (workerState.shutdownRequested) {
     await shutdownWorker();
@@ -252,12 +264,21 @@ globalThis.onmessage = (event: MessageEvent<DesktopWorkerInboundMessage>) => {
     }
     if (message.kind === 'event') {
       workerState.pendingHostEvents.push(message.event);
+      return;
+    }
+    if (message.kind === 'post-message') {
+      workerState.pendingMessages.push(message.message);
     }
     return;
   }
 
   if (message.kind === 'event') {
     handleHostEvent(message.event);
+    return;
+  }
+
+  if (message.kind === 'post-message') {
+    workerState.context?.window.runtime.postMessage(message.message);
     return;
   }
 

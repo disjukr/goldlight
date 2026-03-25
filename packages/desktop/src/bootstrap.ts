@@ -32,6 +32,7 @@ const getGlobalSnapshot = (): DesktopGlobalSnapshot => {
 
 export const installDesktopWindowGlobals = (
   runtime: DesktopWindowRuntime,
+  postMessageToHost: (message: unknown) => void,
 ): DesktopGlobalRestore => {
   const snapshot = getGlobalSnapshot();
   const globals = globalThis as GlobalWithDesktopHooks;
@@ -39,7 +40,7 @@ export const installDesktopWindowGlobals = (
   globals.requestAnimationFrame = runtime.requestAnimationFrame;
   globals.cancelAnimationFrame = runtime.cancelAnimationFrame;
   globals.postMessage = ((message: unknown) => {
-    runtime.postMessage(message);
+    postMessageToHost(message);
   }) as DesktopGlobalPostMessage;
 
   Object.defineProperty(globals, 'onmessage', {

@@ -89,7 +89,7 @@ export type DesktopHostOptions = Readonly<{
   libraryPath?: string;
 }>;
 
-export type DesktopModuleOptions =
+export type GoldlightWindowOptions =
   & DesktopWindowOptions
   & DesktopHostOptions
   & Readonly<{

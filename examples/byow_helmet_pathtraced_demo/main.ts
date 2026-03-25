@@ -1,10 +1,16 @@
 /// <reference lib="deno.unstable" />
 
-import { runDesktopModule } from '@goldlight/desktop';
+import { createWindow, dispose, initialize } from '@goldlight/desktop';
 
-await runDesktopModule({
-  title: 'goldlight byow helmet pathtraced demo',
-  width: 1280,
-  height: 720,
-  module: new URL('./app.ts', import.meta.url),
-});
+await initialize();
+try {
+  const window = createWindow({
+    title: 'goldlight byow helmet pathtraced demo',
+    width: 1280,
+    height: 720,
+    module: new URL('./app.ts', import.meta.url),
+  });
+  await window.whenClosed();
+} finally {
+  await dispose();
+}

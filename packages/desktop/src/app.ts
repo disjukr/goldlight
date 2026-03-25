@@ -4,16 +4,20 @@ import { createDesktopHost, type DesktopHost } from './ffi.ts';
 import { createDesktopWindowRuntime, type DesktopWindowRuntime } from './runtime.ts';
 import type {
   DesktopHostOptions,
-  DesktopModuleOptions,
   DesktopWindowEvent,
   DesktopWindowOptions,
   DesktopWindowState,
   DesktopWindowSurfaceInfo,
+  GoldlightWindowOptions,
 } from './types.ts';
 import type {
   DesktopWindowManagerInboundMessage,
   DesktopWindowManagerOutboundMessage,
 } from './window_manager_protocol.ts';
+import type {
+  DesktopWorkerInboundMessage,
+  DesktopWorkerOutboundMessage,
+} from './worker_protocol.ts';
 
 export type DesktopWindow = Readonly<{
   id: bigint;
@@ -43,11 +47,62 @@ export type DesktopApp = Readonly<{
 
 export type DesktopModuleCleanup = () => void | Promise<void>;
 
+type GoldlightWindowMessageListener = ((event: MessageEvent<unknown>) => void) | null;
+
+export type GoldlightWindow = Readonly<{
+  close: () => void;
+  postMessage: (message: unknown) => void;
+  whenReady: () => Promise<void>;
+  whenClosed: () => Promise<void>;
+  addEventListener: EventTarget['addEventListener'];
+  removeEventListener: EventTarget['removeEventListener'];
+  dispatchEvent: EventTarget['dispatchEvent'];
+  getOnMessage: () => GoldlightWindowMessageListener;
+  setOnMessage: (listener: GoldlightWindowMessageListener) => void;
+}>;
+
 type CoalescedWindowEvents = Readonly<{
   resized?: DesktopWindowEvent;
   focusChanged?: DesktopWindowEvent;
   pointerMoved?: DesktopWindowEvent;
 }>;
+
+type DesktopManagerWorkerSession = {
+  ready: boolean;
+  exited: boolean;
+  closing: boolean;
+  managerReady: boolean;
+  moduleReady: boolean;
+  moduleShutdownComplete: boolean;
+  startupError?: Error;
+  runtimeError?: Error;
+  readyResolve?: () => void;
+  readyReject?: (reason?: unknown) => void;
+  exitResolve?: () => void;
+  readyPromise: Promise<void>;
+  exitPromise: Promise<void>;
+  closedPromise: Promise<void>;
+  onExited: () => void;
+  dispatchMessage: (message: unknown) => void;
+  moduleWorker?: Worker;
+  moduleShutdownPromise: Promise<void>;
+  moduleShutdownResolve?: () => void;
+  handleManagerMessage: (message: DesktopWindowManagerOutboundMessage) => void;
+  handleModuleMessage: (message: DesktopWorkerOutboundMessage) => void;
+  fail: (error: Error) => void;
+  window: GoldlightWindow;
+};
+
+type DesktopManagerWorkerController = {
+  worker: Worker;
+  session?: DesktopManagerWorkerSession;
+  activeRunCount: number;
+  poisoned: boolean;
+};
+
+let initializePromise: Promise<void> | undefined;
+let desktopInitialized = false;
+let desktopManagerWorkerController: DesktopManagerWorkerController | undefined;
 
 const resizeDesktopSurface = (
   surface: Deno.UnsafeWindowSurface,
@@ -171,10 +226,347 @@ const ensureDesktopWebGpuContext = async (): Promise<void> => {
   }
 };
 
-export const createDesktopApp = async (
+const queueMessageEvent = (
+  target: EventTarget,
+  message: unknown,
+  onMessage: GoldlightWindowMessageListener,
+): void => {
+  queueMicrotask(() => {
+    const event = new MessageEvent('message', {
+      data: message,
+      origin: 'desktop://window',
+    });
+    target.dispatchEvent(event);
+    onMessage?.(event);
+  });
+};
+
+const createGoldlightWindowSession = (
+  postToManager: (message: DesktopWindowManagerInboundMessage) => void,
+  options: GoldlightWindowOptions,
+): DesktopManagerWorkerSession => {
+  let readyResolve: (() => void) | undefined;
+  let readyReject: ((reason?: unknown) => void) | undefined;
+  const readyPromise = new Promise<void>((resolve, reject) => {
+    readyResolve = resolve;
+    readyReject = reject;
+  });
+  let exitResolve: (() => void) | undefined;
+  const exitPromise = new Promise<void>((resolve) => {
+    exitResolve = resolve;
+  });
+  let moduleShutdownResolve: (() => void) | undefined;
+  const moduleShutdownPromise = new Promise<void>((resolve) => {
+    moduleShutdownResolve = resolve;
+  });
+  const target = new EventTarget();
+  let onMessage: GoldlightWindowMessageListener = null;
+  let closeEventDispatched = false;
+
+  const session: DesktopManagerWorkerSession = {
+    ready: false,
+    exited: false,
+    closing: false,
+    managerReady: false,
+    moduleReady: false,
+    moduleShutdownComplete: false,
+    readyResolve,
+    readyReject,
+    exitResolve,
+    readyPromise,
+    exitPromise,
+    closedPromise: Promise.resolve(),
+    onExited: () => {
+      if (closeEventDispatched) {
+        return;
+      }
+      closeEventDispatched = true;
+      target.dispatchEvent(new Event('close'));
+    },
+    dispatchMessage: (message) => {
+      queueMessageEvent(target, message, onMessage);
+    },
+    handleManagerMessage: () => {},
+    handleModuleMessage: () => {},
+    fail: () => {},
+    moduleShutdownPromise,
+    moduleShutdownResolve,
+    window: {
+      close: () => {
+        if (session.exited || session.closing) {
+          return;
+        }
+        session.closing = true;
+        postToManager({ kind: 'close-window' });
+      },
+      postMessage: (message) => {
+        if (session.exited) {
+          throw new Error('Cannot postMessage() after the GoldlightWindow has closed');
+        }
+        if (!session.moduleWorker) {
+          throw new Error('Cannot postMessage() before the GoldlightWindow is ready');
+        }
+        session.moduleWorker?.postMessage(
+          {
+            kind: 'post-message',
+            message,
+          } satisfies DesktopWorkerInboundMessage,
+        );
+      },
+      whenReady: () => readyPromise,
+      whenClosed: () => session.closedPromise,
+      addEventListener: target.addEventListener.bind(target),
+      removeEventListener: target.removeEventListener.bind(target),
+      dispatchEvent: target.dispatchEvent.bind(target),
+      getOnMessage: () => onMessage,
+      setOnMessage: (listener) => {
+        onMessage = listener;
+      },
+    },
+  };
+
+  session.closedPromise = (async () => {
+    try {
+      await readyPromise;
+    } catch (error) {
+      await exitPromise;
+      throw error;
+    }
+    await exitPromise;
+    if (session.runtimeError) {
+      throw session.runtimeError;
+    }
+  })();
+
+  const finalizeReady = (): void => {
+    if (!session.ready && session.managerReady && session.moduleReady) {
+      session.ready = true;
+      session.readyResolve?.();
+    }
+  };
+
+  session.fail = (error) => {
+    if (!session.ready) {
+      session.startupError = error;
+      session.readyReject?.(error);
+    } else {
+      session.runtimeError = error;
+    }
+    session.exited = true;
+    session.exitResolve?.();
+    session.onExited();
+  };
+
+  session.handleModuleMessage = (message) => {
+    switch (message.kind) {
+      case 'ready':
+        session.moduleReady = true;
+        finalizeReady();
+        return;
+      case 'request-redraw':
+        postToManager({ kind: 'request-redraw' });
+        return;
+      case 'close-window':
+        session.closing = true;
+        postToManager({ kind: 'close-window' });
+        return;
+      case 'shutdown-complete':
+        session.moduleShutdownComplete = true;
+        session.moduleShutdownResolve?.();
+        return;
+      case 'message':
+        session.dispatchMessage(message.message);
+        return;
+      case 'error': {
+        const error = new Error(message.message);
+        if (message.stack) {
+          error.stack = message.stack;
+        }
+        session.fail(error);
+        return;
+      }
+    }
+  };
+
+  session.handleManagerMessage = (message) => {
+    switch (message.kind) {
+      case 'ready': {
+        session.managerReady = true;
+        const moduleWorker = new Worker(new URL('./worker_module.ts', import.meta.url).href, {
+          type: 'module',
+        });
+        session.moduleWorker = moduleWorker;
+        moduleWorker.onmessage = (event: MessageEvent<DesktopWorkerOutboundMessage>) => {
+          session.handleModuleMessage(event.data);
+        };
+        moduleWorker.onerror = (event: ErrorEvent) => {
+          const error = event.error instanceof Error
+            ? event.error
+            : new Error(event.message || 'Desktop module worker failed');
+          session.fail(error);
+        };
+        moduleWorker.onmessageerror = () => {
+          session.fail(new Error('Desktop module worker message deserialization failed'));
+        };
+        moduleWorker.postMessage(
+          {
+            kind: 'init',
+            module: options.module instanceof URL ? options.module.href : options.module,
+            windowId: message.windowId,
+            surfaceInfo: message.surfaceInfo,
+            windowState: message.windowState,
+          } satisfies DesktopWorkerInboundMessage,
+        );
+        return;
+      }
+      case 'event':
+        session.moduleWorker?.postMessage(
+          {
+            kind: 'event',
+            event: message.event,
+          } satisfies DesktopWorkerInboundMessage,
+        );
+        return;
+      case 'exited':
+        session.exited = true;
+        if (!session.ready) {
+          session.readyReject?.(
+            session.startupError ??
+              new Error(
+                `Window manager worker exited before initialization completed${
+                  message.reason ? ` (${message.reason})` : ''
+                }`,
+              ),
+          );
+        }
+        session.exitResolve?.();
+        session.onExited();
+        return;
+      case 'error': {
+        const error = new Error(message.message);
+        if (message.stack) {
+          error.stack = message.stack;
+        }
+        session.fail(error);
+        return;
+      }
+    }
+  };
+
+  return session;
+};
+
+const failDesktopManagerWorkerSession = (
+  controller: DesktopManagerWorkerController,
+  error: Error,
+): void => {
+  const session = controller.session;
+  if (!session) {
+    controller.poisoned = true;
+    return;
+  }
+  session.fail(error);
+};
+
+const createDesktopManagerWorkerController = (): DesktopManagerWorkerController => {
+  const worker = new Worker(new URL('./window_manager_worker.ts', import.meta.url).href, {
+    type: 'module',
+  });
+  const controller: DesktopManagerWorkerController = {
+    worker,
+    activeRunCount: 0,
+    poisoned: false,
+  };
+
+  worker.onmessage = (event: MessageEvent<DesktopWindowManagerOutboundMessage>) => {
+    const session = controller.session;
+    if (!session) {
+      return;
+    }
+    session.handleManagerMessage(event.data);
+  };
+  worker.onerror = (event: ErrorEvent) => {
+    const error = event.error instanceof Error
+      ? event.error
+      : new Error(event.message || 'Window manager worker failed');
+    controller.poisoned = true;
+    failDesktopManagerWorkerSession(controller, error);
+  };
+  worker.onmessageerror = () => {
+    controller.poisoned = true;
+    failDesktopManagerWorkerSession(
+      controller,
+      new Error('Window manager worker message deserialization failed'),
+    );
+  };
+
+  return controller;
+};
+
+const disposeDesktopManagerWorkerController = (): void => {
+  desktopManagerWorkerController?.worker.terminate();
+  desktopManagerWorkerController = undefined;
+};
+
+const ensureDesktopManagerWorkerController = (): DesktopManagerWorkerController => {
+  if (!desktopManagerWorkerController || desktopManagerWorkerController.poisoned) {
+    disposeDesktopManagerWorkerController();
+    desktopManagerWorkerController = createDesktopManagerWorkerController();
+  }
+
+  return desktopManagerWorkerController;
+};
+
+const assertDesktopInitialized = (): void => {
+  if (!desktopInitialized) {
+    throw new Error(
+      '@goldlight/desktop has not been initialized; call await initialize() before using desktop APIs',
+    );
+  }
+};
+
+export const initialize = async (): Promise<void> => {
+  if (!initializePromise) {
+    initializePromise = (async () => {
+      await ensureDesktopWebGpuContext();
+      ensureDesktopManagerWorkerController();
+      desktopInitialized = true;
+    })().catch((error) => {
+      initializePromise = undefined;
+      desktopInitialized = false;
+      disposeDesktopManagerWorkerController();
+      throw error;
+    });
+  }
+
+  await initializePromise;
+};
+
+export const dispose = async (): Promise<void> => {
+  if (!desktopInitialized && !initializePromise && !desktopManagerWorkerController) {
+    return;
+  }
+
+  const controller = desktopManagerWorkerController;
+  const session = controller?.session;
+  if (session && !session.exited) {
+    session.window.close();
+    try {
+      await session.window.whenClosed();
+    } catch {
+      // Let teardown continue even if window startup/runtime failed.
+    }
+  }
+
+  disposeDesktopManagerWorkerController();
+  desktopInitialized = false;
+  initializePromise = undefined;
+};
+
+export const createDesktopApp = (
   options: DesktopWindowOptions & DesktopHostOptions,
-): Promise<DesktopApp> => {
-  await ensureDesktopWebGpuContext();
+): DesktopApp => {
+  assertDesktopInitialized();
   const host = createDesktopHost(options);
   const window = createDesktopWindow(host, options);
 
@@ -213,102 +605,59 @@ export const createDesktopApp = async (
   };
 };
 
-export const runDesktopModule = async (
-  options: DesktopModuleOptions,
-): Promise<void> => {
-  const managerWorker = new Worker(new URL('./window_manager_worker.ts', import.meta.url).href, {
-    type: 'module',
-  });
-
-  let exited = false;
-  let ready = false;
-  let startupError: Error | undefined;
-  let runtimeError: Error | undefined;
-  let readyResolve: (() => void) | undefined;
-  let readyReject: ((reason?: unknown) => void) | undefined;
-  const readyPromise = new Promise<void>((resolve, reject) => {
-    readyResolve = resolve;
-    readyReject = reject;
-  });
-  let exitResolve: (() => void) | undefined;
-  const exitPromise = new Promise<void>((resolve) => {
-    exitResolve = resolve;
-  });
-
-  const failManagerWorker = (error: Error): void => {
-    if (!ready) {
-      startupError = error;
-      readyReject?.(error);
-    } else {
-      runtimeError = error;
-    }
-    exited = true;
-    exitResolve?.();
-  };
-
-  managerWorker.onmessage = (event: MessageEvent<DesktopWindowManagerOutboundMessage>) => {
-    switch (event.data.kind) {
-      case 'ready':
-        ready = true;
-        readyResolve?.();
-        return;
-      case 'exited':
-        exited = true;
-        if (!ready) {
-          readyReject?.(
-            startupError ??
-              new Error(
-                `Window manager worker exited before initialization completed${
-                  event.data.reason ? ` (${event.data.reason})` : ''
-                }`,
-              ),
-          );
-        }
-        exitResolve?.();
-        return;
-      case 'error': {
-        const error = new Error(event.data.message);
-        if (event.data.stack) {
-          error.stack = event.data.stack;
-        }
-        failManagerWorker(error);
-        return;
-      }
-    }
-  };
-  managerWorker.onerror = (event: ErrorEvent) => {
-    const error = event.error instanceof Error
-      ? event.error
-      : new Error(event.message || 'Window manager worker failed');
-    failManagerWorker(error);
-  };
-  managerWorker.onmessageerror = () => {
-    failManagerWorker(new Error('Window manager worker message deserialization failed'));
-  };
+export const createWindow = (
+  options: GoldlightWindowOptions,
+): GoldlightWindow => {
+  assertDesktopInitialized();
+  const controller = ensureDesktopManagerWorkerController();
+  if (controller.activeRunCount > 0 || controller.session) {
+    throw new Error(
+      'createWindow already has an active desktop module session; the desktop window manager worker is process-global',
+    );
+  }
 
   const postToManager = (message: DesktopWindowManagerInboundMessage): void => {
-    managerWorker.postMessage(message);
+    controller.worker.postMessage(message);
   };
+  const session = createGoldlightWindowSession(postToManager, options);
+  controller.activeRunCount += 1;
+  controller.session = session;
 
-  try {
-    postToManager({
-      kind: 'init',
-      options,
-      module: options.module instanceof URL ? options.module.href : options.module,
-    });
-    await readyPromise;
-    await exitPromise;
-    if (runtimeError) {
-      throw runtimeError;
+  session.closedPromise.finally(async () => {
+    if (session.moduleWorker && !session.moduleShutdownComplete) {
+      session.moduleWorker.postMessage(
+        {
+          kind: 'shutdown',
+        } satisfies DesktopWorkerInboundMessage,
+      );
+      const shutdownDeadline = Date.now() + 250;
+      while (!session.moduleShutdownComplete && Date.now() < shutdownDeadline) {
+        await Promise.race([
+          session.moduleShutdownPromise,
+          new Promise((resolve) => setTimeout(resolve, 5)),
+        ]);
+      }
     }
-  } finally {
-    if (!exited) {
+    session.moduleWorker?.terminate();
+    session.moduleWorker = undefined;
+    if (!session.exited && !controller.poisoned) {
       postToManager({ kind: 'shutdown' });
       const shutdownDeadline = Date.now() + 250;
-      while (!exited && Date.now() < shutdownDeadline) {
+      while (!session.exited && Date.now() < shutdownDeadline) {
         await new Promise((resolve) => setTimeout(resolve, 5));
       }
     }
-    managerWorker.terminate();
-  }
+    controller.session = undefined;
+    controller.activeRunCount = Math.max(0, controller.activeRunCount - 1);
+    if (controller.poisoned) {
+      disposeDesktopManagerWorkerController();
+    }
+  });
+
+  postToManager({
+    kind: 'init',
+    options,
+  });
+
+  return session.window;
 };

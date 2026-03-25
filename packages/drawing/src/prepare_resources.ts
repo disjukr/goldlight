@@ -1,5 +1,5 @@
 import type { DrawingPreparedClipElement } from './clip_stack.ts';
-import { identityMatrix2D, type Point2D } from '@goldlight/geometry';
+import { identityMatrix2d, type Point2d } from '@goldlight/geometry';
 import {
   type DrawingPreparedClipDraw,
   type DrawingPreparedRecording,
@@ -298,18 +298,18 @@ const createStepPayloadBuffer = (
   strokeStyle: DrawingStrokeStyle | null,
   clip: Readonly<{
     hasAtlas: boolean;
-    atlasOrigin: Point2D;
-    atlasInvSize: Point2D;
+    atlasOrigin: Point2d;
+    atlasInvSize: Point2d;
     hasAnalyticRect: boolean;
-    analyticOrigin: Point2D;
-    analyticSize: Point2D;
+    analyticOrigin: Point2d;
+    analyticSize: Point2d;
     hasShader: boolean;
     shaderColor: readonly [number, number, number, number];
   }>,
   dst: Readonly<{
     blendModeCode: number;
     requiresDstRead: boolean;
-    invSize: Point2D;
+    invSize: Point2d;
     blenderCoefficients: readonly [number, number, number, number];
   }>,
   shader: Readonly<{
@@ -508,15 +508,15 @@ const toCurveType = (patch: DrawingPreparedPatch): number => {
 };
 
 const quadraticToCubicPoints = (
-  p0: Point2D,
-  p1: Point2D,
-  p2: Point2D,
-): readonly [Point2D, Point2D, Point2D, Point2D] => {
-  const c1: Point2D = [
+  p0: Point2d,
+  p1: Point2d,
+  p2: Point2d,
+): readonly [Point2d, Point2d, Point2d, Point2d] => {
+  const c1: Point2d = [
     p0[0] + ((p1[0] - p0[0]) * (2 / 3)),
     p0[1] + ((p1[1] - p0[1]) * (2 / 3)),
   ];
-  const c2: Point2D = [
+  const c2: Point2d = [
     p2[0] + ((p1[0] - p2[0]) * (2 / 3)),
     p2[1] + ((p1[1] - p2[1]) * (2 / 3)),
   ];
@@ -524,14 +524,14 @@ const quadraticToCubicPoints = (
 };
 
 const lineToCubicPatchPoints = (
-  p0: Point2D,
-  p1: Point2D,
-): readonly [Point2D, Point2D, Point2D, Point2D] => {
-  const c1: Point2D = [
+  p0: Point2d,
+  p1: Point2d,
+): readonly [Point2d, Point2d, Point2d, Point2d] => {
+  const c1: Point2d = [
     p0[0] + ((p1[0] - p0[0]) / 3),
     p0[1] + ((p1[1] - p0[1]) / 3),
   ];
-  const c2: Point2D = [
+  const c2: Point2d = [
     p1[0] + ((p0[0] - p1[0]) / 3),
     p1[1] + ((p0[1] - p1[1]) / 3),
   ];
@@ -539,11 +539,11 @@ const lineToCubicPatchPoints = (
 };
 
 const conicPatchPoints = (
-  p0: Point2D,
-  p1: Point2D,
-  p2: Point2D,
+  p0: Point2d,
+  p1: Point2d,
+  p2: Point2d,
   weight: number,
-): readonly [Point2D, Point2D, Point2D, Point2D] => [
+): readonly [Point2d, Point2d, Point2d, Point2d] => [
   p0,
   p1,
   p2,
@@ -552,7 +552,7 @@ const conicPatchPoints = (
 
 const getFillPatchPoints = (
   patch: DrawingPreparedPatch,
-): readonly [Point2D, Point2D, Point2D, Point2D] =>
+): readonly [Point2d, Point2d, Point2d, Point2d] =>
   patch.kind === 'line'
     ? lineToCubicPatchPoints(patch.points[0], patch.points[1])
     : patch.kind === 'triangle'
@@ -570,9 +570,9 @@ const toFillCurveType = (patch: DrawingPreparedPatch): number =>
   patch.kind === 'triangle' ? 2 : patch.kind === 'conic' ? 1 : 0;
 
 const transformPoint = (
-  point: Point2D,
+  point: Point2d,
   matrix: readonly [number, number, number, number, number, number],
-): Point2D => [
+): Point2d => [
   (matrix[0] * point[0]) + (matrix[2] * point[1]) + matrix[4],
   (matrix[1] * point[0]) + (matrix[3] * point[1]) + matrix[5],
 ];
@@ -595,7 +595,7 @@ const invertAffineMatrix = (
 ): readonly [number, number, number, number, number, number] => {
   const det = (matrix[0] * matrix[3]) - (matrix[1] * matrix[2]);
   if (Math.abs(det) <= 1e-8) {
-    return identityMatrix2D;
+    return identityMatrix2d;
   }
   const invDet = 1 / det;
   const a = matrix[3] * invDet;
@@ -1080,8 +1080,8 @@ const multiplyAffineMatrices = (
 ];
 
 const createLinearGradientMatrix = (
-  start: Point2D,
-  end: Point2D,
+  start: Point2d,
+  end: Point2d,
 ): readonly [number, number, number, number, number, number] => {
   const dx = end[0] - start[0];
   const dy = end[1] - start[1];
@@ -1094,7 +1094,7 @@ const createLinearGradientMatrix = (
 };
 
 const createRadialGradientMatrix = (
-  center: Point2D,
+  center: Point2d,
   radius: number,
 ): readonly [number, number, number, number, number, number] => {
   const scale = 1 / Math.max(radius, gradientEpsilon);
@@ -1102,7 +1102,7 @@ const createRadialGradientMatrix = (
 };
 
 const createSweepGradientMatrix = (
-  center: Point2D,
+  center: Point2d,
 ): readonly [number, number, number, number, number, number] => [
   1,
   0,
@@ -1113,8 +1113,8 @@ const createSweepGradientMatrix = (
 ];
 
 const createConicalGradientMatrix = (
-  startCenter: Point2D,
-  endCenter: Point2D,
+  startCenter: Point2d,
+  endCenter: Point2d,
   startRadius: number,
   endRadius: number,
 ): readonly [number, number, number, number, number, number] => {
@@ -1192,7 +1192,7 @@ const createGradientPayload = (
     inlineColors: specialization.inlineColors,
   } as const;
 
-  let gradientMatrix: readonly [number, number, number, number, number, number] = identityMatrix2D;
+  let gradientMatrix: readonly [number, number, number, number, number, number] = identityMatrix2d;
   let kindCode = 0;
   let params0: readonly [number, number, number, number] = [0, 0, 0, 0];
   const params1: readonly [number, number, number, number] = [0, 0, 0, 0];
@@ -1271,10 +1271,10 @@ const calcNumRadialSegmentsPerRadian = (approxStrokeRadius: number): number => {
 };
 
 const cubicWangsFormulaP4 = (
-  p0: Point2D,
-  p1: Point2D,
-  p2: Point2D,
-  p3: Point2D,
+  p0: Point2d,
+  p1: Point2d,
+  p2: Point2d,
+  p3: Point2d,
 ): number => {
   const v1x = p0[0] - (2 * p1[0]) + p2[0];
   const v1y = p0[1] - (2 * p1[1]) + p2[1];
@@ -1284,24 +1284,24 @@ const cubicWangsFormulaP4 = (
 };
 
 const conicWangsFormulaP4 = (
-  p0: Point2D,
-  p1: Point2D,
-  p2: Point2D,
+  p0: Point2d,
+  p1: Point2d,
+  p2: Point2d,
   weight: number,
 ): number => {
-  const center: Point2D = [
+  const center: Point2d = [
     (Math.min(p0[0], p1[0], p2[0]) + Math.max(p0[0], p1[0], p2[0])) * 0.5,
     (Math.min(p0[1], p1[1], p2[1]) + Math.max(p0[1], p1[1], p2[1])) * 0.5,
   ];
-  const c0: Point2D = [p0[0] - center[0], p0[1] - center[1]];
-  const c1: Point2D = [p1[0] - center[0], p1[1] - center[1]];
-  const c2: Point2D = [p2[0] - center[0], p2[1] - center[1]];
+  const c0: Point2d = [p0[0] - center[0], p0[1] - center[1]];
+  const c1: Point2d = [p1[0] - center[0], p1[1] - center[1]];
+  const c2: Point2d = [p2[0] - center[0], p2[1] - center[1]];
   const maxLen = Math.max(
     Math.hypot(c0[0], c0[1]),
     Math.hypot(c1[0], c1[1]),
     Math.hypot(c2[0], c2[1]),
   );
-  const dp: Point2D = [
+  const dp: Point2d = [
     c0[0] + c2[0] - (2 * weight * c1[0]),
     c0[1] + c2[1] - (2 * weight * c1[1]),
   ];
@@ -1319,7 +1319,7 @@ const requiredStrokeEdgesForPatch = (
   strokeStyle: DrawingStrokeStyle,
 ): number => {
   const sourcePoints = getStrokePatchPoints(patch.patch);
-  const points: readonly [Point2D, Point2D, Point2D, Point2D] = [
+  const points: readonly [Point2d, Point2d, Point2d, Point2d] = [
     transformPoint(sourcePoints[0], transform),
     transformPoint(sourcePoints[1], transform),
     transformPoint(sourcePoints[2], transform),
@@ -1375,7 +1375,7 @@ const requiredStrokeVertexCount = (
 
 const getPatchPoints = (
   patch: DrawingPreparedPatch,
-): readonly [Point2D, Point2D, Point2D, Point2D] =>
+): readonly [Point2d, Point2d, Point2d, Point2d] =>
   patch.kind === 'line'
     ? [patch.points[0], patch.points[0], patch.points[1], patch.points[1]]
     : patch.kind === 'triangle'
@@ -1388,7 +1388,7 @@ const getPatchPoints = (
 
 const getStrokePatchPoints = (
   patch: DrawingPreparedPatch,
-): readonly [Point2D, Point2D, Point2D, Point2D] =>
+): readonly [Point2d, Point2d, Point2d, Point2d] =>
   patch.kind === 'quadratic'
     ? quadraticToCubicPoints(patch.points[0], patch.points[1], patch.points[2])
     : getPatchPoints(patch);
@@ -1554,7 +1554,7 @@ const prepareStepResources = (
   };
   const stepPayloadBuffer = createStepPayloadBuffer(
     sharedContext,
-    usesDeviceSpaceVertices(step) ? identityMatrix2D : step.draw.transform,
+    usesDeviceSpaceVertices(step) ? identityMatrix2d : step.draw.transform,
     step.depth,
     step.draw.color,
     step.draw.kind === 'pathStroke' ? step.draw.strokeStyle : null,
@@ -1781,7 +1781,7 @@ export const prepareDawnResources = (
       invSize: [0, 0],
       blenderCoefficients: [0, 0, 0, 0],
     },
-    createGradientPayload(undefined, identityMatrix2D, gradientBuilder),
+    createGradientPayload(undefined, identityMatrix2d, gradientBuilder),
   );
   const identityStepBindGroup = sharedContext.resourceProvider.createStepBindGroup(
     identityStepPayloadBuffer,

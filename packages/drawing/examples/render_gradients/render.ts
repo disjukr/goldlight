@@ -1,6 +1,6 @@
 import { exportPngRgba } from '@goldlight/exporters';
 import { createOffscreenBinding, readOffscreenSnapshot } from '@goldlight/gpu';
-import { createPath2D, createRect, createRectPath2D, type Point2D } from '@goldlight/geometry';
+import { createPath2d, createRect, createRectPath2d, type Point2d } from '@goldlight/geometry';
 import {
   checkForFinishedDawnQueueWork,
   encodeDawnCommandBuffer,
@@ -57,11 +57,11 @@ const downsampleRgba = (
 };
 
 const createBlobPath = (
-  center: Point2D,
+  center: Point2d,
   radiusX: number,
   radiusY: number,
 ) =>
-  createPath2D(
+  createPath2d(
     { kind: 'moveTo', to: [center[0], center[1] - radiusY] },
     {
       kind: 'cubicTo',
@@ -85,11 +85,11 @@ const createBlobPath = (
   );
 
 const createStarPath = (
-  center: Point2D,
+  center: Point2d,
   outerRadius: number,
   innerRadius: number,
 ) => {
-  const points: Point2D[] = [];
+  const points: Point2d[] = [];
   for (let index = 0; index < 10; index += 1) {
     const angle = (-Math.PI / 2) + (index * Math.PI / 5);
     const radius = index % 2 === 0 ? outerRadius : innerRadius;
@@ -99,7 +99,7 @@ const createStarPath = (
     ]);
   }
 
-  return createPath2D(
+  return createPath2d(
     { kind: 'moveTo', to: points[0]! },
     ...points.slice(1).map((point) => ({ kind: 'lineTo', to: point }) as const),
     { kind: 'close' },
@@ -130,20 +130,20 @@ export const renderGradientsSnapshot = async (): Promise<
   scaleDrawingRecorder(recorder, supersampleScale, supersampleScale);
 
   recordClear(recorder, [0.05, 0.07, 0.1, 1]);
-  recordDrawPath(recorder, createRectPath2D(createRect(36, 36, 888, 648)), {
+  recordDrawPath(recorder, createRectPath2d(createRect(36, 36, 888, 648)), {
     style: 'fill',
     color: [0.09, 0.11, 0.15, 1],
   });
 
-  recordDrawPath(recorder, createRectPath2D(createRect(72, 78, 244, 564)), {
+  recordDrawPath(recorder, createRectPath2d(createRect(72, 78, 244, 564)), {
     style: 'fill',
     color: [0.13, 0.15, 0.2, 1],
   });
-  recordDrawPath(recorder, createRectPath2D(createRect(358, 78, 244, 564)), {
+  recordDrawPath(recorder, createRectPath2d(createRect(358, 78, 244, 564)), {
     style: 'fill',
     color: [0.13, 0.15, 0.2, 1],
   });
-  recordDrawPath(recorder, createRectPath2D(createRect(644, 78, 244, 564)), {
+  recordDrawPath(recorder, createRectPath2d(createRect(644, 78, 244, 564)), {
     style: 'fill',
     color: [0.13, 0.15, 0.2, 1],
   });
@@ -160,7 +160,7 @@ export const renderGradientsSnapshot = async (): Promise<
       ],
     },
   });
-  recordDrawPath(recorder, createRectPath2D(createRect(112, 408, 164, 138)), {
+  recordDrawPath(recorder, createRectPath2d(createRect(112, 408, 164, 138)), {
     style: 'fill',
     shader: {
       kind: 'linear-gradient',

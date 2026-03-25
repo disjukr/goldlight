@@ -1,9 +1,9 @@
 import {
-  identityMatrix2D,
-  type PathFillRule2D,
-  type Point2D,
+  identityMatrix2d,
+  type PathFillRule2d,
+  type Point2d,
   type Rect,
-  transformPoint2D,
+  transformPoint2d,
 } from '@goldlight/geometry';
 import { type DrawingPreparedClip, visitDrawingClipStackForDraw } from './clip_stack.ts';
 import type {
@@ -12,7 +12,7 @@ import type {
   DrawingCustomBlender,
   DrawingPaint,
   DrawingPaintShader,
-  DrawingPath2D,
+  DrawingPath2d,
   DrawingStrokeStyle,
   DrawPathCommand,
   DrawShapeCommand,
@@ -25,28 +25,28 @@ import {
 } from './renderer_provider.ts';
 
 type FlattenedSubpath = Readonly<{
-  points: readonly Point2D[];
+  points: readonly Point2d[];
   closed: boolean;
 }>;
 
 type MidpointContourVerb =
-  | Readonly<{ kind: 'moveTo'; to: Point2D }>
-  | Readonly<{ kind: 'lineTo'; to: Point2D }>
-  | Readonly<{ kind: 'quadTo'; control: Point2D; to: Point2D }>
-  | Readonly<{ kind: 'conicTo'; control: Point2D; to: Point2D; weight: number }>
-  | Readonly<{ kind: 'cubicTo'; control1: Point2D; control2: Point2D; to: Point2D }>
+  | Readonly<{ kind: 'moveTo'; to: Point2d }>
+  | Readonly<{ kind: 'lineTo'; to: Point2d }>
+  | Readonly<{ kind: 'quadTo'; control: Point2d; to: Point2d }>
+  | Readonly<{ kind: 'conicTo'; control: Point2d; to: Point2d; weight: number }>
+  | Readonly<{ kind: 'cubicTo'; control1: Point2d; control2: Point2d; to: Point2d }>
   | Readonly<{ kind: 'close' }>;
 
 type MidpointContour = Readonly<{
   verbs: readonly MidpointContourVerb[];
-  startPoint: Point2D;
-  endPoint: Point2D;
-  midpoint: Point2D;
+  startPoint: Point2d;
+  endPoint: Point2d;
+  midpoint: Point2d;
   closedExplicitly: boolean;
 }>;
 
 export type DrawingPreparedVertex = Readonly<{
-  point: Point2D;
+  point: Point2d;
   color: readonly [number, number, number, number];
 }>;
 
@@ -159,7 +159,7 @@ export const toDrawingBlendModeCode = (
     : drawingBlendModeCodes.luminosity;
 
 type DrawingPreparedPatchBase = Readonly<{
-  fanPoint?: Point2D;
+  fanPoint?: Point2d;
   resolveLevel: number;
   wangsFormulaP4: number;
 }>;
@@ -167,31 +167,31 @@ type DrawingPreparedPatchBase = Readonly<{
 export type DrawingPreparedPatch = Readonly<
   | (DrawingPreparedPatchBase & {
     kind: 'line';
-    points: readonly [Point2D, Point2D];
+    points: readonly [Point2d, Point2d];
   })
   | (DrawingPreparedPatchBase & {
     kind: 'triangle';
-    points: readonly [Point2D, Point2D, Point2D];
+    points: readonly [Point2d, Point2d, Point2d];
   })
   | (DrawingPreparedPatchBase & {
     kind: 'quadratic';
-    points: readonly [Point2D, Point2D, Point2D];
+    points: readonly [Point2d, Point2d, Point2d];
   })
   | (DrawingPreparedPatchBase & {
     kind: 'conic';
-    points: readonly [Point2D, Point2D, Point2D];
+    points: readonly [Point2d, Point2d, Point2d];
     weight: number;
   })
   | (DrawingPreparedPatchBase & {
     kind: 'cubic';
-    points: readonly [Point2D, Point2D, Point2D, Point2D];
+    points: readonly [Point2d, Point2d, Point2d, Point2d];
   })
 >;
 
 export type DrawingPreparedStrokePatch = Readonly<{
   patch: DrawingPreparedPatch;
-  prevPoint: Point2D;
-  joinControlPoint: Point2D;
+  prevPoint: Point2d;
+  joinControlPoint: Point2d;
   contourStart: boolean;
   contourEnd: boolean;
   startCap: 'none' | 'butt' | 'square' | 'round';
@@ -201,29 +201,29 @@ export type DrawingPreparedStrokePatch = Readonly<{
 type DrawingPatchDefinition =
   | Readonly<{
     kind: 'line';
-    points: readonly [Point2D, Point2D];
-    fanPoint?: Point2D;
+    points: readonly [Point2d, Point2d];
+    fanPoint?: Point2d;
   }>
   | Readonly<{
     kind: 'triangle';
-    points: readonly [Point2D, Point2D, Point2D];
-    fanPoint?: Point2D;
+    points: readonly [Point2d, Point2d, Point2d];
+    fanPoint?: Point2d;
   }>
   | Readonly<{
     kind: 'quadratic';
-    points: readonly [Point2D, Point2D, Point2D];
-    fanPoint?: Point2D;
+    points: readonly [Point2d, Point2d, Point2d];
+    fanPoint?: Point2d;
   }>
   | Readonly<{
     kind: 'conic';
-    points: readonly [Point2D, Point2D, Point2D];
+    points: readonly [Point2d, Point2d, Point2d];
     weight: number;
-    fanPoint?: Point2D;
+    fanPoint?: Point2d;
   }>
   | Readonly<{
     kind: 'cubic';
-    points: readonly [Point2D, Point2D, Point2D, Point2D];
-    fanPoint?: Point2D;
+    points: readonly [Point2d, Point2d, Point2d, Point2d];
+    fanPoint?: Point2d;
   }>;
 
 type DrawingStrokeContourSequenceItem =
@@ -241,7 +241,7 @@ type DrawingStrokeContourSequenceItem =
   }>
   | Readonly<{
     kind: 'moveWithinContour';
-    anchor: Point2D;
+    anchor: Point2d;
   }>
   | Readonly<{
     kind: 'contourFinished';
@@ -253,35 +253,35 @@ type DrawingStrokeContourPatchItem = Extract<
 >;
 
 type DrawingStrokeContourRecord = Readonly<{
-  points: readonly Point2D[];
+  points: readonly Point2d[];
   closed: boolean;
   segments: readonly DrawingStrokeSegmentRecord[];
-  degeneratePoint?: Point2D;
-  firstPoint?: Point2D;
-  lastPoint?: Point2D;
-  startTangent?: Point2D;
-  endTangent?: Point2D;
+  degeneratePoint?: Point2d;
+  firstPoint?: Point2d;
+  lastPoint?: Point2d;
+  startTangent?: Point2d;
+  endTangent?: Point2d;
 }>;
 
 type DrawingStrokeSegmentRecord = Readonly<{
-  start: Point2D;
-  end: Point2D;
-  direction: Point2D;
-  normal: Point2D;
-  leftStart: Point2D;
-  rightStart: Point2D;
-  leftEnd: Point2D;
-  rightEnd: Point2D;
+  start: Point2d;
+  end: Point2d;
+  direction: Point2d;
+  normal: Point2d;
+  leftStart: Point2d;
+  rightStart: Point2d;
+  leftEnd: Point2d;
+  rightEnd: Point2d;
 }>;
 
 export type DrawingPreparedPathFill = Readonly<{
   kind: 'pathFill';
   renderer: DrawingRenderer;
-  triangles: readonly Point2D[];
+  triangles: readonly Point2d[];
   fringeVertices?: readonly DrawingPreparedVertex[];
   patches: readonly DrawingPreparedPatch[];
   innerFillBounds?: Rect;
-  fillRule: PathFillRule2D;
+  fillRule: PathFillRule2d;
   color: readonly [number, number, number, number];
   shader?: DrawingPreparedShader;
   blendMode: DrawingBlendMode;
@@ -298,7 +298,7 @@ export type DrawingPreparedPathFill = Readonly<{
 export type DrawingPreparedPathStroke = Readonly<{
   kind: 'pathStroke';
   renderer: DrawingRenderer;
-  triangles: readonly Point2D[];
+  triangles: readonly Point2d[];
   fringeVertices?: readonly DrawingPreparedVertex[];
   patches: readonly DrawingPreparedStrokePatch[];
   usesTessellatedStrokePatches: boolean;
@@ -495,24 +495,24 @@ const createPreparedDrawClip = (
     }
     : undefined;
 
-const pointsEqual = (left: Point2D, right: Point2D): boolean =>
+const pointsEqual = (left: Point2d, right: Point2d): boolean =>
   Math.abs(left[0] - right[0]) <= epsilon && Math.abs(left[1] - right[1]) <= epsilon;
 
-const cross = (origin: Point2D, a: Point2D, b: Point2D): number =>
+const cross = (origin: Point2d, a: Point2d, b: Point2d): number =>
   ((a[0] - origin[0]) * (b[1] - origin[1])) - ((a[1] - origin[1]) * (b[0] - origin[0]));
 
-const dot = (left: Point2D, right: Point2D): number => (left[0] * right[0]) + (left[1] * right[1]);
+const dot = (left: Point2d, right: Point2d): number => (left[0] * right[0]) + (left[1] * right[1]);
 
 const subtract = (
-  left: Point2D,
-  right: Point2D,
-): Point2D => [left[0] - right[0], left[1] - right[1]];
+  left: Point2d,
+  right: Point2d,
+): Point2d => [left[0] - right[0], left[1] - right[1]];
 
-const add = (left: Point2D, right: Point2D): Point2D => [left[0] + right[0], left[1] + right[1]];
+const add = (left: Point2d, right: Point2d): Point2d => [left[0] + right[0], left[1] + right[1]];
 
-const scale = (point: Point2D, factor: number): Point2D => [point[0] * factor, point[1] * factor];
+const scale = (point: Point2d, factor: number): Point2d => [point[0] * factor, point[1] * factor];
 
-const normalize = (point: Point2D): Point2D | null => {
+const normalize = (point: Point2d): Point2d | null => {
   const length = Math.hypot(point[0], point[1]);
   if (length <= epsilon) {
     return null;
@@ -520,16 +520,16 @@ const normalize = (point: Point2D): Point2D | null => {
   return [point[0] / length, point[1] / length];
 };
 
-const perpendicular = (vector: Point2D): Point2D => [-vector[1], vector[0]];
+const perpendicular = (vector: Point2d): Point2d => [-vector[1], vector[0]];
 
-const midpoint = (a: Point2D, b: Point2D): Point2D => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+const midpoint = (a: Point2d, b: Point2d): Point2d => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
 
-const lerp = (a: Point2D, b: Point2D, t: number): Point2D => [
+const lerp = (a: Point2d, b: Point2d, t: number): Point2d => [
   a[0] + ((b[0] - a[0]) * t),
   a[1] + ((b[1] - a[1]) * t),
 ];
 
-const distanceFromLine = (point: Point2D, start: Point2D, end: Point2D): number => {
+const distanceFromLine = (point: Point2d, start: Point2d, end: Point2d): number => {
   const dx = end[0] - start[0];
   const dy = end[1] - start[1];
   const length = Math.hypot(dx, dy);
@@ -547,9 +547,9 @@ const calcNumRadialSegmentsPerRadian = (approxStrokeRadius: number): number => {
 };
 
 const approximateQuadraticSegments = (
-  from: Point2D,
-  control: Point2D,
-  to: Point2D,
+  from: Point2d,
+  control: Point2d,
+  to: Point2d,
 ): number => {
   const chord = Math.hypot(to[0] - from[0], to[1] - from[1]);
   const controlPolygon = Math.hypot(control[0] - from[0], control[1] - from[1]) +
@@ -565,10 +565,10 @@ const approximateQuadraticSegments = (
 };
 
 const approximateCubicSegments = (
-  from: Point2D,
-  control1: Point2D,
-  control2: Point2D,
-  to: Point2D,
+  from: Point2d,
+  control1: Point2d,
+  control2: Point2d,
+  to: Point2d,
 ): number => {
   const chord = Math.hypot(to[0] - from[0], to[1] - from[1]);
   const controlPolygon = Math.hypot(control1[0] - from[0], control1[1] - from[1]) +
@@ -592,9 +592,9 @@ const nextLog2 = (value: number): number => {
 };
 
 const quadraticWangsFormulaP4 = (
-  from: Point2D,
-  control: Point2D,
-  to: Point2D,
+  from: Point2d,
+  control: Point2d,
+  to: Point2d,
 ): number => {
   const vx = from[0] - (2 * control[0]) + to[0];
   const vy = from[1] - (2 * control[1]) + to[1];
@@ -603,10 +603,10 @@ const quadraticWangsFormulaP4 = (
 };
 
 const cubicWangsFormulaP4 = (
-  from: Point2D,
-  control1: Point2D,
-  control2: Point2D,
-  to: Point2D,
+  from: Point2d,
+  control1: Point2d,
+  control2: Point2d,
+  to: Point2d,
 ): number => {
   const v1x = from[0] - (2 * control1[0]) + control2[0];
   const v1y = from[1] - (2 * control1[1]) + control2[1];
@@ -617,16 +617,16 @@ const cubicWangsFormulaP4 = (
 };
 
 const conicWangsFormulaP2 = (
-  from: Point2D,
-  control: Point2D,
-  to: Point2D,
+  from: Point2d,
+  control: Point2d,
+  to: Point2d,
   weight: number,
 ): number => {
-  const center: Point2D = [
+  const center: Point2d = [
     (Math.min(from[0], control[0], to[0]) + Math.max(from[0], control[0], to[0])) * 0.5,
     (Math.min(from[1], control[1], to[1]) + Math.max(from[1], control[1], to[1])) * 0.5,
   ];
-  const centered: readonly [Point2D, Point2D, Point2D] = [
+  const centered: readonly [Point2d, Point2d, Point2d] = [
     subtract(from, center),
     subtract(control, center),
     subtract(to, center),
@@ -695,9 +695,9 @@ const transformPatch = (
     ? {
       kind: 'conic',
       points: [
-        transformPoint2D(patch.points[0], transform),
-        transformPoint2D(patch.points[1], transform),
-        transformPoint2D(patch.points[2], transform),
+        transformPoint2d(patch.points[0], transform),
+        transformPoint2d(patch.points[1], transform),
+        transformPoint2d(patch.points[2], transform),
       ],
       weight: patch.weight,
     }
@@ -705,35 +705,35 @@ const transformPatch = (
     ? {
       kind: 'triangle',
       points: [
-        transformPoint2D(patch.points[0], transform),
-        transformPoint2D(patch.points[1], transform),
-        transformPoint2D(patch.points[2], transform),
+        transformPoint2d(patch.points[0], transform),
+        transformPoint2d(patch.points[1], transform),
+        transformPoint2d(patch.points[2], transform),
       ],
     }
     : patch.kind === 'quadratic'
     ? {
       kind: 'quadratic',
       points: [
-        transformPoint2D(patch.points[0], transform),
-        transformPoint2D(patch.points[1], transform),
-        transformPoint2D(patch.points[2], transform),
+        transformPoint2d(patch.points[0], transform),
+        transformPoint2d(patch.points[1], transform),
+        transformPoint2d(patch.points[2], transform),
       ],
     }
     : patch.kind === 'line'
     ? {
       kind: 'line',
       points: [
-        transformPoint2D(patch.points[0], transform),
-        transformPoint2D(patch.points[1], transform),
+        transformPoint2d(patch.points[0], transform),
+        transformPoint2d(patch.points[1], transform),
       ],
     }
     : {
       kind: 'cubic',
       points: [
-        transformPoint2D(patch.points[0], transform),
-        transformPoint2D(patch.points[1], transform),
-        transformPoint2D(patch.points[2], transform),
-        transformPoint2D(patch.points[3], transform),
+        transformPoint2d(patch.points[0], transform),
+        transformPoint2d(patch.points[1], transform),
+        transformPoint2d(patch.points[2], transform),
+        transformPoint2d(patch.points[3], transform),
       ],
     };
 
@@ -774,7 +774,7 @@ const resolvePatchLevel = (patch: DrawingPatchDefinition): number => {
 
 const finalizePatch = (
   patch: DrawingPatchDefinition,
-  extras: Readonly<{ fanPoint?: Point2D }> = {},
+  extras: Readonly<{ fanPoint?: Point2d }> = {},
 ): DrawingPreparedPatch => {
   const resolveLevel = resolvePatchLevel(patch);
   const wangsFormulaP4 = patchWangsFormulaP4(patch);
@@ -816,10 +816,10 @@ const accountForStrokeConic = (wangsFormulaP4: number): number => {
 };
 
 const chopAndWriteStrokeCubics = (
-  p0: Point2D,
-  p1: Point2D,
-  p2: Point2D,
-  p3: Point2D,
+  p0: Point2d,
+  p1: Point2d,
+  p2: Point2d,
+  p3: Point2d,
   numPatches: number,
 ): readonly DrawingPreparedPatch[] => {
   const prepared: DrawingPreparedPatch[] = [];
@@ -869,9 +869,9 @@ const chopAndWriteStrokeCubics = (
 };
 
 const chopAndWriteStrokeConics = (
-  p0: Point2D,
-  p1: Point2D,
-  p2: Point2D,
+  p0: Point2d,
+  p1: Point2d,
+  p2: Point2d,
   weight: number,
   numPatches: number,
 ): readonly DrawingPreparedPatch[] => {
@@ -900,8 +900,8 @@ const chopAndWriteStrokeConics = (
       ab[2] + ((bc[2] - ab[2]) * t),
       ab[3] + ((bc[3] - ab[3]) * t),
     ];
-    const midpoint: Point2D = [abc[0] / abc[3], abc[1] / abc[3]];
-    const firstControl: Point2D = [ab[0] / ab[3], ab[1] / ab[3]];
+    const midpoint: Point2d = [abc[0] / abc[3], abc[1] / abc[3]];
+    const firstControl: Point2d = [ab[0] / ab[3], ab[1] / ab[3]];
     const firstWeight = ab[3] / Math.sqrt(Math.max(h0[3] * abc[3], epsilon));
     prepared.push(finalizePatch({
       kind: 'conic',
@@ -912,7 +912,7 @@ const chopAndWriteStrokeConics = (
     h1 = bc;
   }
 
-  const finalControl: Point2D = [h1[0] / h1[3], h1[1] / h1[3]];
+  const finalControl: Point2d = [h1[0] / h1[3], h1[1] / h1[3]];
   const finalWeight = h1[3] / Math.sqrt(Math.max(h0[3], epsilon));
   prepared.push(finalizePatch({
     kind: 'conic',
@@ -964,7 +964,7 @@ const subdivideStrokePreparedPatch = (
     : Object.freeze([normalizedPatch]);
 };
 
-const getPatchStartPoint = (patch: DrawingPreparedPatch): Point2D => {
+const getPatchStartPoint = (patch: DrawingPreparedPatch): Point2d => {
   switch (patch.kind) {
     case 'line':
     case 'triangle':
@@ -978,7 +978,7 @@ const getPatchStartPoint = (patch: DrawingPreparedPatch): Point2D => {
   }
 };
 
-const getPatchEndPoint = (patch: DrawingPreparedPatch): Point2D => {
+const getPatchEndPoint = (patch: DrawingPreparedPatch): Point2d => {
   switch (patch.kind) {
     case 'line':
       return patch.points[1];
@@ -995,7 +995,7 @@ const getPatchEndPoint = (patch: DrawingPreparedPatch): Point2D => {
 
 const getPatchPoints4 = (
   patch: DrawingPreparedPatch,
-): readonly [Point2D, Point2D, Point2D, Point2D] =>
+): readonly [Point2d, Point2d, Point2d, Point2d] =>
   patch.kind === 'line'
     ? [patch.points[0], patch.points[0], patch.points[1], patch.points[1]]
     : patch.kind === 'triangle'
@@ -1007,11 +1007,11 @@ const getPatchPoints4 = (
     : [patch.points[0], patch.points[1], patch.points[2], patch.points[3]];
 
 const resolvePatchTangentControlPoint = (
-  anchor: Point2D,
-  controlA: Point2D,
-  controlB: Point2D,
-  fallback: Point2D,
-): Point2D => {
+  anchor: Point2d,
+  controlA: Point2d,
+  controlB: Point2d,
+  fallback: Point2d,
+): Point2d => {
   if (!pointsEqual(controlA, anchor)) {
     return controlA;
   }
@@ -1021,23 +1021,23 @@ const resolvePatchTangentControlPoint = (
   return fallback;
 };
 
-const getPatchFirstControlPoint = (patch: DrawingPreparedPatch): Point2D => {
+const getPatchFirstControlPoint = (patch: DrawingPreparedPatch): Point2d => {
   const [p0, p1, p2, p3] = getPatchPoints4(patch);
   return resolvePatchTangentControlPoint(p0, p1, p2, p3);
 };
 
-const getPatchOutgoingJoinControlPoint = (patch: DrawingPreparedPatch): Point2D => {
+const getPatchOutgoingJoinControlPoint = (patch: DrawingPreparedPatch): Point2d => {
   const [p0, p1, p2, p3] = getPatchPoints4(patch);
   return resolvePatchTangentControlPoint(p3, p2, p1, p0);
 };
 
 const resolveSquareCapOffset = (
-  anchor: Point2D,
-  tangentControlPoint: Point2D,
+  anchor: Point2d,
+  tangentControlPoint: Point2d,
   halfWidth: number,
   transform: readonly [number, number, number, number, number, number],
   isHairline: boolean,
-): Point2D => {
+): Point2d => {
   const tangent = normalize(subtract(anchor, tangentControlPoint)) ?? [1, 0];
   if (!isHairline) {
     return scale(tangent, halfWidth);
@@ -1045,7 +1045,7 @@ const resolveSquareCapOffset = (
   const mapped = [
     (transform[0] * tangent[0]) + (transform[2] * tangent[1]),
     (transform[1] * tangent[0]) + (transform[3] * tangent[1]),
-  ] as Point2D;
+  ] as Point2d;
   const mappedLength = Math.hypot(mapped[0], mapped[1]);
   if (mappedLength <= epsilon) {
     return [1, 0];
@@ -1057,7 +1057,7 @@ const resolveDegenerateSquareCapOffset = (
   halfWidth: number,
   transform: readonly [number, number, number, number, number, number],
   isHairline: boolean,
-): Point2D => {
+): Point2d => {
   if (!isHairline) {
     return [halfWidth, 0];
   }
@@ -1072,8 +1072,8 @@ const resolveDegenerateSquareCapOffset = (
 };
 
 const createSquareCapStartPatch = (
-  anchor: Point2D,
-  tangentControlPoint: Point2D,
+  anchor: Point2d,
+  tangentControlPoint: Point2d,
   halfWidth: number,
   transform: readonly [number, number, number, number, number, number],
   isHairline: boolean,
@@ -1092,8 +1092,8 @@ const createSquareCapStartPatch = (
 };
 
 const createSquareCapEndPatch = (
-  anchor: Point2D,
-  tangentControlPoint: Point2D,
+  anchor: Point2d,
+  tangentControlPoint: Point2d,
   halfWidth: number,
   transform: readonly [number, number, number, number, number, number],
   isHairline: boolean,
@@ -1112,7 +1112,7 @@ const createSquareCapEndPatch = (
 };
 
 const createDegenerateSquareStrokePatch = (
-  center: Point2D,
+  center: Point2d,
   halfWidth: number,
   transform: readonly [number, number, number, number, number, number],
   isHairline: boolean,
@@ -1128,7 +1128,7 @@ const createDegenerateSquareStrokePatch = (
 };
 
 const createSyntheticRoundStrokePatch = (
-  center: Point2D,
+  center: Point2d,
 ): DrawingPreparedStrokePatch => ({
   patch: {
     kind: 'cubic',
@@ -1145,7 +1145,7 @@ const createSyntheticRoundStrokePatch = (
 });
 
 const createDegenerateRoundStrokePatch = (
-  center: Point2D,
+  center: Point2d,
 ): DrawingPreparedStrokePatch => ({
   ...createSyntheticRoundStrokePatch(center),
   contourStart: true,
@@ -1155,17 +1155,17 @@ const createDegenerateRoundStrokePatch = (
 });
 
 const quadraticToCubicPoints = (
-  p0: Point2D,
-  p1: Point2D,
-  p2: Point2D,
-): readonly [Point2D, Point2D, Point2D, Point2D] => {
+  p0: Point2d,
+  p1: Point2d,
+  p2: Point2d,
+): readonly [Point2d, Point2d, Point2d, Point2d] => {
   const c1 = add(p0, scale(subtract(p1, p0), 2 / 3));
   const c2 = add(p2, scale(subtract(p1, p2), 2 / 3));
   return [p0, c1, c2, p2];
 };
 
 const createArcConicPatches = (
-  center: Point2D,
+  center: Point2d,
   radius: number,
   startAngle: number,
   endAngle: number,
@@ -1193,25 +1193,25 @@ const createArcConicPatches = (
     const thetaMid = (theta0 + theta1) / 2;
     const halfSweep = segmentSweep / 2;
     const weight = Math.cos(halfSweep);
-    const start: Point2D = [
+    const start: Point2d = [
       center[0] + (Math.cos(theta0) * radius),
       center[1] + (Math.sin(theta0) * radius),
     ];
-    const end: Point2D = [
+    const end: Point2d = [
       center[0] + (Math.cos(theta1) * radius),
       center[1] + (Math.sin(theta1) * radius),
     ];
     const controlDistance = radius / Math.max(weight, 1e-5);
-    const control: Point2D = [
+    const control: Point2d = [
       center[0] + (Math.cos(thetaMid) * controlDistance),
       center[1] + (Math.sin(thetaMid) * controlDistance),
     ];
     patches.push({
       kind: 'conic',
       points: [
-        transformPoint2D(start, transform),
-        transformPoint2D(control, transform),
-        transformPoint2D(end, transform),
+        transformPoint2d(start, transform),
+        transformPoint2d(control, transform),
+        transformPoint2d(end, transform),
       ],
       weight,
     });
@@ -1222,9 +1222,9 @@ const createArcConicPatches = (
 
 const createPathFromFlattenedStrokeSubpaths = (
   subpaths: readonly FlattenedSubpath[],
-  fillRule: PathFillRule2D,
-): DrawingPath2D => {
-  const verbs: DrawingPath2D['verbs'][number][] = [];
+  fillRule: PathFillRule2d,
+): DrawingPath2d => {
+  const verbs: DrawingPath2d['verbs'][number][] = [];
   for (const subpath of subpaths) {
     if (subpath.points.length === 0) {
       continue;
@@ -1248,20 +1248,20 @@ const createPathFromFlattenedStrokeSubpaths = (
 };
 
 const createPreparedStrokePatchesFromPath = (
-  path: DrawingPath2D,
+  path: DrawingPath2d,
   strokeStyle: DrawingStrokeStyle,
   transform: readonly [number, number, number, number, number, number],
 ): readonly DrawingPreparedStrokePatch[] => {
   const prepared: DrawingPreparedStrokePatch[] = [];
-  let currentPoint: Point2D | null = null;
-  let contourStart: Point2D | null = null;
-  let pendingContourStart: Point2D | null = null;
-  let lastDegeneratePoint: Point2D | null = null;
+  let currentPoint: Point2d | null = null;
+  let contourStart: Point2d | null = null;
+  let pendingContourStart: Point2d | null = null;
+  let lastDegeneratePoint: Point2d | null = null;
   let contourUnits: DrawingStrokeContourSequenceItem[] = [];
   const cap = strokeStyle.cap;
   const isHairline = strokeStyle.halfWidth < 0.5;
 
-  const resetContour = (nextMoveTo: Point2D | null = null): void => {
+  const resetContour = (nextMoveTo: Point2d | null = null): void => {
     currentPoint = nextMoveTo;
     contourStart = nextMoveTo;
     lastDegeneratePoint = null;
@@ -1300,7 +1300,7 @@ const createPreparedStrokePatchesFromPath = (
   const resolveSequenceItemJoinControlPoint = (
     previous: DrawingStrokeContourSequenceItem | null,
     patch: DrawingPreparedPatch,
-  ): Point2D => {
+  ): Point2d => {
     if (!previous) {
       return getPatchStartPoint(patch);
     }
@@ -1532,14 +1532,14 @@ const createPreparedStrokePatchesFromPath = (
     switch (verb.kind) {
       case 'moveTo': {
         flushOpenContour();
-        const to = transformPoint2D(verb.to, identityMatrix2D);
+        const to = transformPoint2d(verb.to, identityMatrix2d);
         resetContour(to);
         break;
       }
       case 'lineTo': {
         if (!ensureImplicitContour()) break;
         const from = currentPoint!;
-        const to = transformPoint2D(verb.to, identityMatrix2D);
+        const to = transformPoint2d(verb.to, identityMatrix2d);
         if (pointsEqual(from, to)) {
           lastDegeneratePoint = to;
           currentPoint = to;
@@ -1553,8 +1553,8 @@ const createPreparedStrokePatchesFromPath = (
       case 'quadTo': {
         if (!ensureImplicitContour()) break;
         const from = currentPoint!;
-        const control = transformPoint2D(verb.control, identityMatrix2D);
-        const to = transformPoint2D(verb.to, identityMatrix2D);
+        const control = transformPoint2d(verb.control, identityMatrix2d);
+        const to = transformPoint2d(verb.to, identityMatrix2d);
         if (pointsEqual(from, control) && pointsEqual(control, to)) {
           lastDegeneratePoint = to;
           currentPoint = to;
@@ -1577,8 +1577,8 @@ const createPreparedStrokePatchesFromPath = (
       case 'conicTo': {
         if (!ensureImplicitContour()) break;
         const from = currentPoint!;
-        const control = transformPoint2D(verb.control, identityMatrix2D);
-        const to = transformPoint2D(verb.to, identityMatrix2D);
+        const control = transformPoint2d(verb.control, identityMatrix2d);
+        const to = transformPoint2d(verb.to, identityMatrix2d);
         if (pointsEqual(from, control) && pointsEqual(control, to)) {
           lastDegeneratePoint = to;
           currentPoint = to;
@@ -1604,9 +1604,9 @@ const createPreparedStrokePatchesFromPath = (
       case 'cubicTo': {
         if (!ensureImplicitContour()) break;
         const from = currentPoint!;
-        const control1 = transformPoint2D(verb.control1, identityMatrix2D);
-        const control2 = transformPoint2D(verb.control2, identityMatrix2D);
-        const to = transformPoint2D(verb.to, identityMatrix2D);
+        const control1 = transformPoint2d(verb.control1, identityMatrix2d);
+        const control2 = transformPoint2d(verb.control2, identityMatrix2d);
+        const to = transformPoint2d(verb.to, identityMatrix2d);
         if (
           pointsEqual(from, control1) &&
           pointsEqual(control1, control2) &&
@@ -1658,7 +1658,7 @@ const createPreparedStrokePatchesFromPath = (
           verb.startAngle,
           verb.endAngle,
           verb.counterClockwise ?? false,
-          identityMatrix2D,
+          identityMatrix2d,
         );
         for (const arcPatch of arcPatches) {
           emitPatchDefinition(arcPatch);
@@ -1690,12 +1690,12 @@ const createPreparedStrokePatchesFromPath = (
 };
 
 const evaluateConic = (
-  from: Point2D,
-  control: Point2D,
-  to: Point2D,
+  from: Point2d,
+  control: Point2d,
+  to: Point2d,
   weight: number,
   t: number,
-): Point2D => {
+): Point2d => {
   const oneMinusT = 1 - t;
   const denominator = (oneMinusT * oneMinusT) + (2 * weight * oneMinusT * t) + (t * t);
   const x = ((oneMinusT * oneMinusT * from[0]) +
@@ -1708,12 +1708,12 @@ const evaluateConic = (
 };
 
 const derivativeConic = (
-  from: Point2D,
-  control: Point2D,
-  to: Point2D,
+  from: Point2d,
+  control: Point2d,
+  to: Point2d,
   weight: number,
   t: number,
-): Point2D => {
+): Point2d => {
   const dt = 1e-3;
   const left = evaluateConic(from, control, to, weight, Math.max(0, t - dt));
   const right = evaluateConic(from, control, to, weight, Math.min(1, t + dt));
@@ -1721,12 +1721,12 @@ const derivativeConic = (
 };
 
 const derivativeCubic = (
-  from: Point2D,
-  control1: Point2D,
-  control2: Point2D,
-  to: Point2D,
+  from: Point2d,
+  control1: Point2d,
+  control2: Point2d,
+  to: Point2d,
   t: number,
-): Point2D => {
+): Point2d => {
   const oneMinusT = 1 - t;
   return [
     (3 * oneMinusT * oneMinusT * (control1[0] - from[0])) +
@@ -1739,13 +1739,13 @@ const derivativeCubic = (
 };
 
 const splitQuadraticAt = (
-  from: Point2D,
-  control: Point2D,
-  to: Point2D,
+  from: Point2d,
+  control: Point2d,
+  to: Point2d,
   t: number,
 ): readonly [
-  readonly [Point2D, Point2D, Point2D],
-  readonly [Point2D, Point2D, Point2D],
+  readonly [Point2d, Point2d, Point2d],
+  readonly [Point2d, Point2d, Point2d],
 ] => {
   const p01 = lerp(from, control, t);
   const p12 = lerp(control, to, t);
@@ -1757,14 +1757,14 @@ const splitQuadraticAt = (
 };
 
 const splitCubicAt = (
-  from: Point2D,
-  control1: Point2D,
-  control2: Point2D,
-  to: Point2D,
+  from: Point2d,
+  control1: Point2d,
+  control2: Point2d,
+  to: Point2d,
   t: number,
 ): readonly [
-  readonly [Point2D, Point2D, Point2D, Point2D],
-  readonly [Point2D, Point2D, Point2D, Point2D],
+  readonly [Point2d, Point2d, Point2d, Point2d],
+  readonly [Point2d, Point2d, Point2d, Point2d],
 ] => {
   const p01 = lerp(from, control1, t);
   const p12 = lerp(control1, control2, t);
@@ -1779,12 +1779,12 @@ const splitCubicAt = (
 };
 
 const splitCubicAtMany = (
-  from: Point2D,
-  control1: Point2D,
-  control2: Point2D,
-  to: Point2D,
+  from: Point2d,
+  control1: Point2d,
+  control2: Point2d,
+  to: Point2d,
   ts: readonly number[],
-): readonly (readonly [Point2D, Point2D, Point2D, Point2D])[] => {
+): readonly (readonly [Point2d, Point2d, Point2d, Point2d])[] => {
   if (ts.length === 0) {
     return Object.freeze([[from, control1, control2, to]]);
   }
@@ -1792,8 +1792,8 @@ const splitCubicAtMany = (
   if (sorted.length === 0) {
     return Object.freeze([[from, control1, control2, to]]);
   }
-  const segments: (readonly [Point2D, Point2D, Point2D, Point2D])[] = [];
-  let current: readonly [Point2D, Point2D, Point2D, Point2D] = [from, control1, control2, to];
+  const segments: (readonly [Point2d, Point2d, Point2d, Point2d])[] = [];
+  let current: readonly [Point2d, Point2d, Point2d, Point2d] = [from, control1, control2, to];
   let lastT = 0;
   for (const t of sorted) {
     const localT = (t - lastT) / Math.max(1 - lastT, epsilon);
@@ -1807,9 +1807,9 @@ const splitCubicAtMany = (
 };
 
 const findQuadraticCuspT = (
-  from: Point2D,
-  control: Point2D,
-  to: Point2D,
+  from: Point2d,
+  control: Point2d,
+  to: Point2d,
 ): number | null => {
   const tan0 = subtract(control, from);
   const tan1 = subtract(to, control);
@@ -1842,9 +1842,9 @@ const solveQuadraticMidTangent = (a: number, b: number, c: number): number => {
 };
 
 const findConicCuspT = (
-  from: Point2D,
-  control: Point2D,
-  to: Point2D,
+  from: Point2d,
+  control: Point2d,
+  to: Point2d,
   weight: number,
 ): number | null => {
   const tan0 = subtract(control, from);
@@ -1874,7 +1874,7 @@ const findConicCuspT = (
 };
 
 const findCuspTBySampling = (
-  sampleDerivative: (t: number) => Point2D,
+  sampleDerivative: (t: number) => Point2d,
 ): number | null => {
   let bestT: number | null = null;
   let bestLength = Number.POSITIVE_INFINITY;
@@ -1896,12 +1896,12 @@ const findCuspTBySampling = (
 const cubicConvex180ChopEpsilon = 1 / (1 << 11);
 
 const findCubicConvex180Chops = (
-  from: Point2D,
-  control1: Point2D,
-  control2: Point2D,
-  to: Point2D,
+  from: Point2d,
+  control1: Point2d,
+  control2: Point2d,
+  to: Point2d,
 ): Readonly<{ ts: readonly number[]; areCusps: boolean }> => {
-  const cross2 = (lhs: Point2D, rhs: Point2D): number => (lhs[0] * rhs[1]) - (lhs[1] * rhs[0]);
+  const cross2 = (lhs: Point2d, rhs: Point2d): number => (lhs[0] * rhs[1]) - (lhs[1] * rhs[0]);
   const c = subtract(control1, from);
   const d = subtract(control2, control1);
   const e = subtract(to, from);
@@ -1958,11 +1958,11 @@ const findCubicConvex180Chops = (
 };
 
 const flattenConic = (
-  from: Point2D,
-  control: Point2D,
-  to: Point2D,
+  from: Point2d,
+  control: Point2d,
+  to: Point2d,
   weight: number,
-  out: Point2D[],
+  out: Point2d[],
   depth = 0,
 ): void => {
   const cuspT = depth === 0
@@ -1987,13 +1987,13 @@ const flattenConic = (
 };
 
 const flattenArc = (
-  center: Point2D,
+  center: Point2d,
   radius: number,
   startAngle: number,
   endAngle: number,
   counterClockwise: boolean,
   transform: readonly [number, number, number, number, number, number],
-  out: Point2D[],
+  out: Point2d[],
 ): void => {
   const turn = Math.PI * 2;
   let span = endAngle - startAngle;
@@ -2009,14 +2009,14 @@ const flattenArc = (
   const segments = Math.max(4, Math.ceil(Math.abs(span) / (Math.PI / 12)));
   for (let index = 1; index <= segments; index += 1) {
     const angle = startAngle + ((span * index) / segments);
-    out.push(transformPoint2D([
+    out.push(transformPoint2d([
       center[0] + (Math.cos(angle) * radius),
       center[1] + (Math.sin(angle) * radius),
     ], transform));
   }
 };
 
-const polygonArea = (points: readonly Point2D[]): number => {
+const polygonArea = (points: readonly Point2d[]): number => {
   let area = 0;
   for (let index = 0; index < points.length; index += 1) {
     const current = points[index]!;
@@ -2026,7 +2026,7 @@ const polygonArea = (points: readonly Point2D[]): number => {
   return area / 2;
 };
 
-const computeBounds = (points: readonly Point2D[]): Rect => {
+const computeBounds = (points: readonly Point2d[]): Rect => {
   if (points.length === 0) {
     return { origin: [0, 0], size: { width: 0, height: 0 } };
   }
@@ -2052,38 +2052,38 @@ const unionBounds = (bounds: readonly Rect[]): Rect => {
   }
   return computeBounds(bounds.flatMap((bound) => [
     bound.origin,
-    [bound.origin[0] + bound.size.width, bound.origin[1] + bound.size.height] as Point2D,
+    [bound.origin[0] + bound.size.width, bound.origin[1] + bound.size.height] as Point2d,
   ]));
 };
 
 const collectPathBoundsPoints = (
-  path: DrawingPath2D,
+  path: DrawingPath2d,
   transform: readonly [number, number, number, number, number, number],
-): readonly Point2D[] => {
-  const points: Point2D[] = [];
+): readonly Point2d[] => {
+  const points: Point2d[] = [];
   for (const verb of path.verbs) {
     switch (verb.kind) {
       case 'moveTo':
       case 'lineTo':
-        points.push(transformPoint2D(verb.to, transform));
+        points.push(transformPoint2d(verb.to, transform));
         break;
       case 'quadTo':
         points.push(
-          transformPoint2D(verb.control, transform),
-          transformPoint2D(verb.to, transform),
+          transformPoint2d(verb.control, transform),
+          transformPoint2d(verb.to, transform),
         );
         break;
       case 'conicTo':
         points.push(
-          transformPoint2D(verb.control, transform),
-          transformPoint2D(verb.to, transform),
+          transformPoint2d(verb.control, transform),
+          transformPoint2d(verb.to, transform),
         );
         break;
       case 'cubicTo':
         points.push(
-          transformPoint2D(verb.control1, transform),
-          transformPoint2D(verb.control2, transform),
-          transformPoint2D(verb.to, transform),
+          transformPoint2d(verb.control1, transform),
+          transformPoint2d(verb.control2, transform),
+          transformPoint2d(verb.to, transform),
         );
         break;
       case 'arcTo':
@@ -2110,7 +2110,7 @@ const collectPathBoundsPoints = (
 };
 
 const computePathBounds = (
-  path: DrawingPath2D,
+  path: DrawingPath2d,
   transform: readonly [number, number, number, number, number, number],
 ): Rect => computeBounds(collectPathBoundsPoints(path, transform));
 
@@ -2129,19 +2129,19 @@ const intersectBounds = (left: Rect | undefined, right: Rect): Rect | undefined 
   };
 };
 
-const orientation = (a: Point2D, b: Point2D, c: Point2D): number => {
+const orientation = (a: Point2d, b: Point2d, c: Point2d): number => {
   const value = ((b[1] - a[1]) * (c[0] - b[0])) - ((b[0] - a[0]) * (c[1] - b[1]));
   if (Math.abs(value) <= epsilon) return 0;
   return value > 0 ? 1 : 2;
 };
 
-const onSegment = (a: Point2D, b: Point2D, c: Point2D): boolean =>
+const onSegment = (a: Point2d, b: Point2d, c: Point2d): boolean =>
   Math.min(a[0], c[0]) - epsilon <= b[0] &&
   b[0] <= Math.max(a[0], c[0]) + epsilon &&
   Math.min(a[1], c[1]) - epsilon <= b[1] &&
   b[1] <= Math.max(a[1], c[1]) + epsilon;
 
-const segmentsIntersect = (a0: Point2D, a1: Point2D, b0: Point2D, b1: Point2D): boolean => {
+const segmentsIntersect = (a0: Point2d, a1: Point2d, b0: Point2d, b1: Point2d): boolean => {
   const o1 = orientation(a0, a1, b0);
   const o2 = orientation(a0, a1, b1);
   const o3 = orientation(b0, b1, a0);
@@ -2155,11 +2155,11 @@ const segmentsIntersect = (a0: Point2D, a1: Point2D, b0: Point2D, b1: Point2D): 
 };
 
 const segmentIntersectionPoint = (
-  a0: Point2D,
-  a1: Point2D,
-  b0: Point2D,
-  b1: Point2D,
-): Point2D | null => {
+  a0: Point2d,
+  a1: Point2d,
+  b0: Point2d,
+  b1: Point2d,
+): Point2d | null => {
   const a = subtract(a1, a0);
   const b = subtract(b1, b0);
   const det = (a[0] * b[1]) - (a[1] * b[0]);
@@ -2171,7 +2171,7 @@ const segmentIntersectionPoint = (
   return add(a0, scale(a, t));
 };
 
-const isSelfIntersecting = (points: readonly Point2D[]): boolean => {
+const isSelfIntersecting = (points: readonly Point2d[]): boolean => {
   for (let first = 0; first < points.length; first += 1) {
     const firstNext = (first + 1) % points.length;
     const a0 = points[first]!;
@@ -2187,11 +2187,11 @@ const isSelfIntersecting = (points: readonly Point2D[]): boolean => {
 };
 
 type ConvexityVerb =
-  | Readonly<{ kind: 'moveTo'; to: Point2D }>
-  | Readonly<{ kind: 'lineTo'; to: Point2D }>
-  | Readonly<{ kind: 'quadTo'; control: Point2D; to: Point2D }>
-  | Readonly<{ kind: 'conicTo'; control: Point2D; to: Point2D; weight: number }>
-  | Readonly<{ kind: 'cubicTo'; control1: Point2D; control2: Point2D; to: Point2D }>
+  | Readonly<{ kind: 'moveTo'; to: Point2d }>
+  | Readonly<{ kind: 'lineTo'; to: Point2d }>
+  | Readonly<{ kind: 'quadTo'; control: Point2d; to: Point2d }>
+  | Readonly<{ kind: 'conicTo'; control: Point2d; to: Point2d; weight: number }>
+  | Readonly<{ kind: 'cubicTo'; control1: Point2d; control2: Point2d; to: Point2d }>
   | Readonly<{ kind: 'close' }>;
 
 const convexitySign = (value: number): number => value > epsilon ? 1 : value < -epsilon ? -1 : 0;
@@ -2206,7 +2206,7 @@ const trimTrailingConvexityMoves = (
   return count === verbs.length ? verbs : verbs.slice(0, count);
 };
 
-const getConvexityVerbPoints = (verb: ConvexityVerb): readonly Point2D[] => {
+const getConvexityVerbPoints = (verb: ConvexityVerb): readonly Point2d[] => {
   switch (verb.kind) {
     case 'moveTo':
     case 'lineTo':
@@ -2222,9 +2222,9 @@ const getConvexityVerbPoints = (verb: ConvexityVerb): readonly Point2D[] => {
   }
 };
 
-const expandPathForConvexity = (path: DrawingPath2D): readonly ConvexityVerb[] => {
+const expandPathForConvexity = (path: DrawingPath2d): readonly ConvexityVerb[] => {
   const expanded: ConvexityVerb[] = [];
-  let currentPoint: Point2D | null = null;
+  let currentPoint: Point2d | null = null;
   for (const verb of path.verbs) {
     switch (verb.kind) {
       case 'moveTo':
@@ -2245,7 +2245,7 @@ const expandPathForConvexity = (path: DrawingPath2D): readonly ConvexityVerb[] =
           verb.startAngle,
           verb.endAngle,
           verb.counterClockwise ?? false,
-          identityMatrix2D,
+          identityMatrix2d,
         );
         if (patches.length === 0) {
           break;
@@ -2279,10 +2279,10 @@ const expandPathForConvexity = (path: DrawingPath2D): readonly ConvexityVerb[] =
   return Object.freeze(expanded);
 };
 
-const getConvexityPathPoints = (verbs: readonly ConvexityVerb[]): readonly Point2D[] =>
+const getConvexityPathPoints = (verbs: readonly ConvexityVerb[]): readonly Point2d[] =>
   Object.freeze(verbs.flatMap(getConvexityVerbPoints));
 
-const isConcaveBySign = (points: readonly Point2D[]): boolean => {
+const isConcaveBySign = (points: readonly Point2d[]): boolean => {
   if (points.length <= 3) {
     return false;
   }
@@ -2296,7 +2296,7 @@ const isConcaveBySign = (points: readonly Point2D[]): boolean => {
     const limit = outer === 0 ? points.length : 1;
     for (let index = 1; index < limit; index += 1) {
       const next = points[index]!;
-      const vec: Point2D = [next[0] - current[0], next[1] - current[1]];
+      const vec: Point2d = [next[0] - current[0], next[1] - current[1]];
       if (Math.abs(vec[0]) > epsilon || Math.abs(vec[1]) > epsilon) {
         const sx = convexitySign(vec[0]);
         const sy = convexitySign(vec[1]);
@@ -2317,7 +2317,7 @@ const isConcaveBySign = (points: readonly Point2D[]): boolean => {
 
 type ConvexDirChange = 'left' | 'right' | 'straight' | 'backwards' | 'unknown' | 'invalid';
 
-const classifyDirectionChange = (lastVec: Point2D, currentVec: Point2D): ConvexDirChange => {
+const classifyDirectionChange = (lastVec: Point2d, currentVec: Point2d): ConvexDirChange => {
   const crossValue = (lastVec[0] * currentVec[1]) - (lastVec[1] * currentVec[0]);
   if (!Number.isFinite(crossValue)) {
     return 'unknown';
@@ -2329,7 +2329,7 @@ const classifyDirectionChange = (lastVec: Point2D, currentVec: Point2D): ConvexD
   return crossValue > 0 ? 'right' : 'left';
 };
 
-const isPathConvex = (path: DrawingPath2D): boolean => {
+const isPathConvex = (path: DrawingPath2d): boolean => {
   const verbs = trimTrailingConvexityMoves(expandPathForConvexity(path));
   if (verbs.length === 0) {
     return true;
@@ -2341,15 +2341,15 @@ const isPathConvex = (path: DrawingPath2D): boolean => {
 
   let contourCount = 0;
   let needsClose = false;
-  let firstPoint: Point2D = [0, 0];
-  let firstVec: Point2D = [0, 0];
-  let lastPoint: Point2D = [0, 0];
-  let lastVec: Point2D = [0, 0];
+  let firstPoint: Point2d = [0, 0];
+  let firstVec: Point2d = [0, 0];
+  let lastPoint: Point2d = [0, 0];
+  let lastVec: Point2d = [0, 0];
   let expectedDir: ConvexDirChange = 'invalid';
   let firstDirection: 'cw' | 'ccw' | 'unknown' = 'unknown';
   let reversals = 0;
 
-  const setMovePoint = (point: Point2D) => {
+  const setMovePoint = (point: Point2d) => {
     firstPoint = point;
     lastPoint = point;
     firstVec = [0, 0];
@@ -2359,7 +2359,7 @@ const isPathConvex = (path: DrawingPath2D): boolean => {
     reversals = 0;
   };
 
-  const addVec = (currentVec: Point2D): boolean => {
+  const addVec = (currentVec: Point2d): boolean => {
     const dir = classifyDirectionChange(lastVec, currentVec);
     switch (dir) {
       case 'left':
@@ -2386,7 +2386,7 @@ const isPathConvex = (path: DrawingPath2D): boolean => {
     }
   };
 
-  const addPoint = (point: Point2D): boolean => {
+  const addPoint = (point: Point2d): boolean => {
     if (pointsEqual(lastPoint, point)) {
       return true;
     }
@@ -2447,7 +2447,7 @@ const isPathConvex = (path: DrawingPath2D): boolean => {
   return true;
 };
 
-const isPointInTriangle = (point: Point2D, a: Point2D, b: Point2D, c: Point2D): boolean => {
+const isPointInTriangle = (point: Point2d, a: Point2d, b: Point2d, c: Point2d): boolean => {
   const area0 = cross(point, a, b);
   const area1 = cross(point, b, c);
   const area2 = cross(point, c, a);
@@ -2456,11 +2456,11 @@ const isPointInTriangle = (point: Point2D, a: Point2D, b: Point2D, c: Point2D): 
   return !(hasNegative && hasPositive);
 };
 
-const triangulatePolygon = (points: readonly Point2D[]): readonly Point2D[] | null => {
+const triangulatePolygon = (points: readonly Point2d[]): readonly Point2d[] | null => {
   if (points.length < 3 || isSelfIntersecting(points)) return null;
   const winding = polygonArea(points) >= 0 ? 1 : -1;
   const indices = points.map((_, index) => index);
-  const triangles: Point2D[] = [];
+  const triangles: Point2d[] = [];
   let guard = 0;
   while (indices.length > 3 && guard < points.length * points.length) {
     let earFound = false;
@@ -2563,7 +2563,7 @@ const scanlineIntersectionX = (edge: ScanEdge, y: number): number =>
 
 const buildFillIntervals = (
   events: readonly ScanEvent[],
-  fillRule: PathFillRule2D,
+  fillRule: PathFillRule2d,
 ): readonly (readonly [number, number])[] => {
   const intervals: Array<readonly [number, number]> = [];
   if (fillRule === 'evenodd') {
@@ -2590,12 +2590,12 @@ const buildFillIntervals = (
 
 const scanlineTessellate = (
   subpaths: readonly FlattenedSubpath[],
-  fillRule: PathFillRule2D,
-): readonly Point2D[] | null => {
+  fillRule: PathFillRule2d,
+): readonly Point2d[] | null => {
   const ys = collectScanBands(subpaths);
   if (ys.length < 2) return null;
   const edges = buildScanEdges(subpaths);
-  const triangles: Point2D[] = [];
+  const triangles: Point2d[] = [];
 
   for (let band = 0; band < ys.length - 1; band += 1) {
     const y0 = ys[band]!;
@@ -2614,10 +2614,10 @@ const scanlineTessellate = (
     const intervals = buildFillIntervals(events, fillRule);
     for (const [x0, x1] of intervals) {
       if (x1 - x0 <= epsilon) continue;
-      const topLeft: Point2D = [x0, y0];
-      const topRight: Point2D = [x1, y0];
-      const bottomRight: Point2D = [x1, y1];
-      const bottomLeft: Point2D = [x0, y1];
+      const topLeft: Point2d = [x0, y0];
+      const topRight: Point2d = [x1, y0];
+      const bottomRight: Point2d = [x1, y1];
+      const bottomLeft: Point2d = [x0, y1];
       appendQuad(triangles, topLeft, topRight, bottomRight, bottomLeft);
     }
   }
@@ -2626,12 +2626,12 @@ const scanlineTessellate = (
 };
 
 const flattenQuadraticRecursive = (
-  from: Point2D,
-  control: Point2D,
-  to: Point2D,
+  from: Point2d,
+  control: Point2d,
+  to: Point2d,
   depth: number,
   targetDepth: number,
-  out: Point2D[],
+  out: Point2d[],
 ): void => {
   const cuspT = depth === 0 ? findQuadraticCuspT(from, control, to) : null;
   if (cuspT !== null) {
@@ -2656,13 +2656,13 @@ const flattenQuadraticRecursive = (
 };
 
 const flattenCubicRecursive = (
-  from: Point2D,
-  control1: Point2D,
-  control2: Point2D,
-  to: Point2D,
+  from: Point2d,
+  control1: Point2d,
+  control2: Point2d,
+  to: Point2d,
   depth: number,
   targetDepth: number,
-  out: Point2D[],
+  out: Point2d[],
 ): void => {
   const cuspT = depth === 0
     ? findCuspTBySampling((t) => derivativeCubic(from, control1, control2, to, t))
@@ -2694,19 +2694,19 @@ const flattenCubicRecursive = (
 };
 
 const parseMidpointContours = (
-  path: DrawingPath2D,
+  path: DrawingPath2d,
   transform: readonly [number, number, number, number, number, number],
 ): readonly MidpointContour[] | null => {
   const contours: MidpointContour[] = [];
   let contourVerbs: MidpointContourVerb[] = [];
-  let contourStart: Point2D | null = null;
-  let currentPoint: Point2D | null = null;
-  let midpointSum: Point2D = [0, 0];
+  let contourStart: Point2d | null = null;
+  let currentPoint: Point2d | null = null;
+  let midpointSum: Point2d = [0, 0];
   let midpointWeight = 0;
   let hasGeometry = false;
   let closedExplicitly = false;
 
-  const beginContour = (start: Point2D): void => {
+  const beginContour = (start: Point2d): void => {
     contourVerbs = [{ kind: 'moveTo', to: start }];
     contourStart = start;
     currentPoint = start;
@@ -2716,7 +2716,7 @@ const parseMidpointContours = (
     closedExplicitly = false;
   };
 
-  const appendEndpoint = (point: Point2D): void => {
+  const appendEndpoint = (point: Point2d): void => {
     midpointSum = add(midpointSum, point);
     midpointWeight += 1;
     currentPoint = point;
@@ -2759,7 +2759,7 @@ const parseMidpointContours = (
   for (const verb of path.verbs) {
     switch (verb.kind) {
       case 'moveTo': {
-        const start = transformPoint2D(verb.to, transform);
+        const start = transformPoint2d(verb.to, transform);
         if (hasGeometry) {
           finishContour();
         }
@@ -2770,7 +2770,7 @@ const parseMidpointContours = (
         if (!contourStart || !currentPoint) {
           return null;
         }
-        const to = transformPoint2D(verb.to, transform);
+        const to = transformPoint2d(verb.to, transform);
         contourVerbs.push({ kind: 'lineTo', to });
         appendEndpoint(to);
         break;
@@ -2779,8 +2779,8 @@ const parseMidpointContours = (
         if (!contourStart || !currentPoint) {
           return null;
         }
-        const control = transformPoint2D(verb.control, transform);
-        const to = transformPoint2D(verb.to, transform);
+        const control = transformPoint2d(verb.control, transform);
+        const to = transformPoint2d(verb.to, transform);
         contourVerbs.push({ kind: 'quadTo', control, to });
         appendEndpoint(to);
         break;
@@ -2789,8 +2789,8 @@ const parseMidpointContours = (
         if (!contourStart || !currentPoint) {
           return null;
         }
-        const control = transformPoint2D(verb.control, transform);
-        const to = transformPoint2D(verb.to, transform);
+        const control = transformPoint2d(verb.control, transform);
+        const to = transformPoint2d(verb.to, transform);
         contourVerbs.push({ kind: 'conicTo', control, to, weight: verb.weight });
         appendEndpoint(to);
         break;
@@ -2799,9 +2799,9 @@ const parseMidpointContours = (
         if (!contourStart || !currentPoint) {
           return null;
         }
-        const control1 = transformPoint2D(verb.control1, transform);
-        const control2 = transformPoint2D(verb.control2, transform);
-        const to = transformPoint2D(verb.to, transform);
+        const control1 = transformPoint2d(verb.control1, transform);
+        const control2 = transformPoint2d(verb.control2, transform);
+        const to = transformPoint2d(verb.to, transform);
         contourVerbs.push({ kind: 'cubicTo', control1, control2, to });
         appendEndpoint(to);
         break;
@@ -2856,7 +2856,7 @@ const parseMidpointContours = (
 const flattenMidpointContour = (
   contour: MidpointContour,
 ): FlattenedSubpath => {
-  const points: Point2D[] = [contour.startPoint];
+  const points: Point2d[] = [contour.startPoint];
   let currentPoint = contour.startPoint;
   for (const verb of contour.verbs) {
     switch (verb.kind) {
@@ -2912,7 +2912,7 @@ const flattenMidpointContour = (
 };
 
 const flattenMidpointContourSubpaths = (
-  path: DrawingPath2D,
+  path: DrawingPath2d,
   transform: readonly [number, number, number, number, number, number],
 ): readonly FlattenedSubpath[] | null => {
   const contours = parseMidpointContours(path, transform);
@@ -2923,13 +2923,13 @@ const flattenMidpointContourSubpaths = (
 };
 
 const flattenSubpaths = (
-  path: DrawingPath2D,
+  path: DrawingPath2d,
   transform: readonly [number, number, number, number, number, number],
 ): readonly FlattenedSubpath[] | null => {
   const subpaths: FlattenedSubpath[] = [];
-  let points: Point2D[] = [];
-  let currentPoint: Point2D | null = null;
-  let pendingContourStart: Point2D | null = null;
+  let points: Point2d[] = [];
+  let currentPoint: Point2d | null = null;
+  let pendingContourStart: Point2d | null = null;
   let sawClose = false;
 
   const flush = (): void => {
@@ -2967,20 +2967,20 @@ const flattenSubpaths = (
       case 'moveTo':
         flush();
         pendingContourStart = null;
-        points.push(transformPoint2D(verb.to, transform));
-        currentPoint = transformPoint2D(verb.to, transform);
+        points.push(transformPoint2d(verb.to, transform));
+        currentPoint = transformPoint2d(verb.to, transform);
         break;
       case 'lineTo':
         if (!ensureImplicitContour()) return null;
-        points.push(transformPoint2D(verb.to, transform));
-        currentPoint = transformPoint2D(verb.to, transform);
+        points.push(transformPoint2d(verb.to, transform));
+        currentPoint = transformPoint2d(verb.to, transform);
         break;
       case 'quadTo':
         if (!ensureImplicitContour()) return null;
         {
           const from = currentPoint!;
-          const control = transformPoint2D(verb.control, transform);
-          const to = transformPoint2D(verb.to, transform);
+          const control = transformPoint2d(verb.control, transform);
+          const to = transformPoint2d(verb.to, transform);
           const targetDepth = Math.ceil(
             Math.log2(approximateQuadraticSegments(from, control, to)),
           );
@@ -2992,9 +2992,9 @@ const flattenSubpaths = (
         if (!ensureImplicitContour()) return null;
         {
           const from = currentPoint!;
-          const control1 = transformPoint2D(verb.control1, transform);
-          const control2 = transformPoint2D(verb.control2, transform);
-          const to = transformPoint2D(verb.to, transform);
+          const control1 = transformPoint2d(verb.control1, transform);
+          const control2 = transformPoint2d(verb.control2, transform);
+          const to = transformPoint2d(verb.to, transform);
           const targetDepth = Math.ceil(Math.log2(approximateCubicSegments(
             from,
             control1,
@@ -3009,15 +3009,15 @@ const flattenSubpaths = (
         if (!ensureImplicitContour()) return null;
         {
           const from = currentPoint!;
-          const control = transformPoint2D(verb.control, transform);
-          const to = transformPoint2D(verb.to, transform);
+          const control = transformPoint2d(verb.control, transform);
+          const to = transformPoint2d(verb.to, transform);
           flattenConic(from, control, to, verb.weight, points);
           currentPoint = to;
         }
         break;
       case 'arcTo':
         if (!currentPoint && !pendingContourStart) {
-          const startPoint = transformPoint2D([
+          const startPoint = transformPoint2d([
             verb.center[0] + (Math.cos(verb.startAngle) * verb.radius),
             verb.center[1] + (Math.sin(verb.startAngle) * verb.radius),
           ], transform);
@@ -3051,7 +3051,7 @@ const flattenSubpaths = (
 };
 
 const preparePatches = (
-  path: DrawingPath2D,
+  path: DrawingPath2d,
   transform: readonly [number, number, number, number, number, number],
   includeFanPoint: boolean,
   approxTransform: readonly [number, number, number, number, number, number] = transform,
@@ -3130,8 +3130,8 @@ const preparePatches = (
 
 const prepareFillTriangles = (
   subpaths: readonly FlattenedSubpath[],
-  fillRule: PathFillRule2D,
-): readonly Point2D[] | null => {
+  fillRule: PathFillRule2d,
+): readonly Point2d[] | null => {
   const canTriangulateDirectly = subpaths.length === 1 &&
     subpaths[0]!.closed &&
     !isSelfIntersecting(subpaths[0]!.points);
@@ -3143,7 +3143,7 @@ const prepareFillTriangles = (
     }
   }
 
-  const triangles: Point2D[] = [];
+  const triangles: Point2d[] = [];
   for (const subpath of subpaths) {
     if (!subpath.closed || subpath.points.length < 3) return null;
     const contourTriangles = triangulatePolygon(subpath.points);
@@ -3156,22 +3156,22 @@ const prepareFillTriangles = (
 };
 
 type MiddleOutStackVertex = Readonly<{
-  point: Point2D;
+  point: Point2d;
   vertexIndexDelta: number;
 }>;
 
-const middleOutInitialPoint: Point2D = [0, 0];
+const middleOutInitialPoint: Point2d = [0, 0];
 
 class MiddleOutPoppedTriangleStack {
   #triangulator: MiddleOutPolygonTriangulator | null;
-  #lastPoint: Point2D;
+  #lastPoint: Point2d;
   #endIndex: number;
   #newTopIndex: number;
   #newTopValue: MiddleOutStackVertex;
 
   constructor(
     triangulator: MiddleOutPolygonTriangulator | null,
-    lastPoint: Point2D,
+    lastPoint: Point2d,
     endIndex: number,
     newTopIndex: number,
     newTopValue: MiddleOutStackVertex,
@@ -3183,7 +3183,7 @@ class MiddleOutPoppedTriangleStack {
     this.#newTopValue = newTopValue;
   }
 
-  *[Symbol.iterator](): Iterator<readonly [Point2D, Point2D, Point2D]> {
+  *[Symbol.iterator](): Iterator<readonly [Point2d, Point2d, Point2d]> {
     if (!this.#triangulator) {
       return;
     }
@@ -3213,7 +3213,7 @@ class MiddleOutPolygonTriangulator {
   #stack: MiddleOutStackVertex[];
   #topIndex = 0;
 
-  constructor(_maxPushVertexCalls: number, startPoint: Point2D = middleOutInitialPoint) {
+  constructor(_maxPushVertexCalls: number, startPoint: Point2d = middleOutInitialPoint) {
     this.#stack = [{ point: startPoint, vertexIndexDelta: 0 }];
   }
 
@@ -3231,7 +3231,7 @@ class MiddleOutPolygonTriangulator {
     this.#stack[newTopIndex] = newTopValue;
   }
 
-  pushVertex(point: Point2D): MiddleOutPoppedTriangleStack {
+  pushVertex(point: Point2d): MiddleOutPoppedTriangleStack {
     let endIndex = this.#topIndex;
     let vertexIndexDelta = 1;
     while (this.#stack[endIndex]!.vertexIndexDelta === vertexIndexDelta) {
@@ -3247,7 +3247,7 @@ class MiddleOutPolygonTriangulator {
     );
   }
 
-  closeAndMove(newStartPoint: Point2D): MiddleOutPoppedTriangleStack {
+  closeAndMove(newStartPoint: Point2d): MiddleOutPoppedTriangleStack {
     return new MiddleOutPoppedTriangleStack(
       this,
       this.#stack[0]!.point,
@@ -3267,7 +3267,7 @@ class PathMiddleOutFanIter {
   #verbIndex = 0;
   #done = false;
 
-  constructor(path: DrawingPath2D) {
+  constructor(path: DrawingPath2d) {
     this.#triangulator = new MiddleOutPolygonTriangulator(path.verbs.length);
   }
 
@@ -3275,7 +3275,7 @@ class PathMiddleOutFanIter {
     return this.#done;
   }
 
-  nextStack(path: DrawingPath2D): MiddleOutPoppedTriangleStack {
+  nextStack(path: DrawingPath2d): MiddleOutPoppedTriangleStack {
     if (this.#verbIndex >= path.verbs.length) {
       this.#done = true;
       return this.#triangulator.close();
@@ -3301,7 +3301,7 @@ class PathMiddleOutFanIter {
           verb.startAngle,
           verb.endAngle,
           verb.counterClockwise ?? false,
-          identityMatrix2D,
+          identityMatrix2d,
         ).at(-1)?.points[2];
         return this.#triangulator.pushVertex(end ?? middleOutInitialPoint);
       }
@@ -3310,9 +3310,9 @@ class PathMiddleOutFanIter {
 }
 
 const prepareMiddleOutFanTriangles = (
-  path: DrawingPath2D,
-): readonly Point2D[] => {
-  const triangles: Point2D[] = [];
+  path: DrawingPath2d,
+): readonly Point2d[] => {
+  const triangles: Point2d[] = [];
   const appendTriangleStack = (
     stackTriangles: MiddleOutPoppedTriangleStack,
   ) => {
@@ -3329,45 +3329,45 @@ const prepareMiddleOutFanTriangles = (
 };
 
 const transformedQuadraticWangsFormulaP4 = (
-  p0: Point2D,
-  p1: Point2D,
-  p2: Point2D,
+  p0: Point2d,
+  p1: Point2d,
+  p2: Point2d,
   transform: readonly [number, number, number, number, number, number],
 ): number =>
   quadraticWangsFormulaP4(
-    transformPoint2D(p0, transform),
-    transformPoint2D(p1, transform),
-    transformPoint2D(p2, transform),
+    transformPoint2d(p0, transform),
+    transformPoint2d(p1, transform),
+    transformPoint2d(p2, transform),
   );
 
 const transformedConicWangsFormulaP4 = (
-  p0: Point2D,
-  p1: Point2D,
-  p2: Point2D,
+  p0: Point2d,
+  p1: Point2d,
+  p2: Point2d,
   weight: number,
   transform: readonly [number, number, number, number, number, number],
 ): number => {
   const n2 = conicWangsFormulaP2(
-    transformPoint2D(p0, transform),
-    transformPoint2D(p1, transform),
-    transformPoint2D(p2, transform),
+    transformPoint2d(p0, transform),
+    transformPoint2d(p1, transform),
+    transformPoint2d(p2, transform),
     weight,
   );
   return n2 * n2;
 };
 
 const transformedCubicWangsFormulaP4 = (
-  p0: Point2D,
-  p1: Point2D,
-  p2: Point2D,
-  p3: Point2D,
+  p0: Point2d,
+  p1: Point2d,
+  p2: Point2d,
+  p3: Point2d,
   transform: readonly [number, number, number, number, number, number],
 ): number =>
   cubicWangsFormulaP4(
-    transformPoint2D(p0, transform),
-    transformPoint2D(p1, transform),
-    transformPoint2D(p2, transform),
-    transformPoint2D(p3, transform),
+    transformPoint2d(p0, transform),
+    transformPoint2d(p1, transform),
+    transformPoint2d(p2, transform),
+    transformPoint2d(p3, transform),
   );
 
 const appendChoppedTrianglePatches = (
@@ -3404,7 +3404,7 @@ const appendCurvePatch = (
 const appendFanPatch = (
   patches: DrawingPreparedPatch[],
   patch: DrawingPatchDefinition,
-  fanPoint: Point2D | undefined,
+  fanPoint: Point2d | undefined,
   transform: readonly [number, number, number, number, number, number],
 ): void => {
   const transformedWangsFormulaP4 = transformedPatchWangsFormulaP4(patch, transform);
@@ -3426,10 +3426,10 @@ const appendFanPatch = (
 
 const writeQuadraticFanPatches = (
   patches: DrawingPreparedPatch[],
-  p0: Point2D,
-  p1: Point2D,
-  p2: Point2D,
-  fanPoint: Point2D | undefined,
+  p0: Point2d,
+  p1: Point2d,
+  p2: Point2d,
+  fanPoint: Point2d | undefined,
   transform: readonly [number, number, number, number, number, number],
 ): void => {
   let numPatches = accountForFillCurve(transformedQuadraticWangsFormulaP4(p0, p1, p2, transform));
@@ -3492,11 +3492,11 @@ const writeQuadraticFanPatches = (
 
 const writeConicFanPatches = (
   patches: DrawingPreparedPatch[],
-  p0: Point2D,
-  p1: Point2D,
-  p2: Point2D,
+  p0: Point2d,
+  p1: Point2d,
+  p2: Point2d,
   weight: number,
-  fanPoint: Point2D | undefined,
+  fanPoint: Point2d | undefined,
   transform: readonly [number, number, number, number, number, number],
 ): void => {
   let numPatches = accountForFillCurve(
@@ -3526,7 +3526,7 @@ const writeConicFanPatches = (
       ab[1] + ((bc[1] - ab[1]) * t),
       ab[2] + ((bc[2] - ab[2]) * t),
     ];
-    const midpoint: Point2D = [abc[0] / abc[2], abc[1] / abc[2]];
+    const midpoint: Point2d = [abc[0] / abc[2], abc[1] / abc[2]];
     appendFanPatch(
       patches,
       {
@@ -3562,11 +3562,11 @@ const writeConicFanPatches = (
 
 const writeCubicFanPatches = (
   patches: DrawingPreparedPatch[],
-  p0: Point2D,
-  p1: Point2D,
-  p2: Point2D,
-  p3: Point2D,
-  fanPoint: Point2D | undefined,
+  p0: Point2d,
+  p1: Point2d,
+  p2: Point2d,
+  p3: Point2d,
+  fanPoint: Point2d | undefined,
   transform: readonly [number, number, number, number, number, number],
 ): void => {
   let numPatches = accountForFillCurve(transformedCubicWangsFormulaP4(p0, p1, p2, p3, transform));
@@ -3640,9 +3640,9 @@ const writeCubicFanPatches = (
 
 const writeQuadraticPatches = (
   patches: DrawingPreparedPatch[],
-  p0: Point2D,
-  p1: Point2D,
-  p2: Point2D,
+  p0: Point2d,
+  p1: Point2d,
+  p2: Point2d,
   transform: readonly [number, number, number, number, number, number],
 ): void => {
   const n4 = transformedQuadraticWangsFormulaP4(p0, p1, p2, transform);
@@ -3705,9 +3705,9 @@ const writeQuadraticPatches = (
 
 const writeConicPatches = (
   patches: DrawingPreparedPatch[],
-  p0: Point2D,
-  p1: Point2D,
-  p2: Point2D,
+  p0: Point2d,
+  p1: Point2d,
+  p2: Point2d,
   weight: number,
   transform: readonly [number, number, number, number, number, number],
 ): void => {
@@ -3741,7 +3741,7 @@ const writeConicPatches = (
       ab[1] + ((bc[1] - ab[1]) * t),
       ab[2] + ((bc[2] - ab[2]) * t),
     ];
-    const midpoint: Point2D = [abc[0] / abc[2], abc[1] / abc[2]];
+    const midpoint: Point2d = [abc[0] / abc[2], abc[1] / abc[2]];
     appendCurvePatch(patches, {
       kind: 'conic',
       points: [
@@ -3770,10 +3770,10 @@ const writeConicPatches = (
 
 const writeCubicPatches = (
   patches: DrawingPreparedPatch[],
-  p0: Point2D,
-  p1: Point2D,
-  p2: Point2D,
-  p3: Point2D,
+  p0: Point2d,
+  p1: Point2d,
+  p2: Point2d,
+  p3: Point2d,
   transform: readonly [number, number, number, number, number, number],
 ): void => {
   const n4 = transformedCubicWangsFormulaP4(p0, p1, p2, p3, transform);
@@ -3847,12 +3847,12 @@ const writeCubicPatches = (
 };
 
 const prepareCurvePatches = (
-  path: DrawingPath2D,
+  path: DrawingPath2d,
   transform: readonly [number, number, number, number, number, number],
 ): readonly DrawingPreparedPatch[] => {
   const patches: DrawingPreparedPatch[] = [];
-  let currentPoint: Point2D | null = null;
-  let contourStart: Point2D | null = null;
+  let currentPoint: Point2d | null = null;
+  let contourStart: Point2d | null = null;
 
   for (const verb of path.verbs) {
     switch (verb.kind) {
@@ -3898,7 +3898,7 @@ const prepareCurvePatches = (
           verb.startAngle,
           verb.endAngle,
           verb.counterClockwise ?? false,
-          identityMatrix2D,
+          identityMatrix2d,
         );
         for (const patch of arcPatches) {
           if (patch.kind !== 'conic') {
@@ -3935,8 +3935,8 @@ const closeSubpathsForFill = (
 
 const tessellateFillFromPatches = (
   patches: readonly DrawingPreparedPatch[],
-): readonly Point2D[] | null => {
-  const triangles: Point2D[] = [];
+): readonly Point2d[] | null => {
+  const triangles: Point2d[] = [];
   let sawWedge = false;
   for (const patch of patches) {
     if (!patch.fanPoint) {
@@ -3952,11 +3952,11 @@ const tessellateFillFromPatches = (
 };
 
 const lineIntersection = (
-  p0: Point2D,
-  d0: Point2D,
-  p1: Point2D,
-  d1: Point2D,
-): Point2D | null => {
+  p0: Point2d,
+  d0: Point2d,
+  p1: Point2d,
+  d1: Point2d,
+): Point2d | null => {
   const det = (d0[0] * d1[1]) - (d0[1] * d1[0]);
   if (Math.abs(det) <= epsilon) return null;
   const delta = subtract(p1, p0);
@@ -3964,11 +3964,11 @@ const lineIntersection = (
   return add(p0, scale(d0, t));
 };
 
-const appendTriangle = (triangles: Point2D[], a: Point2D, b: Point2D, c: Point2D): void => {
+const appendTriangle = (triangles: Point2d[], a: Point2d, b: Point2d, c: Point2d): void => {
   triangles.push(a, b, c);
 };
 
-const appendQuad = (triangles: Point2D[], a: Point2D, b: Point2D, c: Point2D, d: Point2D): void => {
+const appendQuad = (triangles: Point2d[], a: Point2d, b: Point2d, c: Point2d, d: Point2d): void => {
   triangles.push(a, b, c, a, c, d);
 };
 
@@ -3983,10 +3983,10 @@ const appendColoredQuad = (
 };
 
 const appendRoundFan = (
-  triangles: Point2D[],
-  center: Point2D,
-  start: Point2D,
-  end: Point2D,
+  triangles: Point2d[],
+  center: Point2d,
+  start: Point2d,
+  end: Point2d,
   approxStrokeRadius: number,
 ): void => {
   const startAngle = Math.atan2(start[1] - center[1], start[0] - center[0]);
@@ -4000,7 +4000,7 @@ const appendRoundFan = (
   const radius = Math.hypot(start[0] - center[0], start[1] - center[1]);
   for (let index = 1; index <= steps; index += 1) {
     const angle = startAngle + ((span * index) / steps);
-    const next: Point2D = [
+    const next: Point2d = [
       center[0] + (Math.cos(angle) * radius),
       center[1] + (Math.sin(angle) * radius),
     ];
@@ -4043,10 +4043,10 @@ const buildFillFringe = (
 };
 
 const appendStrokeCap = (
-  triangles: Point2D[],
-  point: Point2D,
-  direction: Point2D,
-  normal: Point2D,
+  triangles: Point2d[],
+  point: Point2d,
+  direction: Point2d,
+  normal: Point2d,
   halfWidth: number,
   cap: NonNullable<DrawingPaint['strokeCap']>,
   atStart: boolean,
@@ -4066,8 +4066,8 @@ const appendStrokeCap = (
 };
 
 const appendDegenerateStrokeCap = (
-  triangles: Point2D[],
-  point: Point2D,
+  triangles: Point2d[],
+  point: Point2d,
   halfWidth: number,
   cap: NonNullable<DrawingPaint['strokeCap']>,
 ): void => {
@@ -4094,10 +4094,10 @@ const appendDegenerateStrokeCap = (
 };
 
 const appendStrokeJoin = (
-  triangles: Point2D[],
-  point: Point2D,
-  inDirection: Point2D,
-  outDirection: Point2D,
+  triangles: Point2d[],
+  point: Point2d,
+  inDirection: Point2d,
+  outDirection: Point2d,
   halfWidth: number,
   join: NonNullable<DrawingPaint['strokeJoin']>,
   miterLimit: number,
@@ -4137,7 +4137,7 @@ const appendStrokeJoin = (
 };
 
 const buildStrokeSegmentRecords = (
-  points: readonly Point2D[],
+  points: readonly Point2d[],
   closed: boolean,
   halfWidth: number,
 ): DrawingStrokeSegmentRecord[] => {
@@ -4195,7 +4195,7 @@ const prepareStrokeTriangles = (
   paint: DrawingPaint,
 ):
   | Readonly<{
-    triangles: readonly Point2D[];
+    triangles: readonly Point2d[];
     fringeVertices?: readonly DrawingPreparedVertex[];
   }>
   | null => {
@@ -4208,7 +4208,7 @@ const prepareStrokeTriangles = (
     ? 'bevel'
     : 'miter';
   const miterLimit = Math.max(1, strokeStyle.joinLimit);
-  const triangles: Point2D[] = [];
+  const triangles: Point2d[] = [];
   const fringeVertices: DrawingPreparedVertex[] = [];
   const color = resolveStrokeColor(paint);
   const transparent: readonly [number, number, number, number] = [color[0], color[1], color[2], 0];
@@ -4319,7 +4319,7 @@ const normalizeDashArray = (paint: DrawingPaint): readonly number[] | null => {
 };
 
 const buildDashedPolyline = (
-  points: readonly Point2D[],
+  points: readonly Point2d[],
   closed: boolean,
   dashArray: readonly number[],
   dashOffset: number,
@@ -4342,7 +4342,7 @@ const buildDashedPolyline = (
   let dashRemaining = dashArray[dashIndex]! - offset;
   let drawing = dashIndex % 2 === 0;
 
-  const segments: Array<readonly [Point2D, Point2D]> = [];
+  const segments: Array<readonly [Point2d, Point2d]> = [];
   const pointCount = closed ? points.length + 1 : points.length;
   for (let index = 1; index < pointCount; index += 1) {
     let start = points[(index - 1) % points.length]!;
@@ -4371,7 +4371,7 @@ const buildDashedPolyline = (
   }
 
   const dashed: FlattenedSubpath[] = [];
-  let current: Point2D[] = [];
+  let current: Point2d[] = [];
   for (const [start, end] of segments) {
     if (current.length === 0) {
       current.push(start, end);
@@ -4413,8 +4413,8 @@ const createStrokeContourRecords = (
     const segments = buildStrokeSegmentRecords(subpath.points, subpath.closed, 0.5);
     const firstPoint = subpath.points[0];
     const lastPoint = subpath.points[subpath.points.length - 1];
-    let startTangent: Point2D | undefined;
-    let endTangent: Point2D | undefined;
+    let startTangent: Point2d | undefined;
+    let endTangent: Point2d | undefined;
     if (segments.length > 0) {
       startTangent = segments[0]!.direction;
       endTangent = segments[segments.length - 1]!.direction;
@@ -4494,7 +4494,7 @@ const computeTessellatedStrokeOrderBounds = (
   return outsetRect(transformedBounds, aaFringeWidth);
 };
 
-const rectCorners = (rect: Rect): readonly Point2D[] =>
+const rectCorners = (rect: Rect): readonly Point2d[] =>
   Object.freeze([
     rect.origin,
     [rect.origin[0] + rect.size.width, rect.origin[1]],
@@ -4508,7 +4508,7 @@ const isAxisAlignedScaleTranslateTransform = (
   transform: readonly [number, number, number, number, number, number],
 ): boolean => Math.abs(transform[1]) <= epsilon && Math.abs(transform[2]) <= epsilon;
 
-const isRectCornerPoint = (point: Point2D, rect: Rect): boolean => {
+const isRectCornerPoint = (point: Point2d, rect: Rect): boolean => {
   const left = rect.origin[0];
   const right = rect.origin[0] + rect.size.width;
   const top = rect.origin[1];
@@ -4523,7 +4523,7 @@ const isSimpleClosedRectSubpath = (subpath: FlattenedSubpath): boolean => {
     return false;
   }
 
-  const uniquePoints: Point2D[] = [];
+  const uniquePoints: Point2d[] = [];
   for (const point of subpath.points) {
     if (!uniquePoints.some((candidate) => pointsEqual(candidate, point))) {
       uniquePoints.push(point);
@@ -4606,17 +4606,17 @@ const shouldPrepareStrokePatches = (_paint: DrawingPaint): boolean => {
 };
 
 const transformPoints = (
-  points: readonly Point2D[],
+  points: readonly Point2d[],
   transform: readonly [number, number, number, number, number, number],
-): readonly Point2D[] => Object.freeze(points.map((point) => transformPoint2D(point, transform)));
+): readonly Point2d[] => Object.freeze(points.map((point) => transformPoint2d(point, transform)));
 
 const preparePathFill = (
   recording: Pick<DrawingRecording, 'caps' | 'targetFormat'>,
   rendererProvider: DrawingRendererProvider,
   command: DrawPathCommand | DrawShapeCommand,
 ): DrawingDrawPreparation => {
-  const subpaths = flattenSubpaths(command.path, identityMatrix2D);
-  const midpointContourSubpaths = flattenMidpointContourSubpaths(command.path, identityMatrix2D);
+  const subpaths = flattenSubpaths(command.path, identityMatrix2d);
+  const midpointContourSubpaths = flattenMidpointContourSubpaths(command.path, identityMatrix2d);
   if (!subpaths) {
     return { supported: false, reason: 'path does not resolve to subpaths' };
   }
@@ -4658,11 +4658,11 @@ const preparePathFill = (
     });
 
     let patches: readonly DrawingPreparedPatch[] = [];
-    let baseTriangles: readonly Point2D[] = [];
+    let baseTriangles: readonly Point2d[] = [];
     switch (renderer.kind) {
       case 'convex-tessellated-wedges':
       case 'stencil-tessellated-wedges':
-        patches = preparePatches(command.path, identityMatrix2D, true, command.transform);
+        patches = preparePatches(command.path, identityMatrix2d, true, command.transform);
         baseTriangles = tessellateFillFromPatches(patches) ??
           prepareFillTriangles(fillSubpaths, command.path.fillRule) ?? [];
         break;

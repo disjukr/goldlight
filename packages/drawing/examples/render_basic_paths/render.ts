@@ -1,10 +1,10 @@
 import { exportPngRgba } from '@goldlight/exporters';
 import { createOffscreenBinding, readOffscreenSnapshot } from '@goldlight/gpu';
 import {
-  createPath2D,
+  createPath2d,
   createRect,
-  createRectPath2D,
-  withPath2DFillRule,
+  createRectPath2d,
+  withPath2dFillRule,
 } from '@goldlight/geometry';
 import {
   checkForFinishedDawnQueueWork,
@@ -84,7 +84,7 @@ export const renderBasicPathsSnapshot = async (): Promise<
   saveDrawingRecorder(recorder);
   scaleDrawingRecorder(recorder, supersampleScale, supersampleScale);
   recordClear(recorder, [0.96, 0.95, 0.91, 1]);
-  recordDrawPath(recorder, createRectPath2D(createRect(48, 48, 416, 416)), {
+  recordDrawPath(recorder, createRectPath2d(createRect(48, 48, 416, 416)), {
     style: 'fill',
     color: [0.14, 0.15, 0.18, 1],
   });
@@ -93,7 +93,7 @@ export const renderBasicPathsSnapshot = async (): Promise<
   translateDrawingRecorder(recorder, 12, 0);
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [84, 384] },
       { kind: 'lineTo', to: [244, 96] },
       { kind: 'lineTo', to: [404, 384] },
@@ -108,7 +108,7 @@ export const renderBasicPathsSnapshot = async (): Promise<
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [148, 332] },
       { kind: 'cubicTo', control1: [192, 168], control2: [320, 168], to: [364, 332] },
       { kind: 'lineTo', to: [148, 332] },
@@ -122,8 +122,8 @@ export const renderBasicPathsSnapshot = async (): Promise<
 
   recordDrawPath(
     recorder,
-    withPath2DFillRule(
-      createPath2D(
+    withPath2dFillRule(
+      createPath2d(
         { kind: 'moveTo', to: [72, 72] },
         { kind: 'lineTo', to: [200, 72] },
         { kind: 'lineTo', to: [200, 200] },
@@ -147,7 +147,7 @@ export const renderBasicPathsSnapshot = async (): Promise<
   clipDrawingRecorderRect(recorder, createRect(280, 280, 140, 140));
   clipDrawingRecorderPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [292, 292] },
       { kind: 'lineTo', to: [408, 292] },
       { kind: 'lineTo', to: [350, 408] },
@@ -156,7 +156,7 @@ export const renderBasicPathsSnapshot = async (): Promise<
   );
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [280, 360] },
       { kind: 'cubicTo', control1: [320, 240], control2: [380, 240], to: [420, 360] },
       { kind: 'lineTo', to: [420, 420] },

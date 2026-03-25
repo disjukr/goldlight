@@ -1,5 +1,5 @@
 import CanvasKitModule from 'npm:canvaskit-wasm@^0.40.0';
-import { createPath2D } from '@goldlight/geometry';
+import { createPath2d } from '@goldlight/geometry';
 
 const outputWidth = 680;
 const outputHeight = 940;
@@ -154,7 +154,7 @@ const appendArc = (
 
 const createCanvasKitPath = (
   CanvasKit: CanvasKit,
-  path: ReturnType<typeof createPath2D>,
+  path: ReturnType<typeof createPath2d>,
 ) => {
   const skPath = new CanvasKit.Path();
   for (const verb of path.verbs) {
@@ -203,7 +203,7 @@ const drawStroke = (
   CanvasKit: CanvasKit,
   canvas: CanvasKitCanvas,
   paint: CanvasKitPaint,
-  path: ReturnType<typeof createPath2D>,
+  path: ReturnType<typeof createPath2d>,
   options: Readonly<{
     strokeWidth: number;
     strokeJoin?: 'miter' | 'bevel' | 'round';
@@ -271,7 +271,7 @@ export const renderStrokesCanvasKitSnapshot = async (): Promise<
     CanvasKit,
     canvas,
     paint,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [90, 180] },
       { kind: 'lineTo', to: [160, 80] },
       { kind: 'lineTo', to: [230, 180] },
@@ -288,7 +288,7 @@ export const renderStrokesCanvasKitSnapshot = async (): Promise<
     CanvasKit,
     canvas,
     paint,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [275, 180] },
       { kind: 'lineTo', to: [345, 80] },
       { kind: 'lineTo', to: [415, 180] },
@@ -305,7 +305,7 @@ export const renderStrokesCanvasKitSnapshot = async (): Promise<
     CanvasKit,
     canvas,
     paint,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [460, 180] },
       { kind: 'lineTo', to: [530, 80] },
       { kind: 'lineTo', to: [600, 180] },
@@ -322,7 +322,7 @@ export const renderStrokesCanvasKitSnapshot = async (): Promise<
     CanvasKit,
     canvas,
     paint,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [90, 315] },
       { kind: 'lineTo', to: [210, 315] },
     ),
@@ -338,7 +338,7 @@ export const renderStrokesCanvasKitSnapshot = async (): Promise<
     CanvasKit,
     canvas,
     paint,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [260, 315] },
       { kind: 'lineTo', to: [380, 315] },
     ),
@@ -354,7 +354,7 @@ export const renderStrokesCanvasKitSnapshot = async (): Promise<
     CanvasKit,
     canvas,
     paint,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [430, 315] },
       { kind: 'lineTo', to: [550, 315] },
     ),
@@ -370,7 +370,7 @@ export const renderStrokesCanvasKitSnapshot = async (): Promise<
     CanvasKit,
     canvas,
     paint,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [88, 430] },
       { kind: 'lineTo', to: [552, 430] },
     ),
@@ -387,7 +387,7 @@ export const renderStrokesCanvasKitSnapshot = async (): Promise<
     CanvasKit,
     canvas,
     paint,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [80, 535] },
       {
         kind: 'cubicTo',
@@ -414,7 +414,7 @@ export const renderStrokesCanvasKitSnapshot = async (): Promise<
     CanvasKit,
     canvas,
     paint,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [80, 675] },
       { kind: 'quadTo', control: [185, 565], to: [300, 675] },
     ),
@@ -430,7 +430,7 @@ export const renderStrokesCanvasKitSnapshot = async (): Promise<
     CanvasKit,
     canvas,
     paint,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [410, 675] },
       {
         kind: 'arcTo',
@@ -452,7 +452,7 @@ export const renderStrokesCanvasKitSnapshot = async (): Promise<
     CanvasKit,
     canvas,
     paint,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [500, 748] },
       { kind: 'lineTo', to: [542, 878] },
       { kind: 'lineTo', to: [430, 796] },
@@ -472,7 +472,7 @@ export const renderStrokesCanvasKitSnapshot = async (): Promise<
     CanvasKit,
     canvas,
     paint,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [110, 850] },
       { kind: 'lineTo', to: [300, 760] },
     ),
@@ -488,7 +488,7 @@ export const renderStrokesCanvasKitSnapshot = async (): Promise<
     CanvasKit,
     canvas,
     paint,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [110, 760] },
       { kind: 'lineTo', to: [300, 850] },
     ),

@@ -1,4 +1,4 @@
-import { type Point2D, type Rect, transformPoint2D } from '@goldlight/geometry';
+import { type Point2d, type Rect, transformPoint2d } from '@goldlight/geometry';
 import type {
   DrawingClip,
   DrawingClipRect,
@@ -10,13 +10,13 @@ import type {
   DrawingClipStackSaveRecord,
   DrawingClipStackSnapshot,
   DrawingClipStackState,
-  DrawingMatrix2D,
-  DrawingPath2D,
+  DrawingMatrix2d,
+  DrawingPath2d,
 } from './types.ts';
 
 export type DrawingPreparedClipElement = Readonly<{
   op: DrawingClip['op'];
-  triangles: readonly Point2D[];
+  triangles: readonly Point2d[];
 }>;
 
 export type DrawingPreparedClipUsageElement = Readonly<{
@@ -28,7 +28,7 @@ export type DrawingPreparedClipUsageElement = Readonly<{
 export type DrawingPreparedClipDrawElement = Readonly<{
   id: number;
   op: DrawingClip['op'];
-  triangles: readonly Point2D[];
+  triangles: readonly Point2d[];
   bounds?: Rect;
   rawElement: DrawingClipStackRawElement;
 }>;
@@ -146,7 +146,7 @@ const unionRect = (left: Rect, right: Rect): Rect => {
 export const prepareDrawingRawClipElementGeometry = (
   rawElement: DrawingClipStackRawElement,
   bounds: Rect | undefined,
-  triangles: readonly Point2D[] | undefined,
+  triangles: readonly Point2d[] | undefined,
 ): void => {
   const runtimeState = ensureRawElementRuntimeState(rawElement);
   runtimeState.preparedBounds = bounds;
@@ -157,7 +157,7 @@ export const getDrawingRawClipElementPreparedGeometry = (
   rawElement: DrawingClipStackRawElement,
 ): Readonly<{
   bounds?: Rect;
-  triangles?: readonly Point2D[];
+  triangles?: readonly Point2d[];
 }> => {
   const runtimeState = ensureRawElementRuntimeState(rawElement);
   return {
@@ -247,12 +247,12 @@ export const resetDrawingRawClipElementRuntimeState = (
 const isEmptyRect = (rect: Rect | undefined): boolean =>
   rect !== undefined && (rect.size.width <= 0 || rect.size.height <= 0);
 
-const createPolygonTriangles = (polygon: readonly Point2D[]): readonly Point2D[] => {
+const createPolygonTriangles = (polygon: readonly Point2d[]): readonly Point2d[] => {
   if (polygon.length < 3) {
-    return Object.freeze([]) as readonly Point2D[];
+    return Object.freeze([]) as readonly Point2d[];
   }
 
-  const triangles: Point2D[] = [];
+  const triangles: Point2d[] = [];
   for (let index = 1; index < polygon.length - 1; index += 1) {
     triangles.push(polygon[0]!, polygon[index]!, polygon[index + 1]!);
   }
@@ -261,17 +261,17 @@ const createPolygonTriangles = (polygon: readonly Point2D[]): readonly Point2D[]
 
 const createRectClipPolygon = (
   clipRect: DrawingClipRect,
-  transform: DrawingMatrix2D,
-): readonly Point2D[] => {
+  transform: DrawingMatrix2d,
+): readonly Point2d[] => {
   const x0 = clipRect.origin[0];
   const y0 = clipRect.origin[1];
   const x1 = x0 + clipRect.size.width;
   const y1 = y0 + clipRect.size.height;
   return Object.freeze([
-    transformPoint2D([x0, y0], transform),
-    transformPoint2D([x1, y0], transform),
-    transformPoint2D([x1, y1], transform),
-    transformPoint2D([x0, y1], transform),
+    transformPoint2d([x0, y0], transform),
+    transformPoint2d([x1, y0], transform),
+    transformPoint2d([x1, y1], transform),
+    transformPoint2d([x0, y1], transform),
   ]);
 };
 
@@ -286,7 +286,7 @@ const rectContains = (outer: DrawingClipRect, inner: DrawingClipRect): boolean =
     outerBottom >= innerBottom;
 };
 
-const matricesEqual = (left: DrawingMatrix2D, right: DrawingMatrix2D): boolean =>
+const matricesEqual = (left: DrawingMatrix2d, right: DrawingMatrix2d): boolean =>
   left.every((value, index) => value === right[index]);
 
 const clipsEquivalent = (left: DrawingClip, right: DrawingClip): boolean => {
@@ -452,7 +452,7 @@ const _getActiveElements = (
     .filter((element) => element.invalidatedByIndex === undefined);
 };
 
-function createPolygonBounds(polygon: readonly Point2D[]): Rect {
+function createPolygonBounds(polygon: readonly Point2d[]): Rect {
   if (polygon.length === 0) {
     return { origin: [0, 0], size: { width: 0, height: 0 } };
   }
@@ -477,7 +477,7 @@ function createPolygonBounds(polygon: readonly Point2D[]): Rect {
   };
 }
 
-const computeRectDeviceBounds = (clipRect: DrawingClipRect, transform: DrawingMatrix2D): Rect =>
+const computeRectDeviceBounds = (clipRect: DrawingClipRect, transform: DrawingMatrix2d): Rect =>
   createPolygonBounds(createRectClipPolygon(clipRect, transform));
 
 const intersectRects = (left: Rect | undefined, right: Rect): Rect =>
@@ -639,16 +639,16 @@ export const setDrawingClipStackShader = (
 export const visitDrawingClipStackForDraw = (
   clipStack: DrawingClipStackSnapshot,
   preparePathClip: (
-    path: DrawingPath2D,
-    transform: DrawingMatrix2D,
+    path: DrawingPath2d,
+    transform: DrawingMatrix2d,
   ) =>
     | Readonly<{
       bounds?: Rect;
-      triangles?: readonly Point2D[];
+      triangles?: readonly Point2d[];
     }>
     | null,
   intersectBounds: (bounds: Rect | undefined, candidate: Rect | undefined) => Rect | undefined,
-  computeBounds: (points: readonly Point2D[]) => Rect,
+  computeBounds: (points: readonly Point2d[]) => Rect,
 ): DrawingVisitedClipStack => {
   const saveRecord = getCurrentDrawingClipSaveRecord(clipStack);
   const activeElements = clipStack.elements

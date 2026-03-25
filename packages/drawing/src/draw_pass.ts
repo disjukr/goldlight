@@ -1,4 +1,4 @@
-import type { Point2D, Rect } from '@goldlight/geometry';
+import type { Point2d, Rect } from '@goldlight/geometry';
 import type { DrawingRecording } from './recording.ts';
 import {
   captureDrawingRawClipElementDeferredDraw,
@@ -121,7 +121,7 @@ export type DrawingPreparedClipDraw = Readonly<{
   id: number;
   elementId: number;
   op: 'intersect' | 'difference';
-  triangles: readonly Point2D[];
+  triangles: readonly Point2d[];
   bounds?: Rect;
   usageBounds: Rect;
   scissorBounds: Rect;
@@ -239,7 +239,7 @@ type MutablePreparedClipDraw = {
   id: number;
   elementId: number;
   op: 'intersect' | 'difference';
-  triangles: readonly Point2D[];
+  triangles: readonly Point2d[];
   bounds?: Rect;
   usageBounds: Rect;
   scissorBounds: Rect;

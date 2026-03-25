@@ -59,16 +59,16 @@ type CanvasKitFactory = (options?: unknown) => Promise<CanvasKit>;
 
 const CanvasKitInit = CanvasKitModule as unknown as CanvasKitFactory;
 type Point = readonly [number, number];
-type Matrix2D = readonly [number, number, number, number, number, number];
+type Matrix2d = readonly [number, number, number, number, number, number];
 
-const createRotationMatrix2D = (degrees: number): Matrix2D => {
+const createRotationMatrix2d = (degrees: number): Matrix2d => {
   const radians = degrees * (Math.PI / 180);
   const c = Math.cos(radians);
   const s = Math.sin(radians);
   return [c, s, -s, c, 0, 0];
 };
 
-const transformPoint = (matrix: Matrix2D, point: Point): Point => [
+const transformPoint = (matrix: Matrix2d, point: Point): Point => [
   (matrix[0] * point[0]) + (matrix[2] * point[1]) + matrix[4],
   (matrix[1] * point[0]) + (matrix[3] * point[1]) + matrix[5],
 ];
@@ -123,7 +123,7 @@ export const renderAaaCanvasKitSnapshot = async (): Promise<Readonly<{ png: Uint
   strokePaint.setColor(toColor(CanvasKit, [1, 0, 0, 1]));
 
   canvas.clear(toColor(CanvasKit, [1, 1, 1, 1]));
-  const rotation = createRotationMatrix2D(1);
+  const rotation = createRotationMatrix2d(1);
 
   let path = new CanvasKit.Path();
   addPolygon(path, [

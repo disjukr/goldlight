@@ -1,5 +1,5 @@
 import CanvasKitModule from 'npm:canvaskit-wasm@^0.40.0';
-import { createPath2D, createRect, createRectPath2D, type Point2D } from '@goldlight/geometry';
+import { createPath2d, createRect, createRectPath2d, type Point2d } from '@goldlight/geometry';
 
 const outputWidth = 960;
 const outputHeight = 720;
@@ -56,23 +56,23 @@ type CanvasKit = {
   TileMode: { Clamp: unknown };
   Shader: {
     MakeLinearGradient: (
-      start: Point2D,
-      end: Point2D,
+      start: Point2d,
+      end: Point2d,
       colors: Float32Array,
       positions: number[] | null,
       tileMode: unknown,
     ) => CanvasKitShader;
     MakeRadialGradient: (
-      center: Point2D,
+      center: Point2d,
       radius: number,
       colors: Float32Array,
       positions: number[] | null,
       tileMode: unknown,
     ) => CanvasKitShader;
     MakeTwoPointConicalGradient: (
-      startCenter: Point2D,
+      startCenter: Point2d,
       startRadius: number,
-      endCenter: Point2D,
+      endCenter: Point2d,
       endRadius: number,
       colors: Float32Array,
       positions: number[] | null,
@@ -107,7 +107,7 @@ const toColorArray = (
 
 const createCanvasKitPath = (
   CanvasKit: CanvasKit,
-  path: ReturnType<typeof createPath2D>,
+  path: ReturnType<typeof createPath2d>,
 ) => {
   const skPath = new CanvasKit.Path();
   for (const verb of path.verbs) {
@@ -145,11 +145,11 @@ const createCanvasKitPath = (
 };
 
 const createBlobPath = (
-  center: Point2D,
+  center: Point2d,
   radiusX: number,
   radiusY: number,
 ) =>
-  createPath2D(
+  createPath2d(
     { kind: 'moveTo', to: [center[0], center[1] - radiusY] },
     {
       kind: 'cubicTo',
@@ -173,11 +173,11 @@ const createBlobPath = (
   );
 
 const createStarPath = (
-  center: Point2D,
+  center: Point2d,
   outerRadius: number,
   innerRadius: number,
 ) => {
-  const points: Point2D[] = [];
+  const points: Point2d[] = [];
   for (let index = 0; index < 10; index += 1) {
     const angle = (-Math.PI / 2) + (index * Math.PI / 5);
     const radius = index % 2 === 0 ? outerRadius : innerRadius;
@@ -187,7 +187,7 @@ const createStarPath = (
     ]);
   }
 
-  return createPath2D(
+  return createPath2d(
     { kind: 'moveTo', to: points[0]! },
     ...points.slice(1).map((point) => ({ kind: 'lineTo', to: point }) as const),
     { kind: 'close' },
@@ -213,7 +213,7 @@ export const renderGradientsCanvasKitSnapshot = async (): Promise<
   canvas.clear(toColor(CanvasKit, [0.05, 0.07, 0.1, 1]));
 
   const drawSolid = (
-    path: ReturnType<typeof createPath2D>,
+    path: ReturnType<typeof createPath2d>,
     color: readonly [number, number, number, number],
   ) => {
     paint.setShader(null);
@@ -224,7 +224,7 @@ export const renderGradientsCanvasKitSnapshot = async (): Promise<
   };
 
   const drawShader = (
-    path: ReturnType<typeof createPath2D>,
+    path: ReturnType<typeof createPath2d>,
     shader: CanvasKitShader,
   ) => {
     paint.setColor(toColor(CanvasKit, [0, 0, 0, 1]));
@@ -236,10 +236,10 @@ export const renderGradientsCanvasKitSnapshot = async (): Promise<
     shader.delete();
   };
 
-  drawSolid(createRectPath2D(createRect(36, 36, 888, 648)), [0.09, 0.11, 0.15, 1]);
-  drawSolid(createRectPath2D(createRect(72, 78, 244, 564)), [0.13, 0.15, 0.2, 1]);
-  drawSolid(createRectPath2D(createRect(358, 78, 244, 564)), [0.13, 0.15, 0.2, 1]);
-  drawSolid(createRectPath2D(createRect(644, 78, 244, 564)), [0.13, 0.15, 0.2, 1]);
+  drawSolid(createRectPath2d(createRect(36, 36, 888, 648)), [0.09, 0.11, 0.15, 1]);
+  drawSolid(createRectPath2d(createRect(72, 78, 244, 564)), [0.13, 0.15, 0.2, 1]);
+  drawSolid(createRectPath2d(createRect(358, 78, 244, 564)), [0.13, 0.15, 0.2, 1]);
+  drawSolid(createRectPath2d(createRect(644, 78, 244, 564)), [0.13, 0.15, 0.2, 1]);
 
   drawShader(
     createBlobPath([194, 256], 88, 116),
@@ -255,7 +255,7 @@ export const renderGradientsCanvasKitSnapshot = async (): Promise<
     ),
   );
   drawShader(
-    createRectPath2D(createRect(112, 408, 164, 138)),
+    createRectPath2d(createRect(112, 408, 164, 138)),
     CanvasKit.Shader.MakeLinearGradient(
       [112, 408],
       [276, 546],

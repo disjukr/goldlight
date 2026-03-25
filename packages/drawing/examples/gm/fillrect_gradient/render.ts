@@ -1,6 +1,6 @@
 import { exportPngRgba } from '@goldlight/exporters';
 import { createOffscreenBinding, readOffscreenSnapshot } from '@goldlight/gpu';
-import { createRect, createRectPath2D } from '@goldlight/geometry';
+import { createRect, createRectPath2d } from '@goldlight/geometry';
 import {
   checkForFinishedDawnQueueWork,
   encodeDawnCommandBuffer,
@@ -146,7 +146,7 @@ export const renderFillrectGradientSnapshot = async (): Promise<
     const linearRect = createRect(0, y, cellSize, cellSize);
     const radialRect = createRect(cellSize + padSize, y, cellSize, cellSize);
 
-    recordDrawPath(recorder, createRectPath2D(linearRect), {
+    recordDrawPath(recorder, createRectPath2d(linearRect), {
       style: 'fill',
       shader: {
         kind: 'linear-gradient',
@@ -156,7 +156,7 @@ export const renderFillrectGradientSnapshot = async (): Promise<
       },
     });
 
-    recordDrawPath(recorder, createRectPath2D(radialRect), {
+    recordDrawPath(recorder, createRectPath2d(radialRect), {
       style: 'fill',
       shader: {
         kind: 'radial-gradient',

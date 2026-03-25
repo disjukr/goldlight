@@ -1,9 +1,9 @@
 import CanvasKitModule from 'npm:canvaskit-wasm@^0.40.0';
 import {
-  createPath2D,
+  createPath2d,
   createRect,
-  createRectPath2D,
-  withPath2DFillRule,
+  createRectPath2d,
+  withPath2dFillRule,
 } from '@goldlight/geometry';
 
 const outputSize = 512;
@@ -74,7 +74,7 @@ const toColor = (
 
 const createCanvasKitPath = (
   CanvasKit: CanvasKit,
-  path: ReturnType<typeof createPath2D>,
+  path: ReturnType<typeof createPath2d>,
 ) => {
   const skPath = new CanvasKit.Path();
   for (const verb of path.verbs) {
@@ -133,7 +133,7 @@ export const renderBasicPathsCanvasKitSnapshot = async (): Promise<
   paint.setStyle(CanvasKit.PaintStyle.Fill);
   paint.setColor(toColor(CanvasKit, [0.14, 0.15, 0.18, 1]));
   canvas.drawPath(
-    createCanvasKitPath(CanvasKit, createRectPath2D(createRect(48, 48, 416, 416))),
+    createCanvasKitPath(CanvasKit, createRectPath2d(createRect(48, 48, 416, 416))),
     paint,
   );
 
@@ -143,7 +143,7 @@ export const renderBasicPathsCanvasKitSnapshot = async (): Promise<
   canvas.drawPath(
     createCanvasKitPath(
       CanvasKit,
-      createPath2D(
+      createPath2d(
         { kind: 'moveTo', to: [84, 384] },
         { kind: 'lineTo', to: [244, 96] },
         { kind: 'lineTo', to: [404, 384] },
@@ -158,7 +158,7 @@ export const renderBasicPathsCanvasKitSnapshot = async (): Promise<
   canvas.drawPath(
     createCanvasKitPath(
       CanvasKit,
-      createPath2D(
+      createPath2d(
         { kind: 'moveTo', to: [148, 332] },
         { kind: 'cubicTo', control1: [192, 168], control2: [320, 168], to: [364, 332] },
         { kind: 'lineTo', to: [148, 332] },
@@ -172,8 +172,8 @@ export const renderBasicPathsCanvasKitSnapshot = async (): Promise<
   canvas.drawPath(
     createCanvasKitPath(
       CanvasKit,
-      withPath2DFillRule(
-        createPath2D(
+      withPath2dFillRule(
+        createPath2d(
           { kind: 'moveTo', to: [72, 72] },
           { kind: 'lineTo', to: [200, 72] },
           { kind: 'lineTo', to: [200, 200] },
@@ -196,7 +196,7 @@ export const renderBasicPathsCanvasKitSnapshot = async (): Promise<
   canvas.clipPath(
     createCanvasKitPath(
       CanvasKit,
-      createPath2D(
+      createPath2d(
         { kind: 'moveTo', to: [292, 292] },
         { kind: 'lineTo', to: [408, 292] },
         { kind: 'lineTo', to: [350, 408] },
@@ -214,7 +214,7 @@ export const renderBasicPathsCanvasKitSnapshot = async (): Promise<
   canvas.drawPath(
     createCanvasKitPath(
       CanvasKit,
-      createPath2D(
+      createPath2d(
         { kind: 'moveTo', to: [280, 360] },
         { kind: 'cubicTo', control1: [320, 240], control2: [380, 240], to: [420, 360] },
         { kind: 'lineTo', to: [420, 420] },

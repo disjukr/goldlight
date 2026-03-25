@@ -32,7 +32,7 @@ stack that fits this repository's TypeScript and WebGPU architecture.
   - `drawing` package exists and is wired into the workspace.
 - Shared 2D geometry model
   - Status: `started`
-  - `Path2D`, fill rules, cubic/conic/arc verbs, and basic transform helpers exist in `geometry`.
+  - `Path2d`, fill rules, cubic/conic/arc verbs, and basic transform helpers exist in `geometry`.
 - Backend context
   - Status: `started`
   - Dawn/WebGPU device lifecycle wrapper exists.
@@ -212,10 +212,10 @@ stack that fits this repository's TypeScript and WebGPU architecture.
 
 Geometry that is reusable across packages should live in `@goldlight/geometry`, not in `drawing`.
 
-- `Point2D` in `@goldlight/geometry/src/path2d.ts`
+- `Point2d` in `@goldlight/geometry/src/path2d.ts`
   - Status: `done`
   - Shared 2D point type
-- `Size2D` in `@goldlight/geometry/src/path2d.ts`
+- `Size2d` in `@goldlight/geometry/src/path2d.ts`
   - Status: `done`
   - Shared 2D size type
 - `Rect` in `@goldlight/geometry/src/path2d.ts`
@@ -230,7 +230,7 @@ Geometry that is reusable across packages should live in `@goldlight/geometry`, 
 - `Polygon` in `@goldlight/geometry/src/path2d.ts`
   - Status: `done`
   - General polygon input
-- `Path2D` in `@goldlight/geometry/src/path2d.ts`
+- `Path2d` in `@goldlight/geometry/src/path2d.ts`
   - Status: `started`
   - Supports `moveTo`, `lineTo`, `quadTo`, `conicTo`, `cubicTo`, `arcTo`, `close`, fill rule state,
     and transform helpers
@@ -263,7 +263,7 @@ Geometry that is reusable across packages should live in `@goldlight/geometry`, 
     interaction with fill stenciling
 - `drawShape`
   - Status: `started`
-  - Current state: shape is converted to `Path2D` and uses the same fill/stroke execution path
+  - Current state: shape is converted to `Path2d` and uses the same fill/stroke execution path
   - Missing: broader primitive specialization
 - Clip path
   - Status: `started`

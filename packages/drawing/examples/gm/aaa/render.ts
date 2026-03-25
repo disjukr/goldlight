@@ -1,11 +1,11 @@
 import { exportPngRgba } from '@goldlight/exporters';
 import { createOffscreenBinding, readOffscreenSnapshot } from '@goldlight/gpu';
 import {
-  createCirclePath2D,
-  createPath2D,
+  createCirclePath2d,
+  createPath2d,
   createRect,
-  createRectPath2D,
-  withPath2DFillRule,
+  createRectPath2d,
+  withPath2dFillRule,
 } from '@goldlight/geometry';
 import {
   checkForFinishedDawnQueueWork,
@@ -28,13 +28,13 @@ const outputWidth = gmWidth;
 const outputHeight = gmHeight * 3;
 
 type Point = readonly [number, number];
-type Matrix2D = readonly [number, number, number, number, number, number];
-type PathVerb = ReturnType<typeof createPath2D>['verbs'][number];
+type Matrix2d = readonly [number, number, number, number, number, number];
+type PathVerb = ReturnType<typeof createPath2d>['verbs'][number];
 
 const red: readonly [number, number, number, number] = [1, 0, 0, 1];
 const white: readonly [number, number, number, number] = [1, 1, 1, 1];
 
-const createRotationMatrix2D = (degrees: number): Matrix2D => {
+const createRotationMatrix2d = (degrees: number): Matrix2d => {
   const radians = degrees * (Math.PI / 180);
   const c = Math.cos(radians);
   const s = Math.sin(radians);
@@ -42,11 +42,11 @@ const createRotationMatrix2D = (degrees: number): Matrix2D => {
 };
 
 const drawAnalyticAntialiasConvex = (recorder: DrawingRecorder): void => {
-  const rotation = createRotationMatrix2D(1);
+  const rotation = createRotationMatrix2d(1);
 
   saveDrawingRecorder(recorder);
   concatDrawingRecorderTransform(recorder, rotation);
-  recordDrawPath(recorder, createRectPath2D(createRect(20, 20, 180, 180)), {
+  recordDrawPath(recorder, createRectPath2d(createRect(20, 20, 180, 180)), {
     style: 'fill',
     color: red,
   });
@@ -55,21 +55,21 @@ const drawAnalyticAntialiasConvex = (recorder: DrawingRecorder): void => {
   saveDrawingRecorder(recorder);
   translateDrawingRecorder(recorder, 0, 200);
   concatDrawingRecorderTransform(recorder, rotation);
-  recordDrawPath(recorder, createRectPath2D(createRect(20, 20, 0.2, 180)), {
+  recordDrawPath(recorder, createRectPath2d(createRect(20, 20, 0.2, 180)), {
     style: 'fill',
     color: red,
   });
-  recordDrawPath(recorder, createRectPath2D(createRect(20, 200, 180, 0.1)), {
+  recordDrawPath(recorder, createRectPath2d(createRect(20, 200, 180, 0.1)), {
     style: 'fill',
     color: red,
   });
-  recordDrawPath(recorder, createCirclePath2D({ center: [100, 100], radius: 30 }, 256), {
+  recordDrawPath(recorder, createCirclePath2d({ center: [100, 100], radius: 30 }, 256), {
     style: 'fill',
     color: red,
   });
   restoreDrawingRecorder(recorder);
 
-  const emptyBugPath = createPath2D(
+  const emptyBugPath = createPath2d(
     { kind: 'moveTo', to: [77.8073, 231.626] },
     {
       kind: 'cubicTo',
@@ -86,7 +86,7 @@ const drawAnalyticAntialiasConvex = (recorder: DrawingRecorder): void => {
   translateDrawingRecorder(recorder, 0, 400);
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [1.98009784, 9.0162744] },
       { kind: 'lineTo', to: [47.843992, 10.1922744] },
       { kind: 'lineTo', to: [47.804008, 11.7597256] },
@@ -97,14 +97,14 @@ const drawAnalyticAntialiasConvex = (recorder: DrawingRecorder): void => {
   );
   restoreDrawingRecorder(recorder);
 
-  recordDrawPath(recorder, createRectPath2D(createRect(700, 266, 10, 268)), {
+  recordDrawPath(recorder, createRectPath2d(createRect(700, 266, 10, 268)), {
     style: 'fill',
     color: red,
   });
 };
 
 const drawAnalyticAntialiasGeneral = (recorder: DrawingRecorder): void => {
-  const rotation = createRotationMatrix2D(1);
+  const rotation = createRotationMatrix2d(1);
   const radius = 115.2;
   const center: Point = [128, 128];
   const points: Point[] = [];
@@ -115,7 +115,7 @@ const drawAnalyticAntialiasGeneral = (recorder: DrawingRecorder): void => {
       center[1] + (radius * Math.sin(angle)),
     ]);
   }
-  const path = createPath2D(
+  const path = createPath2d(
     { kind: 'moveTo', to: points[0]! },
     ...points.slice(1).map((point) => ({ kind: 'lineTo', to: point }) as const),
   );
@@ -139,9 +139,9 @@ const drawAnalyticAntialiasGeneral = (recorder: DrawingRecorder): void => {
   translateDrawingRecorder(recorder, 0, 300);
   recordDrawPath(
     recorder,
-    createPath2D(
-      ...createRectPath2D(createRect(20, 20, 80.4999, 80)).verbs,
-      ...createRectPath2D(createRect(100.5001, 20, 99.4999, 80)).verbs,
+    createPath2d(
+      ...createRectPath2d(createRect(20, 20, 80.4999, 80)).verbs,
+      ...createRectPath2d(createRect(100.5001, 20, 99.4999, 80)).verbs,
     ),
     { style: 'fill', color: red },
   );
@@ -151,9 +151,9 @@ const drawAnalyticAntialiasGeneral = (recorder: DrawingRecorder): void => {
   translateDrawingRecorder(recorder, 300, 300);
   recordDrawPath(
     recorder,
-    createPath2D(
-      ...createRectPath2D(createRect(20, 20, 80.1, 80)).verbs,
-      ...createRectPath2D(createRect(100.9, 20, 99.1, 80)).verbs,
+    createPath2d(
+      ...createRectPath2d(createRect(20, 20, 80.1, 80)).verbs,
+      ...createRectPath2d(createRect(100.9, 20, 99.1, 80)).verbs,
     ),
     { style: 'fill', color: red },
   );
@@ -161,10 +161,10 @@ const drawAnalyticAntialiasGeneral = (recorder: DrawingRecorder): void => {
 };
 
 const drawAnalyticAntialiasInverse = (recorder: DrawingRecorder): void => {
-  const path = withPath2DFillRule(
-    createPath2D(
-      ...createRectPath2D(createRect(0, 0, gmWidth, gmHeight)).verbs,
-      ...createCirclePath2D({ center: [100, 100], radius: 30 }, 256).verbs,
+  const path = withPath2dFillRule(
+    createPath2d(
+      ...createRectPath2d(createRect(0, 0, gmWidth, gmHeight)).verbs,
+      ...createCirclePath2d({ center: [100, 100], radius: 30 }, 256).verbs,
     ),
     'evenodd',
   );

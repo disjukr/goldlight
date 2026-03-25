@@ -19,9 +19,24 @@ import type {
   TextureJsxProps,
 } from './authoring.ts';
 import { normalizeCameraJsxProps, normalizeNodeProps } from './authoring.ts';
-import type { Reconciler2dSceneProps, Reconciler3dSceneProps } from './reconciler_runtime.ts';
+import type {
+  Reconciler2dCircleProps,
+  Reconciler2dGroupProps,
+  Reconciler2dPathProps,
+  Reconciler2dRectProps,
+  Reconciler2dSceneProps,
+  Reconciler3dSceneProps,
+} from './reconciler_runtime.ts';
 import { createG3dSceneRootCommit, type G3dSceneRootSubscriber } from './scene_root.ts';
 import type { SceneIr, TextureRef } from '@goldlight/ir';
+import type { DrawingPaint, DrawingRecorder } from '@goldlight/drawing';
+import {
+  concatDrawingRecorderTransform,
+  recordClear,
+  recordDrawPath,
+  restoreDrawingRecorder,
+  saveDrawingRecorder,
+} from '@goldlight/drawing';
 import {
   applyG3dSceneDocumentScene,
   createG3dSceneDocument,
@@ -32,6 +47,13 @@ import {
   upsertG3dSceneDocumentNode,
   upsertG3dSceneDocumentResource,
 } from './scene_document.ts';
+import {
+  createCircle,
+  createCirclePath2d,
+  createRect,
+  createRectPath2d,
+  type Matrix2d,
+} from '@goldlight/geometry';
 
 type ResourceIntrinsicType =
   | 'asset'
@@ -46,6 +68,10 @@ type HostIntrinsicType =
   | 'g3d-node'
   | 'g3d-group'
   | 'g2d-scene'
+  | 'g2d-group'
+  | 'g2d-path'
+  | 'g2d-rect'
+  | 'g2d-circle'
   | 'g3d-asset'
   | 'g3d-texture'
   | 'g3d-material'
@@ -58,6 +84,10 @@ const supportedIntrinsicTypes = new Set<HostIntrinsicType>([
   'g3d-node',
   'g3d-group',
   'g2d-scene',
+  'g2d-group',
+  'g2d-path',
+  'g2d-rect',
+  'g2d-circle',
   'g3d-asset',
   'g3d-texture',
   'g3d-material',
@@ -71,6 +101,10 @@ type HostPropsByType = {
   'g3d-scene': Reconciler3dSceneProps;
   'g3d-node': NodeJsxProps;
   'g3d-group': GroupJsxProps;
+  'g2d-group': Reconciler2dGroupProps;
+  'g2d-path': Reconciler2dPathProps;
+  'g2d-rect': Reconciler2dRectProps;
+  'g2d-circle': Reconciler2dCircleProps;
   'g3d-asset': AssetJsxProps;
   'g3d-texture': TextureJsxProps;
   'g3d-material': MaterialJsxProps;
@@ -152,6 +186,30 @@ type Scene2dHostInstance = {
   children: HostChild[];
 };
 
+type Group2dHostInstance = {
+  readonly type: 'g2d-group';
+  props: HostPropsWithoutChildren<'g2d-group'>;
+  children: HostChild[];
+};
+
+type Path2dHostInstance = {
+  readonly type: 'g2d-path';
+  props: HostPropsWithoutChildren<'g2d-path'>;
+  children: HostChild[];
+};
+
+type Rect2dHostInstance = {
+  readonly type: 'g2d-rect';
+  props: HostPropsWithoutChildren<'g2d-rect'>;
+  children: HostChild[];
+};
+
+type Circle2dHostInstance = {
+  readonly type: 'g2d-circle';
+  props: HostPropsWithoutChildren<'g2d-circle'>;
+  children: HostChild[];
+};
+
 type ResourceHostInstance =
   | AssetHostInstance
   | TextureHostInstance
@@ -166,6 +224,10 @@ type HostChild =
   | NodeHostInstance
   | GroupHostInstance
   | Scene2dHostInstance
+  | Group2dHostInstance
+  | Path2dHostInstance
+  | Rect2dHostInstance
+  | Circle2dHostInstance
   | ResourceHostInstance;
 type RootHostInstance = SceneHostInstance | Scene2dHostInstance;
 type HostInstance = RootHostInstance | HostChild;
@@ -174,7 +236,7 @@ export type React2dScene = Readonly<{
   textureId: string;
   textureWidth: number;
   textureHeight: number;
-  draw: Reconciler2dSceneProps['draw'];
+  draw: (recorder: DrawingRecorder, timeMs: number) => void;
 }>;
 export type React3dScene = Readonly<{
   id: string;
@@ -228,12 +290,115 @@ const create2dSceneTextureRef = (props: Reconciler2dSceneProps): TextureRef => (
   sampler: 'linear',
 });
 
-const create2dSceneDescriptor = (props: Reconciler2dSceneProps): React2dScene => ({
+const create2dPaint = (
+  props:
+    | Reconciler2dPathProps
+    | Reconciler2dRectProps
+    | Reconciler2dCircleProps,
+): DrawingPaint => ({
+  color: props.color,
+  blendMode: props.blendMode,
+  style: props.style,
+  strokeWidth: props.strokeWidth,
+  strokeJoin: props.strokeJoin,
+  strokeCap: props.strokeCap,
+  miterLimit: props.miterLimit,
+  dashArray: props.dashArray,
+  dashOffset: props.dashOffset,
+});
+
+const createRotationMatrix2d = (radians: number): Matrix2d => {
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  return [cos, sin, -sin, cos, 0, 0];
+};
+
+const render2dChild = (recorder: DrawingRecorder, child: HostChild): void => {
+  switch (child.type) {
+    case 'g2d-group':
+      saveDrawingRecorder(recorder);
+      if (child.props.transform) {
+        concatDrawingRecorderTransform(recorder, child.props.transform);
+      }
+      if (child.props.translation) {
+        concatDrawingRecorderTransform(
+          recorder,
+          [1, 0, 0, 1, child.props.translation[0], child.props.translation[1]],
+        );
+      }
+      if (child.props.rotation !== undefined) {
+        concatDrawingRecorderTransform(recorder, createRotationMatrix2d(child.props.rotation));
+      }
+      if (child.props.scale) {
+        concatDrawingRecorderTransform(
+          recorder,
+          [child.props.scale[0], 0, 0, child.props.scale[1], 0, 0],
+        );
+      }
+      for (const grandChild of child.children) {
+        render2dChild(recorder, grandChild);
+      }
+      restoreDrawingRecorder(recorder);
+      return;
+    case 'g2d-path':
+      if (child.children.length > 0) {
+        throw new Error('<g2d-path> does not support children');
+      }
+      recordDrawPath(recorder, child.props.path, create2dPaint(child.props));
+      return;
+    case 'g2d-rect':
+      if (child.children.length > 0) {
+        throw new Error('<g2d-rect> does not support children');
+      }
+      recordDrawPath(
+        recorder,
+        createRectPath2d(
+          createRect(child.props.x, child.props.y, child.props.width, child.props.height),
+        ),
+        create2dPaint(child.props),
+      );
+      return;
+    case 'g2d-circle':
+      if (child.children.length > 0) {
+        throw new Error('<g2d-circle> does not support children');
+      }
+      recordDrawPath(
+        recorder,
+        createCirclePath2d(
+          createCircle(child.props.cx, child.props.cy, child.props.radius),
+          child.props.segments,
+        ),
+        create2dPaint(child.props),
+      );
+      return;
+    case 'g2d-scene':
+      throw new Error('nested <g2d-scene> is not supported');
+    default:
+      throw new Error(`<${child.type}> is not allowed inside <g2d-scene>`);
+  }
+};
+
+const create2dSceneDraw = (
+  props: Reconciler2dSceneProps,
+  children: readonly HostChild[],
+): React2dScene['draw'] => {
+  return (recorder) => {
+    recordClear(recorder, props.clearColor ?? [0, 0, 0, 0]);
+    for (const child of children) {
+      render2dChild(recorder, child);
+    }
+  };
+};
+
+const create2dSceneDescriptor = (
+  props: Reconciler2dSceneProps,
+  children: readonly HostChild[],
+): React2dScene => ({
   id: props.id,
   textureId: get2dSceneTextureId(props),
   textureWidth: props.textureWidth ?? default2dSceneTextureSize,
   textureHeight: props.textureHeight ?? default2dSceneTextureSize,
-  draw: props.draw,
+  draw: create2dSceneDraw(props, children),
 });
 
 const create3dSceneTextureRef = (props: Reconciler3dSceneProps): TextureRef => ({
@@ -314,6 +479,10 @@ const renderer = Reconciler({
       & HostPropsWithoutChildren<'g3d-scene'>
       & HostPropsWithoutChildren<'g3d-node'>
       & HostPropsWithoutChildren<'g2d-scene'>
+      & HostPropsWithoutChildren<'g2d-group'>
+      & HostPropsWithoutChildren<'g2d-path'>
+      & HostPropsWithoutChildren<'g2d-rect'>
+      & HostPropsWithoutChildren<'g2d-circle'>
       & HostPropsWithoutChildren<'g3d-asset'>
       & HostPropsWithoutChildren<'g3d-texture'>
       & HostPropsWithoutChildren<'g3d-material'>
@@ -396,6 +565,34 @@ const createHostInstance = (
     return {
       type: intrinsicType,
       props: normalizedProps as HostPropsWithoutChildren<'g2d-scene'>,
+      children: [],
+    };
+  }
+  if (intrinsicType === 'g2d-group') {
+    return {
+      type: intrinsicType,
+      props: normalizedProps as HostPropsWithoutChildren<'g2d-group'>,
+      children: [],
+    };
+  }
+  if (intrinsicType === 'g2d-path') {
+    return {
+      type: intrinsicType,
+      props: normalizedProps as HostPropsWithoutChildren<'g2d-path'>,
+      children: [],
+    };
+  }
+  if (intrinsicType === 'g2d-rect') {
+    return {
+      type: intrinsicType,
+      props: normalizedProps as HostPropsWithoutChildren<'g2d-rect'>,
+      children: [],
+    };
+  }
+  if (intrinsicType === 'g2d-circle') {
+    return {
+      type: intrinsicType,
+      props: normalizedProps as HostPropsWithoutChildren<'g2d-circle'>,
       children: [],
     };
   }
@@ -582,20 +779,22 @@ const reconcile3DSceneSnapshot = (
       return nodeIndex + 1;
     }
     if (child.type === 'g2d-scene') {
-      const scene2d = create2dSceneDescriptor(child.props);
+      const scene2d = create2dSceneDescriptor(child.props, child.children);
       scenes2d.push(scene2d);
       visitedResourceIds.texture.add(scene2d.textureId);
       upsertG3dSceneDocumentResource(document, {
         kind: 'texture',
         value: create2dSceneTextureRef(child.props),
       });
-      if (child.children.length > 0) {
-        throw new Error('<g2d-scene> does not support children yet');
-      }
       return nodeIndex;
     }
 
     switch (child.type) {
+      case 'g2d-group':
+      case 'g2d-path':
+      case 'g2d-rect':
+      case 'g2d-circle':
+        throw new Error(`<${child.type}> must be placed inside <g2d-scene>`);
       case 'g3d-asset':
         visitedResourceIds.asset.add(child.props.id);
         upsertG3dSceneDocumentResource(document, { kind: 'asset', value: child.props });
@@ -687,14 +886,11 @@ const syncContainerSceneDocument = (container: HostContainer): void => {
   if (rootInstance.type === 'g2d-scene') {
     const document = container.document ?? createG3dSceneDocument(rootInstance.props.id);
     container.document = document;
-    const scene2d = create2dSceneDescriptor(rootInstance.props);
+    const scene2d = create2dSceneDescriptor(rootInstance.props, rootInstance.children);
     upsertG3dSceneDocumentResource(document, {
       kind: 'texture',
       value: create2dSceneTextureRef(rootInstance.props),
     });
-    if (rootInstance.children.length > 0) {
-      throw new Error('<g2d-scene> does not support children yet');
-    }
     applyG3dSceneDocumentScene(document, { id: rootInstance.props.id });
     for (const nodeId of [...document.nodes.order].reverse()) {
       removeG3dSceneDocumentNode(document, nodeId);

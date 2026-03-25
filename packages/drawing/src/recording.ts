@@ -1,4 +1,4 @@
-import type { Path2D } from '@goldlight/geometry';
+import type { Path2d } from '@goldlight/geometry';
 import { cloneDrawingClipStackSnapshot } from './clip_stack.ts';
 import type { DawnCaps } from './caps.ts';
 import type { DrawingRendererProvider } from './renderer_provider.ts';
@@ -20,7 +20,7 @@ export type DrawingRecording = Readonly<{
 }>;
 
 const cloneCommand = (command: DrawingCommand): DrawingCommand => {
-  const clonePath = (path: Path2D | undefined): Path2D | undefined =>
+  const clonePath = (path: Path2d | undefined): Path2d | undefined =>
     path
       ? {
         verbs: path.verbs.map((verb) => ({ ...verb })),

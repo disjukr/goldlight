@@ -1,14 +1,14 @@
 import { assertAlmostEquals, assertEquals, assertThrows } from 'jsr:@std/assert@^1.0.14';
 import { createOffscreenBinding } from '@goldlight/gpu';
 import {
-  createPath2D,
+  createPath2d,
   createRect,
-  createRectPath2D,
-  createRRectPath2D,
-  createScaleMatrix2D,
-  createTranslationMatrix2D,
-  identityMatrix2D,
-  withPath2DFillRule,
+  createRectPath2d,
+  createRRectPath2d,
+  createScaleMatrix2d,
+  createTranslationMatrix2d,
+  identityMatrix2d,
+  withPath2dFillRule,
 } from '@goldlight/geometry';
 import {
   addCommandBufferToDawnQueueManager,
@@ -27,7 +27,7 @@ import {
   createDawnSharedContext,
   createDrawingClipStackSnapshot,
   createDrawingContext,
-  createDrawingPath2DFromShape,
+  createDrawingPath2dFromShape,
   createDrawingRecorder,
   createDrawingRendererProvider,
   encodeDawnCommandBuffer,
@@ -227,7 +227,7 @@ const createMockGpuContext = () => {
 };
 
 Deno.test('drawing shape path delegates path generation to geometry package', () => {
-  const path = createDrawingPath2DFromShape({
+  const path = createDrawingPath2dFromShape({
     kind: 'rect',
     rect: createRect(10, 20, 30, 40),
   });
@@ -338,7 +338,7 @@ Deno.test('prepareDawnRecording uses the shared-context renderer provider', () =
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [16, 16] },
       { kind: 'lineTo', to: [96, 16] },
       { kind: 'lineTo', to: [96, 96] },
@@ -366,7 +366,7 @@ Deno.test('curve stencil fills use Graphite middle-out fan triangles', () => {
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [16, 16] },
       { kind: 'lineTo', to: [96, 16] },
       { kind: 'lineTo', to: [96, 96] },
@@ -402,7 +402,7 @@ Deno.test('curve stencil fills keep a non-empty fan draw step', () => {
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [16, 16] },
       { kind: 'lineTo', to: [96, 16] },
       { kind: 'lineTo', to: [96, 96] },
@@ -434,7 +434,7 @@ Deno.test('curve stencil fills do not encode line patches into Graphite curve in
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [16, 16] },
       { kind: 'lineTo', to: [96, 16] },
       { kind: 'quadTo', control: [128, 48], to: [96, 96] },
@@ -466,7 +466,7 @@ Deno.test('curve stencil fills encode chopped helper triangles as curve patches'
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [0, 0] },
       { kind: 'cubicTo', control1: [0, 2400], control2: [2400, 2400], to: [2400, 0] },
       { kind: 'close' },
@@ -496,7 +496,7 @@ Deno.test('wedge stencil fills chop large cubics into Graphite fan patches', () 
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [0, 0] },
       { kind: 'cubicTo', control1: [0, 2400], control2: [2400, 2400], to: [2400, 0] },
       { kind: 'close' },
@@ -568,7 +568,7 @@ Deno.test('dawn stroke shader keeps graphite duplicated-edge seam handling', () 
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [24, 24] },
       { kind: 'lineTo', to: [96, 24] },
       { kind: 'lineTo', to: [96, 96] },
@@ -597,7 +597,7 @@ Deno.test('dawn stroke shader pretransforms hairlines before tessellation like g
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [24, 24] },
       { kind: 'lineTo', to: [96, 48] },
     ),
@@ -791,7 +791,7 @@ Deno.test('drawing recorder records transform and clip state into draw commands'
   clipDrawingRecorderRect(recorder, createRect(20, 30, 40, 50));
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [1, 1] },
       { kind: 'lineTo', to: [4, 1] },
       { kind: 'lineTo', to: [4, 5] },
@@ -802,7 +802,7 @@ Deno.test('drawing recorder records transform and clip state into draw commands'
   restoreDrawingRecorder(recorder);
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [0, 0] },
       { kind: 'lineTo', to: [1, 0] },
       { kind: 'lineTo', to: [1, 1] },
@@ -828,7 +828,7 @@ Deno.test('drawing recorder records transform and clip state into draw commands'
   assertEquals(first.clipStack.saveRecords.length, 2);
   assertEquals(first.clipStack.elements[0].clip.op, 'intersect');
   assertEquals(first.clipStack.elements[0].clip.rect, createRect(20, 30, 40, 50));
-  assertEquals(second.transform, identityMatrix2D);
+  assertEquals(second.transform, identityMatrix2d);
   assertEquals(second.clipStack.elements.length, 0);
   assertEquals(first.path.verbs[0], { kind: 'moveTo', to: [1, 1] });
 });
@@ -843,7 +843,7 @@ Deno.test('clip stack defers save-record materialization until a clip mutates it
     kind: 'rect',
     op: 'intersect',
     rect: createRect(8, 12, 24, 28),
-    transform: identityMatrix2D,
+    transform: identityMatrix2d,
   });
 
   assertEquals(materialized.saveRecords.length, 2);
@@ -862,13 +862,13 @@ Deno.test('clip stack invalidates superseded rect intersects within the active s
     kind: 'rect',
     op: 'intersect',
     rect: createRect(0, 0, 96, 96),
-    transform: identityMatrix2D,
+    transform: identityMatrix2d,
   });
   clipStack = appendDrawingClipStackElement(clipStack, {
     kind: 'rect',
     op: 'intersect',
     rect: createRect(16, 20, 32, 28),
-    transform: identityMatrix2D,
+    transform: identityMatrix2d,
   });
 
   assertEquals(clipStack.elements.length, 2);
@@ -927,11 +927,11 @@ Deno.test('drawing recorder supports explicit transform concatenation', () => {
     createDawnSharedContext(createDawnBackendContext(mock.context)),
   );
 
-  concatDrawingRecorderTransform(recorder, createTranslationMatrix2D(5, 8));
-  concatDrawingRecorderTransform(recorder, createScaleMatrix2D(2, 2));
+  concatDrawingRecorderTransform(recorder, createTranslationMatrix2d(5, 8));
+  concatDrawingRecorderTransform(recorder, createScaleMatrix2d(2, 2));
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [1, 1] },
       { kind: 'lineTo', to: [2, 1] },
       { kind: 'lineTo', to: [2, 2] },
@@ -977,7 +977,7 @@ Deno.test('drawing prepared recording groups clear and prepared steps into passe
   recordClear(recorder, [0.1, 0.2, 0.3, 1]);
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [0, 0] },
       { kind: 'lineTo', to: [20, 0] },
       { kind: 'lineTo', to: [20, 20] },
@@ -1008,7 +1008,7 @@ Deno.test('drawing prepared recording preserves supported coeff blend modes', ()
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [0, 0] },
       { kind: 'lineTo', to: [20, 0] },
       { kind: 'lineTo', to: [20, 20] },
@@ -1031,7 +1031,7 @@ Deno.test('drawing prepared recording keeps plus and screen on hardware blend pa
   const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
   const plusRecorder = drawingContext.createRecorder();
   const screenRecorder = drawingContext.createRecorder();
-  const path = createPath2D(
+  const path = createPath2d(
     { kind: 'moveTo', to: [0, 0] },
     { kind: 'lineTo', to: [20, 0] },
     { kind: 'lineTo', to: [20, 20] },
@@ -1059,7 +1059,7 @@ Deno.test('drawing prepared recording keeps coeff dst-over on the hardware blend
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [0, 0] },
       { kind: 'lineTo', to: [20, 0] },
       { kind: 'lineTo', to: [20, 20] },
@@ -1084,7 +1084,7 @@ Deno.test('drawing prepared recording marks advanced blend modes for dst read', 
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [0, 0] },
       { kind: 'lineTo', to: [20, 0] },
       { kind: 'lineTo', to: [20, 20] },
@@ -1109,7 +1109,7 @@ Deno.test('drawing prepared recording treats lcd coverage as dst-read for non-sr
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [0, 0] },
       { kind: 'lineTo', to: [20, 0] },
       { kind: 'lineTo', to: [20, 20] },
@@ -1133,7 +1133,7 @@ Deno.test('drawing prepared recording carries arithmetic custom blenders into ds
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [0, 0] },
       { kind: 'lineTo', to: [20, 0] },
       { kind: 'lineTo', to: [20, 20] },
@@ -1160,7 +1160,7 @@ Deno.test('drawing prepared recording assigns original painter depth within each
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [0, 0] },
       { kind: 'lineTo', to: [20, 0] },
       { kind: 'lineTo', to: [20, 20] },
@@ -1171,7 +1171,7 @@ Deno.test('drawing prepared recording assigns original painter depth within each
   recordClear(recorder, [1, 1, 1, 1]);
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [24, 0] },
       { kind: 'lineTo', to: [44, 0] },
       { kind: 'lineTo', to: [44, 20] },
@@ -1181,7 +1181,7 @@ Deno.test('drawing prepared recording assigns original painter depth within each
   );
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [48, 0] },
       { kind: 'lineTo', to: [68, 0] },
       { kind: 'lineTo', to: [68, 20] },
@@ -1207,7 +1207,7 @@ Deno.test('drawing prepared recording marks overlapping translucent draws as dst
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [0, 0] },
       { kind: 'lineTo', to: [40, 0] },
       { kind: 'lineTo', to: [40, 40] },
@@ -1217,7 +1217,7 @@ Deno.test('drawing prepared recording marks overlapping translucent draws as dst
   );
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [20, 20] },
       { kind: 'lineTo', to: [60, 20] },
       { kind: 'lineTo', to: [60, 60] },
@@ -1243,7 +1243,7 @@ Deno.test('drawing prepared recording compresses disjoint opaque fills to same p
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [0, 0] },
       { kind: 'lineTo', to: [20, 0] },
       { kind: 'lineTo', to: [20, 20] },
@@ -1253,7 +1253,7 @@ Deno.test('drawing prepared recording compresses disjoint opaque fills to same p
   );
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [40, 0] },
       { kind: 'lineTo', to: [60, 0] },
       { kind: 'lineTo', to: [60, 20] },
@@ -1279,7 +1279,7 @@ Deno.test('drawing prepared recording assigns distinct disjoint stencil indices 
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [0, 0] },
       { kind: 'cubicTo', control1: [60, -20], control2: [60, 80], to: [0, 60] },
       { kind: 'lineTo', to: [10, 10] },
@@ -1289,7 +1289,7 @@ Deno.test('drawing prepared recording assigns distinct disjoint stencil indices 
   );
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [20, 0] },
       { kind: 'cubicTo', control1: [80, -20], control2: [80, 80], to: [20, 60] },
       { kind: 'lineTo', to: [30, 10] },
@@ -1316,7 +1316,7 @@ Deno.test('drawing prepared recording keeps direct fills after stencil buckets a
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [0, 0] },
       { kind: 'cubicTo', control1: [60, -20], control2: [60, 80], to: [0, 60] },
       { kind: 'lineTo', to: [10, 10] },
@@ -1326,7 +1326,7 @@ Deno.test('drawing prepared recording keeps direct fills after stencil buckets a
   );
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [10, 10] },
       { kind: 'lineTo', to: [50, 10] },
       { kind: 'lineTo', to: [50, 50] },
@@ -1356,7 +1356,7 @@ Deno.test('drawing prepared recording preserves stencil step order within a sing
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [0, 0] },
       { kind: 'cubicTo', control1: [60, -20], control2: [60, 80], to: [0, 60] },
       { kind: 'lineTo', to: [10, 10] },
@@ -1366,7 +1366,7 @@ Deno.test('drawing prepared recording preserves stencil step order within a sing
   );
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [80, 0] },
       { kind: 'lineTo', to: [120, 0] },
       { kind: 'lineTo', to: [120, 40] },
@@ -1391,7 +1391,7 @@ Deno.test('drawing prepared recording compresses disjoint translucent draws to s
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [0, 0] },
       { kind: 'lineTo', to: [20, 0] },
       { kind: 'lineTo', to: [20, 20] },
@@ -1401,7 +1401,7 @@ Deno.test('drawing prepared recording compresses disjoint translucent draws to s
   );
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [40, 0] },
       { kind: 'lineTo', to: [60, 0] },
       { kind: 'lineTo', to: [60, 20] },
@@ -1427,7 +1427,7 @@ Deno.test('drawing prepared recording can drop back to earlier compressed paint 
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [0, 0] },
       { kind: 'lineTo', to: [20, 0] },
       { kind: 'lineTo', to: [20, 20] },
@@ -1437,7 +1437,7 @@ Deno.test('drawing prepared recording can drop back to earlier compressed paint 
   );
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [10, 10] },
       { kind: 'lineTo', to: [30, 10] },
       { kind: 'lineTo', to: [30, 30] },
@@ -1447,7 +1447,7 @@ Deno.test('drawing prepared recording can drop back to earlier compressed paint 
   );
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [60, 60] },
       { kind: 'lineTo', to: [80, 60] },
       { kind: 'lineTo', to: [80, 80] },
@@ -1473,7 +1473,7 @@ Deno.test('drawing prepared recording uses clipped draw bounds for dst dependenc
   clipDrawingRecorderRect(recorder, createRect(0, 0, 20, 20));
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [0, 0] },
       { kind: 'lineTo', to: [60, 0] },
       { kind: 'lineTo', to: [60, 60] },
@@ -1486,7 +1486,7 @@ Deno.test('drawing prepared recording uses clipped draw bounds for dst dependenc
   clipDrawingRecorderRect(recorder, createRect(40, 40, 20, 20));
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [0, 0] },
       { kind: 'lineTo', to: [60, 0] },
       { kind: 'lineTo', to: [60, 60] },
@@ -1516,7 +1516,7 @@ Deno.test('drawing prepared recording uses conservative transformed stroke bound
   concatDrawingRecorderTransform(recorder, skewTransform);
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [0, 0] },
       { kind: 'lineTo', to: [10, 50] },
     ),
@@ -1524,7 +1524,7 @@ Deno.test('drawing prepared recording uses conservative transformed stroke bound
   );
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [18, 0] },
       { kind: 'lineTo', to: [28, 50] },
     ),
@@ -1547,7 +1547,7 @@ Deno.test('drawing prepared recording uses Graphite-style stroke inflation for t
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [410, 675] },
       {
         kind: 'arcTo',
@@ -1567,7 +1567,7 @@ Deno.test('drawing prepared recording uses Graphite-style stroke inflation for t
   );
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [500, 748] },
       { kind: 'lineTo', to: [542, 878] },
       { kind: 'lineTo', to: [430, 796] },
@@ -1607,7 +1607,7 @@ Deno.test('drawing prepared recording preserves shared clip element ids across r
   saveDrawingRecorder(recorder);
   clipDrawingRecorderPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [10, 10] },
       { kind: 'lineTo', to: [40, 10] },
       { kind: 'lineTo', to: [25, 40] },
@@ -1616,7 +1616,7 @@ Deno.test('drawing prepared recording preserves shared clip element ids across r
   );
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [0, 0] },
       { kind: 'lineTo', to: [50, 0] },
       { kind: 'lineTo', to: [50, 50] },
@@ -1627,7 +1627,7 @@ Deno.test('drawing prepared recording preserves shared clip element ids across r
   restoreDrawingRecorder(recorder);
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [0, 0] },
       { kind: 'lineTo', to: [50, 0] },
       { kind: 'lineTo', to: [50, 50] },
@@ -1654,7 +1654,7 @@ Deno.test('drawing prepared recording finalizes deferred clip draws when a clear
 
   clipDrawingRecorderPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [16, 16] },
       { kind: 'lineTo', to: [96, 16] },
       { kind: 'lineTo', to: [64, 96] },
@@ -1663,7 +1663,7 @@ Deno.test('drawing prepared recording finalizes deferred clip draws when a clear
   );
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [0, 0] },
       { kind: 'lineTo', to: [128, 0] },
       { kind: 'lineTo', to: [128, 128] },
@@ -1706,7 +1706,7 @@ Deno.test('drawing prepared recording preserves clip boundary ordering across su
 
   clipDrawingRecorderPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [16, 16] },
       { kind: 'lineTo', to: [112, 16] },
       { kind: 'lineTo', to: [64, 112] },
@@ -1715,7 +1715,7 @@ Deno.test('drawing prepared recording preserves clip boundary ordering across su
   );
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [24, 24] },
       { kind: 'lineTo', to: [104, 24] },
       { kind: 'lineTo', to: [104, 104] },
@@ -1731,7 +1731,7 @@ Deno.test('drawing prepared recording preserves clip boundary ordering across su
   );
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [32, 32] },
       { kind: 'lineTo', to: [96, 32] },
       { kind: 'lineTo', to: [96, 96] },
@@ -1756,7 +1756,7 @@ Deno.test('drawing prepared recording isolates dst-read barrier wrappers from or
   const mock = createMockGpuContext();
   const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
   const recorder = drawingContext.createRecorder();
-  const path = createPath2D(
+  const path = createPath2d(
     { kind: 'moveTo', to: [16, 16] },
     { kind: 'lineTo', to: [96, 16] },
     { kind: 'lineTo', to: [96, 96] },
@@ -1785,17 +1785,17 @@ Deno.test('drawing prepared recording preserves record order for ordinary fills 
 
   recordDrawPath(
     recorder,
-    createRectPath2D(createRect(0, 0, 160, 160)),
+    createRectPath2d(createRect(0, 0, 160, 160)),
     { style: 'fill', color: [0.1, 0.1, 0.1, 1] },
   );
   recordDrawPath(
     recorder,
-    createRectPath2D(createRect(16, 16, 48, 48)),
+    createRectPath2d(createRect(16, 16, 48, 48)),
     { style: 'fill', color: [1, 0, 0, 1] },
   );
   recordDrawPath(
     recorder,
-    createRectPath2D(createRect(80, 16, 48, 48)),
+    createRectPath2d(createRect(80, 16, 48, 48)),
     { style: 'fill', color: [0, 1, 0, 1] },
   );
 
@@ -1813,7 +1813,7 @@ Deno.test('drawing prepared recording expands stencil fills into render steps', 
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [16, 16] },
       { kind: 'lineTo', to: [96, 16] },
       { kind: 'lineTo', to: [96, 96] },
@@ -1843,7 +1843,7 @@ Deno.test('dawn command buffer executes expanded render steps for stencil fills'
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [16, 16] },
       { kind: 'lineTo', to: [96, 16] },
       { kind: 'lineTo', to: [96, 96] },
@@ -1876,7 +1876,7 @@ Deno.test('dawn preparation separates recording, draw-pass preparation, and reso
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [16, 16] },
       { kind: 'quadTo', control: [64, 0], to: [112, 16] },
       { kind: 'lineTo', to: [112, 112] },
@@ -1913,7 +1913,7 @@ Deno.test('drawing prepared recording selects convex tessellated wedges for simp
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [16, 16] },
       { kind: 'lineTo', to: [96, 16] },
       { kind: 'lineTo', to: [120, 64] },
@@ -1939,7 +1939,7 @@ Deno.test('drawing prepared recording uses Graphite convexity for concave cubic 
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [370, 89] },
       {
         kind: 'cubicTo',
@@ -1984,7 +1984,7 @@ Deno.test('drawing prepared recording uses Graphite path bounds for cubic fill c
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [88, 850] },
       { kind: 'lineTo', to: [282, 850] },
       { kind: 'lineTo', to: [282, 890] },
@@ -2018,7 +2018,7 @@ Deno.test('drawing prepared recording flattens quadratic and cubic paths for fil
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [24, 96] },
       { kind: 'quadTo', control: [96, 24], to: [168, 96] },
       { kind: 'cubicTo', control1: [192, 120], control2: [96, 180], to: [24, 144] },
@@ -2051,7 +2051,7 @@ Deno.test('drawing prepared recording flattens conic and arc verbs', () => {
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [48, 120] },
       { kind: 'conicTo', control: [120, 24], to: [192, 120], weight: 0.5 },
       {
@@ -2083,7 +2083,7 @@ Deno.test('drawing prepared recording splits cusp-like cubic patches', () => {
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [32, 96] },
       { kind: 'cubicTo', control1: [96, 32], control2: [96, 160], to: [160, 96] },
       { kind: 'close' },
@@ -2105,12 +2105,12 @@ Deno.test('drawing prepared recording splits cusp-like cubic patches', () => {
 Deno.test('drawing prepared recording computes Wang-style resolve levels for patches', () => {
   const mock = createMockGpuContext();
   const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
-  const createResolveLevel = (transform = identityMatrix2D) => {
+  const createResolveLevel = (transform = identityMatrix2d) => {
     const recorder = drawingContext.createRecorder();
     concatDrawingRecorderTransform(recorder, transform);
     recordDrawPath(
       recorder,
-      createPath2D(
+      createPath2d(
         { kind: 'moveTo', to: [16, 96] },
         { kind: 'cubicTo', control1: [96, 0], control2: [160, 192], to: [240, 96] },
         { kind: 'close' },
@@ -2131,7 +2131,7 @@ Deno.test('drawing prepared recording computes Wang-style resolve levels for pat
   };
 
   const baseResolveLevel = createResolveLevel();
-  const scaledResolveLevel = createResolveLevel(createScaleMatrix2D(4, 4));
+  const scaledResolveLevel = createResolveLevel(createScaleMatrix2d(4, 4));
 
   assertEquals(scaledResolveLevel >= baseResolveLevel, true);
 });
@@ -2143,7 +2143,7 @@ Deno.test('drawing prepared recording uses Graphite contour midpoint for wedge f
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [24, 24] },
       { kind: 'lineTo', to: [144, 24] },
       { kind: 'lineTo', to: [144, 120] },
@@ -2186,7 +2186,7 @@ Deno.test('drawing prepared wedge fills implicitly close open contours like Grap
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [16, 16] },
       { kind: 'lineTo', to: [96, 16] },
       { kind: 'lineTo', to: [96, 96] },
@@ -2220,8 +2220,8 @@ Deno.test('drawing prepared recording preserves evenodd fill rule through draw s
 
   recordDrawPath(
     recorder,
-    withPath2DFillRule(
-      createPath2D(
+    withPath2dFillRule(
+      createPath2d(
         { kind: 'moveTo', to: [16, 16] },
         { kind: 'lineTo', to: [120, 16] },
         { kind: 'lineTo', to: [120, 120] },
@@ -2261,7 +2261,7 @@ Deno.test('drawing prepared recording derives clip bounds from clip path', () =>
 
   clipDrawingRecorderPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [32, 40] },
       { kind: 'lineTo', to: [96, 40] },
       { kind: 'lineTo', to: [96, 88] },
@@ -2271,7 +2271,7 @@ Deno.test('drawing prepared recording derives clip bounds from clip path', () =>
   );
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [0, 0] },
       { kind: 'lineTo', to: [120, 0] },
       { kind: 'lineTo', to: [120, 120] },
@@ -2295,7 +2295,7 @@ Deno.test('drawing prepared recording preserves patch fill when convex clips are
 
   clipDrawingRecorderPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [48, 32] },
       { kind: 'lineTo', to: [112, 48] },
       { kind: 'lineTo', to: [96, 112] },
@@ -2305,7 +2305,7 @@ Deno.test('drawing prepared recording preserves patch fill when convex clips are
   );
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [24, 96] },
       { kind: 'quadTo', control: [96, 24], to: [168, 96] },
       { kind: 'cubicTo', control1: [192, 120], control2: [96, 180], to: [24, 144] },
@@ -2341,7 +2341,7 @@ Deno.test('drawing prepared recording accumulates clip stack intersections', () 
   clipDrawingRecorderRect(recorder, createRect(32, 24, 48, 72));
   clipDrawingRecorderPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [24, 32] },
       { kind: 'lineTo', to: [88, 32] },
       { kind: 'lineTo', to: [88, 72] },
@@ -2351,7 +2351,7 @@ Deno.test('drawing prepared recording accumulates clip stack intersections', () 
   );
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [0, 0] },
       { kind: 'lineTo', to: [120, 0] },
       { kind: 'lineTo', to: [120, 120] },
@@ -2374,7 +2374,7 @@ Deno.test('drawing prepared recording preserves difference clips as stencil elem
   clipDrawingRecorderRect(recorder, createRect(40, 40, 32, 32), 'difference');
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [0, 0] },
       { kind: 'lineTo', to: [128, 0] },
       { kind: 'lineTo', to: [128, 128] },
@@ -2406,7 +2406,7 @@ Deno.test('drawing prepared recording preserves stroke patches when convex clips
 
   clipDrawingRecorderPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [40, 32] },
       { kind: 'lineTo', to: [104, 32] },
       { kind: 'lineTo', to: [120, 96] },
@@ -2416,7 +2416,7 @@ Deno.test('drawing prepared recording preserves stroke patches when convex clips
   );
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [32, 96] },
       { kind: 'cubicTo', control1: [48, 16], control2: [144, 16], to: [160, 96] },
       { kind: 'lineTo', to: [160, 160] },
@@ -2446,7 +2446,7 @@ Deno.test('drawing prepared recording collapses multiple complex path clips into
 
   clipDrawingRecorderPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [16, 16] },
       { kind: 'lineTo', to: [96, 16] },
       { kind: 'lineTo', to: [96, 96] },
@@ -2461,7 +2461,7 @@ Deno.test('drawing prepared recording collapses multiple complex path clips into
   );
   clipDrawingRecorderPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [40, 8] },
       { kind: 'lineTo', to: [104, 56] },
       { kind: 'lineTo', to: [40, 104] },
@@ -2476,7 +2476,7 @@ Deno.test('drawing prepared recording collapses multiple complex path clips into
   );
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [0, 0] },
       { kind: 'lineTo', to: [120, 0] },
       { kind: 'lineTo', to: [120, 120] },
@@ -2512,7 +2512,7 @@ Deno.test('drawing prepared recording carries analytic and shader clip metadata'
   });
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [0, 0] },
       { kind: 'lineTo', to: [96, 0] },
       { kind: 'lineTo', to: [96, 96] },
@@ -2541,7 +2541,7 @@ Deno.test('drawing prepared recording carries linear gradient shader metadata', 
 
   recordDrawPath(
     recorder,
-    createRectPath2D(createRect(24, 24, 120, 96)),
+    createRectPath2d(createRect(24, 24, 120, 96)),
     {
       style: 'fill',
       shader: {
@@ -2572,7 +2572,7 @@ Deno.test('dawn command buffer encodes gradient-filled draws without unsupported
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [48, 32] },
       { kind: 'lineTo', to: [128, 56] },
       { kind: 'lineTo', to: [112, 144] },
@@ -2621,7 +2621,7 @@ Deno.test('drawing prepared recording falls back for self-intersecting fill path
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [32, 32] },
       { kind: 'lineTo', to: [96, 96] },
       { kind: 'lineTo', to: [32, 96] },
@@ -2670,7 +2670,7 @@ Deno.test('drawing prepared recording expands stroke joins and caps', () => {
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [32, 96] },
       { kind: 'lineTo', to: [96, 32] },
       { kind: 'lineTo', to: [160, 96] },
@@ -2695,7 +2695,7 @@ Deno.test('drawing prepared stroke patches seed open contours from first tangent
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [0, 0] },
       { kind: 'quadTo', control: [20, 30], to: [40, 0] },
     ),
@@ -2725,7 +2725,7 @@ Deno.test('drawing prepared stroke patches keep open contour joins chained acros
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [410, 730] },
       {
         kind: 'arcTo',
@@ -2756,7 +2756,7 @@ Deno.test('drawing prepared stroke patches rewrite closed contour first join con
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [0, 0] },
       { kind: 'lineTo', to: [40, 0] },
       { kind: 'lineTo', to: [40, 30] },
@@ -2784,7 +2784,7 @@ Deno.test('drawing prepared stroke patches emit synthetic circle patches for rou
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [32, 96] },
       { kind: 'lineTo', to: [96, 32] },
       { kind: 'lineTo', to: [160, 96] },
@@ -2820,7 +2820,7 @@ Deno.test('drawing prepared stroke patches preserve bevel and miter line joins i
     const recorder = drawingContext.createRecorder();
     recordDrawPath(
       recorder,
-      createPath2D(
+      createPath2d(
         { kind: 'moveTo', to: [32, 96] },
         { kind: 'lineTo', to: [96, 32] },
         { kind: 'lineTo', to: [160, 96] },
@@ -2845,7 +2845,7 @@ Deno.test('drawing prepared stroke patches preserve bevel and miter line joins i
   const bevelRecorder = drawingContext.createRecorder();
   recordDrawPath(
     bevelRecorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [32, 96] },
       { kind: 'lineTo', to: [96, 32] },
       { kind: 'lineTo', to: [160, 96] },
@@ -2872,7 +2872,7 @@ Deno.test('drawing prepared stroke patches emit square cap patches for open cont
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [260, 315] },
       { kind: 'lineTo', to: [380, 315] },
     ),
@@ -2902,7 +2902,7 @@ Deno.test('drawing prepared stroke patches emit synthetic cap patches for degene
     const recorder = drawingContext.createRecorder();
     recordDrawPath(
       recorder,
-      createPath2D(
+      createPath2d(
         { kind: 'moveTo', to: [96, 96] },
         { kind: 'lineTo', to: [96, 96] },
       ),
@@ -2946,7 +2946,7 @@ Deno.test('drawing prepared stroke patches treat empty closed contours as zero-l
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [144, 96] },
       { kind: 'close' },
     ),
@@ -2974,7 +2974,7 @@ Deno.test('drawing prepared stroke patches treat empty closed contours as zero-l
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [200, 140] },
       { kind: 'close' },
     ),
@@ -3004,7 +3004,7 @@ Deno.test('drawing prepared stroke patches use inverse view scale for hairline s
   concatDrawingRecorderTransform(recorder, [2, 1, 0, 3, 0, 0]);
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [200, 140] },
       { kind: 'close' },
     ),
@@ -3032,7 +3032,7 @@ Deno.test('drawing prepared recording reopens contours from the closed start poi
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [10, 10] },
       { kind: 'lineTo', to: [30, 10] },
       { kind: 'lineTo', to: [30, 30] },
@@ -3068,7 +3068,7 @@ Deno.test('dawn prepared stroke payload stores cpu-derived maxScale for tessella
   concatDrawingRecorderTransform(recorder, transform);
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [0, 0] },
       { kind: 'quadTo', control: [20, 30], to: [40, 0] },
     ),
@@ -3093,7 +3093,7 @@ Deno.test('drawing prepared stroke patches split quadratic cusps at the Skia mid
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [0, 0] },
       { kind: 'quadTo', control: [4, 0], to: [1, 0] },
     ),
@@ -3130,7 +3130,7 @@ Deno.test('drawing prepared stroke patches split conic cusps at the Skia mid-tan
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [0, 0] },
       { kind: 'conicTo', control: [4, 0], to: [1, 0], weight: 0.5 },
     ),
@@ -3167,7 +3167,7 @@ Deno.test('drawing prepared stroke patches emit cusp circles for turnaround curv
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [32, 96] },
       { kind: 'cubicTo', control1: [96, 32], control2: [96, 160], to: [160, 96] },
     ),
@@ -3191,7 +3191,7 @@ Deno.test('drawing prepared stroke patches convert two-cusp cubics into line fal
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [0, 0] },
       { kind: 'cubicTo', control1: [100, 0], control2: [-100, 0], to: [0, 0] },
     ),
@@ -3217,7 +3217,7 @@ Deno.test('drawing prepared recording applies dash pattern to strokes', () => {
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [16, 48] },
       { kind: 'lineTo', to: [208, 48] },
     ),
@@ -3241,7 +3241,7 @@ Deno.test('drawing prepared recording scales hairline alpha coverage', () => {
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [32, 32] },
       { kind: 'lineTo', to: [160, 32] },
     ),
@@ -3262,7 +3262,7 @@ Deno.test('drawing prepared recording adds non-AA inner fill render step for ren
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [16, 16] },
       { kind: 'lineTo', to: [96, 16] },
       { kind: 'lineTo', to: [96, 96] },
@@ -3285,7 +3285,7 @@ Deno.test('drawing prepared recording skips non-AA inner fill for non-rect path 
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [16, 96] },
       { kind: 'lineTo', to: [64, 16] },
       { kind: 'lineTo', to: [112, 96] },
@@ -3308,7 +3308,7 @@ Deno.test('dawn command buffer emits inner fill draw before translucent coverage
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [16, 16] },
       { kind: 'lineTo', to: [96, 16] },
       { kind: 'lineTo', to: [96, 96] },
@@ -3331,7 +3331,7 @@ Deno.test('dawn command buffer omits inner fill draw for non-rect path fills', (
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [16, 96] },
       { kind: 'lineTo', to: [64, 16] },
       { kind: 'lineTo', to: [112, 96] },
@@ -3354,7 +3354,7 @@ Deno.test('dawn command buffer keeps translated fill-cover vertices in device sp
   translateDrawingRecorder(recorder, 20, 30);
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [16, 16] },
       { kind: 'lineTo', to: [96, 16] },
       { kind: 'lineTo', to: [96, 96] },
@@ -3398,7 +3398,7 @@ Deno.test('dawn command buffer encodes fill draws with stencil and cover pipelin
   clipDrawingRecorderRect(recorder, createRect(4, 6, 40, 50));
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [0, 0] },
       { kind: 'lineTo', to: [40, 0] },
       { kind: 'lineTo', to: [40, 40] },
@@ -3440,7 +3440,7 @@ Deno.test('dawn command buffer uses stencil-cover fill path for patch-rendered n
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [24, 96] },
       { kind: 'quadTo', control: [96, 24], to: [168, 96] },
       { kind: 'cubicTo', control1: [192, 120], control2: [96, 180], to: [24, 144] },
@@ -3465,7 +3465,7 @@ Deno.test('dawn stencil cover clears winding stencil for successive nonzero fill
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [24, 24] },
       { kind: 'lineTo', to: [144, 24] },
       { kind: 'lineTo', to: [144, 144] },
@@ -3481,7 +3481,7 @@ Deno.test('dawn stencil cover clears winding stencil for successive nonzero fill
   );
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [168, 24] },
       { kind: 'lineTo', to: [240, 24] },
       { kind: 'lineTo', to: [240, 96] },
@@ -3519,7 +3519,7 @@ Deno.test('dawn command buffer clips via clip path stencil replay with clip boun
 
   clipDrawingRecorderPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [24, 30] },
       { kind: 'lineTo', to: [72, 30] },
       { kind: 'lineTo', to: [72, 78] },
@@ -3529,7 +3529,7 @@ Deno.test('dawn command buffer clips via clip path stencil replay with clip boun
   );
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [0, 0] },
       { kind: 'lineTo', to: [96, 0] },
       { kind: 'lineTo', to: [96, 96] },
@@ -3552,7 +3552,7 @@ Deno.test('dawn command buffer accumulates multiple stencil clip paths before co
 
   clipDrawingRecorderPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [16, 16] },
       { kind: 'lineTo', to: [96, 16] },
       { kind: 'lineTo', to: [96, 96] },
@@ -3567,7 +3567,7 @@ Deno.test('dawn command buffer accumulates multiple stencil clip paths before co
   );
   clipDrawingRecorderPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [40, 8] },
       { kind: 'lineTo', to: [104, 56] },
       { kind: 'lineTo', to: [40, 104] },
@@ -3582,7 +3582,7 @@ Deno.test('dawn command buffer accumulates multiple stencil clip paths before co
   );
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [0, 0] },
       { kind: 'lineTo', to: [120, 0] },
       { kind: 'lineTo', to: [120, 120] },
@@ -3612,7 +3612,7 @@ Deno.test('dawn command buffer reuses shared clip draws for identical clip stack
 
   clipDrawingRecorderPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [24, 24] },
       { kind: 'lineTo', to: [88, 24] },
       { kind: 'lineTo', to: [88, 88] },
@@ -3622,7 +3622,7 @@ Deno.test('dawn command buffer reuses shared clip draws for identical clip stack
   );
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [0, 0] },
       { kind: 'lineTo', to: [64, 0] },
       { kind: 'lineTo', to: [64, 64] },
@@ -3632,7 +3632,7 @@ Deno.test('dawn command buffer reuses shared clip draws for identical clip stack
   );
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [32, 32] },
       { kind: 'lineTo', to: [96, 32] },
       { kind: 'lineTo', to: [96, 96] },
@@ -3660,7 +3660,7 @@ Deno.test('dawn command buffer encodes stroke draws without stencil', () => {
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [32, 96] },
       { kind: 'cubicTo', control1: [48, 16], control2: [144, 16], to: [160, 96] },
       { kind: 'lineTo', to: [160, 160] },
@@ -3688,7 +3688,7 @@ Deno.test('dawn command buffer snapshots dst for offscreen dst-read blend modes'
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [16, 16] },
       { kind: 'lineTo', to: [72, 16] },
       { kind: 'lineTo', to: [72, 72] },
@@ -3699,7 +3699,7 @@ Deno.test('dawn command buffer snapshots dst for offscreen dst-read blend modes'
   );
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [40, 40] },
       { kind: 'lineTo', to: [96, 40] },
       { kind: 'lineTo', to: [96, 96] },
@@ -3759,7 +3759,7 @@ Deno.test('dawn command buffer snapshots dst for surface dst-read blend modes', 
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [16, 16] },
       { kind: 'lineTo', to: [72, 16] },
       { kind: 'lineTo', to: [72, 72] },
@@ -3770,7 +3770,7 @@ Deno.test('dawn command buffer snapshots dst for surface dst-read blend modes', 
   );
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [40, 40] },
       { kind: 'lineTo', to: [96, 40] },
       { kind: 'lineTo', to: [96, 96] },
@@ -3795,7 +3795,7 @@ Deno.test('dawn resource provider reuses one pipeline across shader-blended mode
   const mock = createMockGpuContext();
   const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
   const binding = createOffscreenBinding(mock.context);
-  const path = createPath2D(
+  const path = createPath2d(
     { kind: 'moveTo', to: [16, 16] },
     { kind: 'lineTo', to: [72, 16] },
     { kind: 'lineTo', to: [72, 72] },
@@ -3824,7 +3824,7 @@ Deno.test('dawn command buffer encodes arithmetic custom blender coefficients in
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [16, 16] },
       { kind: 'lineTo', to: [72, 16] },
       { kind: 'lineTo', to: [72, 72] },
@@ -3857,7 +3857,7 @@ Deno.test('dawn command buffer isolates tessellated stroke patches into a depth-
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [16, 16] },
       { kind: 'lineTo', to: [64, 16] },
       { kind: 'lineTo', to: [64, 64] },
@@ -3868,7 +3868,7 @@ Deno.test('dawn command buffer isolates tessellated stroke patches into a depth-
   );
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [96, 16] },
       { kind: 'lineTo', to: [160, 16] },
       { kind: 'lineTo', to: [160, 80] },
@@ -3905,7 +3905,7 @@ Deno.test('dawn stroke patch shader keeps Skia-like combined-edge solve structur
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [32, 96] },
       { kind: 'cubicTo', control1: [48, 16], control2: [144, 16], to: [160, 96] },
       { kind: 'lineTo', to: [160, 160] },
@@ -3974,7 +3974,7 @@ Deno.test('dawn resource provider reuses pipelines across command buffers', () =
     const recorder = createDrawingRecorder(sharedContext);
     recordDrawPath(
       recorder,
-      createPath2D(
+      createPath2d(
         { kind: 'moveTo', to: [16, 16] },
         { kind: 'lineTo', to: [96, 16] },
         { kind: 'lineTo', to: [96, 96] },
@@ -4014,7 +4014,7 @@ Deno.test('dawn pipelines honor target sample count for MSAA', () => {
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [16, 16] },
       { kind: 'lineTo', to: [64, 16] },
       { kind: 'lineTo', to: [64, 64] },
@@ -4486,7 +4486,7 @@ Deno.test('submitDrawingRecorder exposes draw commands without mutating backend 
 
   recordDrawPath(
     recorder,
-    createRRectPath2D({
+    createRRectPath2d({
       rect: createRect(24, 24, 80, 60),
       topLeft: { x: 12, y: 12 },
       topRight: { x: 12, y: 12 },

@@ -1,4 +1,4 @@
-import type { Point2D, Rect } from '@goldlight/geometry';
+import type { Point2d, Rect } from '@goldlight/geometry';
 import type { DrawingPreparedAtlasClip, DrawingPreparedClipElement } from './clip_stack.ts';
 import type { DawnBackendContext } from './dawn_backend_context.ts';
 import type { DawnResourceProvider } from './resource_provider.ts';
@@ -19,12 +19,12 @@ const textureBindingUsage = 0x04;
 const copyDstUsage = 0x02;
 
 const pointInTriangle = (
-  point: Point2D,
-  a: Point2D,
-  b: Point2D,
-  c: Point2D,
+  point: Point2d,
+  a: Point2d,
+  b: Point2d,
+  c: Point2d,
 ): boolean => {
-  const sign = (left: Point2D, right: Point2D, third: Point2D): number =>
+  const sign = (left: Point2d, right: Point2d, third: Point2d): number =>
     (left[0] - third[0]) * (right[1] - third[1]) - (right[0] - third[0]) * (left[1] - third[1]);
   const d1 = sign(point, a, b);
   const d2 = sign(point, b, c);
@@ -58,7 +58,7 @@ const rasterizeAtlasClip = (
       const maxY = Math.min(height - 1, Math.ceil(Math.max(a[1], b[1], c[1]) - bounds.origin[1]));
       for (let y = minY; y <= maxY; y += 1) {
         for (let x = minX; x <= maxX; x += 1) {
-          const sample: Point2D = [bounds.origin[0] + x + 0.5, bounds.origin[1] + y + 0.5];
+          const sample: Point2d = [bounds.origin[0] + x + 0.5, bounds.origin[1] + y + 0.5];
           if (pointInTriangle(sample, a, b, c)) {
             elementMask[(y * width) + x] = 255;
           }

@@ -6,14 +6,14 @@ import {
   setDrawingClipStackShader,
 } from './clip_stack.ts';
 import {
-  createScaleMatrix2D,
-  createTranslationMatrix2D,
-  identityMatrix2D,
-  multiplyMatrix2D,
-  type Path2D,
+  createScaleMatrix2d,
+  createTranslationMatrix2d,
+  identityMatrix2d,
+  multiplyMatrix2d,
+  type Path2d,
   type Rect,
 } from '@goldlight/geometry';
-import { createDrawingPath2DFromShape } from './geometry.ts';
+import { createDrawingPath2dFromShape } from './geometry.ts';
 import { createDrawingRecording, type DrawingRecording } from './recording.ts';
 import { type DawnSharedContext, registerDawnRecorder } from './shared_context.ts';
 import type {
@@ -23,7 +23,7 @@ import type {
   DrawingClipStackSnapshot,
   DrawingCommand,
   DrawingPaint,
-  DrawingPath2D,
+  DrawingPath2d,
   DrawingShapeDescriptor,
   DrawingSubmission,
   DrawPathCommand,
@@ -61,7 +61,7 @@ export const createDrawingRecorder = (
   sharedContext,
   commands: [],
   state: {
-    transform: identityMatrix2D,
+    transform: identityMatrix2d,
     clipStack: createDrawingClipStackSnapshot(),
   },
   stateStack: [],
@@ -81,12 +81,12 @@ export const recordClear = (
 
 export const recordDrawPath = (
   recorder: DrawingRecorder,
-  path: Path2D,
+  path: Path2d,
   paint: DrawingPaint = {},
 ): DrawPathCommand => {
   const command: DrawPathCommand = {
     kind: 'drawPath',
-    path: path as DrawingPath2D,
+    path: path as DrawingPath2d,
     paint,
     transform: recorder.state.transform,
     clipStack: recorder.state.clipStack,
@@ -103,7 +103,7 @@ export const recordDrawShape = (
   const command: DrawShapeCommand = {
     kind: 'drawShape',
     shape,
-    path: createDrawingPath2DFromShape(shape),
+    path: createDrawingPath2dFromShape(shape),
     paint,
     transform: recorder.state.transform,
     clipStack: recorder.state.clipStack,
@@ -125,7 +125,7 @@ export const restoreDrawingRecorder = (recorder: DrawingRecorder): void => {
   const mutable = recorder as MutableDrawingRecorder;
   const restored = mutable.stateStack.pop();
   mutable.state = restored ??
-    { transform: identityMatrix2D, clipStack: createDrawingClipStackSnapshot() };
+    { transform: identityMatrix2d, clipStack: createDrawingClipStackSnapshot() };
 };
 
 export const concatDrawingRecorderTransform = (
@@ -134,7 +134,7 @@ export const concatDrawingRecorderTransform = (
 ): void => {
   (recorder as MutableDrawingRecorder).state = {
     ...recorder.state,
-    transform: multiplyMatrix2D(transform, recorder.state.transform),
+    transform: multiplyMatrix2d(transform, recorder.state.transform),
   };
 };
 
@@ -143,7 +143,7 @@ export const translateDrawingRecorder = (
   tx: number,
   ty: number,
 ): void => {
-  concatDrawingRecorderTransform(recorder, createTranslationMatrix2D(tx, ty));
+  concatDrawingRecorderTransform(recorder, createTranslationMatrix2d(tx, ty));
 };
 
 export const scaleDrawingRecorder = (
@@ -151,7 +151,7 @@ export const scaleDrawingRecorder = (
   sx: number,
   sy = sx,
 ): void => {
-  concatDrawingRecorderTransform(recorder, createScaleMatrix2D(sx, sy));
+  concatDrawingRecorderTransform(recorder, createScaleMatrix2d(sx, sy));
 };
 
 export const clipDrawingRecorderRect = (
@@ -172,7 +172,7 @@ export const clipDrawingRecorderRect = (
 
 export const clipDrawingRecorderPath = (
   recorder: DrawingRecorder,
-  clipPath: Path2D,
+  clipPath: Path2d,
   op: DrawingClipOp = 'intersect',
 ): void => {
   (recorder as MutableDrawingRecorder).state = {
@@ -180,7 +180,7 @@ export const clipDrawingRecorderPath = (
     clipStack: appendDrawingClipStackElement(recorder.state.clipStack, {
       kind: 'path',
       op,
-      path: clipPath as DrawingPath2D,
+      path: clipPath as DrawingPath2d,
       transform: recorder.state.transform,
     }),
   };
@@ -202,7 +202,7 @@ export const resetDrawingRecorder = (
   const mutable = recorder as MutableDrawingRecorder;
   mutable.commands.length = 0;
   mutable.state = {
-    transform: identityMatrix2D,
+    transform: identityMatrix2d,
     clipStack: createDrawingClipStackSnapshot(),
   };
   mutable.stateStack.length = 0;

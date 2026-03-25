@@ -1,10 +1,10 @@
 import CanvasKitModule from 'npm:canvaskit-wasm@^0.40.0';
 import {
-  createPath2D,
+  createPath2d,
   createRect,
-  createRectPath2D,
-  type Point2D,
-  withPath2DFillRule,
+  createRectPath2d,
+  type Point2d,
+  withPath2dFillRule,
 } from '@goldlight/geometry';
 
 const outputWidth = 720;
@@ -72,7 +72,7 @@ const toColor = (
 
 const createCanvasKitPath = (
   CanvasKit: CanvasKit,
-  path: ReturnType<typeof createPath2D>,
+  path: ReturnType<typeof createPath2d>,
 ) => {
   const skPath = new CanvasKit.Path();
   for (const verb of path.verbs) {
@@ -110,11 +110,11 @@ const createCanvasKitPath = (
 };
 
 const createRoundedDiamondPath = (
-  center: Point2D,
+  center: Point2d,
   radiusX: number,
   radiusY: number,
 ) =>
-  createPath2D(
+  createPath2d(
     { kind: 'moveTo', to: [center[0], center[1] - radiusY] },
     {
       kind: 'quadTo',
@@ -140,7 +140,7 @@ const createRoundedDiamondPath = (
   );
 
 const createWobblyDiamondPath = (
-  center: Point2D,
+  center: Point2d,
   width: number,
   height: number,
 ) => {
@@ -148,7 +148,7 @@ const createWobblyDiamondPath = (
   const right = center[0] + width / 2;
   const top = center[1] - height / 2;
   const bottom = center[1] + height / 2;
-  return createPath2D(
+  return createPath2d(
     { kind: 'moveTo', to: [center[0], top] },
     {
       kind: 'cubicTo',
@@ -179,7 +179,7 @@ const createWobblyDiamondPath = (
 };
 
 const createConcaveKitePath = (
-  center: Point2D,
+  center: Point2d,
   width: number,
   height: number,
 ) => {
@@ -187,7 +187,7 @@ const createConcaveKitePath = (
   const right = center[0] + width / 2;
   const top = center[1] - height / 2;
   const bottom = center[1] + height / 2;
-  return createPath2D(
+  return createPath2d(
     { kind: 'moveTo', to: [center[0], top] },
     {
       kind: 'quadTo',
@@ -220,11 +220,11 @@ const createConcaveKitePath = (
 };
 
 const createTrianglePath = (
-  a: Point2D,
-  b: Point2D,
-  c: Point2D,
+  a: Point2d,
+  b: Point2d,
+  c: Point2d,
 ) =>
-  createPath2D(
+  createPath2d(
     { kind: 'moveTo', to: a },
     { kind: 'lineTo', to: b },
     { kind: 'lineTo', to: c },
@@ -232,10 +232,10 @@ const createTrianglePath = (
   );
 
 const createSelfIntersectingStarPath = (
-  center: Point2D,
+  center: Point2d,
   radius: number,
 ) => {
-  const points: Point2D[] = [];
+  const points: Point2d[] = [];
   for (let index = 0; index < 5; index += 1) {
     const angle = (-Math.PI / 2) + ((index * Math.PI * 2) / 5);
     points.push([
@@ -244,8 +244,8 @@ const createSelfIntersectingStarPath = (
     ]);
   }
 
-  return withPath2DFillRule(
-    createPath2D(
+  return withPath2dFillRule(
+    createPath2d(
       { kind: 'moveTo', to: points[0]! },
       { kind: 'lineTo', to: points[2]! },
       { kind: 'lineTo', to: points[4]! },
@@ -258,11 +258,11 @@ const createSelfIntersectingStarPath = (
 };
 
 const createSoftStarPath = (
-  center: Point2D,
+  center: Point2d,
   outerRadius: number,
   innerRadius: number,
 ) => {
-  const points: Point2D[] = [];
+  const points: Point2d[] = [];
   for (let index = 0; index < 10; index += 1) {
     const angle = (-Math.PI / 2) + (index * Math.PI / 5);
     const radius = index % 2 === 0 ? outerRadius : innerRadius;
@@ -272,20 +272,20 @@ const createSoftStarPath = (
     ]);
   }
 
-  const verbs: Parameters<typeof createPath2D>[number][] = [
+  const verbs: Parameters<typeof createPath2d>[number][] = [
     { kind: 'moveTo', to: points[0]! },
   ];
   for (let index = 0; index < points.length; index += 1) {
     const current = points[index]!;
     const next = points[(index + 1) % points.length]!;
-    const control: Point2D = [
+    const control: Point2d = [
       ((current[0] + next[0]) / 2) + ((center[0] - (current[0] + next[0]) / 2) * 0.08),
       ((current[1] + next[1]) / 2) + ((center[1] - (current[1] + next[1]) / 2) * 0.08),
     ];
     verbs.push({ kind: 'quadTo', control, to: next });
   }
   verbs.push({ kind: 'close' });
-  return createPath2D(...verbs);
+  return createPath2d(...verbs);
 };
 
 const createDiamondCutoutRectPath = (
@@ -296,9 +296,9 @@ const createDiamondCutoutRectPath = (
   holeRadiusX: number,
   holeRadiusY: number,
 ) => {
-  const center: Point2D = [x + width / 2, y + height / 2];
-  return createPath2D(
-    ...createRectPath2D(createRect(x, y, width, height)).verbs,
+  const center: Point2d = [x + width / 2, y + height / 2];
+  return createPath2d(
+    ...createRectPath2d(createRect(x, y, width, height)).verbs,
     { kind: 'moveTo', to: [center[0], center[1] - holeRadiusY] },
     { kind: 'lineTo', to: [center[0] - holeRadiusX, center[1]] },
     { kind: 'lineTo', to: [center[0], center[1] + holeRadiusY] },
@@ -308,12 +308,12 @@ const createDiamondCutoutRectPath = (
 };
 
 const createNestedDiamondPath = (
-  center: Point2D,
+  center: Point2d,
   width: number,
   height: number,
   innerScale = 0.52,
 ) =>
-  createPath2D(
+  createPath2d(
     ...createRoundedDiamondPath(center, width / 2, height / 2).verbs,
     ...createRoundedDiamondPath(
       center,
@@ -340,7 +340,7 @@ export const renderFillsCanvasKitSnapshot = async (): Promise<
   canvas.clear(toColor(CanvasKit, [0.97, 0.95, 0.9, 1]));
 
   const drawFill = (
-    path: ReturnType<typeof createPath2D>,
+    path: ReturnType<typeof createPath2d>,
     color: readonly [number, number, number, number],
   ) => {
     paint.setColor(toColor(CanvasKit, color));
@@ -349,7 +349,7 @@ export const renderFillsCanvasKitSnapshot = async (): Promise<
     skPath.delete();
   };
 
-  drawFill(createRectPath2D(createRect(44, 44, 632, 892)), [0.14, 0.15, 0.18, 1]);
+  drawFill(createRectPath2d(createRect(44, 44, 632, 892)), [0.14, 0.15, 0.18, 1]);
   drawFill(createTrianglePath([92, 226], [182, 88], [274, 226]), [0.91, 0.37, 0.23, 1]);
   drawFill(createWobblyDiamondPath([370, 156], 186, 134), [0.98, 0.8, 0.33, 1]);
   drawFill(createRoundedDiamondPath([558, 160], 88, 72), [0.22, 0.58, 0.47, 1]);
@@ -366,7 +366,7 @@ export const renderFillsCanvasKitSnapshot = async (): Promise<
   drawFill(createSoftStarPath([236, 688], 92, 46), [0.2, 0.47, 0.9, 0.42]);
   drawFill(createRoundedDiamondPath([252, 690], 104, 114), [0.13, 0.65, 0.52, 0.4]);
   drawFill(createNestedDiamondPath([482, 834], 124, 92), [0.96, 0.73, 0.36, 0.88]);
-  drawFill(withPath2DFillRule(createNestedDiamondPath([608, 834], 124, 92), 'evenodd'), [
+  drawFill(withPath2dFillRule(createNestedDiamondPath([608, 834], 124, 92), 'evenodd'), [
     0.48,
     0.77,
     0.86,
@@ -375,7 +375,7 @@ export const renderFillsCanvasKitSnapshot = async (): Promise<
 
   canvas.save();
   canvas.translate(370, 556);
-  drawFill(createRectPath2D(createRect(0, 0, 210, 220)), [0.16, 0.18, 0.24, 0.96]);
+  drawFill(createRectPath2d(createRect(0, 0, 210, 220)), [0.16, 0.18, 0.24, 0.96]);
   canvas.restore();
 
   canvas.save();
@@ -385,7 +385,7 @@ export const renderFillsCanvasKitSnapshot = async (): Promise<
   canvas.restore();
 
   drawFill(
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [88, 850] },
       { kind: 'lineTo', to: [282, 850] },
       { kind: 'lineTo', to: [282, 890] },

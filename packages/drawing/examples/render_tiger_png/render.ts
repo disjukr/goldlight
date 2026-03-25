@@ -14,12 +14,12 @@ import {
 } from '@goldlight/drawing';
 import { createOffscreenBinding, readOffscreenSnapshot } from '@goldlight/gpu';
 import {
-  createPath2D,
-  identityMatrix2D,
-  multiplyMatrix2D,
-  withPath2DFillRule,
+  createPath2d,
+  identityMatrix2d,
+  multiplyMatrix2d,
+  withPath2dFillRule,
 } from '@goldlight/geometry';
-import type { Matrix2D, Path2D, PathVerb2D } from '@goldlight/geometry';
+import type { Matrix2d, Path2d, PathVerb2d } from '@goldlight/geometry';
 
 type SvgPaint = readonly [number, number, number, number] | null;
 
@@ -28,15 +28,15 @@ type SvgStyleState = Readonly<{
   stroke: SvgPaint;
   strokeWidth: number;
   fillRule: 'nonzero' | 'evenodd';
-  transform: Matrix2D;
+  transform: Matrix2d;
 }>;
 
 type SvgPathDraw = Readonly<{
-  path: Path2D;
+  path: Path2d;
   fill: SvgPaint;
   stroke: SvgPaint;
   strokeWidth: number;
-  transform: Matrix2D;
+  transform: Matrix2d;
 }>;
 
 type SvgScene = Readonly<{
@@ -53,7 +53,7 @@ const defaultStyleState: SvgStyleState = {
   stroke: null,
   strokeWidth: 1,
   fillRule: 'nonzero',
-  transform: identityMatrix2D,
+  transform: identityMatrix2d,
 };
 
 const parseNumberList = (value: string): number[] =>
@@ -121,15 +121,15 @@ const parseAttributes = (raw: string): Record<string, string> => {
   return attributes;
 };
 
-const parseTransform = (value: string | undefined): Matrix2D => {
+const parseTransform = (value: string | undefined): Matrix2d => {
   if (!value) {
-    return identityMatrix2D;
+    return identityMatrix2d;
   }
   const operations = [...value.matchAll(/([A-Za-z]+)\s*\(([^)]*)\)/g)];
-  let transform = identityMatrix2D;
+  let transform = identityMatrix2d;
   for (const [, name, rawArgs] of operations) {
     const args = parseNumberList(rawArgs);
-    let next = identityMatrix2D;
+    let next = identityMatrix2d;
     if (name === 'matrix') {
       if (args.length !== 6) {
         throw new Error(`Invalid matrix transform: ${value}`);
@@ -142,7 +142,7 @@ const parseTransform = (value: string | undefined): Matrix2D => {
     } else {
       throw new Error(`Unsupported transform operation: ${name}`);
     }
-    transform = multiplyMatrix2D(transform, next);
+    transform = multiplyMatrix2d(transform, next);
   }
   return transform;
 };
@@ -169,7 +169,7 @@ const applyAttributesToStyle = (
     stroke: stroke === undefined ? parent.stroke : stroke,
     strokeWidth: Number.isFinite(strokeWidth) ? strokeWidth! : parent.strokeWidth,
     fillRule: fillRule ?? parent.fillRule,
-    transform: multiplyMatrix2D(parent.transform, parseTransform(attributes.transform)),
+    transform: multiplyMatrix2d(parent.transform, parseTransform(attributes.transform)),
   };
 };
 
@@ -179,9 +179,9 @@ const tokenizePathData = (data: string): string[] =>
 const isCommandToken = (token: string | undefined): token is string =>
   token !== undefined && /^[A-Za-z]$/.test(token);
 
-const parsePathData = (data: string): Path2D => {
+const parsePathData = (data: string): Path2d => {
   const tokens = tokenizePathData(data);
-  const verbs: PathVerb2D[] = [];
+  const verbs: PathVerb2d[] = [];
   let index = 0;
   let current: readonly [number, number] = [0, 0];
   let subpathStart: readonly [number, number] = [0, 0];
@@ -287,7 +287,7 @@ const parsePathData = (data: string): Path2D => {
     }
   }
 
-  return createPath2D(...verbs);
+  return createPath2d(...verbs);
 };
 
 const parseViewBox = (value: string | undefined) => {
@@ -342,7 +342,7 @@ const parseSvgScene = (svg: string): SvgScene => {
         continue;
       }
       draws.push({
-        path: withPath2DFillRule(parsePathData(pathData), state.fillRule),
+        path: withPath2dFillRule(parsePathData(pathData), state.fillRule),
         fill: state.fill,
         stroke: state.stroke,
         strokeWidth: state.strokeWidth,
@@ -358,7 +358,7 @@ const createViewBoxFitTransform = (
   viewBox: Readonly<{ minX: number; minY: number; width: number; height: number }>,
   outputWidth: number,
   outputHeight: number,
-): Matrix2D => {
+): Matrix2d => {
   const scale = Math.min(
     outputWidth / Math.max(viewBox.width, 1),
     outputHeight / Math.max(viewBox.height, 1),
@@ -398,7 +398,7 @@ export const renderTigerSnapshot = async (): Promise<
   recordClear(recorder, defaultBackground);
 
   for (const draw of scene.draws) {
-    const drawTransform = multiplyMatrix2D(fitTransform, draw.transform);
+    const drawTransform = multiplyMatrix2d(fitTransform, draw.transform);
     if (draw.fill) {
       saveDrawingRecorder(recorder);
       concatDrawingRecorderTransform(recorder, drawTransform);

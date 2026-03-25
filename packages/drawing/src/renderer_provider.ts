@@ -1,4 +1,4 @@
-import type { PathFillRule2D } from '@goldlight/geometry';
+import type { PathFillRule2d } from '@goldlight/geometry';
 import type { DawnCaps } from './caps.ts';
 import type { DrawingPreparedPatch } from './path_renderer.ts';
 
@@ -23,7 +23,7 @@ export type DrawingRenderer = Readonly<{
   name: string;
   kind: DrawingRendererKind;
   patchMode: DrawingRendererPatchMode;
-  fillRule?: PathFillRule2D;
+  fillRule?: PathFillRule2d;
   requiresStencil: boolean;
   usesDepth: boolean;
 }>;
@@ -32,12 +32,12 @@ export type DrawingRendererProvider = Readonly<{
   pathRendererStrategy: DrawingPathRendererStrategy;
   renderers: readonly DrawingRenderer[];
   convexTessellatedWedges: () => DrawingRenderer;
-  stencilTessellatedWedges: (fillRule: PathFillRule2D) => DrawingRenderer;
-  stencilTessellatedCurves: (fillRule: PathFillRule2D) => DrawingRenderer;
+  stencilTessellatedWedges: (fillRule: PathFillRule2d) => DrawingRenderer;
+  stencilTessellatedCurves: (fillRule: PathFillRule2d) => DrawingRenderer;
   tessellatedStrokes: () => DrawingRenderer;
   getPathFillRenderer: (
     options: Readonly<{
-      fillRule: PathFillRule2D;
+      fillRule: PathFillRule2d;
       isConvex: boolean;
       verbCount: number;
       drawBoundsArea: number;
@@ -151,7 +151,7 @@ export const createDrawingRendererProvider = (
       readonly nonzero: DrawingRenderer;
       readonly evenodd: DrawingRenderer;
     },
-  >(variants: T, fillRule: PathFillRule2D): DrawingRenderer =>
+  >(variants: T, fillRule: PathFillRule2d): DrawingRenderer =>
     fillRule === 'evenodd' ? variants.evenodd : variants.nonzero;
 
   return {

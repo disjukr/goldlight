@@ -1,11 +1,11 @@
 import { exportPngRgba } from '@goldlight/exporters';
 import { createOffscreenBinding, readOffscreenSnapshot } from '@goldlight/gpu';
 import {
-  createPath2D,
+  createPath2d,
   createRect,
-  createRectPath2D,
-  type Point2D,
-  withPath2DFillRule,
+  createRectPath2d,
+  type Point2d,
+  withPath2dFillRule,
 } from '@goldlight/geometry';
 import {
   checkForFinishedDawnQueueWork,
@@ -65,11 +65,11 @@ const downsampleRgba = (
 };
 
 const createRoundedDiamondPath = (
-  center: Point2D,
+  center: Point2d,
   radiusX: number,
   radiusY: number,
 ) =>
-  createPath2D(
+  createPath2d(
     { kind: 'moveTo', to: [center[0], center[1] - radiusY] },
     {
       kind: 'quadTo',
@@ -95,7 +95,7 @@ const createRoundedDiamondPath = (
   );
 
 const createWobblyDiamondPath = (
-  center: Point2D,
+  center: Point2d,
   width: number,
   height: number,
 ) => {
@@ -103,7 +103,7 @@ const createWobblyDiamondPath = (
   const right = center[0] + width / 2;
   const top = center[1] - height / 2;
   const bottom = center[1] + height / 2;
-  return createPath2D(
+  return createPath2d(
     { kind: 'moveTo', to: [center[0], top] },
     {
       kind: 'cubicTo',
@@ -134,7 +134,7 @@ const createWobblyDiamondPath = (
 };
 
 const createConcaveKitePath = (
-  center: Point2D,
+  center: Point2d,
   width: number,
   height: number,
 ) => {
@@ -142,7 +142,7 @@ const createConcaveKitePath = (
   const right = center[0] + width / 2;
   const top = center[1] - height / 2;
   const bottom = center[1] + height / 2;
-  return createPath2D(
+  return createPath2d(
     { kind: 'moveTo', to: [center[0], top] },
     {
       kind: 'quadTo',
@@ -175,11 +175,11 @@ const createConcaveKitePath = (
 };
 
 const createTrianglePath = (
-  a: Point2D,
-  b: Point2D,
-  c: Point2D,
+  a: Point2d,
+  b: Point2d,
+  c: Point2d,
 ) =>
-  createPath2D(
+  createPath2d(
     { kind: 'moveTo', to: a },
     { kind: 'lineTo', to: b },
     { kind: 'lineTo', to: c },
@@ -187,10 +187,10 @@ const createTrianglePath = (
   );
 
 const createSelfIntersectingStarPath = (
-  center: Point2D,
+  center: Point2d,
   radius: number,
 ) => {
-  const points: Point2D[] = [];
+  const points: Point2d[] = [];
   for (let index = 0; index < 5; index += 1) {
     const angle = (-Math.PI / 2) + ((index * Math.PI * 2) / 5);
     points.push([
@@ -199,8 +199,8 @@ const createSelfIntersectingStarPath = (
     ]);
   }
 
-  return withPath2DFillRule(
-    createPath2D(
+  return withPath2dFillRule(
+    createPath2d(
       { kind: 'moveTo', to: points[0]! },
       { kind: 'lineTo', to: points[2]! },
       { kind: 'lineTo', to: points[4]! },
@@ -213,11 +213,11 @@ const createSelfIntersectingStarPath = (
 };
 
 const createSoftStarPath = (
-  center: Point2D,
+  center: Point2d,
   outerRadius: number,
   innerRadius: number,
 ) => {
-  const points: Point2D[] = [];
+  const points: Point2d[] = [];
   for (let index = 0; index < 10; index += 1) {
     const angle = (-Math.PI / 2) + (index * Math.PI / 5);
     const radius = index % 2 === 0 ? outerRadius : innerRadius;
@@ -227,20 +227,20 @@ const createSoftStarPath = (
     ]);
   }
 
-  const verbs: Parameters<typeof createPath2D>[number][] = [
+  const verbs: Parameters<typeof createPath2d>[number][] = [
     { kind: 'moveTo', to: points[0]! },
   ];
   for (let index = 0; index < points.length; index += 1) {
     const current = points[index]!;
     const next = points[(index + 1) % points.length]!;
-    const control: Point2D = [
+    const control: Point2d = [
       ((current[0] + next[0]) / 2) + ((center[0] - (current[0] + next[0]) / 2) * 0.08),
       ((current[1] + next[1]) / 2) + ((center[1] - (current[1] + next[1]) / 2) * 0.08),
     ];
     verbs.push({ kind: 'quadTo', control, to: next });
   }
   verbs.push({ kind: 'close' });
-  return createPath2D(...verbs);
+  return createPath2d(...verbs);
 };
 
 const createDiamondCutoutRectPath = (
@@ -251,9 +251,9 @@ const createDiamondCutoutRectPath = (
   holeRadiusX: number,
   holeRadiusY: number,
 ) => {
-  const center: Point2D = [x + width / 2, y + height / 2];
-  return createPath2D(
-    ...createRectPath2D(createRect(x, y, width, height)).verbs,
+  const center: Point2d = [x + width / 2, y + height / 2];
+  return createPath2d(
+    ...createRectPath2d(createRect(x, y, width, height)).verbs,
     { kind: 'moveTo', to: [center[0], center[1] - holeRadiusY] },
     { kind: 'lineTo', to: [center[0] - holeRadiusX, center[1]] },
     { kind: 'lineTo', to: [center[0], center[1] + holeRadiusY] },
@@ -263,12 +263,12 @@ const createDiamondCutoutRectPath = (
 };
 
 const createNestedDiamondPath = (
-  center: Point2D,
+  center: Point2d,
   width: number,
   height: number,
   innerScale = 0.52,
 ) =>
-  createPath2D(
+  createPath2d(
     ...createRoundedDiamondPath(center, width / 2, height / 2).verbs,
     ...createRoundedDiamondPath(
       center,
@@ -301,7 +301,7 @@ export const renderFillsSnapshot = async (): Promise<
   scaleDrawingRecorder(recorder, supersampleScale, supersampleScale);
 
   recordClear(recorder, [0.97, 0.95, 0.9, 1]);
-  recordDrawPath(recorder, createRectPath2D(createRect(44, 44, 632, 892)), {
+  recordDrawPath(recorder, createRectPath2d(createRect(44, 44, 632, 892)), {
     style: 'fill',
     color: [0.14, 0.15, 0.18, 1],
   });
@@ -357,7 +357,7 @@ export const renderFillsSnapshot = async (): Promise<
   });
   recordDrawPath(
     recorder,
-    withPath2DFillRule(createNestedDiamondPath([608, 834], 124, 92), 'evenodd'),
+    withPath2dFillRule(createNestedDiamondPath([608, 834], 124, 92), 'evenodd'),
     {
       style: 'fill',
       color: [0.48, 0.77, 0.86, 0.88],
@@ -366,7 +366,7 @@ export const renderFillsSnapshot = async (): Promise<
 
   saveDrawingRecorder(recorder);
   translateDrawingRecorder(recorder, 370, 556);
-  recordDrawPath(recorder, createRectPath2D(createRect(0, 0, 210, 220)), {
+  recordDrawPath(recorder, createRectPath2d(createRect(0, 0, 210, 220)), {
     style: 'fill',
     color: [0.16, 0.18, 0.24, 0.96],
   });
@@ -386,7 +386,7 @@ export const renderFillsSnapshot = async (): Promise<
 
   recordDrawPath(
     recorder,
-    createPath2D(
+    createPath2d(
       { kind: 'moveTo', to: [88, 850] },
       { kind: 'lineTo', to: [282, 850] },
       { kind: 'lineTo', to: [282, 890] },

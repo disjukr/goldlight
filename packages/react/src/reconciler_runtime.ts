@@ -1,5 +1,6 @@
 import React, { type ReactNode } from 'npm:react@19.2.0';
-import type { DrawingRecorder } from '@goldlight/drawing';
+import type { DrawingBlendMode } from '@goldlight/drawing';
+import type { Matrix2d, Path2d } from '@goldlight/geometry';
 
 import type {
   AnimationClipJsxProps,
@@ -61,8 +62,53 @@ export type Reconciler2dSceneProps = Readonly<{
   textureWidth?: number;
   textureHeight?: number;
   outputTextureId: string;
-  draw: (recorder: DrawingRecorder, timeMs: number) => void;
+  clearColor?: readonly [number, number, number, number];
+  children?: ReactNode;
 }>;
+
+export type Reconciler2dGroupProps = Readonly<{
+  transform?: Matrix2d;
+  translation?: readonly [number, number];
+  rotation?: number;
+  scale?: readonly [number, number];
+  children?: ReactNode;
+}>;
+
+type Reconciler2dPaintProps = Readonly<{
+  color?: readonly [number, number, number, number];
+  blendMode?: DrawingBlendMode;
+  style?: 'fill' | 'stroke';
+  strokeWidth?: number;
+  strokeJoin?: 'miter' | 'bevel' | 'round';
+  strokeCap?: 'butt' | 'square' | 'round';
+  miterLimit?: number;
+  dashArray?: readonly number[];
+  dashOffset?: number;
+}>;
+
+export type Reconciler2dPathProps = Readonly<
+  {
+    path: Path2d;
+  } & Reconciler2dPaintProps
+>;
+
+export type Reconciler2dRectProps = Readonly<
+  {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } & Reconciler2dPaintProps
+>;
+
+export type Reconciler2dCircleProps = Readonly<
+  {
+    cx: number;
+    cy: number;
+    radius: number;
+    segments?: number;
+  } & Reconciler2dPaintProps
+>;
 
 type WithJsxKey<TProps> = TProps & { key?: React.Key };
 
@@ -186,6 +232,10 @@ declare global {
       'g3d-animation-clip': WithJsxKey<AnimationClipJsxProps>;
       'g3d-camera': WithJsxKey<CameraJsxProps>;
       'g2d-scene': WithJsxKey<Reconciler2dSceneProps>;
+      'g2d-group': WithJsxKey<Reconciler2dGroupProps>;
+      'g2d-path': WithJsxKey<Reconciler2dPathProps>;
+      'g2d-rect': WithJsxKey<Reconciler2dRectProps>;
+      'g2d-circle': WithJsxKey<Reconciler2dCircleProps>;
     }
   }
 }

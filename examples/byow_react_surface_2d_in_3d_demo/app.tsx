@@ -12,95 +12,33 @@ import {
   requestGpuContext,
   resizeSurfaceBindingTarget,
 } from '@goldlight/gpu';
-import { createBoxMesh, createPath2D } from '@goldlight/geometry';
+import { createBoxMesh, createPath2d, type Path2d } from '@goldlight/geometry';
 import {
   createReactSceneRoot,
   createReactSceneRootForwardRenderer,
   G3dDirectionalLight,
   G3dPerspectiveCamera,
 } from '@goldlight/react/reconciler';
-import {
-  createDrawingPath2DFromShape,
-  type DrawingRecorder,
-  recordClear,
-  recordDrawPath,
-} from '@goldlight/drawing';
 
 const createStarPath = (
-  centerX: number,
-  centerY: number,
   innerRadius: number,
   outerRadius: number,
   points: number,
   rotationRadians: number,
-) => {
+): Path2d => {
   const commands: Array<{ kind: 'moveTo' | 'lineTo'; to: [number, number] } | { kind: 'close' }> =
     [];
 
   for (let index = 0; index < points * 2; index += 1) {
     const radius = index % 2 === 0 ? outerRadius : innerRadius;
     const angle = rotationRadians + ((Math.PI * index) / points);
-    const x = centerX + (Math.cos(angle) * radius);
-    const y = centerY + (Math.sin(angle) * radius);
+    const x = Math.cos(angle) * radius;
+    const y = Math.sin(angle) * radius;
     commands.push(index === 0 ? { kind: 'moveTo', to: [x, y] } : { kind: 'lineTo', to: [x, y] });
   }
 
   commands.push({ kind: 'close' });
-  return createPath2D(...commands);
-};
-
-const drawPanel = (recorder: DrawingRecorder, timeMs: number): void => {
-  const t = timeMs / 1000;
-  const starRotation = t * 1.7;
-  const glow = 0.5 + (Math.sin(t * 2.2) * 0.5);
-  const pulse = 0.5 + (Math.sin(t * 3.4) * 0.5);
-  const outerGlow = createStarPath(256, 256, 74, 182, 5, (-starRotation * 0.72) - 0.2);
-  const starPath = createStarPath(256, 256, 88, 156, 5, starRotation);
-  const innerCut = createStarPath(256, 256, 28, 62, 5, -starRotation * 1.3);
-
-  recordClear(recorder, [0, 0, 0, 0]);
-  recordDrawPath(recorder, outerGlow, {
-    style: 'fill',
-    color: [0.9, 0.28 + (glow * 0.14), 0.5 + (glow * 0.1), 0.24 + (glow * 0.12)],
-  });
-  recordDrawPath(recorder, starPath, {
-    style: 'fill',
-    color: [0.98, 0.78, 0.2, 1],
-  });
-  recordDrawPath(recorder, starPath, {
-    style: 'stroke',
-    strokeWidth: 14,
-    strokeJoin: 'round',
-    strokeCap: 'round',
-    color: [1, 0.96, 0.88, 1],
-  });
-  recordDrawPath(recorder, innerCut, {
-    style: 'fill',
-    color: [0.08, 0.14, 0.22, 0.72],
-  });
-  recordDrawPath(
-    recorder,
-    createDrawingPath2DFromShape({
-      kind: 'circle',
-      circle: { center: [256, 256], radius: 18 + (pulse * 28) },
-    }),
-    {
-      style: 'fill',
-      color: [1, 0.98, 0.86, 0.68 + (pulse * 0.28)],
-    },
-  );
-  recordDrawPath(
-    recorder,
-    createDrawingPath2DFromShape({
-      kind: 'circle',
-      circle: { center: [256, 256], radius: 36 + (pulse * 34) },
-    }),
-    {
-      style: 'stroke',
-      strokeWidth: 10 + (pulse * 8),
-      color: [1, 0.9, 0.48, 0.18 + (pulse * 0.18)],
-    },
-  );
+  return createPath2d(...commands);
 };
 
 type DemoSceneProps = Readonly<{
@@ -109,6 +47,9 @@ type DemoSceneProps = Readonly<{
 
 const DemoScene = ({ timeMs }: DemoSceneProps) => {
   const t = timeMs / 1000;
+  const starRotation = t * 1.7;
+  const glow = 0.5 + (Math.sin(t * 2.2) * 0.5);
+  const pulse = 0.5 + (Math.sin(t * 3.4) * 0.5);
   const liveRoomRotation = createQuaternionFromEulerDegrees(
     16 + (Math.sin(t * 0.55) * 9),
     26 + (t * 24),
@@ -122,6 +63,9 @@ const DemoScene = ({ timeMs }: DemoSceneProps) => {
   const panelOffsetX = -0.9 + (Math.sin(t * 0.95) * 0.92);
   const panelOffsetY = 0.44 + (Math.cos(t * 1.15) * 0.16);
   const panelOffsetZ = 0.56 + (Math.sin(t * 0.75) * 0.14);
+  const outerGlow = createStarPath(74, 182, 5, (-starRotation * 0.72) - 0.2);
+  const starPath = createStarPath(88, 156, 5, starRotation);
+  const innerCut = createStarPath(28, 62, 5, -starRotation * 1.3);
 
   return (
     <g3d-scene
@@ -226,8 +170,48 @@ const DemoScene = ({ timeMs }: DemoSceneProps) => {
         outputTextureId='status-panel-texture'
         textureWidth={512}
         textureHeight={512}
-        draw={drawPanel}
-      />
+      >
+        <g2d-group translation={[256, 256]}>
+          <g2d-path
+            path={outerGlow}
+            style='fill'
+            color={[0.9, 0.28 + (glow * 0.14), 0.5 + (glow * 0.1), 0.24 + (glow * 0.12)]}
+          />
+          <g2d-path
+            path={starPath}
+            style='fill'
+            color={[0.98, 0.78, 0.2, 1]}
+          />
+          <g2d-path
+            path={starPath}
+            style='stroke'
+            strokeWidth={14}
+            strokeJoin='round'
+            strokeCap='round'
+            color={[1, 0.96, 0.88, 1]}
+          />
+          <g2d-path
+            path={innerCut}
+            style='fill'
+            color={[0.08, 0.14, 0.22, 0.72]}
+          />
+          <g2d-circle
+            cx={0}
+            cy={0}
+            radius={18 + (pulse * 28)}
+            style='fill'
+            color={[1, 0.98, 0.86, 0.68 + (pulse * 0.28)]}
+          />
+          <g2d-circle
+            cx={0}
+            cy={0}
+            radius={36 + (pulse * 34)}
+            style='stroke'
+            strokeWidth={10 + (pulse * 8)}
+            color={[1, 0.9, 0.48, 0.18 + (pulse * 0.18)]}
+          />
+        </g2d-group>
+      </g2d-scene>
       <g3d-node
         id='status-panel-node'
         meshId='panel-mesh'

@@ -5,8 +5,6 @@ import {
   createPath2D,
   createRect,
   createRectPath2D,
-  createTranslationMatrix2D,
-  multiplyMatrix2D,
   withPath2DFillRule,
 } from '@goldlight/geometry';
 import {
@@ -152,18 +150,21 @@ const drawAnalyticAntialiasGeneral = (recorder: DrawingRecorder): void => {
     { kind: 'moveTo', to: points[0]! },
     ...points.slice(1).map((point) => ({ kind: 'lineTo', to: point }) as const),
   );
-  const rotatedPath = transformPath(path, rotation);
-  const translatedThenRotatedPath = transformPath(
-    path,
-    multiplyMatrix2D(rotation, createTranslationMatrix2D(200, 0)),
-  );
 
-  recordDrawPath(recorder, rotatedPath, { style: 'fill', color: red });
-  recordDrawPath(recorder, translatedThenRotatedPath, {
+  saveDrawingRecorder(recorder);
+  concatDrawingRecorderTransform(recorder, rotation);
+  recordDrawPath(recorder, path, { style: 'fill', color: red });
+  restoreDrawingRecorder(recorder);
+
+  saveDrawingRecorder(recorder);
+  translateDrawingRecorder(recorder, 200, 0);
+  concatDrawingRecorderTransform(recorder, rotation);
+  recordDrawPath(recorder, path, {
     style: 'stroke',
     strokeWidth: 5,
     color: red,
   });
+  restoreDrawingRecorder(recorder);
 
   saveDrawingRecorder(recorder);
   translateDrawingRecorder(recorder, 0, 300);

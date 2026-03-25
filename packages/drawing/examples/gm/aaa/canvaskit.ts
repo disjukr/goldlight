@@ -31,6 +31,10 @@ type CanvasKitPaint = {
 type CanvasKitCanvas = {
   clear: (color: unknown) => void;
   drawPath: (path: CanvasKitPath, paint: CanvasKitPaint) => void;
+  save: () => void;
+  restore: () => void;
+  translate: (x: number, y: number) => void;
+  rotate: (degrees: number, px?: number, py?: number) => void;
 };
 
 type CanvasKitSurface = {
@@ -67,11 +71,6 @@ const createRotationMatrix2D = (degrees: number): Matrix2D => {
 const transformPoint = (matrix: Matrix2D, point: Point): Point => [
   (matrix[0] * point[0]) + (matrix[2] * point[1]) + matrix[4],
   (matrix[1] * point[0]) + (matrix[3] * point[1]) + matrix[5],
-];
-
-const translatePoint = (point: Point, tx: number, ty: number): Point => [
-  point[0] + tx,
-  point[1] + ty,
 ];
 
 const addPolygon = (path: CanvasKitPath, points: readonly Point[]): void => {
@@ -181,14 +180,19 @@ export const renderAaaCanvasKitSnapshot = async (): Promise<Readonly<{ png: Uint
     ]);
   }
   path = new CanvasKit.Path();
-  addPolygon(path, points.map((point) => transformPoint(rotation, [point[0], point[1] + gmHeight])));
+  addPolygon(path, points.map((point) => [point[0], point[1] + gmHeight]));
+  canvas.save();
+  canvas.rotate(1, 0, 0);
   canvas.drawPath(path, fillPaint);
+  canvas.restore();
 
   path = new CanvasKit.Path();
-  addPolygon(path, points
-    .map((point) => transformPoint(rotation, [point[0], point[1] + gmHeight]))
-    .map((point) => translatePoint(point, 200, 0)));
+  addPolygon(path, points.map((point) => [point[0], point[1] + gmHeight]));
+  canvas.save();
+  canvas.translate(200, 0);
+  canvas.rotate(1, 0, 0);
   canvas.drawPath(path, strokePaint);
+  canvas.restore();
 
   path = new CanvasKit.Path();
   path.addRect(CanvasKit.XYWHRect(20, gmHeight + 320, 80.4999, 80));

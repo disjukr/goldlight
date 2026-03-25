@@ -20,6 +20,6 @@ implemented here.
 From the repository root:
 
 ```sh
-deno task example:drawing:tiger:check
-deno task example:drawing:tiger:png
+deno task example:drawing -- tiger check
+deno task example:drawing -- tiger png
 ```

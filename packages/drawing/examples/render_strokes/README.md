@@ -14,6 +14,6 @@ What it shows:
 From the repository root:
 
 ```sh
-deno task example:drawing:strokes:check
-deno task example:drawing:strokes:png
+deno task example:drawing -- strokes check
+deno task example:drawing -- strokes png
 ```

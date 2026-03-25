@@ -16,6 +16,6 @@ What it uses:
 From the repository root:
 
 ```sh
-deno task example:drawing:basic-paths:check
-deno task example:drawing:basic-paths:png
+deno task example:drawing -- basic-paths check
+deno task example:drawing -- basic-paths png
 ```

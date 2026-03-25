@@ -15,9 +15,9 @@ What it shows:
 From the repository root:
 
 ```sh
-deno task example:drawing:gradients:check
-deno task example:drawing:gradients:png
-deno task example:drawing:gradients:ckpng
+deno task example:drawing -- gradients check
+deno task example:drawing -- gradients png
+deno task example:drawing -- gradients ckpng
 ```
 
 Use `out.png` and `ckout.png` side by side to compare the current Graphite/Dawn gradient output

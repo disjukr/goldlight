@@ -856,7 +856,8 @@ ${commonPaintShaderSource}
 
 struct VertexOut {
   @builtin(position) position: vec4<f32>,
-  @location(0) devicePosition: vec2<f32>,
+  @location(0) color: vec4<f32>,
+  @location(1) devicePosition: vec2<f32>,
 };
 
 fn local_to_device(position: vec2<f32>) -> vec2<f32> {

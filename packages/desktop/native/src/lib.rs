@@ -1,5 +1,5 @@
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::ffi::c_char;
 use std::time::{Duration, Instant};
@@ -10,6 +10,15 @@ use winit::event_loop::EventLoop;
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::platform::pump_events::{EventLoopExtPumpEvents, PumpStatus};
 use winit::window::{Window, WindowAttributes};
+
+#[cfg(target_os = "windows")]
+use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
+#[cfg(target_os = "windows")]
+use windows_sys::Win32::Graphics::Gdi::{CreateSolidBrush, DeleteObject, FillRect, HBRUSH};
+#[cfg(target_os = "windows")]
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    CallWindowProcW, DefWindowProcW, GetClientRect, SetWindowLongPtrW, GWLP_WNDPROC, WM_ERASEBKGND,
+};
 
 const HOST_INIT_OK: u8 = 1;
 const HOST_RESULT_OK: u8 = 1;
@@ -70,6 +79,10 @@ struct DesktopHostApplication {
     window_state: Option<SharedWindowState>,
     window: Option<Window>,
     pending_close_window_id: Option<u64>,
+    #[cfg(target_os = "windows")]
+    background_brush: Option<HBRUSH>,
+    #[cfg(target_os = "windows")]
+    original_wnd_proc: Option<isize>,
 }
 
 impl DesktopHostApplication {
@@ -119,6 +132,62 @@ struct HostRuntime {
 
 thread_local! {
     static HOST_RUNTIME: RefCell<Option<HostRuntime>> = const { RefCell::new(None) };
+    #[cfg(target_os = "windows")]
+    static WINDOW_BACKGROUND_BRUSH: Cell<HBRUSH> = const { Cell::new(std::ptr::null_mut()) };
+    #[cfg(target_os = "windows")]
+    static ORIGINAL_WND_PROC: Cell<isize> = const { Cell::new(0) };
+}
+
+#[cfg(target_os = "windows")]
+unsafe extern "system" fn background_window_proc(
+    hwnd: HWND,
+    message: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    if message == WM_ERASEBKGND {
+        let handled = WINDOW_BACKGROUND_BRUSH.with(|background_brush| {
+            let brush = background_brush.get();
+            if brush.is_null() {
+                return false;
+            }
+            let mut rect = RECT::default();
+            if unsafe { GetClientRect(hwnd, &mut rect) } == 0 {
+                return false;
+            }
+
+            let hdc = wparam as *mut core::ffi::c_void;
+            if hdc.is_null() {
+                return false;
+            }
+
+            unsafe {
+                FillRect(hdc, &rect, brush);
+            }
+            true
+        });
+        if handled {
+            return 1;
+        }
+    }
+
+    let original_proc = ORIGINAL_WND_PROC.with(|original_wnd_proc| original_wnd_proc.get());
+    if original_proc != 0 {
+        return unsafe {
+            CallWindowProcW(
+                Some(std::mem::transmute::<
+                    isize,
+                    unsafe extern "system" fn(HWND, u32, WPARAM, LPARAM) -> LRESULT,
+                >(original_proc)),
+                hwnd,
+                message,
+                wparam,
+                lparam,
+            )
+        };
+    }
+
+    unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
 }
 
 fn read_utf8(bytes: *const c_char, length: usize) -> Option<String> {
@@ -168,6 +237,59 @@ fn resolve_surface_info(
         }),
         _ => None,
     }
+}
+
+#[cfg(target_os = "windows")]
+fn install_window_background(window: &Window, rgba: u32) -> (Option<HBRUSH>, Option<isize>) {
+    let raw_window = match window.window_handle().ok().map(|value| value.as_raw()) {
+        Some(raw_handle) => raw_handle,
+        None => return (None, None),
+    };
+    let RawWindowHandle::Win32(handle) = raw_window else {
+        return (None, None);
+    };
+
+    let hwnd = handle.hwnd.get() as HWND;
+    if hwnd.is_null() {
+        return (None, None);
+    }
+
+    let red = (rgba & 0xff) as u8;
+    let green = ((rgba >> 8) & 0xff) as u8;
+    let blue = ((rgba >> 16) & 0xff) as u8;
+    let color_ref = (red as u32) | ((green as u32) << 8) | ((blue as u32) << 16);
+
+    let brush = unsafe { CreateSolidBrush(color_ref) };
+    if brush.is_null() {
+        return (None, None);
+    }
+
+    let original_proc = unsafe {
+        SetWindowLongPtrW(
+            hwnd,
+            GWLP_WNDPROC,
+            background_window_proc as *const () as isize,
+        )
+    };
+    WINDOW_BACKGROUND_BRUSH.with(|background_brush| background_brush.set(brush));
+    ORIGINAL_WND_PROC.with(|stored_original_proc| stored_original_proc.set(original_proc));
+    (Some(brush), if original_proc == 0 { None } else { Some(original_proc) })
+}
+
+#[cfg(not(target_os = "windows"))]
+fn install_window_background(_window: &Window, _rgba: u32) -> (Option<()>, Option<()>) {
+    (None, None)
+}
+
+#[cfg(target_os = "windows")]
+fn destroy_background_brush(brush: HBRUSH) {
+    if !brush.is_null() {
+        unsafe {
+            DeleteObject(brush);
+        }
+    }
+    WINDOW_BACKGROUND_BRUSH.with(|background_brush| background_brush.set(std::ptr::null_mut()));
+    ORIGINAL_WND_PROC.with(|original_wnd_proc| original_wnd_proc.set(0));
 }
 
 fn to_desktop_key_code(physical_key: &PhysicalKey) -> i64 {
@@ -360,6 +482,10 @@ pub extern "C" fn desktop_host_init() -> u8 {
                 window_state: None,
                 window: None,
                 pending_close_window_id: None,
+                #[cfg(target_os = "windows")]
+                background_brush: None,
+                #[cfg(target_os = "windows")]
+                original_wnd_proc: None,
             },
             next_window_id: 1,
         });
@@ -370,6 +496,13 @@ pub extern "C" fn desktop_host_init() -> u8 {
 #[no_mangle]
 pub extern "C" fn desktop_host_shutdown() {
     HOST_RUNTIME.with(|runtime| {
+        #[cfg(target_os = "windows")]
+        if let Some(runtime) = runtime.borrow_mut().as_mut() {
+            if let Some(brush) = runtime.app.background_brush.take() {
+                destroy_background_brush(brush);
+            }
+            runtime.app.original_wnd_proc = None;
+        }
         runtime.borrow_mut().take();
     });
 }
@@ -380,6 +513,7 @@ pub extern "C" fn desktop_host_create_window(
     title_len: usize,
     width: u32,
     height: u32,
+    background_color_rgba: u32,
 ) -> u64 {
     let Some(window_title) = read_utf8(title, title_len) else {
         return 0;
@@ -394,13 +528,22 @@ pub extern "C" fn desktop_host_create_window(
         runtime.next_window_id += 1;
         let attributes: WindowAttributes = Window::default_attributes()
             .with_title(window_title)
-            .with_inner_size(LogicalSize::new(width as f64, height as f64));
+            .with_inner_size(LogicalSize::new(width as f64, height as f64))
+            .with_visible(false);
 
         #[allow(deprecated)]
         let window = match runtime.event_loop.create_window(attributes) {
             Ok(window) => window,
             Err(_) => return 0,
         };
+
+        #[cfg(target_os = "windows")]
+        if background_color_rgba != 0 {
+            let (brush, original_wnd_proc) =
+                install_window_background(&window, background_color_rgba);
+            runtime.app.background_brush = brush;
+            runtime.app.original_wnd_proc = original_wnd_proc;
+        }
 
         let Some(shared_window_state) = resolve_surface_info(&window, window_id, width, height)
         else {
@@ -412,6 +555,24 @@ pub extern "C" fn desktop_host_create_window(
         window_id
     })
     .unwrap_or(0)
+}
+
+#[no_mangle]
+pub extern "C" fn desktop_host_show_window(window_id: u64) -> u8 {
+    with_runtime_mut(|runtime| {
+        if runtime.app.window_state.map(|entry| entry.id) != Some(window_id) {
+            return 0;
+        }
+
+        if let Some(window) = runtime.app.window.as_ref() {
+            window.set_visible(true);
+            window.request_redraw();
+            HOST_RESULT_OK
+        } else {
+            0
+        }
+    })
+    .unwrap_or_default()
 }
 
 #[no_mangle]
@@ -429,6 +590,13 @@ pub extern "C" fn desktop_host_destroy_window(window_id: u64) -> u8 {
         runtime.app.window = None;
         runtime.app.window_state = None;
         runtime.app.pending_close_window_id = None;
+        #[cfg(target_os = "windows")]
+        {
+            if let Some(brush) = runtime.app.background_brush.take() {
+                destroy_background_brush(brush);
+            }
+            runtime.app.original_wnd_proc = None;
+        }
         runtime
             .app
             .events
@@ -466,6 +634,13 @@ pub extern "C" fn desktop_host_poll_events(timeout_ms: u32) -> u32 {
             let window_id = runtime.app.pending_close_window_id.take();
             runtime.app.window = None;
             runtime.app.window_state = None;
+            #[cfg(target_os = "windows")]
+            {
+                if let Some(brush) = runtime.app.background_brush.take() {
+                    destroy_background_brush(brush);
+                }
+                runtime.app.original_wnd_proc = None;
+            }
             if let Some(window_id) = window_id {
                 runtime.app.events.retain(|event| {
                     event.kind == EVENT_CLOSE_REQUESTED || event.window_id != window_id

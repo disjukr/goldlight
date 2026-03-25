@@ -2,14 +2,10 @@
 
 import { installDesktopWindowGlobals } from './bootstrap.ts';
 import { createDesktopWindowRuntime } from './runtime.ts';
+import type { DesktopHost } from './ffi.ts';
 import type { DesktopModuleCleanup, DesktopModuleContext } from './app.ts';
 import type { DesktopModuleContext as RuntimeDesktopModuleContext, DesktopWindow } from './app.ts';
-import type {
-  DesktopHost,
-  DesktopWindowEvent,
-  DesktopWindowState,
-  DesktopWindowSurfaceInfo,
-} from './types.ts';
+import type { DesktopWindowEvent, DesktopWindowState, DesktopWindowSurfaceInfo } from './types.ts';
 import type {
   DesktopWorkerInboundMessage,
   DesktopWorkerOutboundMessage,
@@ -48,6 +44,28 @@ const postToHost = (message: DesktopWorkerOutboundMessage): void => {
     return;
   }
   postMessageToParent(message);
+};
+
+const queuePendingHostEvent = (event: DesktopWindowEvent): void => {
+  if (event.kind === 'frame') {
+    return;
+  }
+
+  if (
+    event.kind === 'resized' ||
+    event.kind === 'focus-changed' ||
+    event.kind === 'pointer-moved'
+  ) {
+    const existingIndex = workerState.pendingHostEvents.findIndex((pendingEvent) =>
+      pendingEvent.kind === event.kind && pendingEvent.windowId === event.windowId
+    );
+    if (existingIndex >= 0) {
+      workerState.pendingHostEvents[existingIndex] = event;
+      return;
+    }
+  }
+
+  workerState.pendingHostEvents.push(event);
 };
 
 const closeWorker = (): void => {
@@ -135,6 +153,11 @@ const createWorkerDesktopContext = (
     requestRedraw: () => {
       postToHost({ kind: 'request-redraw' });
     },
+    showWindow: () => {
+      throw new Error(
+        'Desktop workers do not support showing windows directly from module code',
+      );
+    },
     pollEvents: () => [],
     getWindowSurfaceInfo: () => surfaceInfo,
     getWindowState: () => runtimeWindowState.current,
@@ -209,6 +232,7 @@ const runModule = async (
     await shutdownWorker();
     return;
   }
+  postToHost({ kind: 'request-redraw' });
   postToHost({ kind: 'ready' });
 };
 
@@ -263,7 +287,7 @@ globalThis.onmessage = (event: MessageEvent<DesktopWorkerInboundMessage>) => {
       return;
     }
     if (message.kind === 'event') {
-      workerState.pendingHostEvents.push(message.event);
+      queuePendingHostEvent(message.event);
       return;
     }
     if (message.kind === 'post-message') {

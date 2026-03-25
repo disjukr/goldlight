@@ -83,6 +83,7 @@ export type DesktopWindowOptions = Readonly<{
   title: string;
   width: number;
   height: number;
+  backgroundColor?: readonly [number, number, number, number];
 }>;
 
 export type DesktopHostOptions = Readonly<{

@@ -1,8 +1,8 @@
 /// <reference lib="deno.unstable" />
 
-import { createWindow, dispose, initialize } from '@goldlight/desktop';
+import { createWindow, disposeMain, initializeMain } from '@goldlight/desktop';
 
-await initialize();
+await initializeMain();
 try {
   const window = createWindow({
     title: 'goldlight byow cornell helmet pathtraced demo',
@@ -12,5 +12,5 @@ try {
   });
   await window.whenClosed();
 } finally {
-  await dispose();
+  await disposeMain();
 }

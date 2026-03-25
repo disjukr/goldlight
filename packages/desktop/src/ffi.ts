@@ -49,10 +49,14 @@ type DesktopHostLibrary = Deno.DynamicLibrary<{
     result: 'void';
   };
   desktop_host_create_window: {
-    parameters: ['buffer', 'usize', 'u32', 'u32'];
+    parameters: ['buffer', 'usize', 'u32', 'u32', 'u32'];
     result: 'u64';
   };
   desktop_host_destroy_window: {
+    parameters: ['u64'];
+    result: 'u8';
+  };
+  desktop_host_show_window: {
     parameters: ['u64'];
     result: 'u8';
   };
@@ -81,6 +85,7 @@ type DesktopHostLibrary = Deno.DynamicLibrary<{
 export type DesktopHost = Readonly<{
   createWindow: (options: DesktopWindowOptions) => bigint;
   destroyWindow: (windowId: bigint) => void;
+  showWindow: (windowId: bigint) => void;
   requestRedraw: (windowId: bigint) => void;
   pollEvents: (timeoutMs?: number) => readonly DesktopWindowEvent[];
   getWindowSurfaceInfo: (windowId: bigint) => DesktopWindowSurfaceInfo;
@@ -199,10 +204,14 @@ export const createDesktopHost = (options: DesktopHostOptions = {}): DesktopHost
       result: 'void',
     },
     desktop_host_create_window: {
-      parameters: ['buffer', 'usize', 'u32', 'u32'],
+      parameters: ['buffer', 'usize', 'u32', 'u32', 'u32'],
       result: 'u64',
     },
     desktop_host_destroy_window: {
+      parameters: ['u64'],
+      result: 'u8',
+    },
+    desktop_host_show_window: {
       parameters: ['u64'],
       result: 'u8',
     },
@@ -233,6 +242,25 @@ export const createDesktopHost = (options: DesktopHostOptions = {}): DesktopHost
     throw new Error('Failed to initialize the goldlight desktop host');
   }
 
+  const encodeBackgroundColor = (
+    backgroundColor: DesktopWindowOptions['backgroundColor'],
+  ): number => {
+    if (!backgroundColor) {
+      return 0;
+    }
+
+    const [red, green, blue, alpha] = backgroundColor;
+    const encodeChannel = (value: number): number =>
+      Math.max(0, Math.min(255, Math.round(value * 255)));
+
+    return (
+      encodeChannel(red) |
+      (encodeChannel(green) << 8) |
+      (encodeChannel(blue) << 16) |
+      (encodeChannel(alpha) << 24)
+    ) >>> 0;
+  };
+
   const createWindow = (windowOptions: DesktopWindowOptions): bigint => {
     const titleBytes = new TextEncoder().encode(windowOptions.title);
     const titleBuffer = new Uint8Array(titleBytes.byteLength + 1);
@@ -242,6 +270,7 @@ export const createDesktopHost = (options: DesktopHostOptions = {}): DesktopHost
       BigInt(titleBytes.byteLength),
       windowOptions.width,
       windowOptions.height,
+      encodeBackgroundColor(windowOptions.backgroundColor),
     );
     if (windowId === 0n) {
       throw new Error(`Desktop host failed to create window "${windowOptions.title}"`);
@@ -253,6 +282,12 @@ export const createDesktopHost = (options: DesktopHostOptions = {}): DesktopHost
   const destroyWindow = (windowId: bigint): void => {
     if (library.symbols.desktop_host_destroy_window(windowId) !== destroyWindowResultOk) {
       throw new Error(`Desktop host failed to destroy window ${windowId.toString()}`);
+    }
+  };
+
+  const showWindow = (windowId: bigint): void => {
+    if (library.symbols.desktop_host_show_window(windowId) !== hostInitResultOk) {
+      throw new Error(`Desktop host failed to show window ${windowId.toString()}`);
     }
   };
 
@@ -324,6 +359,7 @@ export const createDesktopHost = (options: DesktopHostOptions = {}): DesktopHost
   return {
     createWindow,
     destroyWindow,
+    showWindow,
     requestRedraw,
     pollEvents,
     getWindowSurfaceInfo,

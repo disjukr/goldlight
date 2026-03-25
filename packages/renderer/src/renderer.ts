@@ -63,6 +63,9 @@ import builtInEnvironmentBackgroundShader from './shaders/built_in_environment_b
 import builtInEnvironmentBackgroundBlurShader from './shaders/built_in_environment_background_blur.wgsl' with {
   type: 'text',
 };
+import forwardEnvironmentBrdfLutBytes from './images/forward_environment_brdf_lut_rg16f.bin' with {
+  type: 'bytes',
+};
 import {
   type BuiltInLitTemplateVariant as BuiltInLitTemplateVariantFromTemplate,
   inspectBuiltInLitTemplateProgram,
@@ -3541,7 +3544,7 @@ const createEnvironmentBrdfLutData = (
   height: number;
   data: Uint16Array;
 }> => {
-  const data = new Uint16Array(size * size * 4);
+  const data = new Uint16Array(size * size * 2);
   for (let y = 0; y < size; y += 1) {
     for (let x = 0; x < size; x += 1) {
       const roughness = (x + 0.5) / size;
@@ -3572,11 +3575,9 @@ const createEnvironmentBrdfLutData = (
         bias += fresnel * visibility;
       }
 
-      const offset = ((y * size) + x) * 4;
+      const offset = ((y * size) + x) * 2;
       data[offset] = encodeHalfFloat(scale / sampleCount);
       data[offset + 1] = encodeHalfFloat(bias / sampleCount);
-      data[offset + 2] = encodeHalfFloat(0);
-      data[offset + 3] = encodeHalfFloat(1);
     }
   }
 
@@ -3585,6 +3586,30 @@ const createEnvironmentBrdfLutData = (
     height: size,
     data,
   };
+};
+
+const forwardEnvironmentBrdfLutSize = 128;
+const forwardEnvironmentBrdfLutAssetByteLength = forwardEnvironmentBrdfLutSize *
+  forwardEnvironmentBrdfLutSize * 2 * 2;
+
+const resolveForwardEnvironmentBrdfLutData = (): Readonly<{
+  width: number;
+  height: number;
+  data: Uint16Array;
+}> => {
+  if (forwardEnvironmentBrdfLutBytes.byteLength === forwardEnvironmentBrdfLutAssetByteLength) {
+    return {
+      width: forwardEnvironmentBrdfLutSize,
+      height: forwardEnvironmentBrdfLutSize,
+      data: new Uint16Array(
+        forwardEnvironmentBrdfLutBytes.buffer,
+        forwardEnvironmentBrdfLutBytes.byteOffset,
+        forwardEnvironmentBrdfLutBytes.byteLength / 2,
+      ),
+    };
+  }
+
+  return createEnvironmentBrdfLutData(forwardEnvironmentBrdfLutSize);
 };
 
 const uploadForwardEnvironmentTexture = (
@@ -3740,11 +3765,11 @@ const ensureForwardEnvironmentBrdfLut = (
     throw new Error('forward BRDF LUT upload requires GPUQueue.writeTexture support');
   }
 
-  const lut = createEnvironmentBrdfLutData();
+  const lut = resolveForwardEnvironmentBrdfLutData();
   const texture = context.device.createTexture({
     label: cacheId,
     size: { width: lut.width, height: lut.height, depthOrArrayLayers: 1 },
-    format: 'rgba16float',
+    format: 'rg16float',
     usage: textureBindingUsage | textureCopyDstUsage,
   });
   context.queue.writeTexture(
@@ -3752,7 +3777,7 @@ const ensureForwardEnvironmentBrdfLut = (
     toBufferSource(lut.data),
     {
       offset: 0,
-      bytesPerRow: lut.width * 8,
+      bytesPerRow: lut.width * 4,
       rowsPerImage: lut.height,
     },
     {
@@ -3777,7 +3802,7 @@ const ensureForwardEnvironmentBrdfLut = (
     }),
     width: lut.width,
     height: lut.height,
-    format: 'rgba16float',
+    format: 'rg16float',
   };
   residency.textures.set(cacheId, uploaded);
   return uploaded;
@@ -4129,7 +4154,6 @@ const renderForwardMeshPass = (
     if (!geometry) {
       continue;
     }
-
     const material = node.material ?? createDefaultMaterial();
     const resolvedPreparedProgram = prepareMaterialProgram(materialRegistry, node.material, {}, {
       geometry,

@@ -251,6 +251,7 @@ const createGoldlightWindowSession = (
     readyResolve = resolve;
     readyReject = reject;
   });
+  void readyPromise.catch(() => {});
   let exitResolve: (() => void) | undefined;
   const exitPromise = new Promise<void>((resolve) => {
     exitResolve = resolve;
@@ -330,6 +331,9 @@ const createGoldlightWindowSession = (
       await readyPromise;
     } catch (error) {
       await exitPromise;
+      if (isExpectedPreReadyCloseError(error)) {
+        return;
+      }
       throw error;
     }
     await exitPromise;
@@ -430,14 +434,25 @@ const createGoldlightWindowSession = (
       case 'exited':
         session.exited = true;
         if (!session.ready) {
-          session.readyReject?.(
-            session.startupError ??
+          if (isExpectedPreReadyManagerExitReason(message.reason)) {
+            session.closing = true;
+            session.readyReject?.(
               new Error(
-                `Window manager worker exited before initialization completed${
+                `Window closed before initialization completed${
                   message.reason ? ` (${message.reason})` : ''
                 }`,
               ),
-          );
+            );
+          } else {
+            session.readyReject?.(
+              session.startupError ??
+                new Error(
+                  `Window manager worker exited before initialization completed${
+                    message.reason ? ` (${message.reason})` : ''
+                  }`,
+                ),
+            );
+          }
         }
         session.exitResolve?.();
         session.onExited();
@@ -508,6 +523,13 @@ const disposeDesktopManagerWorkerController = (): void => {
   desktopManagerWorkerController = undefined;
 };
 
+const isExpectedPreReadyManagerExitReason = (reason?: string): boolean =>
+  reason === 'host-close-requested' || reason === 'manager-shutdown-requested';
+
+const isExpectedPreReadyCloseError = (error: unknown): boolean =>
+  error instanceof Error &&
+  error.message.startsWith('Window closed before initialization completed');
+
 const ensureDesktopManagerWorkerController = (): DesktopManagerWorkerController => {
   if (!desktopManagerWorkerController || desktopManagerWorkerController.poisoned) {
     disposeDesktopManagerWorkerController();
@@ -520,12 +542,12 @@ const ensureDesktopManagerWorkerController = (): DesktopManagerWorkerController 
 const assertDesktopInitialized = (): void => {
   if (!desktopInitialized) {
     throw new Error(
-      '@goldlight/desktop has not been initialized; call await initialize() before using desktop APIs',
+      '@goldlight/desktop main thread has not been initialized; call await initializeMain() before using desktop APIs',
     );
   }
 };
 
-export const initialize = async (): Promise<void> => {
+export const initializeMain = async (): Promise<void> => {
   if (!initializePromise) {
     initializePromise = (async () => {
       await ensureDesktopWebGpuContext();
@@ -542,7 +564,7 @@ export const initialize = async (): Promise<void> => {
   await initializePromise;
 };
 
-export const dispose = async (): Promise<void> => {
+export const disposeMain = async (): Promise<void> => {
   if (!desktopInitialized && !initializePromise && !desktopManagerWorkerController) {
     return;
   }

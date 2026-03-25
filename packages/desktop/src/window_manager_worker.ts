@@ -14,6 +14,11 @@ type CoalescedWindowEvents = Readonly<{
   pointerMoved?: DesktopWindowEvent;
 }>;
 
+type WindowManagerGlobalScope = typeof globalThis & {
+  postMessage: (message: DesktopWindowManagerOutboundMessage) => void;
+  onmessage: ((event: MessageEvent<DesktopWindowManagerInboundMessage>) => void) | null;
+};
+
 type ManagerState = {
   initialized: boolean;
   running: boolean;
@@ -42,7 +47,7 @@ const resetManagerState = (): void => {
 };
 
 const postToMain = (message: DesktopWindowManagerOutboundMessage): void => {
-  globalThis.postMessage(message);
+  (globalThis as WindowManagerGlobalScope).postMessage(message);
 };
 
 const encodePointerValue = (value: Deno.PointerValue<unknown>): bigint =>
@@ -169,6 +174,7 @@ const runManager = async (
   const windowId = host.createWindow(message.options);
   const surfaceInfo = host.getWindowSurfaceInfo(windowId);
   const windowState = host.getWindowState(windowId);
+  host.showWindow(windowId);
 
   state.initialized = true;
   state.running = true;
@@ -209,7 +215,9 @@ const runManager = async (
   resetManagerState();
 };
 
-globalThis.onmessage = (event: MessageEvent<DesktopWindowManagerInboundMessage>) => {
+(globalThis as WindowManagerGlobalScope).onmessage = (
+  event: MessageEvent<DesktopWindowManagerInboundMessage>,
+) => {
   const message = event.data;
   if (message.kind === 'init') {
     if (state.initialized) {

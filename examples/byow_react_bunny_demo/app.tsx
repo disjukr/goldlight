@@ -9,22 +9,10 @@ import {
   createQuaternionFromEulerDegrees,
   getMeshBounds,
 } from '@goldlight/core';
-import type { DesktopModuleCleanup, DesktopModuleContext } from '@goldlight/desktop';
-import {
-  createRuntimeResidency,
-  createSurfaceBinding,
-  requestGpuContext,
-  resizeSurfaceBindingTarget,
-} from '@goldlight/gpu';
+import { initializeWindow, type WindowSceneProps } from '@goldlight/desktop';
 import type { MeshPrimitive } from '@goldlight/ir';
 import { importPlyFromText } from '@goldlight/importers';
-import {
-  createReactSceneRoot,
-  createSceneRootForwardRenderer,
-  G3dDirectionalLight,
-  G3dPerspectiveCamera,
-} from '@goldlight/react/reconciler';
-import { createMaterialRegistry } from '@goldlight/renderer';
+import { G3dDirectionalLight, G3dPerspectiveCamera } from '@goldlight/react/reconciler';
 
 const bunnySource = await Deno.readTextFile(
   new URL('../assets/stanford-bunny/bun_zipper.ply', import.meta.url),
@@ -51,7 +39,7 @@ const lightRotation = createQuaternionFromEulerDegrees(-42, -36, 0);
 const bunnyRotationDegreesPerSecond = 60;
 const maxRotationDeltaMs = 100;
 
-const BunnyScene = () => {
+const BunnyScene = (_props: WindowSceneProps) => {
   const [yawDegrees, setYawDegrees] = React.useState(22);
 
   React.useEffect(() => {
@@ -112,48 +100,4 @@ const BunnyScene = () => {
   );
 };
 
-export default async (
-  { window }: DesktopModuleContext,
-): Promise<void | DesktopModuleCleanup> => {
-  const sceneRoot = createReactSceneRoot(<BunnyScene />);
-  const target = {
-    kind: 'surface' as const,
-    width: window.surfaceInfo.width,
-    height: window.surfaceInfo.height,
-    format: navigator.gpu.getPreferredCanvasFormat(),
-    alphaMode: 'opaque' as const,
-  };
-  const gpuContext = await requestGpuContext({ target });
-  const binding = createSurfaceBinding(gpuContext, window.canvasContext);
-  const residency = createRuntimeResidency();
-  const materialRegistry = createMaterialRegistry();
-  const forwardRenderer = createSceneRootForwardRenderer(sceneRoot, {
-    context: gpuContext,
-    binding,
-    residency,
-    materialRegistry,
-    initialTimeMs: performance.now(),
-  });
-
-  window.runtime.addEventListener('resize', (event) => {
-    const detail = (event as CustomEvent<{ width: number; height: number }>).detail;
-    target.width = detail.width;
-    target.height = detail.height;
-    resizeSurfaceBindingTarget(binding, detail.width, detail.height);
-  });
-
-  let frameHandle = 0;
-  const drawFrame = (timeMs: number) => {
-    forwardRenderer.renderFrame(timeMs);
-    window.present();
-    frameHandle = requestAnimationFrame(drawFrame);
-  };
-
-  frameHandle = requestAnimationFrame(drawFrame);
-
-  return () => {
-    cancelAnimationFrame(frameHandle);
-    sceneRoot.unmount();
-    forwardRenderer.dispose();
-  };
-};
+export default initializeWindow(BunnyScene);

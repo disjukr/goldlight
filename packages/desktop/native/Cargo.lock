@@ -371,6 +371,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "goldlight_desktop_host"
+version = "0.0.0"
+dependencies = [
+ "raw-window-handle",
+ "windows-sys 0.61.2",
+ "winit",
+]
+
+[[package]]
 name = "hashbrown"
 version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -897,14 +906,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ce70a74e890531977d37e532c34d45e9055d2409ed08ddba14529471ed0be16"
 dependencies = [
  "bitflags 2.11.0",
-]
-
-[[package]]
-name = "goldlight_desktop_host"
-version = "0.0.0"
-dependencies = [
- "raw-window-handle",
- "winit",
 ]
 
 [[package]]

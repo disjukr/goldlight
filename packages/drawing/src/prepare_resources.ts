@@ -924,27 +924,34 @@ const applyHueMethodToStops = (
 const normalizeGradientStops = (
   shader: DrawingPreparedShader,
 ): readonly DrawingGradientNormalizedStop[] => {
+  const tileMode = shader.tileMode ?? 'clamp';
   const sourceStops = shader.stops.length > 0
     ? shader.stops
     : [{ offset: 0, color: [0, 0, 0, 1] as const }];
-  const sorted = [...sourceStops]
-    .map((stop) => ({
-      offset: clamp01(stop.offset),
-      color: stop.color,
-    }))
-    .sort((left, right) => left.offset - right.offset);
+  const clamped = sourceStops.map((stop) => ({
+    offset: clamp01(stop.offset),
+    color: stop.color,
+  }));
 
-  const stops = sorted.length === 1
-    ? [
-      sorted[0]!,
-      { offset: 1, color: sorted[0]!.color },
-    ]
-    : [...sorted];
+  const stops: DrawingGradientNormalizedStop[] = [];
+  let previousOffset = 0;
 
-  if (stops[0]!.offset > 0) {
-    stops.unshift({ offset: 0, color: stops[0]!.color });
+  if (clamped[0]!.offset > 0) {
+    stops.push({ offset: 0, color: clamped[0]!.color });
   }
-  if (stops[stops.length - 1]!.offset < 1) {
+
+  for (const stop of clamped) {
+    const offset = Math.max(previousOffset, stop.offset);
+    stops.push({
+      offset,
+      color: stop.color,
+    });
+    previousOffset = offset;
+  }
+
+  if (stops.length === 1) {
+    stops.push({ offset: 1, color: stops[0]!.color });
+  } else if (stops[stops.length - 1]!.offset < 1) {
     stops.push({ offset: 1, color: stops[stops.length - 1]!.color });
   }
 
@@ -960,8 +967,8 @@ const normalizeGradientStops = (
     const runLength = runEnd - index;
     const offset = stops[index]!.offset;
     const duplicate = runLength > 1;
-    const ignoreLeftmost = duplicate && shader.tileMode !== 'clamp' && offset === 0;
-    const ignoreRightmost = shader.tileMode !== 'clamp' && offset === 1;
+    const ignoreLeftmost = duplicate && tileMode !== 'clamp' && offset === 0;
+    const ignoreRightmost = tileMode !== 'clamp' && offset === 1;
     if (!ignoreLeftmost) {
       deduped.push(stops[index]!);
     }
@@ -1169,11 +1176,11 @@ const createGradientPayload = (
 
   const colorSpaceCode = toGradientColorSpaceCode(shader);
   const gradientStops = getGradientStopBufferEntry(builder, shader);
-  const specialization = gradientStops.numStops <= 8 ? toInlineGradientData(gradientStops.stops) : {
+  const specialization = {
     layoutCode: 3,
     inlineOffsets: identityGradientInlineOffsets,
     inlineColors: identityGradientInlineColors,
-  };
+  } as const;
   const common = {
     layoutCode: specialization.layoutCode,
     numStops: gradientStops.numStops,

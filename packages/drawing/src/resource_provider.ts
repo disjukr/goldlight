@@ -609,9 +609,7 @@ fn interpolated_to_rgb_unpremul(colorIn: vec4<f32>, colorSpace: i32, doUnpremul:
 
 fn tile_grad(tileMode: i32, tIn: vec2<f32>) -> vec2<f32> {
   var t = tIn;
-  if (tileMode == 0) {
-    t.x = saturate01(t.x);
-  } else if (tileMode == 1) {
+  if (tileMode == 1) {
     t.x = fract(t.x);
   } else if (tileMode == 2) {
     let t1 = t.x - 1.0;
@@ -624,17 +622,30 @@ fn tile_grad(tileMode: i32, tIn: vec2<f32>) -> vec2<f32> {
   return t;
 }
 
+fn mix_gradient_stops(
+  t: f32,
+  lowOffset: f32,
+  lowColor: vec4<f32>,
+  highOffset: f32,
+  highColor: vec4<f32>,
+) -> vec4<f32> {
+  if (highOffset <= lowOffset) {
+    return select(lowColor, highColor, t >= highOffset);
+  }
+  return mix(lowColor, highColor, (t - lowOffset) / (highOffset - lowOffset));
+}
+
 fn colorize_grad_4(t: vec2<f32>) -> vec4<f32> {
   if (t.y < 0.0) {
     return vec4<f32>(0.0);
   } else if (t.x <= step.gradientOffsets0.x) {
     return step.gradientColor0;
   } else if (t.x < step.gradientOffsets0.y) {
-    return mix(step.gradientColor0, step.gradientColor1, (t.x - step.gradientOffsets0.x) / (step.gradientOffsets0.y - step.gradientOffsets0.x));
+    return mix_gradient_stops(t.x, step.gradientOffsets0.x, step.gradientColor0, step.gradientOffsets0.y, step.gradientColor1);
   } else if (t.x < step.gradientOffsets0.z) {
-    return mix(step.gradientColor1, step.gradientColor2, (t.x - step.gradientOffsets0.y) / (step.gradientOffsets0.z - step.gradientOffsets0.y));
+    return mix_gradient_stops(t.x, step.gradientOffsets0.y, step.gradientColor1, step.gradientOffsets0.z, step.gradientColor2);
   } else if (t.x < step.gradientOffsets0.w) {
-    return mix(step.gradientColor2, step.gradientColor3, (t.x - step.gradientOffsets0.z) / (step.gradientOffsets0.w - step.gradientOffsets0.z));
+    return mix_gradient_stops(t.x, step.gradientOffsets0.z, step.gradientColor2, step.gradientOffsets0.w, step.gradientColor3);
   } else {
     return step.gradientColor3;
   }
@@ -648,23 +659,23 @@ fn colorize_grad_8(t: vec2<f32>) -> vec4<f32> {
       if (t.x <= step.gradientOffsets0.x) {
         return step.gradientColor0;
       } else if (t.x < step.gradientOffsets0.y) {
-        return mix(step.gradientColor0, step.gradientColor1, (t.x - step.gradientOffsets0.x) / (step.gradientOffsets0.y - step.gradientOffsets0.x));
+        return mix_gradient_stops(t.x, step.gradientOffsets0.x, step.gradientColor0, step.gradientOffsets0.y, step.gradientColor1);
       } else {
-        return mix(step.gradientColor1, step.gradientColor2, (t.x - step.gradientOffsets0.y) / (step.gradientOffsets0.z - step.gradientOffsets0.y));
+        return mix_gradient_stops(t.x, step.gradientOffsets0.y, step.gradientColor1, step.gradientOffsets0.z, step.gradientColor2);
       }
     } else if (t.x < step.gradientOffsets0.w) {
-      return mix(step.gradientColor2, step.gradientColor3, (t.x - step.gradientOffsets0.z) / (step.gradientOffsets0.w - step.gradientOffsets0.z));
+      return mix_gradient_stops(t.x, step.gradientOffsets0.z, step.gradientColor2, step.gradientOffsets0.w, step.gradientColor3);
     } else {
-      return mix(step.gradientColor3, step.gradientColor4, (t.x - step.gradientOffsets0.w) / (step.gradientOffsets1.x - step.gradientOffsets0.w));
+      return mix_gradient_stops(t.x, step.gradientOffsets0.w, step.gradientColor3, step.gradientOffsets1.x, step.gradientColor4);
     }
   } else if (t.x < step.gradientOffsets1.z) {
     if (t.x < step.gradientOffsets1.y) {
-      return mix(step.gradientColor4, step.gradientColor5, (t.x - step.gradientOffsets1.x) / (step.gradientOffsets1.y - step.gradientOffsets1.x));
+      return mix_gradient_stops(t.x, step.gradientOffsets1.x, step.gradientColor4, step.gradientOffsets1.y, step.gradientColor5);
     } else {
-      return mix(step.gradientColor5, step.gradientColor6, (t.x - step.gradientOffsets1.y) / (step.gradientOffsets1.z - step.gradientOffsets1.y));
+      return mix_gradient_stops(t.x, step.gradientOffsets1.y, step.gradientColor5, step.gradientOffsets1.z, step.gradientColor6);
     }
   } else if (t.x < step.gradientOffsets1.w) {
-    return mix(step.gradientColor6, step.gradientColor7, (t.x - step.gradientOffsets1.z) / (step.gradientOffsets1.w - step.gradientOffsets1.z));
+    return mix_gradient_stops(t.x, step.gradientOffsets1.z, step.gradientColor6, step.gradientOffsets1.w, step.gradientColor7);
   } else {
     return step.gradientColor7;
   }
@@ -680,46 +691,63 @@ fn gradient_stop_color(index: i32, numStops: i32, bufferOffset: i32) -> vec4<f32
   );
 }
 
+fn gradient_stop_offset(index: i32, bufferOffset: i32) -> f32 {
+  return fsGradientBuffer.data[bufferOffset + index];
+}
+
 fn colorize_grad_buf(numStops: i32, bufferOffset: i32, t: vec2<f32>) -> vec4<f32> {
-  let colorsBaseIndex = bufferOffset + numStops;
   if (t.y < 0.0) {
     return vec4<f32>(0.0);
-  } else if (t.x == 0.0) {
-    return gradient_stop_color(0, numStops, bufferOffset);
-  } else if (t.x == 1.0) {
-    return gradient_stop_color(numStops - 1, numStops, bufferOffset);
   }
-  var lowOffsetIndex = bufferOffset;
-  var highOffsetIndex = lowOffsetIndex + numStops - 1;
-  var i = 1;
-  while (i < numStops) {
-    let middleOffsetIndex = (lowOffsetIndex + highOffsetIndex) / 2;
-    if (t.x < fsGradientBuffer.data[middleOffsetIndex]) {
-      highOffsetIndex = middleOffsetIndex;
+
+  let leftBorderColor = gradient_stop_color(0, numStops, bufferOffset);
+  let rightBorderColor = gradient_stop_color(numStops - 1, numStops, bufferOffset);
+
+  if (t.x < 0.0) {
+    return leftBorderColor;
+  }
+  if (t.x > 1.0) {
+    return rightBorderColor;
+  }
+
+  var startIndex = 0;
+  var endIndex = numStops - 1;
+  if (numStops > 1 && gradient_stop_offset(0, bufferOffset) == gradient_stop_offset(1, bufferOffset)) {
+    startIndex = 1;
+  }
+  if (
+    numStops > 1 &&
+    gradient_stop_offset(numStops - 2, bufferOffset) ==
+      gradient_stop_offset(numStops - 1, bufferOffset)
+  ) {
+    endIndex = numStops - 2;
+  }
+
+  if (t.x <= gradient_stop_offset(startIndex, bufferOffset)) {
+    return gradient_stop_color(startIndex, numStops, bufferOffset);
+  }
+  if (t.x >= gradient_stop_offset(endIndex, bufferOffset)) {
+    return gradient_stop_color(endIndex, numStops, bufferOffset);
+  }
+
+  var lowIndex = startIndex;
+  var highIndex = endIndex;
+  while (highIndex - lowIndex > 1) {
+    let middleIndex = (lowIndex + highIndex) / 2;
+    if (t.x < gradient_stop_offset(middleIndex, bufferOffset)) {
+      highIndex = middleIndex;
     } else {
-      lowOffsetIndex = middleOffsetIndex;
+      lowIndex = middleIndex;
     }
-    i = i * 2;
   }
-  let lowColorIndex = colorsBaseIndex + (lowOffsetIndex - bufferOffset) * 4;
-  let lowOffset = fsGradientBuffer.data[lowOffsetIndex];
-  let lowColor = vec4<f32>(
-    fsGradientBuffer.data[lowColorIndex],
-    fsGradientBuffer.data[lowColorIndex + 1],
-    fsGradientBuffer.data[lowColorIndex + 2],
-    fsGradientBuffer.data[lowColorIndex + 3],
-  );
-  let highColorIndex = colorsBaseIndex + (highOffsetIndex - bufferOffset) * 4;
-  let highOffset = fsGradientBuffer.data[highOffsetIndex];
+
+  let lowOffset = gradient_stop_offset(lowIndex, bufferOffset);
+  let lowColor = gradient_stop_color(lowIndex, numStops, bufferOffset);
+  let highOffset = gradient_stop_offset(highIndex, bufferOffset);
   if (highOffset == lowOffset) {
     return lowColor;
   }
-  let highColor = vec4<f32>(
-    fsGradientBuffer.data[highColorIndex],
-    fsGradientBuffer.data[highColorIndex + 1],
-    fsGradientBuffer.data[highColorIndex + 2],
-    fsGradientBuffer.data[highColorIndex + 3],
-  );
+  let highColor = gradient_stop_color(highIndex, numStops, bufferOffset);
   return mix(lowColor, highColor, (t.x - lowOffset) / (highOffset - lowOffset));
 }
 
@@ -811,8 +839,7 @@ ${commonPaintShaderSource}
 
 struct VertexOut {
   @builtin(position) position: vec4<f32>,
-  @location(0) color: vec4<f32>,
-  @location(1) devicePosition: vec2<f32>,
+  @location(0) devicePosition: vec2<f32>,
 };
 
 fn local_to_device(position: vec2<f32>) -> vec2<f32> {
@@ -1059,7 +1086,6 @@ fn vs_main(
   let devicePosition = local_to_device(local);
   var out: VertexOut;
   out.position = device_to_ndc(devicePosition);
-  out.color = paint_shader_color(devicePosition);
   out.devicePosition = devicePosition;
   return out;
 }
@@ -1067,7 +1093,7 @@ fn vs_main(
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
   let clipCoverage = clip_coverage(in.devicePosition);
-  var color = apply_clip_shader(in.color);
+  var color = apply_clip_shader(paint_shader_color(in.devicePosition));
   color.a *= clipCoverage;
   return blend_with_dst(color, in.devicePosition);
 }
@@ -1092,8 +1118,7 @@ ${commonPaintShaderSource}
 
 struct VertexOut {
   @builtin(position) position: vec4<f32>,
-  @location(0) color: vec4<f32>,
-  @location(1) devicePosition: vec2<f32>,
+  @location(0) devicePosition: vec2<f32>,
 };
 
 fn device_to_ndc(position: vec2<f32>) -> vec4<f32> {
@@ -1289,7 +1314,6 @@ fn vs_main(
   let devicePosition = local_to_device(local);
   var out: VertexOut;
   out.position = device_to_ndc(devicePosition);
-  out.color = paint_shader_color(devicePosition);
   out.devicePosition = devicePosition;
   return out;
 }
@@ -1297,7 +1321,7 @@ fn vs_main(
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
   let clipCoverage = clip_coverage(in.devicePosition);
-  var color = apply_clip_shader(in.color);
+  var color = apply_clip_shader(paint_shader_color(in.devicePosition));
   color.a *= clipCoverage;
   return blend_with_dst(color, in.devicePosition);
 }
@@ -1322,8 +1346,7 @@ ${commonPaintShaderSource}
 
 struct VertexOut {
   @builtin(position) position: vec4<f32>,
-  @location(0) color: vec4<f32>,
-  @location(1) devicePosition: vec2<f32>,
+  @location(0) devicePosition: vec2<f32>,
 };
 
 fn device_to_ndc(position: vec2<f32>) -> vec4<f32> {
@@ -1819,7 +1842,6 @@ fn vs_main(
   );
   var out: VertexOut;
   out.position = device_to_ndc(devicePosition);
-  out.color = paint_shader_color(devicePosition);
   out.devicePosition = devicePosition;
   return out;
 }
@@ -1827,7 +1849,7 @@ fn vs_main(
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
   let clipCoverage = clip_coverage(in.devicePosition);
-  var color = apply_clip_shader(in.color);
+  var color = apply_clip_shader(paint_shader_color(in.devicePosition));
   color.a *= clipCoverage;
   return blend_with_dst(color, in.devicePosition);
 }

@@ -20,14 +20,14 @@ import type {
   Vec3,
 } from '@goldlight/ir';
 import {
-  applySceneDocumentScene,
-  createSceneDocument,
-  removeSceneDocumentNode,
-  removeSceneDocumentResource,
-  type SceneDocument,
-  sceneDocumentToSceneIr,
-  upsertSceneDocumentNode,
-  upsertSceneDocumentResource,
+  applyG3dSceneDocumentScene,
+  createG3dSceneDocument,
+  type G3dSceneDocument,
+  g3dSceneDocumentToSceneIr,
+  removeG3dSceneDocumentNode,
+  removeG3dSceneDocumentResource,
+  upsertG3dSceneDocumentNode,
+  upsertG3dSceneDocumentResource,
 } from './scene_document.ts';
 
 type Vec3Like = Vec3 | readonly [number, number, number];
@@ -35,6 +35,7 @@ type QuatLike = Quat | readonly [number, number, number, number];
 
 export type SceneAuthoringProps = Readonly<{
   activeCameraId?: SceneIr['activeCameraId'];
+  clearColor?: readonly [number, number, number, number];
 }>;
 export type FragmentAuthoringProps = Readonly<Record<string, never>>;
 
@@ -121,12 +122,14 @@ export type SceneJsxProps = Readonly<
     children?: AuthoringRenderable;
   } & SceneAuthoringProps
 >;
+export type G3dSceneJsxProps = SceneJsxProps;
 export type GroupJsxProps = Readonly<
   {
     id: string;
     children?: AuthoringRenderable;
   } & NodeAuthoringProps
 >;
+export type G3dGroupJsxProps = GroupJsxProps;
 
 export type NodeJsxProps = Readonly<
   {
@@ -134,6 +137,7 @@ export type NodeJsxProps = Readonly<
     children?: AuthoringRenderable;
   } & NodeAuthoringProps
 >;
+export type G3dNodeJsxProps = NodeJsxProps;
 type SceneObjectAliasNodeProps = Readonly<{
   nodeId?: string;
   name?: Node['name'];
@@ -166,9 +170,16 @@ export type DirectionalLightJsxProps = Readonly<
   & Omit<Light, 'id' | 'kind'>
   & SceneObjectAliasNodeProps
 >;
-export type PerspectiveCameraProps = PerspectiveCameraJsxProps;
-export type OrthographicCameraProps = OrthographicCameraJsxProps;
-export type DirectionalLightProps = DirectionalLightJsxProps;
+export type G3dPerspectiveCameraProps = PerspectiveCameraJsxProps;
+export type G3dOrthographicCameraProps = OrthographicCameraJsxProps;
+export type G3dDirectionalLightProps = DirectionalLightJsxProps;
+export type G3dAssetJsxProps = AssetJsxProps;
+export type G3dTextureJsxProps = TextureJsxProps;
+export type G3dMaterialJsxProps = MaterialJsxProps;
+export type G3dLightJsxProps = LightJsxProps;
+export type G3dMeshJsxProps = MeshJsxProps;
+export type G3dAnimationClipJsxProps = AnimationClipJsxProps;
+export type G3dCameraJsxProps = CameraJsxProps;
 
 type AuthoringComponent<Props> = (
   props: Props & {
@@ -494,19 +505,28 @@ const buildDirectionalLightElement = (
   );
 };
 
-export const PerspectiveCamera = (props: PerspectiveCameraProps): AuthoringElement =>
+export const G3dPerspectiveCamera = (props: G3dPerspectiveCameraProps): AuthoringElement =>
   buildPerspectiveCameraElement(props);
 
-export const OrthographicCamera = (props: OrthographicCameraProps): AuthoringElement =>
+export const G3dOrthographicCamera = (props: G3dOrthographicCameraProps): AuthoringElement =>
   buildOrthographicCameraElement(props);
 
-export const DirectionalLight = (props: DirectionalLightProps): AuthoringElement =>
+export const G3dDirectionalLight = (props: G3dDirectionalLightProps): AuthoringElement =>
   buildDirectionalLightElement(props);
 
 export const jsx = (
   type:
     | keyof AuthoringPropsByType
-    | 'group'
+    | 'g3d-scene'
+    | 'g3d-group'
+    | 'g3d-node'
+    | 'g3d-asset'
+    | 'g3d-texture'
+    | 'g3d-material'
+    | 'g3d-light'
+    | 'g3d-mesh'
+    | 'g3d-animation-clip'
+    | 'g3d-camera'
     | typeof Fragment
     | AuthoringComponent<
       | SceneJsxProps
@@ -546,28 +566,42 @@ export const jsx = (
     );
   }
 
-  if (type === 'scene') {
+  if (type === 'g3d-scene') {
     const { id, children: _children, ...sceneProps } = authoringProps as SceneJsxProps;
     return createAuthoringElement('scene', id, sceneProps, children);
   }
 
-  if (type === 'group') {
+  if (type === 'g3d-group') {
     const { id, children: _children, ...groupProps } = authoringProps as GroupJsxProps;
     return createAuthoringElement('node', id, normalizeNodeProps(groupProps), children);
   }
 
   if (
-    type === 'asset' || type === 'texture' || type === 'material' || type === 'light' ||
-    type === 'mesh' || type === 'animationClip' || type === 'camera'
+    type === 'g3d-asset' || type === 'g3d-texture' || type === 'g3d-material' ||
+    type === 'g3d-light' || type === 'g3d-mesh' || type === 'g3d-animation-clip' ||
+    type === 'g3d-camera'
   ) {
     const { id, children: _children, ...resourceProps } = authoringProps as {
       id: string;
       children?: AuthoringRenderable;
     };
+    const mappedType = type === 'g3d-asset'
+      ? 'asset'
+      : type === 'g3d-texture'
+      ? 'texture'
+      : type === 'g3d-material'
+      ? 'material'
+      : type === 'g3d-light'
+      ? 'light'
+      : type === 'g3d-mesh'
+      ? 'mesh'
+      : type === 'g3d-animation-clip'
+      ? 'animationClip'
+      : 'camera';
     return {
-      type,
+      type: mappedType,
       id,
-      props: { id, ...resourceProps } as AuthoringPropsByType[typeof type],
+      props: { id, ...resourceProps } as AuthoringPropsByType[typeof mappedType],
       children,
     };
   }
@@ -585,7 +619,7 @@ export const normalizeCameraJsxProps = (camera: CameraJsxProps): Camera =>
     : createOrthographicCamera(camera.id, camera);
 
 const sweepUnvisitedResourceIds = (
-  document: SceneDocument,
+  document: G3dSceneDocument,
   kind:
     | 'asset'
     | 'texture'
@@ -611,21 +645,21 @@ const sweepUnvisitedResourceIds = (
     : document.cameras.order;
   for (const id of [...collection]) {
     if (!visitedIds.has(id)) {
-      removeSceneDocumentResource(document, kind, id);
+      removeG3dSceneDocumentResource(document, kind, id);
     }
   }
 };
 
 export const authoringTreeToSceneDocument = (
   element: AuthoringElement,
-  document = createSceneDocument(element.id),
-): SceneDocument => {
+  document = createG3dSceneDocument(element.id),
+): G3dSceneDocument => {
   if (element.type !== 'scene') {
     throw new Error('authoring root must be a scene');
   }
 
   const sceneProps = element.props as SceneAuthoringProps | undefined;
-  applySceneDocumentScene(document, {
+  applyG3dSceneDocumentScene(document, {
     id: element.id,
     activeCameraId: sceneProps?.activeCameraId,
   });
@@ -663,7 +697,7 @@ export const authoringTreeToSceneDocument = (
         return visitChildren(parentId, node.children ?? [], nodeIndex);
       case 'node':
         visitedNodeIds.add(node.id);
-        upsertSceneDocumentNode(document, {
+        upsertG3dSceneDocumentNode(document, {
           id: node.id,
           parentId,
           index: nodeIndex,
@@ -673,49 +707,49 @@ export const authoringTreeToSceneDocument = (
         return nodeIndex + 1;
       case 'asset':
         visitedResourceIds.asset.add(node.id);
-        upsertSceneDocumentResource(document, {
+        upsertG3dSceneDocumentResource(document, {
           kind: 'asset',
           value: node.props as AssetRef,
         });
         return nodeIndex;
       case 'texture':
         visitedResourceIds.texture.add(node.id);
-        upsertSceneDocumentResource(document, {
+        upsertG3dSceneDocumentResource(document, {
           kind: 'texture',
           value: node.props as TextureRef,
         });
         return nodeIndex;
       case 'material':
         visitedResourceIds.material.add(node.id);
-        upsertSceneDocumentResource(document, {
+        upsertG3dSceneDocumentResource(document, {
           kind: 'material',
           value: node.props as Material,
         });
         return nodeIndex;
       case 'light':
         visitedResourceIds.light.add(node.id);
-        upsertSceneDocumentResource(document, {
+        upsertG3dSceneDocumentResource(document, {
           kind: 'light',
           value: node.props as Light,
         });
         return nodeIndex;
       case 'mesh':
         visitedResourceIds.mesh.add(node.id);
-        upsertSceneDocumentResource(document, {
+        upsertG3dSceneDocumentResource(document, {
           kind: 'mesh',
           value: node.props as MeshPrimitive,
         });
         return nodeIndex;
       case 'animationClip':
         visitedResourceIds.animationClip.add(node.id);
-        upsertSceneDocumentResource(document, {
+        upsertG3dSceneDocumentResource(document, {
           kind: 'animationClip',
           value: node.props as AnimationClip,
         });
         return nodeIndex;
       case 'camera':
         visitedResourceIds.camera.add(node.id);
-        upsertSceneDocumentResource(document, {
+        upsertG3dSceneDocumentResource(document, {
           kind: 'camera',
           value: normalizeCameraJsxProps(node.props as CameraJsxProps),
         });
@@ -729,7 +763,7 @@ export const authoringTreeToSceneDocument = (
 
   for (const nodeId of [...document.nodes.order].reverse()) {
     if (!visitedNodeIds.has(nodeId)) {
-      removeSceneDocumentNode(document, nodeId);
+      removeG3dSceneDocumentNode(document, nodeId);
     }
   }
   sweepUnvisitedResourceIds(document, 'asset', visitedResourceIds.asset);
@@ -744,4 +778,4 @@ export const authoringTreeToSceneDocument = (
 };
 
 export const authoringTreeToSceneIr = (element: AuthoringElement): SceneIr =>
-  sceneDocumentToSceneIr(authoringTreeToSceneDocument(element));
+  g3dSceneDocumentToSceneIr(authoringTreeToSceneDocument(element));

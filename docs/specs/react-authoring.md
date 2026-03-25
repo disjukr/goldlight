@@ -15,8 +15,8 @@ React integration is a separate package. It must not become the source of truth 
   node-oriented Scene IR structure.
 - Higher-level camera/light composition should prefer React convenience components built from
   `<camera>`, `<light>`, and `<node>` instead of expanding the primitive JSX surface with more
-  built-in combined object tags; the package now exports `PerspectiveCamera`, `OrthographicCamera`,
-  and `DirectionalLight` as the first shared examples of that pattern.
+  built-in combined object tags; the package now exports `G3dPerspectiveCamera`,
+  `G3dOrthographicCamera`, and `G3dDirectionalLight` as the first shared examples of that pattern.
 - Node-like authoring elements may use transform shorthands such as `position`, `rotation`, and
   `scale`; these fold into the existing Scene IR transform object during lowering.
 - Authored trees are lowered into complete Scene IR or evaluated scene inputs.
@@ -24,7 +24,7 @@ React integration is a separate package. It must not become the source of truth 
 
 ## Scope
 
-The current package owns JSX authoring, lowering, the snapshot-style `createSceneRoot()`
+The current package owns JSX authoring, lowering, the snapshot-style `createG3dSceneRoot()`
 implementation, and an experimental `@goldlight/react/reconciler` entrypoint that mounts normal
 React components into the package-local scene document before publishing committed `SceneIr`
 snapshots.
@@ -61,7 +61,7 @@ The next proposed step for issue `#64` is now captured in
 current provisional snapshot bridge toward a scene update boundary that can apply high-frequency
 node changes without whole-scene residency rebuilds, while still keeping residency, rendering,
 offscreen targets, and multi-scene orchestration outside the React package. The repository currently
-has a first implementation waypoint in `createSceneRoot()`, but ADR 0006 does not treat that
+has a first implementation waypoint in `createG3dSceneRoot()`, but ADR 0006 does not treat that
 full-snapshot publication shape as the final contract.
 
 Issue `#112` has now reached its first experimental reconciler milestone through
@@ -83,14 +83,15 @@ Issue `#117` provided the first scene-document implementation slice that this ho
   the same TSX surface before lowering.
 - The preferred long-term direction is to move camera/light convenience toward reusable React
   components while keeping primitive JSX authoring tied to explicit IR concepts.
-- `PerspectiveCamera`, `OrthographicCamera`, and `DirectionalLight` now compose those explicit
-  primitives into reusable React-facing scene objects without changing the underlying IR semantics.
-- `createSceneRoot()` now provides a data-only commit bridge that publishes full `SceneIr` snapshots
-  plus previous-scene/revision metadata, commit summaries, update plans, and a data-only
+- `G3dPerspectiveCamera`, `G3dOrthographicCamera`, and `G3dDirectionalLight` now compose those
+  explicit primitives into reusable React-facing scene objects without changing the underlying IR
+  semantics.
+- `createG3dSceneRoot()` now provides a data-only commit bridge that publishes full `SceneIr`
+  snapshots plus previous-scene/revision metadata, commit summaries, update plans, and a data-only
   `updatePayload` to caller-owned subscribers as a current implementation waypoint.
-- `createSceneRoot()` now keeps an internal React-owned scene document so stable resource and node
-  host instances can survive repeated commits even though the published subscriber payload is still
-  a data-only `SceneIr` snapshot.
+- `createG3dSceneRoot()` now keeps an internal React-owned scene document so stable resource and
+  node host instances can survive repeated commits even though the published subscriber payload is
+  still a data-only `SceneIr` snapshot.
 - `@goldlight/react/reconciler` now provides an experimental real React renderer that accepts normal
   React components, applies mount/update/unmount work to the internal scene document, and publishes
   live `SceneIr` snapshots plus the same derived summary/update-plan/update-payload commit metadata
@@ -105,9 +106,10 @@ Issue `#117` provided the first scene-document implementation slice that this ho
 - The reconciler entrypoint now also augments the normal React JSX runtime so `<scene>`, `<node>`,
   `<camera>`, `<light>`, `<mesh>`, `<material>`, `<texture>`, and `<asset>` can be authored in plain
   TSX on the live path.
-- `@goldlight/react/reconciler` now exports React-runtime `PerspectiveCamera`, `OrthographicCamera`,
-  and `DirectionalLight` convenience components so live reconciler scenes can keep the same
-  high-level camera/light composition style as the snapshot authoring surface.
+- `@goldlight/react/reconciler` now exports React-runtime `G3dPerspectiveCamera`,
+  `G3dOrthographicCamera`, and `G3dDirectionalLight` convenience components so live reconciler
+  scenes can keep the same high-level camera/light composition style as the snapshot authoring
+  surface.
 - `createReactSceneRoot()` now exposes `flushUpdates()` so deterministic integrations can force
   scheduled React work through one reconciler root and rethrow that root's pending reconciler errors
   before advancing renderer-side frame work.
@@ -138,7 +140,7 @@ Issue `#117` provided the first scene-document implementation slice that this ho
   moving pass orchestration into React application code; scene roots now own any flush behavior
   directly instead of requiring a separate runtime callback option.
 - The browser example still demonstrates full-scene JSX authoring plus the current snapshot-based
-  `createSceneRoot()` flow, while the BYOW React Bunny demo now exercises the experimental
+  `createG3dSceneRoot()` flow, while the BYOW React Bunny demo now exercises the experimental
   reconciler-driven path.
 - The next unresolved architecture question is how React-authored changes should cross into runtime
   update planning so frequent node changes can avoid whole-scene resets while multi-scene
@@ -153,7 +155,7 @@ Issue `#117` provided the first scene-document implementation slice that this ho
   `React.createElement()` calls.
 - [`../../examples/browser_react_authoring/README.md`](../../examples/browser_react_authoring/README.md)
   shows the reference browser flow: author a tree with `@goldlight/react` TSX, commit it through
-  `createSceneRoot()`, derive an update plan plus summary from that commit, drop targeted residency
-  entries where stable resource IDs changed, avoid resets for transform-only node updates, fall back
-  to a full reset for scene-topology or binding changes, then hand the published scene snapshot to
-  the existing runtime and renderer layers.
+  `createG3dSceneRoot()`, derive an update plan plus summary from that commit, drop targeted
+  residency entries where stable resource IDs changed, avoid resets for transform-only node updates,
+  fall back to a full reset for scene-topology or binding changes, then hand the published scene
+  snapshot to the existing runtime and renderer layers.

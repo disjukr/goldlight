@@ -59,8 +59,8 @@ current architectural constraint that core runtime packages remain React-indepen
 
 - `@goldlight/react` gains an internal mutable document/host-instance layer even though its
   published APIs should remain data-oriented
-- the current `createSceneRoot()` snapshot bridge becomes a compatibility waypoint instead of the
-  only viable React integration path
+- the current `createG3dSceneRoot()` snapshot bridge becomes an implementation waypoint instead of
+  the only viable React integration path
 - reconciler work can be split into bounded slices: scene document first, host config second,
   runtime adapter integration third
 - React-driven live updates can evolve without making render targets, portals, or multi-scene

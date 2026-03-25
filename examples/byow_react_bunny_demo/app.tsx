@@ -21,8 +21,8 @@ import { importPlyFromText } from '@goldlight/importers';
 import {
   createReactSceneRoot,
   createSceneRootForwardRenderer,
-  DirectionalLight,
-  PerspectiveCamera,
+  G3dDirectionalLight,
+  G3dPerspectiveCamera,
 } from '@goldlight/react/reconciler';
 import { createMaterialRegistry } from '@goldlight/renderer';
 
@@ -69,8 +69,8 @@ const BunnyScene = () => {
 
   const bunnyRotation = createQuaternionFromEulerDegrees(0, yawDegrees, 0);
   return (
-    <scene id='byow-react-bunny' activeCameraId='camera-main'>
-      <material
+    <g3d-scene id='byow-react-bunny' activeCameraId='camera-main'>
+      <g3d-material
         id='stanford-bunny-material'
         kind='lit'
         textures={[]}
@@ -78,26 +78,26 @@ const BunnyScene = () => {
           color: { x: 0.82, y: 0.84, z: 0.88, w: 1 },
         }}
       />
-      <mesh {...bunnyMeshWithNormals} />
-      <PerspectiveCamera
+      <g3d-mesh {...bunnyMeshWithNormals} />
+      <G3dPerspectiveCamera
         id='camera-main'
         position={[0, 0.28, 3.1]}
         znear={0.05}
         zfar={20}
         yfov={Math.PI / 3}
       />
-      <DirectionalLight
+      <G3dDirectionalLight
         id='key-light'
         color={{ x: 1, y: 0.95, z: 0.9 }}
         intensity={1.7}
         nodeId='key-light-node'
         rotation={[lightRotation.x, lightRotation.y, lightRotation.z, lightRotation.w]}
       />
-      <node
+      <g3d-node
         id='bunny-root'
         rotation={[bunnyRotation.x, bunnyRotation.y, bunnyRotation.z, bunnyRotation.w]}
       >
-        <node
+        <g3d-node
           id='stanford-bunny-node'
           meshId='stanford-bunny-mesh'
           position={[
@@ -107,8 +107,8 @@ const BunnyScene = () => {
           ]}
           scale={[bunnyScale, bunnyScale, bunnyScale]}
         />
-      </node>
-    </scene>
+      </g3d-node>
+    </g3d-scene>
   );
 };
 

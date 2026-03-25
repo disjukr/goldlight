@@ -1,4 +1,5 @@
 import React, { type ReactNode } from 'npm:react@19.2.0';
+import type { DrawingRecorder } from '@goldlight/drawing';
 
 import type {
   AnimationClipJsxProps,
@@ -16,41 +17,52 @@ import type {
   TextureJsxProps,
 } from './authoring.ts';
 
-export type ReconcilerSceneProps = Readonly<
+export type Reconciler3dSceneProps = Readonly<
   Omit<SceneJsxProps, 'children'> & {
+    outputTextureId?: string;
+    textureWidth?: number;
+    textureHeight?: number;
     children?: ReactNode;
   }
 >;
 
-export type ReconcilerNodeProps = Readonly<
+export type Reconciler3dNodeProps = Readonly<
   Omit<NodeJsxProps, 'children'> & {
     children?: ReactNode;
   }
 >;
 
-export type ReconcilerGroupProps = Readonly<
+export type Reconciler3dGroupProps = Readonly<
   Omit<GroupJsxProps, 'children'> & {
     children?: ReactNode;
   }
 >;
 
-export type ReconcilerPerspectiveCameraProps = Readonly<
+export type Reconciler3dPerspectiveCameraProps = Readonly<
   Omit<PerspectiveCameraJsxProps, 'children'> & {
     children?: ReactNode;
   }
 >;
 
-export type ReconcilerOrthographicCameraProps = Readonly<
+export type Reconciler3dOrthographicCameraProps = Readonly<
   Omit<OrthographicCameraJsxProps, 'children'> & {
     children?: ReactNode;
   }
 >;
 
-export type ReconcilerDirectionalLightProps = Readonly<
+export type Reconciler3dDirectionalLightProps = Readonly<
   Omit<DirectionalLightJsxProps, 'children'> & {
     children?: ReactNode;
   }
 >;
+
+export type Reconciler2dSceneProps = Readonly<{
+  id: string;
+  textureWidth?: number;
+  textureHeight?: number;
+  outputTextureId: string;
+  draw: (recorder: DrawingRecorder, timeMs: number) => void;
+}>;
 
 type WithJsxKey<TProps> = TProps & { key?: React.Key };
 
@@ -61,8 +73,8 @@ const hasChildIntent = (children: ReactNode): boolean => {
   return children !== undefined && children !== null && children !== false && children !== true;
 };
 
-export const PerspectiveCamera = (
-  props: ReconcilerPerspectiveCameraProps,
+export const G3dPerspectiveCamera = (
+  props: Reconciler3dPerspectiveCameraProps,
 ): React.ReactElement => {
   const { id, children, nodeId, name, transform, position, rotation, scale, ...cameraProps } =
     props;
@@ -74,10 +86,10 @@ export const PerspectiveCamera = (
   return React.createElement(
     React.Fragment,
     null,
-    React.createElement('camera', { id, type: 'perspective', ...cameraProps }),
+    React.createElement('g3d-camera', { id, type: 'perspective', ...cameraProps }),
     hasNodeIntent
       ? React.createElement(
-        'node',
+        'g3d-node',
         {
           id: aliasNodeId,
           name,
@@ -93,8 +105,8 @@ export const PerspectiveCamera = (
   );
 };
 
-export const OrthographicCamera = (
-  props: ReconcilerOrthographicCameraProps,
+export const G3dOrthographicCamera = (
+  props: Reconciler3dOrthographicCameraProps,
 ): React.ReactElement => {
   const { id, children, nodeId, name, transform, position, rotation, scale, ...cameraProps } =
     props;
@@ -106,10 +118,10 @@ export const OrthographicCamera = (
   return React.createElement(
     React.Fragment,
     null,
-    React.createElement('camera', { id, type: 'orthographic', ...cameraProps }),
+    React.createElement('g3d-camera', { id, type: 'orthographic', ...cameraProps }),
     hasNodeIntent
       ? React.createElement(
-        'node',
+        'g3d-node',
         {
           id: aliasNodeId,
           name,
@@ -125,8 +137,8 @@ export const OrthographicCamera = (
   );
 };
 
-export const DirectionalLight = (
-  props: ReconcilerDirectionalLightProps,
+export const G3dDirectionalLight = (
+  props: Reconciler3dDirectionalLightProps,
 ): React.ReactElement => {
   const { id, children, nodeId, name, transform, position, rotation, scale, ...lightProps } = props;
   const aliasNodeId = nodeId ?? id;
@@ -137,10 +149,10 @@ export const DirectionalLight = (
   return React.createElement(
     React.Fragment,
     null,
-    React.createElement('light', { id, kind: 'directional', ...lightProps }),
+    React.createElement('g3d-light', { id, kind: 'directional', ...lightProps }),
     hasNodeIntent
       ? React.createElement(
-        'node',
+        'g3d-node',
         {
           id: aliasNodeId,
           name,
@@ -163,16 +175,17 @@ declare global {
     }
 
     interface IntrinsicElements {
-      scene: WithJsxKey<ReconcilerSceneProps>;
-      node: WithJsxKey<ReconcilerNodeProps>;
-      group: WithJsxKey<ReconcilerGroupProps>;
-      asset: WithJsxKey<AssetJsxProps>;
-      texture: WithJsxKey<TextureJsxProps>;
-      material: WithJsxKey<MaterialJsxProps>;
-      light: WithJsxKey<LightJsxProps>;
-      mesh: WithJsxKey<MeshJsxProps>;
-      animationClip: WithJsxKey<AnimationClipJsxProps>;
-      camera: WithJsxKey<CameraJsxProps>;
+      'g3d-scene': WithJsxKey<Reconciler3dSceneProps>;
+      'g3d-node': WithJsxKey<Reconciler3dNodeProps>;
+      'g3d-group': WithJsxKey<Reconciler3dGroupProps>;
+      'g3d-asset': WithJsxKey<AssetJsxProps>;
+      'g3d-texture': WithJsxKey<TextureJsxProps>;
+      'g3d-material': WithJsxKey<MaterialJsxProps>;
+      'g3d-light': WithJsxKey<LightJsxProps>;
+      'g3d-mesh': WithJsxKey<MeshJsxProps>;
+      'g3d-animation-clip': WithJsxKey<AnimationClipJsxProps>;
+      'g3d-camera': WithJsxKey<CameraJsxProps>;
+      'g2d-scene': WithJsxKey<Reconciler2dSceneProps>;
     }
   }
 }

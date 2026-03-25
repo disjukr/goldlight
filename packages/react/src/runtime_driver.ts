@@ -4,17 +4,17 @@ import type { SceneIr } from '@goldlight/ir';
 
 import {
   canApplySceneRootTransformUpdates,
-  planSceneRootResidencyInvalidation,
-  type SceneRoot,
-  type SceneRootCommit,
-  type SceneRootResidencyInvalidationPlan,
-  type SceneRootSubscriber,
+  type G3dSceneRoot,
+  type G3dSceneRootCommit,
+  type G3dSceneRootResidencyInvalidationPlan,
+  type G3dSceneRootSubscriber,
+  planG3dSceneRootResidencyInvalidation,
 } from './scene_root.ts';
 
 type SceneRootLike = Readonly<{
   flushUpdates?: () => void;
   getScene: () => SceneIr | undefined;
-  subscribe: (subscriber: SceneRootSubscriber) => () => void;
+  subscribe: (subscriber: G3dSceneRootSubscriber) => () => void;
 }>;
 
 export type SceneRootFrameEvaluationMode = 'none' | 'full' | 'partial';
@@ -38,9 +38,9 @@ export type SceneRootFrameDriverOptions = Readonly<{
 export type SceneRootFrameResult = Readonly<{
   scene: SceneIr;
   evaluatedScene: EvaluatedScene;
-  commit?: SceneRootCommit;
+  commit?: G3dSceneRootCommit;
   evaluationMode: SceneRootFrameEvaluationMode;
-  residencyPlan?: SceneRootResidencyInvalidationPlan;
+  residencyPlan?: G3dSceneRootResidencyInvalidationPlan;
   stats: SceneRootFrameDriverStats;
 }>;
 
@@ -65,11 +65,11 @@ const createStatsSnapshot = (
 });
 
 export const createSceneRootFrameDriver = (
-  sceneRoot: SceneRoot | SceneRootLike,
+  sceneRoot: G3dSceneRoot | SceneRootLike,
   options: SceneRootFrameDriverOptions = {},
 ): SceneRootFrameDriver => {
   let currentScene = sceneRoot.getScene();
-  let pendingCommit: SceneRootCommit | undefined;
+  let pendingCommit: G3dSceneRootCommit | undefined;
   let partialUpdateCount = 0;
   let fullUpdateCount = 0;
   let targetedInvalidationCount = 0;
@@ -112,10 +112,10 @@ export const createSceneRootFrameDriver = (
     const commit = pendingCommit;
     pendingCommit = undefined;
     let evaluationMode: SceneRootFrameEvaluationMode = 'none';
-    let residencyPlan: SceneRootResidencyInvalidationPlan | undefined;
+    let residencyPlan: G3dSceneRootResidencyInvalidationPlan | undefined;
 
     if (commit && options.residency) {
-      residencyPlan = planSceneRootResidencyInvalidation(commit);
+      residencyPlan = planG3dSceneRootResidencyInvalidation(commit);
       applyRuntimeResidencyPlan(options.residency, residencyPlan);
       if (residencyPlan.reset) {
         resetInvalidationCount += 1;
@@ -123,7 +123,7 @@ export const createSceneRootFrameDriver = (
         targetedInvalidationCount += 1;
       }
     } else if (commit) {
-      residencyPlan = planSceneRootResidencyInvalidation(commit);
+      residencyPlan = planG3dSceneRootResidencyInvalidation(commit);
     }
 
     if (!evaluatedScene || evaluatedScene.sceneId !== scene.id) {

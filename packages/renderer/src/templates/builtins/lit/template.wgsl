@@ -305,7 +305,7 @@ fn fsMain(inValue: VsOut) -> @location(0) vec4<f32> {
     return vec4<f32>(handedness, 1.0);
   }
   if (debugView == 9) {
-    return vec4<f32>(fract(in.texCoord), 0.0, 1.0);
+    return vec4<f32>(0.0, 0.0, 0.0, 1.0);
   }
 
   for (var index = 0; index < lightCount; index += 1) {

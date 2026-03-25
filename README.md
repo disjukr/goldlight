@@ -91,8 +91,8 @@ Implemented today:
 - Windows BYOW Stanford Bunny demo authored through `@goldlight/react`, loading the vendored ASCII
   PLY mesh, generating runtime normals for built-in lit shading, and publishing live bunny rotation
   updates through the experimental React reconciler host
-- a browser React authoring example plus the current `createSceneRoot()` snapshot path that commits
-  JSX-authored trees into `SceneIr` snapshots before rendering, including JSX-authored scene
+- a browser React authoring example plus the current `createG3dSceneRoot()` snapshot path that
+  commits JSX-authored trees into `SceneIr` snapshots before rendering, including JSX-authored scene
   resources such as meshes, materials, cameras, textures, assets, and animation clips, exported
   convenience components for common camera/light composition, an internal React-owned scene document
   that preserves stable resource and node host instances across commits before publishing data-only

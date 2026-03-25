@@ -23,11 +23,17 @@ Runnable examples live here. Each example should document how to build, serve, o
   extension
 - [`byow_react_bunny_demo/README.md`](./byow_react_bunny_demo/README.md): Windows-native BYOW demo
   mounted through `@goldlight/react/reconciler` and rendering the vendored Stanford Bunny PLY mesh
+- [`byow_react_surface_2d_in_3d_demo/README.md`](./byow_react_surface_2d_in_3d_demo/README.md):
+  Windows-native BYOW demo rendering a React-authored `g2d-scene` into a texture-backed 3D panel
+- [`byow_react_scene3d_in_3d_demo/README.md`](./byow_react_scene3d_in_3d_demo/README.md):
+  Windows-native BYOW demo rendering a nested React-authored `g3d-scene` into a texture-backed 3D
+  panel
 - [`assets/README.md`](./assets/README.md): in-repo small example assets plus refresh commands
   including the Stanford Bunny PLY source mesh
 - [`browser_forward/README.md`](./browser_forward/README.md): browser-based forward rendering flow
 - [`browser_react_authoring/README.md`](./browser_react_authoring/README.md): browser forward flow
-  with scene nodes authored through `@goldlight/react` TSX and committed through the snapshot bridge
+  with scene nodes authored through `@goldlight/react` TSX and committed through the `g3d-*`
+  snapshot bridge
 - [`browser_textured_forward/README.md`](./browser_textured_forward/README.md): browser forward flow
   with uploaded texture residency and built-in unlit sampling
 - [`browser_custom_textured_forward/README.md`](./browser_custom_textured_forward/README.md):
@@ -56,6 +62,14 @@ Runnable examples live here. Each example should document how to build, serve, o
 - Type-check the BYOW Cornell Helmet pathtraced demo: `deno task example:byow:cornell-helmet:check`
 - Run the BYOW React Bunny demo: `deno task example:byow:react-bunny:run`
 - Type-check the BYOW React Bunny demo: `deno task example:byow:react-bunny:check`
+- Run the BYOW React 2D surface demo:
+  `deno run -A --unstable-ffi --unstable-webgpu --unstable-raw-imports examples/byow_react_surface_2d_in_3d_demo/main.ts`
+- Type-check the BYOW React 2D surface demo:
+  `deno check --unstable-raw-imports examples/byow_react_surface_2d_in_3d_demo/main.ts examples/byow_react_surface_2d_in_3d_demo/app.tsx`
+- Run the BYOW React 3D scene-in-scene demo:
+  `deno run -A --unstable-ffi --unstable-webgpu --unstable-raw-imports examples/byow_react_scene3d_in_3d_demo/main.ts`
+- Type-check the BYOW React 3D scene-in-scene demo:
+  `deno check --unstable-raw-imports examples/byow_react_scene3d_in_3d_demo/main.ts examples/byow_react_scene3d_in_3d_demo/app.tsx`
 - Build the desktop host library: `deno task desktop:host:build`
 - Refresh the in-repo example assets: `deno task asset:examples`
 - Refresh the Stanford Bunny source and extracted mesh: `deno task asset:stanford-bunny`
@@ -91,9 +105,13 @@ reconciler host instead of the snapshot-only JSX lowering helper.
 For React integrations, read the examples in this order:
 
 - [`browser_react_authoring/README.md`](./browser_react_authoring/README.md) for the data-only
-  `createSceneRoot()` snapshot bridge
+  `createG3dSceneRoot()` snapshot bridge
 - [`byow_react_bunny_demo/README.md`](./byow_react_bunny_demo/README.md) for the experimental
   `@goldlight/react/reconciler` live host
+- [`byow_react_surface_2d_in_3d_demo/README.md`](./byow_react_surface_2d_in_3d_demo/README.md) for
+  the current `g2d-scene` offscreen-to-texture path inside the reconciler host
+- [`byow_react_scene3d_in_3d_demo/README.md`](./byow_react_scene3d_in_3d_demo/README.md) for the
+  current `g3d-scene` offscreen-to-texture path inside the reconciler host
 
 ## Related Docs
 

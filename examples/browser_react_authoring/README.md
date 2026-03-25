@@ -1,22 +1,22 @@
 # Browser React Authoring Example
 
 This example shows the current bridge between `@goldlight/react` and the existing runtime layers. It
-authors a scene with TSX, including the exported `PerspectiveCamera` convenience component plus node
-transform shorthands such as `position`, commits that tree through `createSceneRoot()`, then renders
-the published `SceneIr` snapshot through the browser forward pipeline. Because the bridge publishes
-whole-scene snapshots, the example also uses `planSceneRootResidencyInvalidation()` together with
-`@goldlight/gpu`'s `applyRuntimeResidencyPlan()` helper so cached GPU residency can drop changed
-mesh/material/texture entries by ID, keep transform-only node updates on the lighter path, and still
-fall back to a full reset for node topology or binding changes.
+authors a scene with TSX, including the exported `G3dPerspectiveCamera` convenience component plus
+node transform shorthands such as `position`, commits that tree through `createG3dSceneRoot()`, then
+renders the published `SceneIr` snapshot through the browser forward pipeline. Because the bridge
+publishes whole-scene snapshots, the example also uses `planG3dSceneRootResidencyInvalidation()`
+together with `@goldlight/gpu`'s `applyRuntimeResidencyPlan()` helper so cached GPU residency can
+drop changed mesh/material/texture entries by ID, keep transform-only node updates on the lighter
+path, and still fall back to a full reset for node topology or binding changes.
 
 The example follows ADR 0005's preferred direction: camera/light convenience lives in reusable React
 components while primitive JSX authoring stays closer to explicit Scene IR concepts such as
-`<camera>`, `<light>`, and `<node>`. It intentionally documents the snapshot path, not the live
-reconciler path.
+`<g3d-camera>`, `<g3d-light>`, and `<g3d-node>`. It intentionally documents the snapshot path, not
+the live reconciler path.
 
 `@goldlight/react` now has two distinct integration surfaces:
 
-- `createSceneRoot()` for JSX authoring plus snapshot commits, summaries, and targeted update
+- `createG3dSceneRoot()` for JSX authoring plus snapshot commits, summaries, and targeted update
   planning
 - `@goldlight/react/reconciler` for the experimental live React host that publishes committed
   `SceneIr` snapshots from normal React state and lifecycle updates

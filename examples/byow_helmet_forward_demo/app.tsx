@@ -17,8 +17,8 @@ import { importGltfFromGlb } from '@goldlight/importers';
 import {
   createReactSceneRoot,
   createSceneRootForwardRenderer,
-  DirectionalLight,
-  PerspectiveCamera,
+  G3dDirectionalLight,
+  G3dPerspectiveCamera,
 } from '@goldlight/react/reconciler';
 import {
   createMaterialRegistry,
@@ -105,19 +105,19 @@ const HelmetScene = () => {
 
   const helmetRotation = createQuaternionFromEulerDegrees(72, yawDegrees, 0);
   return (
-    <scene id='byow-helmet-forward-demo' activeCameraId='helmet-forward-camera'>
-      {helmetScene.assets.map((asset) => <asset key={asset.id} {...asset} />)}
-      {helmetScene.textures.map((texture) => <texture key={texture.id} {...texture} />)}
-      {helmetMaterials.map((material) => <material key={material.id} {...material} />)}
-      {helmetScene.meshes.map((mesh) => <mesh key={mesh.id} {...mesh} />)}
-      <PerspectiveCamera
+    <g3d-scene id='byow-helmet-forward-demo' activeCameraId='helmet-forward-camera'>
+      {helmetScene.assets.map((asset) => <g3d-asset key={asset.id} {...asset} />)}
+      {helmetScene.textures.map((texture) => <g3d-texture key={texture.id} {...texture} />)}
+      {helmetMaterials.map((material) => <g3d-material key={material.id} {...material} />)}
+      {helmetScene.meshes.map((mesh) => <g3d-mesh key={mesh.id} {...mesh} />)}
+      <G3dPerspectiveCamera
         id='helmet-forward-camera'
         position={[0, 0.18, 2.35]}
         znear={0.05}
         zfar={100}
         yfov={Math.PI / 3}
       />
-      <DirectionalLight
+      <G3dDirectionalLight
         id='helmet-forward-key'
         color={{ x: 1, y: 0.95, z: 0.9 }}
         intensity={4.8}
@@ -127,7 +127,7 @@ const HelmetScene = () => {
           return [rotation.x, rotation.y, rotation.z, rotation.w] as const;
         })()}
       />
-      <DirectionalLight
+      <G3dDirectionalLight
         id='helmet-forward-fill'
         color={{ x: 0.62, y: 0.7, z: 1 }}
         intensity={1.35}
@@ -137,7 +137,7 @@ const HelmetScene = () => {
           return [rotation.x, rotation.y, rotation.z, rotation.w] as const;
         })()}
       />
-      <DirectionalLight
+      <G3dDirectionalLight
         id='helmet-forward-rim'
         color={{ x: 0.9, y: 0.96, z: 1 }}
         intensity={2.15}
@@ -147,7 +147,7 @@ const HelmetScene = () => {
           return [rotation.x, rotation.y, rotation.z, rotation.w] as const;
         })()}
       />
-      <node
+      <g3d-node
         id='helmet-forward-node'
         meshId={sourceMesh.id}
         position={[
@@ -158,7 +158,7 @@ const HelmetScene = () => {
         rotation={[helmetRotation.x, helmetRotation.y, helmetRotation.z, helmetRotation.w]}
         scale={[helmetScale, helmetScale, helmetScale]}
       />
-    </scene>
+    </g3d-scene>
   );
 };
 

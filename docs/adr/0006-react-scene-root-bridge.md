@@ -18,9 +18,9 @@ not become React-only concepts.
 
 The proposed boundary is:
 
-- React-facing authoring may still commit trees through a root object such as `createSceneRoot()`,
-  but full-scene `SceneIr` snapshots are a provisional implementation path, not the desired final
-  public update contract
+- React-facing authoring may still commit trees through a root object such as
+  `createG3dSceneRoot()`, but full-scene `SceneIr` snapshots are a provisional implementation path,
+  not the desired final public update contract
 - the long-term live-update boundary should admit partial node/resource application so
   high-frequency React state changes can avoid whole-scene residency rebuilds
 - scene evaluation, residency ownership, frame execution, render targets, and multi-scene
@@ -43,7 +43,8 @@ The update contract should be concrete about mutation classes:
 
 The repository's current implementation waypoint is:
 
-- `createSceneRoot()` publishes full `SceneIr` snapshots with previous-scene and revision metadata
+- `createG3dSceneRoot()` publishes full `SceneIr` snapshots with previous-scene and revision
+  metadata
 - `summarizeSceneRootCommit()` derives collection-level change summaries from snapshot pairs
 - `commitSummaryNeedsResidencyReset()` marks the current conservative reset boundary for
   integrations
@@ -61,8 +62,8 @@ Related discussion: `#85`, "ADR 0006: React scene update planning boundary for @
 
 - `@goldlight/react` can move beyond one-shot lowering without forcing frequent transform updates
   through whole-scene snapshot replacement
-- the current `createSceneRoot()` snapshot bridge remains useful as an implementation waypoint, but
-  it should not harden into the final live-update contract
+- the current `createG3dSceneRoot()` snapshot bridge remains useful as an implementation waypoint,
+  but it should not harden into the final live-update contract
 - finer-grained node/resource application becomes an explicit design goal instead of an optional
   optimization
 - multi-scene orchestration and scene-to-texture workflows keep a clear home outside React package

@@ -11,9 +11,9 @@ import {
   requestGpuContext,
 } from '../../packages/gpu/mod.ts';
 import {
-  createSceneRoot,
-  PerspectiveCamera,
-  planSceneRootResidencyInvalidation,
+  createG3dSceneRoot,
+  G3dPerspectiveCamera,
+  planG3dSceneRootResidencyInvalidation,
 } from '../../packages/react/mod.ts';
 import { createMaterialRegistry, renderForwardFrame } from '../../packages/renderer/mod.ts';
 
@@ -26,8 +26,8 @@ canvas.width = 640;
 canvas.height = 480;
 
 const TriangleScene = () => (
-  <scene id='react-browser-authoring' activeCameraId='camera-main'>
-    <material
+  <g3d-scene id='react-browser-authoring' activeCameraId='camera-main'>
+    <g3d-material
       id='triangle-material'
       kind='unlit'
       textures={[]}
@@ -35,7 +35,7 @@ const TriangleScene = () => (
         color: { x: 0.19, y: 0.62, z: 0.97, w: 1 },
       }}
     />
-    <mesh
+    <g3d-mesh
       id='triangle'
       materialId='triangle-material'
       attributes={[{
@@ -54,20 +54,20 @@ const TriangleScene = () => (
         ],
       }]}
     />
-    <PerspectiveCamera id='camera-main' position={[0, 0, 2]} />
-    <group id='scene-root' name='Authored Root'>
-      <node id='triangle-node' name='Authored Triangle' meshId='triangle' />
-    </group>
-  </scene>
+    <G3dPerspectiveCamera id='camera-main' position={[0, 0, 2]} />
+    <g3d-group id='scene-root' name='Authored Root'>
+      <g3d-node id='triangle-node' name='Authored Triangle' meshId='triangle' />
+    </g3d-group>
+  </g3d-scene>
 );
 
-const sceneRoot = createSceneRoot();
+const sceneRoot = createG3dSceneRoot();
 let scene = sceneRoot.getScene();
 const residency = createRuntimeResidency();
 
 sceneRoot.subscribe((commit) => {
   scene = commit.scene;
-  applyRuntimeResidencyPlan(residency, planSceneRootResidencyInvalidation(commit));
+  applyRuntimeResidencyPlan(residency, planG3dSceneRootResidencyInvalidation(commit));
 });
 sceneRoot.render(<TriangleScene />);
 

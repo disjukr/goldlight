@@ -2,9 +2,9 @@ import type { Node, SceneIr } from '@goldlight/ir';
 
 import { type AuthoringElement, authoringTreeToSceneDocument } from './authoring.ts';
 import {
-  createSceneDocument,
-  type SceneDocument,
-  sceneDocumentToSceneIr,
+  createG3dSceneDocument,
+  type G3dSceneDocument,
+  g3dSceneDocumentToSceneIr,
 } from './scene_document.ts';
 
 type SceneRootEntityWithId = Readonly<{ id: string }>;
@@ -33,14 +33,14 @@ type SceneRootCollectionValueByName = {
   animationClips: SceneIr['animationClips'][number];
 };
 
-export type SceneRootCollectionUpdatePayload<TEntry extends SceneRootEntityWithId> = Readonly<{
+export type G3dSceneRootCollectionUpdatePayload<TEntry extends SceneRootEntityWithId> = Readonly<{
   added: readonly TEntry[];
   updated: readonly TEntry[];
   removedIds: readonly string[];
   unchangedIds: readonly string[];
 }>;
 
-export type SceneRootNodeUpdatePayload = Readonly<{
+export type G3dSceneRootNodeUpdatePayload = Readonly<{
   added: readonly Node[];
   updated: readonly Node[];
   removedIds: readonly string[];
@@ -53,7 +53,7 @@ export type SceneRootNodeUpdatePayload = Readonly<{
   otherUpdated: readonly Node[];
 }>;
 
-export type SceneRootCommitUpdatePayload = Readonly<{
+export type G3dSceneRootCommitUpdatePayload = Readonly<{
   sceneId: SceneIr['id'];
   previousSceneId?: SceneIr['id'];
   revision: number;
@@ -61,19 +61,19 @@ export type SceneRootCommitUpdatePayload = Readonly<{
   activeCameraChanged: boolean;
   rootNodeIds: readonly string[];
   rootNodeIdsChanged: boolean;
-  assets: SceneRootCollectionUpdatePayload<SceneRootCollectionValueByName['assets']>;
-  textures: SceneRootCollectionUpdatePayload<SceneRootCollectionValueByName['textures']>;
-  materials: SceneRootCollectionUpdatePayload<SceneRootCollectionValueByName['materials']>;
-  lights: SceneRootCollectionUpdatePayload<SceneRootCollectionValueByName['lights']>;
-  meshes: SceneRootCollectionUpdatePayload<SceneRootCollectionValueByName['meshes']>;
-  cameras: SceneRootCollectionUpdatePayload<SceneRootCollectionValueByName['cameras']>;
-  nodes: SceneRootNodeUpdatePayload;
-  animationClips: SceneRootCollectionUpdatePayload<
+  assets: G3dSceneRootCollectionUpdatePayload<SceneRootCollectionValueByName['assets']>;
+  textures: G3dSceneRootCollectionUpdatePayload<SceneRootCollectionValueByName['textures']>;
+  materials: G3dSceneRootCollectionUpdatePayload<SceneRootCollectionValueByName['materials']>;
+  lights: G3dSceneRootCollectionUpdatePayload<SceneRootCollectionValueByName['lights']>;
+  meshes: G3dSceneRootCollectionUpdatePayload<SceneRootCollectionValueByName['meshes']>;
+  cameras: G3dSceneRootCollectionUpdatePayload<SceneRootCollectionValueByName['cameras']>;
+  nodes: G3dSceneRootNodeUpdatePayload;
+  animationClips: G3dSceneRootCollectionUpdatePayload<
     SceneRootCollectionValueByName['animationClips']
   >;
 }>;
 
-export type SceneRootResidencyInvalidationPlan = Readonly<{
+export type G3dSceneRootResidencyInvalidationPlan = Readonly<{
   reset: boolean;
   meshIds: readonly string[];
   materialIds: readonly string[];
@@ -81,16 +81,16 @@ export type SceneRootResidencyInvalidationPlan = Readonly<{
   reasons: readonly string[];
 }>;
 
-export type SceneRootCommit = Readonly<
+export type G3dSceneRootCommit = Readonly<
   & SceneRootCommitBase
   & {
     summary: SceneRootCommitSummary;
     updatePlan: SceneRootCommitUpdatePlan;
-    updatePayload: SceneRootCommitUpdatePayload;
+    updatePayload: G3dSceneRootCommitUpdatePayload;
   }
 >;
 
-export type SceneRootSubscriber = (commit: SceneRootCommit) => void;
+export type G3dSceneRootSubscriber = (commit: G3dSceneRootCommit) => void;
 
 export type SceneRootCollectionSummary = Readonly<{
   addedIds: readonly string[];
@@ -139,12 +139,12 @@ export type SceneRootCommitUpdatePlan = Readonly<{
   animationClips: SceneRootCollectionSummary;
 }>;
 
-export type SceneRoot = Readonly<{
+export type G3dSceneRoot = Readonly<{
   render: (element: AuthoringElement) => SceneIr;
   flushUpdates: () => void;
   getScene: () => SceneIr | undefined;
   getRevision: () => number;
-  subscribe: (subscriber: SceneRootSubscriber) => () => void;
+  subscribe: (subscriber: G3dSceneRootSubscriber) => () => void;
 }>;
 
 const HASH_OFFSET = 2166136261;
@@ -282,7 +282,7 @@ const getSceneCollection = <TName extends SceneRootCollectionName>(
 const toSceneRootCollectionUpdatePayload = <TEntry extends SceneRootEntityWithId>(
   currentEntries: readonly TEntry[],
   summary: SceneRootCollectionSummary,
-): SceneRootCollectionUpdatePayload<TEntry> => {
+): G3dSceneRootCollectionUpdatePayload<TEntry> => {
   const currentById = new Map(currentEntries.map((entry) => [entry.id, entry]));
 
   return {
@@ -302,7 +302,7 @@ const toSceneRootCollectionUpdatePayload = <TEntry extends SceneRootEntityWithId
 const toSceneRootNodeUpdatePayload = (
   currentNodes: readonly Node[],
   plan: SceneRootNodeUpdatePlan,
-): SceneRootNodeUpdatePayload => {
+): G3dSceneRootNodeUpdatePayload => {
   const currentById = new Map(currentNodes.map((node) => [node.id, node]));
   const pickNodes = (ids: readonly string[]): Node[] =>
     ids.flatMap((id) => {
@@ -495,7 +495,7 @@ export const commitSummaryNeedsResidencyReset = (summary: SceneRootCommitSummary
     collectionHasChanges(summary.nodes);
 };
 
-export const canApplySceneRootTransformUpdates = (commit: SceneRootCommit): boolean => {
+export const canApplySceneRootTransformUpdates = (commit: G3dSceneRootCommit): boolean => {
   const { updatePlan } = commit;
   return !updatePlan.sceneIdChanged &&
     !updatePlan.activeCameraChanged &&
@@ -515,11 +515,11 @@ export const canApplySceneRootTransformUpdates = (commit: SceneRootCommit): bool
     updatePlan.nodes.otherUpdatedIds.length === 0;
 };
 
-export const createSceneRootCommit = (
+export const createG3dSceneRootCommit = (
   scene: SceneIr,
   previousScene: SceneIr | undefined,
   revision: number,
-): SceneRootCommit => {
+): G3dSceneRootCommit => {
   validateSceneRootCommitScene(scene);
 
   const baseCommit = {
@@ -582,7 +582,7 @@ const appendUniqueIds = (target: Set<string>, ids: readonly string[]): void => {
 };
 
 const collectAssetLinkedIds = (
-  commit: SceneRootCommit,
+  commit: G3dSceneRootCommit,
   assetIds: readonly string[],
 ): Readonly<{
   textureIds: readonly string[];
@@ -606,9 +606,9 @@ const collectAssetLinkedIds = (
   };
 };
 
-export const planSceneRootResidencyInvalidation = (
-  commit: SceneRootCommit,
-): SceneRootResidencyInvalidationPlan => {
+export const planG3dSceneRootResidencyInvalidation = (
+  commit: G3dSceneRootCommit,
+): G3dSceneRootResidencyInvalidationPlan => {
   const { updatePlan } = commit;
   const reasons: string[] = [];
 
@@ -664,19 +664,19 @@ export const planSceneRootResidencyInvalidation = (
   };
 };
 
-export const createSceneRoot = (initialElement?: AuthoringElement): SceneRoot => {
+export const createG3dSceneRoot = (initialElement?: AuthoringElement): G3dSceneRoot => {
   let currentScene: SceneIr | undefined;
-  let currentDocument: SceneDocument | undefined;
+  let currentDocument: G3dSceneDocument | undefined;
   let revision = 0;
-  const subscribers = new Set<SceneRootSubscriber>();
+  const subscribers = new Set<G3dSceneRootSubscriber>();
 
   const render = (element: AuthoringElement): SceneIr => {
     if (currentDocument === undefined) {
-      currentDocument = createSceneDocument(element.id);
+      currentDocument = createG3dSceneDocument(element.id);
     }
     authoringTreeToSceneDocument(element, currentDocument);
-    const scene = sceneDocumentToSceneIr(currentDocument);
-    const commit = createSceneRootCommit(scene, currentScene, revision + 1);
+    const scene = g3dSceneDocumentToSceneIr(currentDocument);
+    const commit = createG3dSceneRootCommit(scene, currentScene, revision + 1);
 
     currentScene = scene;
     revision = commit.revision;

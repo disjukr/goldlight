@@ -484,6 +484,7 @@ export type ForwardRenderOptions = Readonly<{
   materialRegistry?: MaterialRegistry;
   postProcessPasses?: readonly PostProcessPass[];
   extension?: ForwardSceneExtension;
+  clearColor?: readonly [number, number, number, number];
 }>;
 
 export type VolumePassItem = Readonly<{
@@ -2829,6 +2830,7 @@ const resolveForwardRenderOptions = (
       materialRegistry: materialRegistryOrOptions ?? createMaterialRegistry(),
       postProcessPasses,
       extension: {},
+      clearColor: [0.02, 0.02, 0.03, 1],
     };
   }
 
@@ -2836,6 +2838,7 @@ const resolveForwardRenderOptions = (
     materialRegistry: materialRegistryOrOptions.materialRegistry ?? createMaterialRegistry(),
     postProcessPasses: materialRegistryOrOptions.postProcessPasses ?? [],
     extension: materialRegistryOrOptions.extension ?? {},
+    clearColor: materialRegistryOrOptions.clearColor ?? [0.02, 0.02, 0.03, 1],
   };
 };
 
@@ -5896,6 +5899,7 @@ export const renderForwardFrame = (
     options.materialRegistry,
     options.postProcessPasses,
     {
+      clearColor: options.clearColor,
       extension: options.extension,
     },
   );
@@ -5914,6 +5918,7 @@ const renderForwardFrameInternal = (
     includeRaymarchPasses?: boolean;
     raymarchCamera?: RaymarchCamera;
     extension?: ForwardSceneExtension;
+    clearColor?: readonly [number, number, number, number];
   }> = {},
 ): ForwardRenderResult => {
   assertRendererSceneCapabilities(
@@ -5946,6 +5951,14 @@ const renderForwardFrameInternal = (
     residency,
     options.extension?.environmentMap,
   );
+  const clearColor = options.clearColor
+    ? {
+      r: options.clearColor[0],
+      g: options.clearColor[1],
+      b: options.clearColor[2],
+      a: options.clearColor[3],
+    }
+    : { r: 0.02, g: 0.02, b: 0.03, a: 1 };
   const hasEnvironmentBackground = Boolean(options.extension?.environmentMap) &&
     forwardEnvironment.ready;
   if (hasEnvironmentBackground) {
@@ -5960,7 +5973,7 @@ const renderForwardFrameInternal = (
     const backgroundPass = encoder.beginRenderPass({
       colorAttachments: [{
         view: backgroundSourceView,
-        clearValue: { r: 0.02, g: 0.02, b: 0.03, a: 1 },
+        clearValue: clearColor,
         loadOp: 'clear',
         storeOp: 'store',
       }],
@@ -5995,7 +6008,7 @@ const renderForwardFrameInternal = (
   const pass = encoder.beginRenderPass({
     colorAttachments: [{
       view: colorView,
-      clearValue: { r: 0.02, g: 0.02, b: 0.03, a: 1 },
+      clearValue: clearColor,
       loadOp: hasEnvironmentBackground ? 'load' : 'clear',
       storeOp: 'store',
     }],

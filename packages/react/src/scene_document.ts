@@ -22,19 +22,19 @@ import type {
   TextureRef,
 } from '@goldlight/ir';
 
-type SceneDocumentScene = {
+type G3dSceneDocumentScene = {
   id: string;
   activeCameraId?: string;
 };
 
-export type SceneDocumentNodeInput = Readonly<{
+export type G3dSceneDocumentNodeInput = Readonly<{
   id: string;
   parentId?: string;
   index?: number;
   props?: Partial<Omit<Node, 'id' | 'parentId'>>;
 }>;
 
-export type SceneDocumentNodeInstance = {
+export type G3dSceneDocumentNodeInstance = {
   readonly kind: 'node';
   readonly id: string;
   parentId?: string;
@@ -42,7 +42,7 @@ export type SceneDocumentNodeInstance = {
   props: Partial<Omit<Node, 'id' | 'parentId'>>;
 };
 
-type SceneDocumentResourceByKind = {
+type G3dSceneDocumentResourceByKind = {
   asset: AssetRef;
   texture: TextureRef;
   material: Material;
@@ -52,47 +52,47 @@ type SceneDocumentResourceByKind = {
   animationClip: AnimationClip;
 };
 
-export type SceneDocumentResourceKind = keyof SceneDocumentResourceByKind;
+export type G3dSceneDocumentResourceKind = keyof G3dSceneDocumentResourceByKind;
 
-export type SceneDocumentResourceInput<TKind extends SceneDocumentResourceKind> = Readonly<{
+export type G3dSceneDocumentResourceInput<TKind extends G3dSceneDocumentResourceKind> = Readonly<{
   kind: TKind;
-  value: SceneDocumentResourceByKind[TKind];
+  value: G3dSceneDocumentResourceByKind[TKind];
 }>;
 
-export type SceneDocumentResourceInstance<TKind extends SceneDocumentResourceKind> = {
+export type G3dSceneDocumentResourceInstance<TKind extends G3dSceneDocumentResourceKind> = {
   readonly kind: TKind;
   readonly id: string;
-  value: SceneDocumentResourceByKind[TKind];
+  value: G3dSceneDocumentResourceByKind[TKind];
 };
 
-type SceneDocumentResourceCollection<TKind extends SceneDocumentResourceKind> = {
+type G3dSceneDocumentResourceCollection<TKind extends G3dSceneDocumentResourceKind> = {
   order: string[];
-  byId: Map<string, SceneDocumentResourceInstance<TKind>>;
+  byId: Map<string, G3dSceneDocumentResourceInstance<TKind>>;
 };
 
-type SceneDocumentNodeCollection = {
+type G3dSceneDocumentNodeCollection = {
   order: string[];
   rootNodeIds: string[];
-  byId: Map<string, SceneDocumentNodeInstance>;
+  byId: Map<string, G3dSceneDocumentNodeInstance>;
 };
 
-export type SceneDocument = {
-  scene: SceneDocumentScene;
-  assets: SceneDocumentResourceCollection<'asset'>;
-  textures: SceneDocumentResourceCollection<'texture'>;
-  materials: SceneDocumentResourceCollection<'material'>;
-  lights: SceneDocumentResourceCollection<'light'>;
-  meshes: SceneDocumentResourceCollection<'mesh'>;
-  cameras: SceneDocumentResourceCollection<'camera'>;
-  animationClips: SceneDocumentResourceCollection<'animationClip'>;
-  nodes: SceneDocumentNodeCollection;
+export type G3dSceneDocument = {
+  scene: G3dSceneDocumentScene;
+  assets: G3dSceneDocumentResourceCollection<'asset'>;
+  textures: G3dSceneDocumentResourceCollection<'texture'>;
+  materials: G3dSceneDocumentResourceCollection<'material'>;
+  lights: G3dSceneDocumentResourceCollection<'light'>;
+  meshes: G3dSceneDocumentResourceCollection<'mesh'>;
+  cameras: G3dSceneDocumentResourceCollection<'camera'>;
+  animationClips: G3dSceneDocumentResourceCollection<'animationClip'>;
+  nodes: G3dSceneDocumentNodeCollection;
 };
 
 const createResourceCollection = <
-  TKind extends SceneDocumentResourceKind,
->(): SceneDocumentResourceCollection<TKind> => ({
+  TKind extends G3dSceneDocumentResourceKind,
+>(): G3dSceneDocumentResourceCollection<TKind> => ({
   order: [],
-  byId: new Map<string, SceneDocumentResourceInstance<TKind>>(),
+  byId: new Map<string, G3dSceneDocumentResourceInstance<TKind>>(),
 });
 
 const removeOrderedId = (orderedIds: string[], id: string): void => {
@@ -111,29 +111,32 @@ const insertOrderedId = (orderedIds: string[], id: string, index?: number): void
   orderedIds.splice(index, 0, id);
 };
 
-const getResourceCollection = <TKind extends SceneDocumentResourceKind>(
-  document: SceneDocument,
+const getResourceCollection = <TKind extends G3dSceneDocumentResourceKind>(
+  document: G3dSceneDocument,
   kind: TKind,
-): SceneDocumentResourceCollection<TKind> => {
+): G3dSceneDocumentResourceCollection<TKind> => {
   switch (kind) {
     case 'asset':
-      return document.assets as SceneDocumentResourceCollection<TKind>;
+      return document.assets as G3dSceneDocumentResourceCollection<TKind>;
     case 'texture':
-      return document.textures as SceneDocumentResourceCollection<TKind>;
+      return document.textures as G3dSceneDocumentResourceCollection<TKind>;
     case 'material':
-      return document.materials as SceneDocumentResourceCollection<TKind>;
+      return document.materials as G3dSceneDocumentResourceCollection<TKind>;
     case 'light':
-      return document.lights as SceneDocumentResourceCollection<TKind>;
+      return document.lights as G3dSceneDocumentResourceCollection<TKind>;
     case 'mesh':
-      return document.meshes as SceneDocumentResourceCollection<TKind>;
+      return document.meshes as G3dSceneDocumentResourceCollection<TKind>;
     case 'camera':
-      return document.cameras as SceneDocumentResourceCollection<TKind>;
+      return document.cameras as G3dSceneDocumentResourceCollection<TKind>;
     case 'animationClip':
-      return document.animationClips as SceneDocumentResourceCollection<TKind>;
+      return document.animationClips as G3dSceneDocumentResourceCollection<TKind>;
   }
 };
 
-const detachNodeInstance = (document: SceneDocument, node: SceneDocumentNodeInstance): void => {
+const detachNodeInstance = (
+  document: G3dSceneDocument,
+  node: G3dSceneDocumentNodeInstance,
+): void => {
   if (node.parentId === undefined) {
     removeOrderedId(document.nodes.rootNodeIds, node.id);
     return;
@@ -146,8 +149,8 @@ const detachNodeInstance = (document: SceneDocument, node: SceneDocumentNodeInst
 };
 
 const attachNodeInstance = (
-  document: SceneDocument,
-  node: SceneDocumentNodeInstance,
+  document: G3dSceneDocument,
+  node: G3dSceneDocumentNodeInstance,
   parentId: string | undefined,
   index?: number,
 ): void => {
@@ -163,7 +166,7 @@ const attachNodeInstance = (
   insertOrderedId(parentNode.childIds, node.id, index);
 };
 
-export const createSceneDocument = (id = 'scene'): SceneDocument => ({
+export const createG3dSceneDocument = (id = 'scene'): G3dSceneDocument => ({
   scene: { id },
   assets: createResourceCollection(),
   textures: createResourceCollection(),
@@ -175,26 +178,26 @@ export const createSceneDocument = (id = 'scene'): SceneDocument => ({
   nodes: {
     order: [],
     rootNodeIds: [],
-    byId: new Map<string, SceneDocumentNodeInstance>(),
+    byId: new Map<string, G3dSceneDocumentNodeInstance>(),
   },
 });
 
-export const applySceneDocumentScene = (
-  document: SceneDocument,
+export const applyG3dSceneDocumentScene = (
+  document: G3dSceneDocument,
   scene: Readonly<{
     id: string;
     activeCameraId?: string;
   }>,
-): SceneDocument => {
+): G3dSceneDocument => {
   document.scene.id = scene.id;
   document.scene.activeCameraId = scene.activeCameraId;
   return document;
 };
 
-export const upsertSceneDocumentResource = <TKind extends SceneDocumentResourceKind>(
-  document: SceneDocument,
-  input: SceneDocumentResourceInput<TKind>,
-): SceneDocumentResourceInstance<TKind> => {
+export const upsertG3dSceneDocumentResource = <TKind extends G3dSceneDocumentResourceKind>(
+  document: G3dSceneDocument,
+  input: G3dSceneDocumentResourceInput<TKind>,
+): G3dSceneDocumentResourceInstance<TKind> => {
   const collection = getResourceCollection(document, input.kind);
   const existing = collection.byId.get(input.value.id);
   if (existing) {
@@ -206,14 +209,14 @@ export const upsertSceneDocumentResource = <TKind extends SceneDocumentResourceK
     kind: input.kind,
     id: input.value.id,
     value: input.value,
-  } satisfies SceneDocumentResourceInstance<TKind>;
+  } satisfies G3dSceneDocumentResourceInstance<TKind>;
   collection.byId.set(instance.id, instance);
   collection.order.push(instance.id);
   return instance;
 };
 
-export const removeSceneDocumentResource = <TKind extends SceneDocumentResourceKind>(
-  document: SceneDocument,
+export const removeG3dSceneDocumentResource = <TKind extends G3dSceneDocumentResourceKind>(
+  document: G3dSceneDocument,
   kind: TKind,
   id: string,
 ): boolean => {
@@ -225,10 +228,10 @@ export const removeSceneDocumentResource = <TKind extends SceneDocumentResourceK
   return true;
 };
 
-export const upsertSceneDocumentNode = (
-  document: SceneDocument,
-  input: SceneDocumentNodeInput,
-): SceneDocumentNodeInstance => {
+export const upsertG3dSceneDocumentNode = (
+  document: G3dSceneDocument,
+  input: G3dSceneDocumentNodeInput,
+): G3dSceneDocumentNodeInstance => {
   const existing = document.nodes.byId.get(input.id);
   if (existing) {
     if (existing.parentId !== input.parentId) {
@@ -247,7 +250,7 @@ export const upsertSceneDocumentNode = (
     return existing;
   }
 
-  const instance: SceneDocumentNodeInstance = {
+  const instance: G3dSceneDocumentNodeInstance = {
     kind: 'node',
     id: input.id,
     parentId: undefined,
@@ -260,14 +263,14 @@ export const upsertSceneDocumentNode = (
   return instance;
 };
 
-export const removeSceneDocumentNode = (document: SceneDocument, id: string): boolean => {
+export const removeG3dSceneDocumentNode = (document: G3dSceneDocument, id: string): boolean => {
   const node = document.nodes.byId.get(id);
   if (!node) {
     return false;
   }
 
   for (const childId of [...node.childIds]) {
-    removeSceneDocumentNode(document, childId);
+    removeG3dSceneDocumentNode(document, childId);
   }
 
   detachNodeInstance(document, node);
@@ -276,7 +279,7 @@ export const removeSceneDocumentNode = (document: SceneDocument, id: string): bo
   return true;
 };
 
-export const sceneDocumentToSceneIr = (document: SceneDocument): SceneIr => {
+export const g3dSceneDocumentToSceneIr = (document: G3dSceneDocument): SceneIr => {
   let scene = document.scene.activeCameraId === undefined ? createSceneIr(document.scene.id) : {
     ...createSceneIr(document.scene.id),
     activeCameraId: document.scene.activeCameraId,

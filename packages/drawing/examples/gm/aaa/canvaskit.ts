@@ -69,6 +69,11 @@ const transformPoint = (matrix: Matrix2D, point: Point): Point => [
   (matrix[1] * point[0]) + (matrix[3] * point[1]) + matrix[5],
 ];
 
+const translatePoint = (point: Point, tx: number, ty: number): Point => [
+  point[0] + tx,
+  point[1] + ty,
+];
+
 const addPolygon = (path: CanvasKitPath, points: readonly Point[]): void => {
   path.moveTo(points[0]![0], points[0]![1]);
   for (const point of points.slice(1)) {
@@ -180,7 +185,9 @@ export const renderAaaCanvasKitSnapshot = async (): Promise<Readonly<{ png: Uint
   canvas.drawPath(path, fillPaint);
 
   path = new CanvasKit.Path();
-  addPolygon(path, points.map((point) => transformPoint(rotation, [point[0] + 200, point[1] + gmHeight])));
+  addPolygon(path, points
+    .map((point) => transformPoint(rotation, [point[0], point[1] + gmHeight]))
+    .map((point) => translatePoint(point, 200, 0)));
   canvas.drawPath(path, strokePaint);
 
   path = new CanvasKit.Path();

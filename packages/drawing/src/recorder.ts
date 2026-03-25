@@ -134,7 +134,7 @@ export const concatDrawingRecorderTransform = (
 ): void => {
   (recorder as MutableDrawingRecorder).state = {
     ...recorder.state,
-    transform: multiplyMatrix2D(recorder.state.transform, transform),
+    transform: multiplyMatrix2D(transform, recorder.state.transform),
   };
 };
 

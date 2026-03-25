@@ -12,4 +12,15 @@ Each GM lives in its own subdirectory and should usually provide:
 
 Current ports:
 
+- `aaa`: Skia `gm/aaa.cpp`
 - `fillrect_gradient`: Skia `gm/fillrect_gradient.cpp`
+
+Progress order: alphabetical by Skia `gm/*.cpp`.
+
+Current queue:
+
+- `3d`: blocked, current `packages/drawing` scope is 2D-only
+- `aaa`: done
+- `aaclip`: pending
+- `aarecteffect`: pending
+- `aarectmodes`: pending

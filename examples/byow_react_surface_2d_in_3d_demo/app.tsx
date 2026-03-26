@@ -71,7 +71,12 @@ const DemoScene = () => {
   const { timeMs = 0 } = useFrameState<DemoFrameState>();
   const { scaleFactor } = useWindowMetrics();
   const t = timeMs / 1000;
-  const panelTextureSize = Math.max(1, Math.round(512 * scaleFactor));
+  const panelViewportWidth = 384;
+  const panelViewportHeight = 384;
+  const panelTextureWidth = Math.max(1, Math.round(panelViewportWidth * scaleFactor));
+  const panelTextureHeight = Math.max(1, Math.round(panelViewportHeight * scaleFactor));
+  const panelCenterX = panelViewportWidth / 2;
+  const panelCenterY = panelViewportHeight / 2;
   const starRotation = t * 1.7;
   const glow = 0.5 + (Math.sin(t * 2.2) * 0.5);
   const pulse = 0.5 + (Math.sin(t * 3.4) * 0.5);
@@ -96,6 +101,7 @@ const DemoScene = () => {
     <g3d-scene
       id='byow-react-surface2d-demo'
       activeCameraId='camera-main'
+      msaaSampleCount={1}
       clearColor={[0.08, 0.19, 0.26, 1]}
     >
       <DemoFrameDriver />
@@ -194,10 +200,12 @@ const DemoScene = () => {
       <g2d-scene
         id='status-panel'
         outputTextureId='status-panel-texture'
-        textureWidth={panelTextureSize}
-        textureHeight={panelTextureSize}
+        viewportWidth={panelViewportWidth}
+        viewportHeight={panelViewportHeight}
+        textureWidth={panelTextureWidth}
+        textureHeight={panelTextureHeight}
       >
-        <g2d-group translation={[256, 256]}>
+        <g2d-group translation={[panelCenterX, panelCenterY]}>
           <g2d-path
             path={outerGlow}
             style='fill'

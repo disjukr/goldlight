@@ -21,6 +21,9 @@ import type {
 export type Reconciler3dSceneProps = Readonly<
   Omit<SceneJsxProps, 'children'> & {
     outputTextureId?: string;
+    msaaSampleCount?: number;
+    viewportWidth?: number;
+    viewportHeight?: number;
     textureWidth?: number;
     textureHeight?: number;
     children?: ReactNode;
@@ -59,6 +62,9 @@ export type Reconciler3dDirectionalLightProps = Readonly<
 
 export type Reconciler2dSceneProps = Readonly<{
   id: string;
+  msaaSampleCount?: number;
+  viewportWidth?: number;
+  viewportHeight?: number;
   textureWidth?: number;
   textureHeight?: number;
   outputTextureId: string;

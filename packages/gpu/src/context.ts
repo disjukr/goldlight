@@ -4,6 +4,7 @@ export type SurfaceTarget = Readonly<{
   height: number;
   format: GPUTextureFormat;
   alphaMode?: GPUCanvasAlphaMode;
+  msaaSampleCount?: number;
 }>;
 
 export type OffscreenTarget = Readonly<{
@@ -11,7 +12,7 @@ export type OffscreenTarget = Readonly<{
   width: number;
   height: number;
   format: GPUTextureFormat;
-  sampleCount: number;
+  msaaSampleCount: number;
 }>;
 
 export type RenderTarget = SurfaceTarget | OffscreenTarget;
@@ -32,6 +33,7 @@ export type SurfaceBinding = Readonly<{
   depthView: GPUTextureView;
   depthWidth: number;
   depthHeight: number;
+  depthMsaaSampleCount: number;
 }>;
 
 export type OffscreenBinding = Readonly<{
@@ -74,6 +76,22 @@ export type GpuLostInfo = Readonly<{
   message: string;
 }>;
 
+export const resolveSupportedMsaaSampleCount = (
+  adapter: Pick<GPUAdapter, 'features'>,
+  requestedMsaaSampleCount: number | undefined,
+): number => {
+  const requested = requestedMsaaSampleCount ?? 1;
+  if (requested <= 1) {
+    return 1;
+  }
+
+  if (adapter.features.has('texture-adapter-specific-format-features')) {
+    return requested;
+  }
+
+  return requested === 4 ? 4 : 1;
+};
+
 export const isWebGPUAvailable = (gpu: GPU | undefined = globalThis.navigator?.gpu) => Boolean(gpu);
 
 export const canUseWebGPU = async (
@@ -105,8 +123,16 @@ export const requestGpuContext = async (
     throw new Error('Failed to request WebGPU adapter');
   }
 
+  const autoFeatureNames = ['texture-adapter-specific-format-features'] as const;
+  const requiredFeatures = new Set<GPUFeatureName>(options.requiredFeatures ?? []);
+  for (const featureName of autoFeatureNames) {
+    if (adapter.features.has(featureName)) {
+      requiredFeatures.add(featureName);
+    }
+  }
+
   const device = await adapter.requestDevice({
-    requiredFeatures: options.requiredFeatures ? [...options.requiredFeatures] : undefined,
+    requiredFeatures: requiredFeatures.size > 0 ? [...requiredFeatures] : undefined,
     requiredLimits: options.requiredLimits,
   });
 
@@ -147,7 +173,7 @@ const createDepthTexture = (
   device: Pick<GPUDevice, 'createTexture'>,
   width: number,
   height: number,
-  sampleCount = 1,
+  msaaSampleCount = 1,
 ): GPUTexture =>
   device.createTexture({
     label: 'render-depth',
@@ -157,7 +183,7 @@ const createDepthTexture = (
       depthOrArrayLayers: 1,
     },
     format: depthTextureFormat,
-    sampleCount,
+    sampleCount: msaaSampleCount,
     usage: renderAttachmentUsage,
   });
 
@@ -176,17 +202,23 @@ const syncSurfaceDepthAttachment = (
 ): void => {
   const width = (colorTexture as GPUTexture & { width?: number }).width ?? binding.target.width;
   const height = (colorTexture as GPUTexture & { height?: number }).height ?? binding.target.height;
+  const msaaSampleCount = binding.target.msaaSampleCount ?? 1;
 
-  if (width === binding.depthWidth && height === binding.depthHeight) {
+  if (
+    width === binding.depthWidth &&
+    height === binding.depthHeight &&
+    msaaSampleCount === binding.depthMsaaSampleCount
+  ) {
     return;
   }
 
-  const depthTexture = createDepthTexture(device, width, height);
+  const depthTexture = createDepthTexture(device, width, height, msaaSampleCount);
   const mutableBinding = binding as MutableSurfaceBinding;
   mutableBinding.depthTexture = depthTexture;
   mutableBinding.depthView = depthTexture.createView();
   mutableBinding.depthWidth = width;
   mutableBinding.depthHeight = height;
+  mutableBinding.depthMsaaSampleCount = msaaSampleCount;
 };
 
 export const createSurfaceBinding = (
@@ -207,6 +239,7 @@ export const createSurfaceBinding = (
     context.device,
     context.target.width,
     context.target.height,
+    context.target.msaaSampleCount ?? 1,
   );
 
   return {
@@ -218,6 +251,7 @@ export const createSurfaceBinding = (
     depthView: depthTexture.createView(),
     depthWidth: context.target.width,
     depthHeight: context.target.height,
+    depthMsaaSampleCount: context.target.msaaSampleCount ?? 1,
   };
 };
 
@@ -236,11 +270,11 @@ export const createOffscreenBinding = (
       depthOrArrayLayers: 1,
     },
     format: context.target.format,
-    sampleCount: context.target.sampleCount,
+    sampleCount: context.target.msaaSampleCount,
     usage: renderAttachmentUsage | textureBindingUsage |
-      (context.target.sampleCount === 1 ? textureCopySrcUsage : 0),
+      (context.target.msaaSampleCount === 1 ? textureCopySrcUsage : 0),
   });
-  const resolveTexture = context.target.sampleCount > 1
+  const resolveTexture = context.target.msaaSampleCount > 1
     ? context.device.createTexture({
       label: 'offscreen-resolve',
       size: {
@@ -257,7 +291,7 @@ export const createOffscreenBinding = (
     context.device,
     context.target.width,
     context.target.height,
-    context.target.sampleCount,
+    context.target.msaaSampleCount,
   );
 
   return {

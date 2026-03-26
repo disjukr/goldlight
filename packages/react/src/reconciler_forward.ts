@@ -10,6 +10,7 @@ import {
   type RenderContextBinding,
   type RuntimeResidency,
   type TextureResidency,
+  resolveSupportedMsaaSampleCount,
 } from '@goldlight/gpu';
 import { evaluateScene } from '@goldlight/core';
 import {
@@ -41,6 +42,7 @@ type React3dSceneRootLike =
     get2dScenes: () => readonly React2dScene[];
     get3dScenes: () => readonly React3dScene[];
     getRootClearColor: () => readonly [number, number, number, number] | undefined;
+    getRootMsaaSampleCount: () => number | undefined;
     getContentRevision: () => number;
   }>;
 
@@ -63,6 +65,7 @@ export type ReactSceneRootForwardRendererOptions = Readonly<
     context: GpuContext & GpuRenderExecutionContext & GpuUploadContext & GpuTextureUploadContext;
     binding: RenderContextBinding;
     residency: RuntimeResidency;
+    msaaSampleCount?: number;
     materialRegistry?: MaterialRegistry;
     postProcessPasses?: readonly PostProcessPass[];
     hooks?: ReactSceneRootForwardRendererHooks;
@@ -88,27 +91,33 @@ type Scene3dRuntimeState = {
 
 const surfaceTextureFormat = 'rgba8unorm' as const;
 
-const create2dSceneTarget = (scene2d: React2dScene): OffscreenTarget => ({
+const create2dSceneTarget = (
+  adapter: GpuContext['adapter'],
+  scene2d: React2dScene,
+): OffscreenTarget => ({
   kind: 'offscreen',
   width: scene2d.textureWidth,
   height: scene2d.textureHeight,
   format: surfaceTextureFormat,
-  sampleCount: 1,
+  msaaSampleCount: resolveSupportedMsaaSampleCount(adapter, scene2d.msaaSampleCount),
 });
 
-const create3dSceneTarget = (scene3d: React3dScene): OffscreenTarget => ({
+const create3dSceneTarget = (
+  adapter: GpuContext['adapter'],
+  scene3d: React3dScene,
+): OffscreenTarget => ({
   kind: 'offscreen',
   width: scene3d.textureWidth,
   height: scene3d.textureHeight,
   format: surfaceTextureFormat,
-  sampleCount: 1,
+  msaaSampleCount: resolveSupportedMsaaSampleCount(adapter, scene3d.msaaSampleCount),
 });
 
 const create2dSceneRuntimeState = (
   context: ReactSceneRootForwardRendererOptions['context'],
   scene2d: React2dScene,
 ): Scene2dRuntimeState => {
-  const target = create2dSceneTarget(scene2d);
+  const target = create2dSceneTarget(context.adapter, scene2d);
   const surfaceContext: GpuContext = {
     adapter: context.adapter,
     device: context.device,
@@ -132,7 +141,7 @@ const create3dSceneRuntimeState = (
   context: ReactSceneRootForwardRendererOptions['context'],
   scene3d: React3dScene,
 ): Scene3dRuntimeState => {
-  const target = create3dSceneTarget(scene3d);
+  const target = create3dSceneTarget(context.adapter, scene3d);
   const surfaceContext: GpuContext = {
     adapter: context.adapter,
     device: context.device,
@@ -165,7 +174,7 @@ const syncSurfaceRuntimeState = (
   scene2d: React2dScene,
 ): Scene2dRuntimeState => {
   const current = runtimeStates.get(scene2d.id);
-  const nextTarget = create2dSceneTarget(scene2d);
+  const nextTarget = create2dSceneTarget(context.adapter, scene2d);
   if (
     current &&
     current.target.width === nextTarget.width &&
@@ -190,11 +199,12 @@ const syncScene3dRuntimeState = (
   scene3d: React3dScene,
 ): Scene3dRuntimeState => {
   const current = runtimeStates.get(scene3d.id);
-  const nextTarget = create3dSceneTarget(scene3d);
+  const nextTarget = create3dSceneTarget(context.adapter, scene3d);
   if (
     current &&
     current.target.width === nextTarget.width &&
-    current.target.height === nextTarget.height
+    current.target.height === nextTarget.height &&
+    current.target.msaaSampleCount === nextTarget.msaaSampleCount
   ) {
     current.scene3d = scene3d;
     return current;
@@ -263,7 +273,11 @@ export const createReactSceneRootForwardRenderer = (
         const activeScene3dIds = new Set<string>();
         for (const scene3d of sceneRoot.get3dScenes()) {
           activeScene3dIds.add(scene3d.id);
-          const state = syncScene3dRuntimeState(options.context, scene3dRuntimeStates, scene3d);
+          const state = syncScene3dRuntimeState(
+            options.context,
+            scene3dRuntimeStates,
+            scene3d,
+          );
           if (state.renderedRevision !== scene3d.revision) {
             const evaluatedScene3d = evaluateScene(scene3d.scene, { timeMs: currentTimeMs });
             ensureSceneMeshResidency(options.context, residency, scene3d.scene, evaluatedScene3d);

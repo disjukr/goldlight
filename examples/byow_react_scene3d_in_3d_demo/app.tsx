@@ -50,7 +50,10 @@ const DemoScene = () => {
   const { timeMs = 0 } = useFrameState<DemoFrameState>();
   const { scaleFactor } = useWindowMetrics();
   const t = timeMs / 1000;
-  const inspectorTextureSize = Math.max(1, Math.round(640 * scaleFactor));
+  const inspectorViewportWidth = 640;
+  const inspectorViewportHeight = 640;
+  const inspectorTextureWidth = Math.max(1, Math.round(inspectorViewportWidth * scaleFactor));
+  const inspectorTextureHeight = Math.max(1, Math.round(inspectorViewportHeight * scaleFactor));
   const screenOffsetX = -0.92 + (Math.sin(t * 0.9) * 0.9);
   const screenOffsetY = 0.38 + (Math.cos(t * 1.1) * 0.18);
   const screenOffsetZ = 0.52 + (Math.sin(t * 0.7) * 0.16);
@@ -176,8 +179,10 @@ const DemoScene = () => {
         id='inspector-scene'
         activeCameraId='inspector-camera'
         outputTextureId='inspector-scene-texture'
-        textureWidth={inspectorTextureSize}
-        textureHeight={inspectorTextureSize}
+        viewportWidth={inspectorViewportWidth}
+        viewportHeight={inspectorViewportHeight}
+        textureWidth={inspectorTextureWidth}
+        textureHeight={inspectorTextureHeight}
         clearColor={[0.72, 0.62, 0.44, 1]}
       >
         <g3d-material

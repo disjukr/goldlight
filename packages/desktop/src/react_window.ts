@@ -7,6 +7,8 @@ import React from 'npm:react@19.2.0';
 import {
   createRuntimeResidency,
   createSurfaceBinding,
+  type RenderContextBinding,
+  resolveSupportedMsaaSampleCount,
   requestGpuContext,
   resizeSurfaceBindingTarget,
 } from '@goldlight/gpu';
@@ -16,16 +18,13 @@ import {
   type React3dSceneRoot,
   type SceneRootForwardRenderer,
 } from '@goldlight/react/reconciler';
-import type { FrameState } from '@goldlight/renderer';
+import type { FrameState, PostProcessPass } from '@goldlight/renderer';
 
 import type { DesktopModuleCleanup, DesktopModuleContext } from './app.ts';
 
-export type FrameStateStore = Readonly<{
+export type FrameStateHandle = Readonly<{
   getSnapshot: () => FrameState;
   subscribe: (listener: () => void) => () => void;
-}>;
-
-export type FrameController = Readonly<{
   setFrameState: (nextState: FrameState) => void;
 }>;
 
@@ -38,94 +37,112 @@ export type WindowMetrics = Readonly<{
   focused: boolean;
 }>;
 
-export type WindowMetricsStore = Readonly<{
+export type WindowMetricsHandle = Readonly<{
   getSnapshot: () => WindowMetrics;
   subscribe: (listener: () => void) => () => void;
 }>;
 
-export const FrameControllerContext = React.createContext<FrameController | null>(null);
-export const FrameStateStoreContext = React.createContext<FrameStateStore | null>(null);
-export const WindowMetricsStoreContext = React.createContext<WindowMetricsStore | null>(null);
+export type RendererConfig = Readonly<{
+  msaaSampleCount: number;
+  postProcessPasses: readonly PostProcessPass[];
+}>;
 
-const FrameContextProvider = (
-  {
-    controller,
-    store,
-    children,
-  }: React.PropsWithChildren<{ controller: FrameController; store: FrameStateStore }>,
-) =>
-  React.createElement(
-    FrameControllerContext.Provider,
-    { value: controller },
-    React.createElement(
-      FrameStateStoreContext.Provider,
-      { value: store },
-      children,
-    ),
-  );
+export type RendererConfigHandle = Readonly<{
+  getSnapshot: () => RendererConfig;
+  subscribe: (listener: () => void) => () => void;
+  setRendererConfig: (nextConfig: RendererConfig) => void;
+}>;
 
-const WindowMetricsContextProvider = (
-  {
-    store,
-    children,
-  }: React.PropsWithChildren<{ store: WindowMetricsStore }>,
-) =>
-  React.createElement(
-    WindowMetricsStoreContext.Provider,
-    { value: store },
-    children,
-  );
+export const FrameStateHandleContext = React.createContext<FrameStateHandle | null>(null);
+export const WindowMetricsHandleContext = React.createContext<WindowMetricsHandle | null>(null);
+export const RendererConfigHandleContext = React.createContext<RendererConfigHandle | null>(null);
 
-export const useFrameController = (): FrameController => {
-  const controller = React.useContext(FrameControllerContext);
-  if (!controller) {
-    throw new Error('useFrameController() must be used inside initializeWindow()');
+export const useFrameStateHandle = (): FrameStateHandle => {
+  const handle = React.useContext(FrameStateHandleContext);
+  if (!handle) {
+    throw new Error('useFrameStateHandle() must be used inside initializeWindow()');
   }
-  return controller;
+  return handle;
 };
 
-export const useSetFrameState = (): FrameController['setFrameState'] => {
-  return useFrameController().setFrameState;
+export const useSetFrameState = (): FrameStateHandle['setFrameState'] => {
+  return useFrameStateHandle().setFrameState;
 };
 
 export const useFrameState = <TFrameState extends FrameState = FrameState>(): TFrameState => {
-  const store = React.useContext(FrameStateStoreContext);
-  if (!store) {
+  const handle = React.useContext(FrameStateHandleContext);
+  if (!handle) {
     throw new Error('useFrameState() must be used inside initializeWindow()');
   }
   return React.useSyncExternalStore(
-    store.subscribe,
-    store.getSnapshot,
-    store.getSnapshot,
+    handle.subscribe,
+    handle.getSnapshot,
+    handle.getSnapshot,
   ) as TFrameState;
 };
 
 export const useWindowMetrics = (): WindowMetrics => {
-  const store = React.useContext(WindowMetricsStoreContext);
-  if (!store) {
+  const handle = React.useContext(WindowMetricsHandleContext);
+  if (!handle) {
     throw new Error('useWindowMetrics() must be used inside initializeWindow()');
   }
   return React.useSyncExternalStore(
-    store.subscribe,
-    store.getSnapshot,
-    store.getSnapshot,
+    handle.subscribe,
+    handle.getSnapshot,
+    handle.getSnapshot,
   );
 };
 
-type FrameStateStoreController = Readonly<{
-  store: FrameStateStore;
-  controller: FrameController;
+export const useSetRendererConfig = (): RendererConfigHandle['setRendererConfig'] => {
+  const handle = React.useContext(RendererConfigHandleContext);
+  if (!handle) {
+    throw new Error('useSetRendererConfig() must be used inside initializeWindow()');
+  }
+  return handle.setRendererConfig;
+};
+
+export const useRendererConfig = (): RendererConfig => {
+  const handle = React.useContext(RendererConfigHandleContext);
+  if (!handle) {
+    throw new Error('useRendererConfig() must be used inside initializeWindow()');
+  }
+  return React.useSyncExternalStore(
+    handle.subscribe,
+    handle.getSnapshot,
+    handle.getSnapshot,
+  );
+};
+
+type FrameStateHandleController = Readonly<{
+  handle: FrameStateHandle;
 }>;
 
-type WindowMetricsStoreController = Readonly<{
-  store: WindowMetricsStore;
+type WindowMetricsHandleController = Readonly<{
+  handle: WindowMetricsHandle;
   setMetrics: (nextMetrics: WindowMetrics) => void;
 }>;
 
-const createFrameStateStoreController = (
+type RendererConfigHandleController = Readonly<{
+  handle: RendererConfigHandle;
+}>;
+
+const defaultRendererConfig: RendererConfig = {
+  msaaSampleCount: 1,
+  postProcessPasses: [],
+};
+
+const areRendererConfigsEqual = (
+  left: RendererConfig,
+  right: RendererConfig,
+): boolean =>
+  left.msaaSampleCount === right.msaaSampleCount &&
+  left.postProcessPasses.length === right.postProcessPasses.length &&
+  left.postProcessPasses.every((pass, index) => Object.is(pass, right.postProcessPasses[index]));
+
+const createFrameStateHandleController = (
   initialFrameState: FrameState,
   onChange: () => void,
-): FrameStateStoreController => {
+): FrameStateHandleController => {
   let currentFrameState = initialFrameState;
   const listeners = new Set<() => void>();
 
@@ -137,7 +154,7 @@ const createFrameStateStoreController = (
   };
 
   return {
-    store: {
+    handle: {
       getSnapshot: () => currentFrameState,
       subscribe: (listener) => {
         listeners.add(listener);
@@ -145,8 +162,6 @@ const createFrameStateStoreController = (
           listeners.delete(listener);
         };
       },
-    },
-    controller: {
       setFrameState: (nextState) => {
         if (Object.is(currentFrameState, nextState)) {
           return;
@@ -170,10 +185,10 @@ const readWindowMetrics = (window: DesktopModuleContext['window']): WindowMetric
   };
 };
 
-const createWindowMetricsStoreController = (
+const createWindowMetricsHandleController = (
   initialMetrics: WindowMetrics,
   onChange: () => void,
-): WindowMetricsStoreController => {
+): WindowMetricsHandleController => {
   let currentMetrics = initialMetrics;
   const listeners = new Set<() => void>();
 
@@ -185,7 +200,7 @@ const createWindowMetricsStoreController = (
   };
 
   return {
-    store: {
+    handle: {
       getSnapshot: () => currentMetrics,
       subscribe: (listener) => {
         listeners.add(listener);
@@ -211,75 +226,168 @@ const createWindowMetricsStoreController = (
   };
 };
 
-export type InitializeWindowOptions<TProps> = Readonly<{
-  props?: TProps;
+const createRendererConfigHandleController = (
+  initialConfig: RendererConfig,
+  onChange: () => void,
+): RendererConfigHandleController => {
+  let currentConfig = initialConfig;
+  const listeners = new Set<() => void>();
+
+  const notify = () => {
+    onChange();
+    for (const listener of [...listeners]) {
+      listener();
+    }
+  };
+
+  return {
+    handle: {
+      getSnapshot: () => currentConfig,
+      subscribe: (listener) => {
+        listeners.add(listener);
+        return () => {
+          listeners.delete(listener);
+        };
+      },
+      setRendererConfig: (nextConfig) => {
+        if (areRendererConfigsEqual(currentConfig, nextConfig)) {
+          return;
+        }
+        currentConfig = nextConfig;
+        notify();
+      },
+    },
+  };
+};
+
+const destroyBindingResources = (binding: RenderContextBinding): void => {
+  binding.depthTexture.destroy?.();
+  if (binding.kind === 'offscreen') {
+    binding.texture.destroy?.();
+    binding.resolveTexture?.destroy?.();
+  }
+};
+
+export type InitializeWindowConfig = Readonly<{
   initialFrameState?: FrameState;
-  onReady?: (
-    context: Readonly<{
-      window: DesktopModuleContext['window'];
-      sceneRoot: React3dSceneRoot;
-      forwardRenderer: SceneRootForwardRenderer;
-      frameController: FrameController;
-    }>,
-  ) => void;
+  initialRendererConfig?: RendererConfig;
 }>;
 
-export const initializeWindow = <TProps>(
-  Component: React.ComponentType<TProps>,
-  options?: InitializeWindowOptions<TProps>,
+export const initializeWindow = (
+  Component: React.ComponentType,
+  config?: InitializeWindowConfig,
 ) =>
 async (
   { window }: DesktopModuleContext,
 ): Promise<void | DesktopModuleCleanup> => {
   const rootElement = (
-    frameController: FrameController,
-    frameStateStore: FrameStateStore,
-    windowMetricsStore: WindowMetricsStore,
+    frameState: FrameStateHandle,
+    windowMetrics: WindowMetricsHandle,
+    rendererConfig: RendererConfigHandle,
   ) =>
     React.createElement(
-      WindowMetricsContextProvider,
-      { store: windowMetricsStore },
+      WindowMetricsHandleContext.Provider,
+      { value: windowMetrics },
       React.createElement(
-        FrameContextProvider,
-        { controller: frameController, store: frameStateStore },
-        React.createElement(Component, (options?.props ?? {}) as TProps),
+        RendererConfigHandleContext.Provider,
+        { value: rendererConfig },
+        React.createElement(
+          FrameStateHandleContext.Provider,
+          { value: frameState },
+          React.createElement(Component),
+        ),
       ),
     );
 
   let requestFrame = () => {};
-  const { store: frameStateStore, controller: frameController } = createFrameStateStoreController(
-    options?.initialFrameState ?? {},
+  const { handle: frameState } = createFrameStateHandleController(
+    config?.initialFrameState ?? {},
     () => requestFrame(),
   );
-  const windowMetrics = createWindowMetricsStoreController(
+  const windowMetrics = createWindowMetricsHandleController(
     readWindowMetrics(window),
     () => requestFrame(),
   );
+  let needsRendererReconfigure = false;
+  const rendererConfig = createRendererConfigHandleController(
+    config?.initialRendererConfig ?? defaultRendererConfig,
+    () => {
+      needsRendererReconfigure = true;
+      requestFrame();
+    },
+  );
 
   const sceneRoot = createReactSceneRoot(
-    rootElement(frameController, frameStateStore, windowMetrics.store),
+    rootElement(
+      frameState,
+      windowMetrics.handle,
+      rendererConfig.handle,
+    ),
   );
-  const initialMetrics = windowMetrics.store.getSnapshot();
-  const target = {
+  const getEffectiveRendererConfig = (): RendererConfig => {
+    const baseConfig = rendererConfig.handle.getSnapshot();
+    const rootMsaaSampleCount = sceneRoot.getRootMsaaSampleCount();
+    return rootMsaaSampleCount === undefined ? baseConfig : {
+      ...baseConfig,
+      msaaSampleCount: rootMsaaSampleCount,
+    };
+  };
+  const initialMetrics = windowMetrics.handle.getSnapshot();
+  const createTarget = (metrics: WindowMetrics, config: RendererConfig) => ({
+    kind: 'surface' as const,
+    width: metrics.physicalWidth,
+    height: metrics.physicalHeight,
+    format: navigator.gpu.getPreferredCanvasFormat(),
+    alphaMode: 'opaque' as const,
+    msaaSampleCount: resolveSupportedMsaaSampleCount(gpuContext.adapter, config.msaaSampleCount),
+  });
+  const initialTarget = {
     kind: 'surface' as const,
     width: initialMetrics.physicalWidth,
     height: initialMetrics.physicalHeight,
     format: navigator.gpu.getPreferredCanvasFormat(),
     alphaMode: 'opaque' as const,
+    msaaSampleCount: 1,
   };
-  const gpuContext = await requestGpuContext({ target });
-  const binding = createSurfaceBinding(gpuContext, window.canvasContext);
+  const gpuContext = await requestGpuContext({ target: initialTarget });
+  let target = createTarget(initialMetrics, getEffectiveRendererConfig());
+  const createBinding = (nextTarget: typeof target) =>
+    createSurfaceBinding({ ...gpuContext, target: nextTarget }, window.canvasContext);
+  let binding = createBinding(target);
   const residency = createRuntimeResidency();
-  const forwardRenderer = createReactSceneRootForwardRenderer(sceneRoot, {
-    context: gpuContext,
-    binding,
-    residency,
-  });
+  const createForwardRenderer = (nextBinding: typeof binding, config: RendererConfig) =>
+    createReactSceneRootForwardRenderer(sceneRoot, {
+      context: gpuContext,
+      binding: nextBinding,
+      residency,
+      postProcessPasses: config.postProcessPasses,
+      msaaSampleCount: config.msaaSampleCount,
+    });
+  let currentForwardRenderer = createForwardRenderer(binding, getEffectiveRendererConfig());
+  const forwardRenderer: SceneRootForwardRenderer = {
+    getFrameDriver: () => currentForwardRenderer.getFrameDriver(),
+    renderFrame: (frameState, frameOptions) =>
+      currentForwardRenderer.renderFrame(frameState, frameOptions),
+    dispose: () => currentForwardRenderer.dispose(),
+  };
 
   let frameHandle = 0;
   let disposed = false;
   let needsPresent = true;
   let lastRenderedContentRevision = sceneRoot.getContentRevision();
+
+  const reconfigureRenderer = () => {
+    const nextConfig = getEffectiveRendererConfig();
+    const nextMetrics = windowMetrics.handle.getSnapshot();
+    const nextTarget = createTarget(nextMetrics, nextConfig);
+    currentForwardRenderer.dispose();
+    destroyBindingResources(binding);
+    target = nextTarget;
+    binding = createBinding(nextTarget);
+    currentForwardRenderer = createForwardRenderer(binding, nextConfig);
+    needsRendererReconfigure = false;
+    needsPresent = true;
+  };
 
   const drawFrame = (_timeMs: number) => {
     frameHandle = 0;
@@ -288,9 +396,16 @@ async (
     }
 
     sceneRoot.flushUpdates();
+    const effectiveConfig = getEffectiveRendererConfig();
+    if (target.msaaSampleCount !== effectiveConfig.msaaSampleCount) {
+      needsRendererReconfigure = true;
+    }
+    if (needsRendererReconfigure) {
+      reconfigureRenderer();
+    }
     const nextContentRevision = sceneRoot.getContentRevision();
     if (needsPresent || nextContentRevision !== lastRenderedContentRevision) {
-      forwardRenderer.renderFrame(frameStateStore.getSnapshot());
+      currentForwardRenderer.renderFrame(frameState.getSnapshot());
       window.present();
       needsPresent = false;
       lastRenderedContentRevision = nextContentRevision;
@@ -338,12 +453,6 @@ async (
   window.runtime.addEventListener('resize', handleResize);
   window.runtime.addEventListener('scalefactorchange', handleScaleFactorChange);
   window.runtime.addEventListener('focuschange', handleFocusChange);
-  options?.onReady?.({
-    window,
-    sceneRoot,
-    forwardRenderer,
-    frameController,
-  });
 
   requestFrame();
 
@@ -357,6 +466,7 @@ async (
     window.runtime.removeEventListener('scalefactorchange', handleScaleFactorChange);
     window.runtime.removeEventListener('focuschange', handleFocusChange);
     sceneRoot.unmount();
-    forwardRenderer.dispose();
+    currentForwardRenderer.dispose();
+    destroyBindingResources(binding);
   };
 };

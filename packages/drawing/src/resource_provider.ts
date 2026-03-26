@@ -2078,10 +2078,10 @@ export const createDawnResourceProvider = (
   });
 
   const sampleCount = caps?.supportsSampleCount(
-      backend.target.kind === 'offscreen' ? backend.target.sampleCount : 1,
+      backend.target.kind === 'offscreen' ? backend.target.msaaSampleCount : 1,
       backend.target.format,
     )
-    ? backend.target.kind === 'offscreen' ? backend.target.sampleCount : 1
+    ? backend.target.kind === 'offscreen' ? backend.target.msaaSampleCount : 1
     : caps?.defaultSampleCount ?? 1;
 
   const getViewportBindGroupLayout = (): GPUBindGroupLayout => {
@@ -2521,10 +2521,10 @@ export const createDawnResourceProvider = (
     },
     getStencilAttachmentView: () => {
       const sampleCount = caps?.supportsSampleCount(
-          backend.target.kind === 'offscreen' ? backend.target.sampleCount : 1,
+          backend.target.kind === 'offscreen' ? backend.target.msaaSampleCount : 1,
           stencilFormat,
         )
-        ? backend.target.kind === 'offscreen' ? backend.target.sampleCount : 1
+        ? backend.target.kind === 'offscreen' ? backend.target.msaaSampleCount : 1
         : 1;
       if (
         stencilAttachment &&

@@ -235,6 +235,9 @@ type HostInstance = RootHostInstance | HostChild;
 export type React2dScene = Readonly<{
   id: string;
   textureId: string;
+  msaaSampleCount: number;
+  viewportWidth: number;
+  viewportHeight: number;
   textureWidth: number;
   textureHeight: number;
   revision: number;
@@ -243,6 +246,9 @@ export type React2dScene = Readonly<{
 export type React3dScene = Readonly<{
   id: string;
   textureId: string;
+  msaaSampleCount: number;
+  viewportWidth: number;
+  viewportHeight: number;
   textureWidth: number;
   textureHeight: number;
   revision: number;
@@ -256,6 +262,7 @@ type HostContainer = {
   current2dScenes: readonly React2dScene[];
   current3dScenes: readonly React3dScene[];
   currentRootClearColor?: readonly [number, number, number, number];
+  currentRootMsaaSampleCount?: number;
   revision: number;
   contentRevision: number;
   contentTreeRevision?: number;
@@ -273,6 +280,7 @@ export type React3dSceneRoot = Readonly<{
   get2dScenes: () => readonly React2dScene[];
   get3dScenes: () => readonly React3dScene[];
   getRootClearColor: () => readonly [number, number, number, number] | undefined;
+  getRootMsaaSampleCount: () => number | undefined;
   getRevision: () => number;
   getContentRevision: () => number;
   subscribe: (subscriber: G3dSceneRootSubscriber) => () => void;
@@ -357,7 +365,9 @@ const createInitialHostRevisionState = (): HostRevisionState => ({
   lastChildSubtreeRevisions: [],
 });
 
-const initializeHostRevisionState = <TInstance extends HostInstance>(instance: TInstance): TInstance => {
+const initializeHostRevisionState = <TInstance extends HostInstance>(
+  instance: TInstance,
+): TInstance => {
   hostRevisionStates.set(instance, createInitialHostRevisionState());
   return instance;
 };
@@ -370,7 +380,8 @@ const getHostRevisionState = (instance: HostInstance): HostRevisionState => {
   return state;
 };
 
-const getHostSubtreeRevision = (instance: HostInstance): number => getHostRevisionState(instance).subtreeRevision;
+const getHostSubtreeRevision = (instance: HostInstance): number =>
+  getHostRevisionState(instance).subtreeRevision;
 
 const syncHostSubtreeRevision = (instance: HostInstance): number => {
   const state = getHostRevisionState(instance);
@@ -385,8 +396,11 @@ const syncHostSubtreeRevision = (instance: HostInstance): number => {
   const childSubtreeRevisions = childRefs.map((child) => syncHostSubtreeRevision(child));
   const childListChanged = state.lastChildRefs.length !== childRefs.length ||
     childRefs.some((child, index) => state.lastChildRefs[index] !== child);
-  const childRevisionChanged = state.lastChildSubtreeRevisions.length !== childSubtreeRevisions.length ||
-    childSubtreeRevisions.some((revision, index) => state.lastChildSubtreeRevisions[index] !== revision);
+  const childRevisionChanged =
+    state.lastChildSubtreeRevisions.length !== childSubtreeRevisions.length ||
+    childSubtreeRevisions.some((revision, index) =>
+      state.lastChildSubtreeRevisions[index] !== revision
+    );
 
   if (selfChanged || childListChanged || childRevisionChanged || state.subtreeRevision === 0) {
     state.subtreeRevision += 1;
@@ -519,6 +533,9 @@ const create2dSceneDescriptor = (
 ): React2dScene => ({
   id: props.id,
   textureId: get2dSceneTextureId(props),
+  msaaSampleCount: props.msaaSampleCount ?? 1,
+  viewportWidth: props.viewportWidth ?? props.textureWidth ?? default2dSceneTextureSize,
+  viewportHeight: props.viewportHeight ?? props.textureHeight ?? default2dSceneTextureSize,
   textureWidth: props.textureWidth ?? default2dSceneTextureSize,
   textureHeight: props.textureHeight ?? default2dSceneTextureSize,
   revision,
@@ -539,6 +556,9 @@ const create3dSceneDescriptor = (
 ): React3dScene => ({
   id: props.id,
   textureId: get3dSceneTextureId(props),
+  msaaSampleCount: props.msaaSampleCount ?? 1,
+  viewportWidth: props.viewportWidth ?? props.textureWidth ?? default3dSceneTextureSize,
+  viewportHeight: props.viewportHeight ?? props.textureHeight ?? default3dSceneTextureSize,
   textureWidth: props.textureWidth ?? default3dSceneTextureSize,
   textureHeight: props.textureHeight ?? default3dSceneTextureSize,
   revision,
@@ -995,6 +1015,7 @@ const syncContainerSceneDocument = (container: HostContainer): void => {
     container.current2dScenes = [];
     container.current3dScenes = [];
     container.currentRootClearColor = undefined;
+    container.currentRootMsaaSampleCount = undefined;
     if (previousScene) {
       const commit = createG3dSceneRootCommit(
         g3dSceneDocumentToSceneIr(createG3dSceneDocument(previousScene.id)),
@@ -1049,6 +1070,7 @@ const syncContainerSceneDocument = (container: HostContainer): void => {
     container.current2dScenes = [scene2d];
     container.current3dScenes = [];
     container.currentRootClearColor = undefined;
+    container.currentRootMsaaSampleCount = rootInstance.props.msaaSampleCount;
     if (container.contentTreeRevision !== rootSubtreeRevision) {
       container.contentTreeRevision = rootSubtreeRevision;
       container.contentRevision += 1;
@@ -1068,6 +1090,7 @@ const syncContainerSceneDocument = (container: HostContainer): void => {
   container.current2dScenes = snapshot.scenes2d;
   container.current3dScenes = snapshot.scenes3d;
   container.currentRootClearColor = rootInstance.props.clearColor;
+  container.currentRootMsaaSampleCount = rootInstance.props.msaaSampleCount;
   if (container.contentTreeRevision !== rootSubtreeRevision) {
     container.contentTreeRevision = rootSubtreeRevision;
     container.contentRevision += 1;
@@ -1084,6 +1107,7 @@ const createRootContainer = (): HostContainer => ({
   current2dScenes: [],
   current3dScenes: [],
   currentRootClearColor: undefined,
+  currentRootMsaaSampleCount: undefined,
   revision: 0,
   contentRevision: 0,
   contentTreeRevision: undefined,
@@ -1180,6 +1204,7 @@ export const createReactSceneRoot = (initialElement?: ReactNode): React3dSceneRo
     get2dScenes: () => container.current2dScenes,
     get3dScenes: () => container.current3dScenes,
     getRootClearColor: () => container.currentRootClearColor,
+    getRootMsaaSampleCount: () => container.currentRootMsaaSampleCount,
     getRevision: () => container.revision,
     getContentRevision: () => container.contentRevision,
     subscribe: (subscriber) => {

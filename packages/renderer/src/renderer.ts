@@ -2159,6 +2159,7 @@ type MaterialPipelineOptions = Readonly<{
   blend?: GPUBlendState;
   depthWriteEnabled?: boolean;
   cullMode?: GPUCullMode | 'none';
+  msaaSampleCount?: number;
 }>;
 
 const resolveMaterialRenderPolicy = (material?: Material): MaterialRenderPolicy => {
@@ -3903,7 +3904,7 @@ const renderForwardEnvironmentBackground = (
     context,
     residency,
     binding.target.format,
-    getRenderTargetSampleCount(binding),
+    getRenderTargetMsaaSampleCount(binding),
   );
   const uniformData = createEnvironmentBackgroundUniformData(binding, activeCamera);
   const uniformBuffer = context.device.createBuffer({
@@ -3979,7 +3980,7 @@ const renderEnvironmentBackgroundBlurPasses = (
     {
       id: 'environment-background-blur-vertical',
       targetView: outputView,
-      sampleCount: getRenderTargetSampleCount(binding),
+      sampleCount: getRenderTargetMsaaSampleCount(binding),
       uniformData: Float32Array.from([
         0,
         1 / Math.max(binding.target.height, 1),
@@ -4069,12 +4070,14 @@ const prefersTexturedMaterialProgram = (
 const createMaterialPipelineOptions = (
   material: Material | undefined,
   passKind: 'opaque' | 'transparent',
+  msaaSampleCount = 1,
 ): MaterialPipelineOptions => {
   const policy = resolveMaterialRenderPolicy(material);
   return {
     blend: passKind === 'transparent' ? alphaBlendState : undefined,
     depthWriteEnabled: passKind === 'transparent' ? policy.depthWrite : true,
     cullMode: policy.doubleSided ? 'none' : 'back',
+    msaaSampleCount,
   };
 };
 
@@ -4162,6 +4165,7 @@ const renderForwardMeshPass = (
   environment: ReturnType<typeof ensureForwardEnvironmentTexture>,
   extension: ForwardSceneExtension,
   transientBuffers: GPUBuffer[],
+  msaaSampleCount: number,
   passKind: 'opaque' | 'transparent' = 'opaque',
 ): number => {
   let drawCount = 0;
@@ -4208,7 +4212,7 @@ const renderForwardMeshPass = (
       residency,
       preparedProgram,
       format,
-      createMaterialPipelineOptions(material, passKind),
+      createMaterialPipelineOptions(material, passKind, msaaSampleCount),
     );
 
     let isDrawable = true;
@@ -4587,9 +4591,10 @@ export const ensureMaterialPipeline = (
   const blendKey = options.blend ? 'alpha-blend' : 'opaque';
   const depthWriteEnabled = options.depthWriteEnabled ?? true;
   const cullMode = options.cullMode === 'none' ? 'none' : options.cullMode ?? 'back';
+  const msaaSampleCount = options.msaaSampleCount ?? 1;
   const cacheKey = `${preparedProgram.key}:${format}:${blendKey}:${
     depthWriteEnabled ? 'depth' : 'nodepth'
-  }:${cullMode}`;
+  }:${cullMode}:msaa${msaaSampleCount}`;
   const cached = residency.pipelines.get(cacheKey);
   if (cached) {
     return cached as GPURenderPipeline;
@@ -4686,6 +4691,9 @@ export const ensureMaterialPipeline = (
       format: depthTextureFormat,
       depthWriteEnabled,
       depthCompare: 'less',
+    },
+    multisample: {
+      count: msaaSampleCount,
     },
   });
 
@@ -6011,18 +6019,35 @@ const renderForwardFrameInternal = (
     materialRegistry,
     residency,
   );
-  const sceneColorTexture = postProcessPasses.length > 0
+  const renderTargetSampleCount = getRenderTargetMsaaSampleCount(binding);
+  const needsIntermediateSceneColor = postProcessPasses.length > 0 || renderTargetSampleCount > 1;
+  const sceneColorTexture = needsIntermediateSceneColor
     ? createTransientRenderTexture(
       context,
       binding,
       'forward-scene-color',
       binding.target.format,
       renderAttachmentUsage | textureBindingUsage,
-      getRenderTargetSampleCount(binding),
+      renderTargetSampleCount,
+    )
+    : undefined;
+  const sceneColorResolveTexture = renderTargetSampleCount > 1 && postProcessPasses.length > 0
+    ? createTransientRenderTexture(
+      context,
+      binding,
+      'forward-scene-color-resolve',
+      binding.target.format,
+      renderAttachmentUsage | textureBindingUsage,
     )
     : undefined;
   const sceneColorView = sceneColorTexture?.createView();
-  const colorView = sceneColorView ?? acquireColorAttachmentView(context, binding);
+  const sceneColorResolveView = sceneColorResolveTexture?.createView();
+  const finalColorView = acquireColorAttachmentView(context, binding);
+  const colorView = sceneColorView ?? finalColorView;
+  const colorResolveTarget = renderTargetSampleCount > 1
+    ? sceneColorResolveView ?? finalColorView
+    : undefined;
+  const resolvedSceneColorView = sceneColorResolveView ?? sceneColorView ?? finalColorView;
   const viewProjectionMatrix = options.viewProjectionMatrix ??
     createViewProjectionMatrix(binding, evaluatedScene.activeCamera);
   const encoder = context.device.createCommandEncoder({
@@ -6030,6 +6055,12 @@ const renderForwardFrameInternal = (
   });
   const transientTextures: GPUTexture[] = [];
   const transientBuffers: GPUBuffer[] = [];
+  if (sceneColorTexture) {
+    transientTextures.push(sceneColorTexture);
+  }
+  if (sceneColorResolveTexture) {
+    transientTextures.push(sceneColorResolveTexture);
+  }
   const forwardEnvironment = ensureForwardEnvironmentTexture(
     context,
     residency,
@@ -6092,6 +6123,7 @@ const renderForwardFrameInternal = (
   const pass = encoder.beginRenderPass({
     colorAttachments: [{
       view: colorView,
+      resolveTarget: colorResolveTarget,
       clearValue: clearColor,
       loadOp: hasEnvironmentBackground ? 'load' : 'clear',
       storeOp: 'store',
@@ -6128,6 +6160,7 @@ const renderForwardFrameInternal = (
     forwardEnvironment,
     options.extension ?? {},
     transientBuffers,
+    renderTargetSampleCount,
     'opaque',
   );
 
@@ -6137,6 +6170,7 @@ const renderForwardFrameInternal = (
     const transparentPass = encoder.beginRenderPass({
       colorAttachments: [{
         view: colorView,
+        resolveTarget: colorResolveTarget,
         loadOp: 'load',
         storeOp: 'store',
       }],
@@ -6162,6 +6196,7 @@ const renderForwardFrameInternal = (
       forwardEnvironment,
       options.extension ?? {},
       transientBuffers,
+      renderTargetSampleCount,
       'transparent',
     );
     transparentPass.end();
@@ -6174,7 +6209,7 @@ const renderForwardFrameInternal = (
       binding,
       residency,
       postProcessPasses,
-      sceneColorView,
+      resolvedSceneColorView,
     );
   }
 
@@ -6199,7 +6234,7 @@ const createTransientRenderTexture = (
   label: string,
   format: GPUTextureFormat,
   usage = renderAttachmentUsage | textureBindingUsage,
-  sampleCount = 1,
+  msaaSampleCount = 1,
 ): GPUTexture =>
   context.device.createTexture({
     label,
@@ -6209,7 +6244,7 @@ const createTransientRenderTexture = (
       depthOrArrayLayers: 1,
     },
     format,
-    sampleCount,
+    sampleCount: msaaSampleCount,
     usage,
   });
 
@@ -6230,8 +6265,8 @@ const createPathtracedAccumulationTexture = (
     usage: renderAttachmentUsage | textureBindingUsage,
   });
 
-const getRenderTargetSampleCount = (binding: RenderContextBinding): number =>
-  'sampleCount' in binding.target ? binding.target.sampleCount : 1;
+const getRenderTargetMsaaSampleCount = (binding: RenderContextBinding): number =>
+  'msaaSampleCount' in binding.target ? (binding.target.msaaSampleCount ?? 1) : 1;
 
 const createPathtracedSceneKey = (
   evaluatedScene: EvaluatedScene,
@@ -6367,7 +6402,7 @@ const renderPostProcessPasses = (
       residency,
       postProcessPass.program,
       binding.target.format,
-      isLastPass ? getRenderTargetSampleCount(binding) : 1,
+      isLastPass ? getRenderTargetMsaaSampleCount(binding) : 1,
     );
     const targetView = isLastPass
       ? acquireColorAttachmentView(context, binding)
@@ -6471,7 +6506,7 @@ export const renderDeferredFrame = (
       'deferred-scene-color',
       binding.target.format,
       renderAttachmentUsage | textureBindingUsage,
-      getRenderTargetSampleCount(binding),
+      getRenderTargetMsaaSampleCount(binding),
     )
     : undefined;
   const sceneColorView = sceneColorTexture?.createView();
@@ -6773,6 +6808,7 @@ export const renderDeferredFrame = (
       ensureForwardEnvironmentTexture(context, residency),
       {},
       [],
+      getRenderTargetMsaaSampleCount(binding),
     );
     forwardLitPass.end();
   }
@@ -6978,7 +7014,7 @@ export const renderUberFrame = (
       'uber-scene-color',
       binding.target.format,
       renderAttachmentUsage | textureBindingUsage,
-      getRenderTargetSampleCount(binding),
+      getRenderTargetMsaaSampleCount(binding),
     )
     : undefined;
   const sceneColorView = sceneColorTexture?.createView();
@@ -7263,6 +7299,7 @@ export const renderUberFrame = (
       ensureForwardEnvironmentTexture(context, residency),
       {},
       [],
+      getRenderTargetMsaaSampleCount(binding),
       'opaque',
     );
     forwardOpaquePass.end();
@@ -7297,6 +7334,7 @@ export const renderUberFrame = (
       ensureForwardEnvironmentTexture(context, residency),
       {},
       [],
+      getRenderTargetMsaaSampleCount(binding),
       'transparent',
     );
     forwardTransparentPass.end();
@@ -7458,7 +7496,7 @@ export const renderNodePickSnapshot = async (
       width: binding.target.width,
       height: binding.target.height,
       format: nodePickTargetFormat,
-      sampleCount: 1,
+      msaaSampleCount: 1,
     },
   });
   const frame = renderNodePickFrame(context, pickBinding, residency, evaluatedScene);
@@ -7611,7 +7649,7 @@ export const renderForwardCubemapSnapshot = async (
         width: size,
         height: size,
         format,
-        sampleCount: 1,
+        msaaSampleCount: 1,
       },
     });
     const target = [

@@ -14,30 +14,40 @@ import {
   drawingDstUsage,
   type DrawingPreparedDraw,
   prepareDrawingPathCommand,
+  prepareDrawingTextCommand,
 } from './path_renderer.ts';
 import { isDrawingStencilFillRenderer } from './renderer_provider.ts';
 import type {
+  DrawDirectMaskTextCommand,
   DrawingBlendMode,
   DrawingClipRect,
   DrawingClipStackWrapperKind,
   DrawingCommand,
   DrawPathCommand,
+  DrawSdfTextCommand,
   DrawShapeCommand,
 } from './types.ts';
 
-export type DrawingDrawCommand = DrawPathCommand | DrawShapeCommand;
+export type DrawingDrawCommand =
+  | DrawPathCommand
+  | DrawShapeCommand
+  | DrawDirectMaskTextCommand
+  | DrawSdfTextCommand;
 
 export type DrawingShaderKey =
   | 'path'
   | 'wedge-patch'
   | 'curve-patch'
-  | 'stroke-patch';
+  | 'stroke-patch'
+  | 'bitmap-text'
+  | 'sdf-text';
 
 export type DrawingVertexLayoutKey =
   | 'device-vertex'
   | 'wedge-patch-instance'
   | 'curve-patch-instance'
-  | 'stroke-patch-instance';
+  | 'stroke-patch-instance'
+  | 'text-vertex';
 
 export type DrawingDepthStencilKey =
   | 'none'
@@ -92,7 +102,8 @@ export type DrawingPreparedRenderStepKind =
   | 'fill-cover'
   | 'fill-fringe'
   | 'stroke-main'
-  | 'stroke-fringe';
+  | 'stroke-fringe'
+  | 'text-main';
 
 export type DrawingPreparedRenderStep = Readonly<{
   draw: DrawingPreparedDraw;
@@ -175,7 +186,8 @@ const lastDepthIndex = 0xffff;
 const firstLayerOrder = 1;
 
 const isDrawCommand = (command: DrawingCommand): command is DrawingDrawCommand =>
-  command.kind === 'drawPath' || command.kind === 'drawShape';
+  command.kind === 'drawPath' || command.kind === 'drawShape' ||
+  command.kind === 'drawDirectMaskText' || command.kind === 'drawSdfText';
 
 const rectsIntersect = (left: Rect, right: Rect): boolean => {
   const leftRight = left.origin[0] + left.size.width;
@@ -521,7 +533,7 @@ const expandRenderSteps = (
         );
       }
     }
-  } else {
+  } else if (step.draw.kind === 'pathStroke') {
     pushRenderStep('stroke-main', step.pipelineDescs[0]!, 0, false, step.usesDepth);
     if (step.draw.fringeVertices?.length) {
       pushRenderStep(
@@ -542,6 +554,8 @@ const expandRenderSteps = (
         false,
       );
     }
+  } else {
+    pushRenderStep('text-main', step.pipelineDescs[0]!, 0, false, false);
   }
 
   return renderSteps.map((renderStep) => ({
@@ -1324,6 +1338,22 @@ const getPipelineDescsForDraw = (
           false,
           'triangle-strip',
         )];
+    case 'directMaskText':
+      return [createPipelineDesc(
+        usesStencilClip ? 'drawing-text-bitmap-clip-cover' : 'drawing-text-bitmap-cover',
+        'bitmap-text',
+        'text-vertex',
+        pipelineBlendMode,
+        usesStencilClip ? 'clip-cover' : 'direct',
+      )];
+    case 'sdfText':
+      return [createPipelineDesc(
+        usesStencilClip ? 'drawing-text-sdf-clip-cover' : 'drawing-text-sdf-cover',
+        'sdf-text',
+        'text-vertex',
+        pipelineBlendMode,
+        usesStencilClip ? 'clip-cover' : 'direct',
+      )];
   }
 };
 
@@ -1422,7 +1452,9 @@ export const prepareDrawingRecording = (
     }
 
     if (isDrawCommand(command)) {
-      const prepared = prepareDrawingPathCommand(recording, recording.rendererProvider, command);
+      const prepared = command.kind === 'drawPath' || command.kind === 'drawShape'
+        ? prepareDrawingPathCommand(recording, recording.rendererProvider, command)
+        : prepareDrawingTextCommand(recording, command);
       if (prepared.supported) {
         currentSteps.push({
           draw: prepared.draw,
@@ -1447,7 +1479,8 @@ export const prepareDrawingRecording = (
           usesFillStencil: prepared.draw.kind === 'pathFill' &&
             isDrawingStencilFillRenderer(prepared.draw.renderer) &&
             !prepared.draw.clip?.elements?.length,
-          usesDepth: prepared.draw.renderer.usesDepth &&
+          usesDepth: (prepared.draw.kind === 'pathFill' || prepared.draw.kind === 'pathStroke') &&
+            prepared.draw.renderer.usesDepth &&
             (
               (prepared.draw.kind === 'pathStroke' &&
                 prepared.draw.usesTessellatedStrokePatches &&

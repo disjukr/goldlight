@@ -15,9 +15,11 @@ export type DrawingRendererKind =
   | 'convex-tessellated-wedges'
   | 'stencil-tessellated-wedges'
   | 'stencil-tessellated-curves'
-  | 'tessellated-strokes';
+  | 'tessellated-strokes'
+  | 'bitmap-text'
+  | 'sdf-text';
 
-export type DrawingRendererPatchMode = 'none' | 'wedge' | 'curve' | 'stroke';
+export type DrawingRendererPatchMode = 'none' | 'wedge' | 'curve' | 'stroke' | 'text';
 
 export type DrawingRenderer = Readonly<{
   name: string;

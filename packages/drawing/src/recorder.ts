@@ -18,6 +18,7 @@ import { createDrawingRecording, type DrawingRecording } from './recording.ts';
 import { type DawnSharedContext, registerDawnRecorder } from './shared_context.ts';
 import type {
   ClearCommand,
+  DrawDirectMaskTextCommand,
   DrawingClipOp,
   DrawingClipShader,
   DrawingClipStackSnapshot,
@@ -27,6 +28,7 @@ import type {
   DrawingShapeDescriptor,
   DrawingSubmission,
   DrawPathCommand,
+  DrawSdfTextCommand,
   DrawShapeCommand,
 } from './types.ts';
 
@@ -104,6 +106,38 @@ export const recordDrawShape = (
     kind: 'drawShape',
     shape,
     path: createDrawingPath2dFromShape(shape),
+    paint,
+    transform: recorder.state.transform,
+    clipStack: recorder.state.clipStack,
+  };
+  recorder.commands.push(command);
+  return command;
+};
+
+export const recordDrawDirectMaskText = (
+  recorder: DrawingRecorder,
+  glyphs: DrawDirectMaskTextCommand['glyphs'],
+  paint: DrawingPaint = {},
+): DrawDirectMaskTextCommand => {
+  const command: DrawDirectMaskTextCommand = {
+    kind: 'drawDirectMaskText',
+    glyphs,
+    paint,
+    transform: recorder.state.transform,
+    clipStack: recorder.state.clipStack,
+  };
+  recorder.commands.push(command);
+  return command;
+};
+
+export const recordDrawSdfText = (
+  recorder: DrawingRecorder,
+  glyphs: DrawSdfTextCommand['glyphs'],
+  paint: DrawingPaint = {},
+): DrawSdfTextCommand => {
+  const command: DrawSdfTextCommand = {
+    kind: 'drawSdfText',
+    glyphs,
     paint,
     transform: recorder.state.transform,
     clipStack: recorder.state.clipStack,

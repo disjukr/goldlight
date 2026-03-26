@@ -26,6 +26,7 @@ export type DawnCommandBuffer = Readonly<{
   passCount: number;
   unsupportedCommands: readonly DrawingCommand[];
   ownedBuffers: readonly GPUBuffer[];
+  ownedTextures: readonly GPUTexture[];
 }>;
 
 const toGpuColor = (color: readonly [number, number, number, number]): GPUColor => ({
@@ -40,8 +41,8 @@ const applyClipRect = (
   step: DrawingPreparedRenderStep,
   target: Readonly<{ width: number; height: number }>,
 ): void => {
-  const x = Math.max(0, Math.floor(step.drawBounds.origin[0]));
-  const y = Math.max(0, Math.floor(step.drawBounds.origin[1]));
+  const x = Math.min(target.width, Math.max(0, Math.floor(step.drawBounds.origin[0])));
+  const y = Math.min(target.height, Math.max(0, Math.floor(step.drawBounds.origin[1])));
   const right = Math.min(
     target.width,
     Math.ceil(step.drawBounds.origin[0] + step.drawBounds.size.width),
@@ -171,11 +172,12 @@ const createStepClipTextureBindGroup = (
   resources: DrawingPreparedStepResources,
   dstTextureView?: GPUTextureView,
 ): GPUBindGroup =>
-  !resources.clipTextureView && !dstTextureView
+  !resources.clipTextureView && !dstTextureView && !resources.sampledTextureView
     ? commandResources.defaultClipTextureBindGroup
     : sharedContext.resourceProvider.createClipTextureBindGroup(
       resources.clipTextureView ?? undefined,
       dstTextureView,
+      resources.sampledTextureView ?? undefined,
     );
 
 const createDstSnapshotView = (
@@ -453,6 +455,7 @@ export const encodePreparedDawnCommandBuffer = (
     passCount,
     unsupportedCommands: Object.freeze(unsupportedCommands),
     ownedBuffers: preparedWork.resources.ownedBuffers,
+    ownedTextures: preparedWork.resources.ownedTextures,
   };
 };
 

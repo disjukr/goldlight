@@ -26,9 +26,11 @@ export type DrawingPreparedStepResources = Readonly<{
   stepPayloadBuffer: GPUBuffer;
   stepBindGroup: GPUBindGroup;
   clipTextureView: GPUTextureView | null;
+  sampledTextureView: GPUTextureView | null;
   clipDrawKey: string | null;
   vertexBuffer: GPUBuffer | null;
   instanceBuffer: GPUBuffer | null;
+  sampledTexture?: GPUTexture;
   vertexCount: number;
   instanceCount: number;
 }>;
@@ -68,6 +70,7 @@ export type DrawingPreparedCommandResources = Readonly<{
   fullscreenClipVertexBuffer: GPUBuffer;
   fullscreenClipVertexCount: number;
   ownedBuffers: readonly GPUBuffer[];
+  ownedTextures: readonly GPUTexture[];
   tasks: readonly DrawingPreparedRenderPassTaskResources[];
 }>;
 
@@ -238,6 +241,129 @@ const createVertexBuffer = (
   new Float32Array(buffer.getMappedRange()).set(vertices);
   buffer.unmap();
   return buffer;
+};
+
+const textVertexFloats = 4;
+
+const createTextVertexData = (
+  quads: readonly Readonly<{
+    bounds: Readonly<{ origin: Point2d; size: Readonly<{ width: number; height: number }> }>;
+    uvBounds: Readonly<{ origin: Point2d; size: Readonly<{ width: number; height: number }> }>;
+  }>[],
+): Float32Array => {
+  const vertices = new Float32Array(quads.length * 6 * textVertexFloats);
+  let offset = 0;
+  for (const quad of quads) {
+    const x0 = quad.bounds.origin[0];
+    const y0 = quad.bounds.origin[1];
+    const x1 = x0 + quad.bounds.size.width;
+    const y1 = y0 + quad.bounds.size.height;
+    const u0 = quad.uvBounds.origin[0];
+    const v0 = quad.uvBounds.origin[1];
+    const u1 = u0 + quad.uvBounds.size.width;
+    const v1 = v0 + quad.uvBounds.size.height;
+    const data = [
+      x0,
+      y0,
+      u0,
+      v0,
+      x1,
+      y0,
+      u1,
+      v0,
+      x0,
+      y1,
+      u0,
+      v1,
+      x0,
+      y1,
+      u0,
+      v1,
+      x1,
+      y0,
+      u1,
+      v0,
+      x1,
+      y1,
+      u1,
+      v1,
+    ];
+    vertices.set(data, offset);
+    offset += data.length;
+  }
+  return vertices;
+};
+
+const createTextAtlas = (
+  glyphs: readonly Readonly<{
+    quadBounds: Readonly<{ origin: Point2d; size: Readonly<{ width: number; height: number }> }>;
+    mask: Readonly<{
+      width: number;
+      height: number;
+      stride: number;
+      pixels: Uint8Array;
+    }>;
+  }>[],
+): Readonly<{
+  width: number;
+  height: number;
+  pixels: Uint8Array;
+  quads: readonly Readonly<{
+    bounds: Readonly<{ origin: Point2d; size: Readonly<{ width: number; height: number }> }>;
+    uvBounds: Readonly<{ origin: Point2d; size: Readonly<{ width: number; height: number }> }>;
+  }>[];
+}> => {
+  const padding = 1;
+  let atlasWidth = 0;
+  let atlasHeight = padding;
+  let rowWidth = padding;
+  let rowHeight = 0;
+  const maxRowWidth = 1024;
+  const placements: { x: number; y: number }[] = [];
+
+  for (const glyph of glyphs) {
+    if (rowWidth + glyph.mask.width + padding > maxRowWidth) {
+      atlasWidth = Math.max(atlasWidth, rowWidth);
+      atlasHeight += rowHeight + padding;
+      rowWidth = padding;
+      rowHeight = 0;
+    }
+    placements.push({ x: rowWidth, y: atlasHeight });
+    rowWidth += glyph.mask.width + padding;
+    rowHeight = Math.max(rowHeight, glyph.mask.height);
+  }
+  atlasWidth = Math.max(1, atlasWidth, rowWidth);
+  atlasHeight = Math.max(1, atlasHeight + rowHeight + padding);
+  const pixels = new Uint8Array(atlasWidth * atlasHeight * 4);
+  const quads = glyphs.map((glyph, index) => {
+    const placement = placements[index]!;
+    for (let row = 0; row < glyph.mask.height; row += 1) {
+      for (let column = 0; column < glyph.mask.width; column += 1) {
+        const alpha = glyph.mask.pixels[(row * glyph.mask.stride) + column] ?? 0;
+        const pixelIndex = (((placement.y + row) * atlasWidth) + placement.x + column) * 4;
+        pixels[pixelIndex + 0] = 255;
+        pixels[pixelIndex + 1] = 255;
+        pixels[pixelIndex + 2] = 255;
+        pixels[pixelIndex + 3] = alpha;
+      }
+    }
+    return {
+      bounds: glyph.quadBounds,
+      uvBounds: {
+        origin: [placement.x / atlasWidth, placement.y / atlasHeight] as Point2d,
+        size: {
+          width: glyph.mask.width / atlasWidth,
+          height: glyph.mask.height / atlasHeight,
+        },
+      },
+    };
+  });
+  return {
+    width: atlasWidth,
+    height: atlasHeight,
+    pixels,
+    quads: Object.freeze(quads),
+  };
 };
 
 const createPatchTemplateBuffer = (
@@ -1573,6 +1699,86 @@ const prepareStepResources = (
     createGradientPayload(step.draw.shader, step.draw.transform, gradientBuilder),
   );
   const stepBindGroup = sharedContext.resourceProvider.createStepBindGroup(stepPayloadBuffer);
+  let sampledTexture: GPUTexture | null = null;
+  let sampledTextureView: GPUTextureView | null = null;
+
+  if (step.draw.kind === 'directMaskText' || step.draw.kind === 'sdfText') {
+    const atlas = createTextAtlas(step.draw.glyphs);
+    sampledTexture = sharedContext.resourceProvider.createTexture({
+      label: step.draw.kind === 'directMaskText'
+        ? 'drawing-text-bitmap-atlas'
+        : 'drawing-text-sdf-atlas',
+      size: {
+        width: atlas.width,
+        height: atlas.height,
+        depthOrArrayLayers: 1,
+      },
+      format: 'rgba8unorm',
+      usage: 0x04 | 0x02,
+    });
+    if (
+      'writeTexture' in sharedContext.backend.queue &&
+      typeof sharedContext.backend.queue.writeTexture === 'function'
+    ) {
+      sharedContext.backend.queue.writeTexture(
+        { texture: sampledTexture },
+        new Uint8Array(atlas.pixels),
+        { bytesPerRow: atlas.width * 4, rowsPerImage: atlas.height },
+        { width: atlas.width, height: atlas.height, depthOrArrayLayers: 1 },
+      );
+    }
+    sampledTextureView = sampledTexture.createView();
+    const vertexBuffer = createVertexBuffer(sharedContext, createTextVertexData(atlas.quads));
+    const textShaderPayload = createGradientPayload(
+      step.draw.shader,
+      identityMatrix2d,
+      gradientBuilder,
+    );
+    const textStepPayloadBuffer = createStepPayloadBuffer(
+      sharedContext,
+      identityMatrix2d,
+      step.depth,
+      step.draw.color,
+      null,
+      clipPayload,
+      {
+        blendModeCode: toDrawingBlendModeCode(step.draw.blendMode, step.draw.blender),
+        requiresDstRead: (step.draw.dstUsage & drawingDstUsage.dstReadRequired) !== 0,
+        invSize: [
+          1 / Math.max(sharedContext.backend.target.width, 1),
+          1 / Math.max(sharedContext.backend.target.height, 1),
+        ],
+        blenderCoefficients: step.draw.blender?.kind === 'arithmetic'
+          ? step.draw.blender.coefficients
+          : [0, 0, 0, 0],
+      },
+      step.draw.kind === 'sdfText'
+        ? {
+          ...textShaderPayload,
+          params0: [
+            Math.max(0, 0.5 - (0.5 / Math.max(step.draw.sdfRadius, 1))),
+            Math.min(1, 0.5 + (0.5 / Math.max(step.draw.sdfRadius, 1))),
+            0,
+            0,
+          ] as const,
+        }
+        : textShaderPayload,
+    );
+    return {
+      pipelineHandle,
+      pipeline,
+      stepPayloadBuffer: textStepPayloadBuffer,
+      stepBindGroup: sharedContext.resourceProvider.createStepBindGroup(textStepPayloadBuffer),
+      clipTextureView: clipAtlasView,
+      sampledTextureView,
+      clipDrawKey: getClipDrawKey(step),
+      vertexBuffer,
+      instanceBuffer: null,
+      vertexCount: atlas.quads.length * 6,
+      instanceCount: 1,
+      ...(sampledTexture ? { sampledTexture } : {}),
+    } as DrawingPreparedStepResources & { sampledTexture?: GPUTexture };
+  }
 
   if (step.draw.kind === 'pathFill') {
     const usesPatchFill = isDrawingPatchFillRenderer(step.draw.renderer);
@@ -1632,6 +1838,7 @@ const prepareStepResources = (
       stepPayloadBuffer,
       stepBindGroup,
       clipTextureView: clipAtlasView,
+      sampledTextureView,
       clipDrawKey: getClipDrawKey(step),
       vertexBuffer,
       instanceBuffer,
@@ -1677,6 +1884,7 @@ const prepareStepResources = (
     stepPayloadBuffer,
     stepBindGroup,
     clipTextureView: clipAtlasView,
+    sampledTextureView,
     clipDrawKey: getClipDrawKey(step),
     vertexBuffer,
     instanceBuffer: null,
@@ -1748,6 +1956,22 @@ const collectOwnedBuffers = (
   }
 
   return Object.freeze(buffers);
+};
+
+const collectOwnedTextures = (
+  tasks: readonly DrawingPreparedRenderPassTaskResources[],
+): readonly GPUTexture[] => {
+  const textures: GPUTexture[] = [];
+  for (const task of tasks) {
+    for (const pass of task.passes) {
+      for (const step of pass.steps) {
+        if (step.sampledTexture) {
+          textures.push(step.sampledTexture);
+        }
+      }
+    }
+  }
+  return Object.freeze(textures);
 };
 
 export const prepareDawnResources = (
@@ -1833,6 +2057,7 @@ export const prepareDawnResources = (
       wedgePatchVertexBuffer,
       curvePatchVertexBuffer,
     }),
+    ownedTextures: collectOwnedTextures(taskResources),
     tasks: taskResources,
   };
 };

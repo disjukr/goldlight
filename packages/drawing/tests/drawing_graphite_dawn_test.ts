@@ -3717,7 +3717,7 @@ Deno.test('dawn command buffer snapshots dst for offscreen dst-read blend modes'
 
   assertEquals(commandBuffer.unsupportedCommands.length, 0);
   assertEquals(mock.created.textureCopies.length, 1);
-  assertEquals(mock.created.bindGroups.some((group) => group.entries.length === 4), true);
+  assertEquals(mock.created.bindGroups.some((group) => group.entries.length === 6), true);
   assertEquals(commandBuffer.passCount, 2);
 });
 

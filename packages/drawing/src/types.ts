@@ -233,6 +233,35 @@ export type DrawingPaint = Readonly<{
   dashOffset?: number;
 }>;
 
+export type DrawingGlyphMaskFormat = 'a8';
+
+export type DrawingGlyphMask = Readonly<{
+  width: number;
+  height: number;
+  stride: number;
+  format: DrawingGlyphMaskFormat;
+  offsetX: number;
+  offsetY: number;
+  pixels: Uint8Array;
+}>;
+
+export type DrawingDirectMaskGlyph = Readonly<{
+  glyphID: number;
+  x: number;
+  y: number;
+  mask: DrawingGlyphMask | null;
+}>;
+
+export type DrawingSdfGlyph = Readonly<{
+  glyphID: number;
+  x: number;
+  y: number;
+  mask: DrawingGlyphMask | null;
+  sdf: DrawingGlyphMask | null;
+  sdfInset: number;
+  sdfRadius: number;
+}>;
+
 export type DrawingStrokeStyle = Readonly<{
   halfWidth: number;
   joinLimit: number;
@@ -261,7 +290,28 @@ export type DrawShapeCommand = Readonly<{
   clipStack: DrawingClipStackSnapshot;
 }>;
 
-export type DrawingCommand = ClearCommand | DrawPathCommand | DrawShapeCommand;
+export type DrawDirectMaskTextCommand = Readonly<{
+  kind: 'drawDirectMaskText';
+  glyphs: readonly DrawingDirectMaskGlyph[];
+  paint: DrawingPaint;
+  transform: DrawingMatrix2d;
+  clipStack: DrawingClipStackSnapshot;
+}>;
+
+export type DrawSdfTextCommand = Readonly<{
+  kind: 'drawSdfText';
+  glyphs: readonly DrawingSdfGlyph[];
+  paint: DrawingPaint;
+  transform: DrawingMatrix2d;
+  clipStack: DrawingClipStackSnapshot;
+}>;
+
+export type DrawingCommand =
+  | ClearCommand
+  | DrawPathCommand
+  | DrawShapeCommand
+  | DrawDirectMaskTextCommand
+  | DrawSdfTextCommand;
 
 export type DrawingSubmission = Readonly<{
   backend: DrawingBackendKind;

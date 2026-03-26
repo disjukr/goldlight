@@ -1,0 +1,89 @@
+import {
+  type DrawingPaint,
+  type DrawingRecorder,
+  recordDrawDirectMaskText,
+  recordDrawPath,
+  recordDrawSdfText,
+} from '@goldlight/drawing';
+import { createTranslationMatrix2d, transformPath2d } from '@goldlight/geometry';
+import type { DirectMaskSubRun, SdfSubRun, TextHost } from './types.ts';
+
+export const recordDirectMaskSubRun = (
+  recorder: DrawingRecorder,
+  subRun: DirectMaskSubRun,
+  paint: DrawingPaint = {},
+): void => {
+  recordDrawDirectMaskText(
+    recorder,
+    subRun.glyphs.map((glyph) => ({
+      glyphID: glyph.glyphID,
+      x: glyph.x,
+      y: glyph.y,
+      mask: glyph.mask
+        ? {
+          ...glyph.mask,
+          pixels: new Uint8Array(glyph.mask.pixels),
+        }
+        : null,
+    })),
+    paint,
+  );
+};
+
+export const recordSdfSubRun = (
+  recorder: DrawingRecorder,
+  subRun: SdfSubRun,
+  paint: DrawingPaint = {},
+): void => {
+  recordDrawSdfText(
+    recorder,
+    subRun.glyphs.map((glyph) => ({
+      glyphID: glyph.glyphID,
+      x: glyph.x,
+      y: glyph.y,
+      mask: glyph.mask
+        ? {
+          ...glyph.mask,
+          pixels: new Uint8Array(glyph.mask.pixels),
+        }
+        : null,
+      sdf: glyph.sdf
+        ? {
+          ...glyph.sdf,
+          pixels: new Uint8Array(glyph.sdf.pixels),
+        }
+        : null,
+      sdfInset: glyph.sdfInset,
+      sdfRadius: glyph.sdfRadius,
+    })),
+    paint,
+  );
+};
+
+export const recordPathFallbackRun = (
+  host: TextHost,
+  recorder: DrawingRecorder,
+  run: Readonly<{
+    typeface: bigint;
+    size: number;
+    glyphIDs: Uint32Array;
+    positions: Float32Array;
+    offsets: Float32Array;
+  }>,
+  paint: DrawingPaint = {},
+): void => {
+  for (let index = 0; index < run.glyphIDs.length; index += 1) {
+    const glyphID = run.glyphIDs[index]!;
+    const path = host.getGlyphPath(run.typeface, glyphID, run.size);
+    if (!path) {
+      continue;
+    }
+    const x = run.positions[index * 2]! + run.offsets[index * 2]!;
+    const y = run.positions[index * 2 + 1]! + run.offsets[index * 2 + 1]!;
+    recordDrawPath(
+      recorder,
+      transformPath2d(path, createTranslationMatrix2d(x, y)),
+      paint,
+    );
+  }
+};

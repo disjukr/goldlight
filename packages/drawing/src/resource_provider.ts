@@ -46,6 +46,7 @@ export type DawnResourceProvider = Readonly<{
   createClipTextureBindGroup: (
     clipTextureView?: GPUTextureView,
     dstTextureView?: GPUTextureView,
+    sampledTextureView?: GPUTextureView,
   ) => GPUBindGroup;
   createGraphicsPipelineHandle: (
     descriptor: DrawingGraphicsPipelineDesc,
@@ -1939,6 +1940,84 @@ const createClipCoverDepthLessState = (): GPUDepthStencilState => ({
   stencilBack: createStencilFaceState('keep', 'equal'),
 });
 
+const bitmapTextShaderSource = `
+struct ViewportUniform {
+  scale: vec2<f32>,
+  translate: vec2<f32>,
+};
+
+@group(0) @binding(0) var<uniform> viewport: ViewportUniform;
+${commonStepUniformSource}
+@group(1) @binding(0) var<uniform> step: StepUniform;
+${commonBlendShaderSource}
+${commonPaintShaderSource}
+@group(3) @binding(4) var textSampler: sampler;
+@group(3) @binding(5) var textTexture: texture_2d<f32>;
+
+struct VertexOut {
+  @builtin(position) position: vec4<f32>,
+  @location(0) devicePosition: vec2<f32>,
+  @location(1) uv: vec2<f32>,
+};
+
+@vertex
+fn vs_main(@location(0) position: vec2<f32>, @location(1) uv: vec2<f32>) -> VertexOut {
+  var out: VertexOut;
+  out.position = vec4<f32>((position * viewport.scale) + viewport.translate, step.matrix1.w, 1.0);
+  out.devicePosition = position;
+  out.uv = uv;
+  return out;
+}
+
+@fragment
+fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
+  let coverage = textureSample(textTexture, textSampler, in.uv).a * clip_coverage(in.devicePosition);
+  var color = apply_clip_shader(paint_shader_color(in.devicePosition));
+  color.a *= coverage;
+  return blend_with_dst(color, in.devicePosition);
+}
+`;
+
+const sdfTextShaderSource = `
+struct ViewportUniform {
+  scale: vec2<f32>,
+  translate: vec2<f32>,
+};
+
+@group(0) @binding(0) var<uniform> viewport: ViewportUniform;
+${commonStepUniformSource}
+@group(1) @binding(0) var<uniform> step: StepUniform;
+${commonBlendShaderSource}
+${commonPaintShaderSource}
+@group(3) @binding(4) var textSampler: sampler;
+@group(3) @binding(5) var textTexture: texture_2d<f32>;
+
+struct VertexOut {
+  @builtin(position) position: vec4<f32>,
+  @location(0) devicePosition: vec2<f32>,
+  @location(1) uv: vec2<f32>,
+};
+
+@vertex
+fn vs_main(@location(0) position: vec2<f32>, @location(1) uv: vec2<f32>) -> VertexOut {
+  var out: VertexOut;
+  out.position = vec4<f32>((position * viewport.scale) + viewport.translate, step.matrix1.w, 1.0);
+  out.devicePosition = position;
+  out.uv = uv;
+  return out;
+}
+
+@fragment
+fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
+  let distance = textureSample(textTexture, textSampler, in.uv).a;
+  let coverage = smoothstep(step.shaderParams0.x, step.shaderParams0.y, distance) *
+    clip_coverage(in.devicePosition);
+  var color = apply_clip_shader(paint_shader_color(in.devicePosition));
+  color.a *= coverage;
+  return blend_with_dst(color, in.devicePosition);
+}
+`;
+
 const createPathShaderModule = (backend: DawnBackendContext): GPUShaderModule =>
   backend.device.createShaderModule({
     label: 'drawing-path-shader',
@@ -1961,6 +2040,18 @@ const createStrokePatchShaderModule = (backend: DawnBackendContext): GPUShaderMo
   backend.device.createShaderModule({
     label: 'drawing-stroke-patch-shader',
     code: strokePatchShaderSource,
+  });
+
+const createBitmapTextShaderModule = (backend: DawnBackendContext): GPUShaderModule =>
+  backend.device.createShaderModule({
+    label: 'drawing-bitmap-text-shader',
+    code: bitmapTextShaderSource,
+  });
+
+const createSdfTextShaderModule = (backend: DawnBackendContext): GPUShaderModule =>
+  backend.device.createShaderModule({
+    label: 'drawing-sdf-text-shader',
+    code: sdfTextShaderSource,
   });
 
 const canonicalizeSamplerDescriptor = (
@@ -2014,7 +2105,6 @@ export const createDawnResourceProvider = (
   const graphicsPipelineCache = new Map<string, GPURenderPipeline>();
   let defaultClipTextureView: GPUTextureView | null = null;
   let defaultDstTextureView: GPUTextureView | null = null;
-
   const createVertexLayout = (): GPUVertexBufferLayout => ({
     arrayStride: floatBytes * floatsPerVertex,
     attributes: [
@@ -2074,6 +2164,14 @@ export const createDawnResourceProvider = (
       { shaderLocation: 4, offset: floatBytes * 8, format: 'float32x2' },
       { shaderLocation: 5, offset: floatBytes * 10, format: 'float32x2' },
       { shaderLocation: 6, offset: floatBytes * 12, format: 'float32x2' },
+    ],
+  });
+
+  const createTextVertexLayout = (): GPUVertexBufferLayout => ({
+    arrayStride: floatBytes * 4,
+    attributes: [
+      { shaderLocation: 0, offset: 0, format: 'float32x2' },
+      { shaderLocation: 1, offset: floatBytes * 2, format: 'float32x2' },
     ],
   });
 
@@ -2171,6 +2269,22 @@ export const createDawnResourceProvider = (
         },
         {
           binding: 3,
+          visibility: GPUShaderStage.FRAGMENT,
+          texture: {
+            sampleType: 'float',
+            viewDimension: '2d',
+            multisampled: false,
+          },
+        },
+        {
+          binding: 4,
+          visibility: GPUShaderStage.FRAGMENT,
+          sampler: {
+            type: 'filtering',
+          },
+        },
+        {
+          binding: 5,
           visibility: GPUShaderStage.FRAGMENT,
           texture: {
             sampleType: 'float',
@@ -2276,6 +2390,10 @@ export const createDawnResourceProvider = (
       ? createWedgePatchShaderModule(backend)
       : descriptor.shader === 'curve-patch'
       ? createCurvePatchShaderModule(backend)
+      : descriptor.shader === 'bitmap-text'
+      ? createBitmapTextShaderModule(backend)
+      : descriptor.shader === 'sdf-text'
+      ? createSdfTextShaderModule(backend)
       : createStrokePatchShaderModule(backend);
     shaderModuleCache.set(cacheKey, shaderModule);
     return shaderModule;
@@ -2290,6 +2408,8 @@ export const createDawnResourceProvider = (
       ? [createPatchResolveVertexLayout(), createWedgePatchInstanceLayout()]
       : descriptor.vertexLayout === 'curve-patch-instance'
       ? [createPatchResolveVertexLayout(), createCurvePatchInstanceLayout()]
+      : descriptor.vertexLayout === 'text-vertex'
+      ? [createTextVertexLayout()]
       : [createStrokePatchLayout()];
 
   const getDepthStencil = (
@@ -2452,7 +2572,7 @@ export const createDawnResourceProvider = (
           },
         }],
       }),
-    createClipTextureBindGroup: (clipTextureView, dstTextureView) =>
+    createClipTextureBindGroup: (clipTextureView, dstTextureView, sampledTextureView) =>
       backend.device.createBindGroup({
         label: 'drawing-clip-texture-bind-group',
         layout: getClipTextureBindGroupLayout(),
@@ -2480,6 +2600,18 @@ export const createDawnResourceProvider = (
           {
             binding: 3,
             resource: dstTextureView ?? getDefaultDstTextureView(),
+          },
+          {
+            binding: 4,
+            resource: provider.createSampler({
+              label: 'drawing-sampled-texture-sampler',
+              magFilter: 'linear',
+              minFilter: 'linear',
+            }),
+          },
+          {
+            binding: 5,
+            resource: sampledTextureView ?? getDefaultClipTextureView(),
           },
         ],
       }),

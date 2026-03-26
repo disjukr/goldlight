@@ -7,6 +7,7 @@ import {
 } from '@goldlight/geometry';
 import { type DrawingPreparedClip, visitDrawingClipStackForDraw } from './clip_stack.ts';
 import type {
+  DrawDirectMaskTextCommand,
   DrawingBlendMode,
   DrawingClipRect,
   DrawingCustomBlender,
@@ -15,6 +16,7 @@ import type {
   DrawingPath2d,
   DrawingStrokeStyle,
   DrawPathCommand,
+  DrawSdfTextCommand,
   DrawShapeCommand,
 } from './types.ts';
 import type { DrawingRecording } from './recording.ts';
@@ -316,7 +318,61 @@ export type DrawingPreparedPathStroke = Readonly<{
   usesStencil: boolean;
 }>;
 
-export type DrawingPreparedDraw = DrawingPreparedPathFill | DrawingPreparedPathStroke;
+export type DrawingPreparedTextAtlasGlyph = Readonly<{
+  glyphID: number;
+  mask: NonNullable<DrawDirectMaskTextCommand['glyphs'][number]['mask']>;
+  quadBounds: Rect;
+}>;
+
+export type DrawingPreparedDirectMaskText = Readonly<{
+  kind: 'directMaskText';
+  renderer: DrawingRenderer;
+  triangles: readonly Point2d[];
+  glyphs: readonly DrawingPreparedTextAtlasGlyph[];
+  color: readonly [number, number, number, number];
+  shader?: DrawingPreparedShader;
+  blendMode: DrawingBlendMode;
+  coverage: DrawingCoverage;
+  blender?: DrawingCustomBlender;
+  dstUsage: DrawingDstUsage;
+  transform: readonly [number, number, number, number, number, number];
+  bounds: Rect;
+  clipRect?: DrawingClipRect;
+  clip?: DrawingPreparedClip;
+  usesStencil: boolean;
+}>;
+
+export type DrawingPreparedSdfText = Readonly<{
+  kind: 'sdfText';
+  renderer: DrawingRenderer;
+  triangles: readonly Point2d[];
+  glyphs: readonly (
+    & DrawingPreparedTextAtlasGlyph
+    & Readonly<{
+      sdfInset: number;
+      sdfRadius: number;
+    }>
+  )[];
+  color: readonly [number, number, number, number];
+  shader?: DrawingPreparedShader;
+  blendMode: DrawingBlendMode;
+  coverage: DrawingCoverage;
+  blender?: DrawingCustomBlender;
+  dstUsage: DrawingDstUsage;
+  transform: readonly [number, number, number, number, number, number];
+  bounds: Rect;
+  clipRect?: DrawingClipRect;
+  clip?: DrawingPreparedClip;
+  usesStencil: boolean;
+  sdfInset: number;
+  sdfRadius: number;
+}>;
+
+export type DrawingPreparedDraw =
+  | DrawingPreparedPathFill
+  | DrawingPreparedPathStroke
+  | DrawingPreparedDirectMaskText
+  | DrawingPreparedSdfText;
 
 export type DrawingDrawPreparation = Readonly<
   | { supported: true; draw: DrawingPreparedDraw }
@@ -324,6 +380,20 @@ export type DrawingDrawPreparation = Readonly<
 >;
 
 const defaultFillColor: readonly [number, number, number, number] = [0, 0, 0, 1];
+const bitmapTextRenderer: DrawingRenderer = Object.freeze({
+  name: 'BitmapText',
+  kind: 'bitmap-text',
+  patchMode: 'text',
+  requiresStencil: false,
+  usesDepth: false,
+});
+const sdfTextRenderer: DrawingRenderer = Object.freeze({
+  name: 'SDFText',
+  kind: 'sdf-text',
+  patchMode: 'text',
+  requiresStencil: false,
+  usesDepth: false,
+});
 const defaultBlendMode: DrawingBlendMode = 'src-over';
 const advancedBlendModes = new Set<DrawingBlendMode>([
   'multiply',
@@ -494,6 +564,56 @@ const createPreparedDrawClip = (
       shader: preparedClipStack.shader,
     }
     : undefined;
+
+const unionTextBounds = (bounds: readonly Rect[]): Rect | null => {
+  if (bounds.length === 0) {
+    return null;
+  }
+  let minX = bounds[0]!.origin[0];
+  let minY = bounds[0]!.origin[1];
+  let maxX = bounds[0]!.origin[0] + bounds[0]!.size.width;
+  let maxY = bounds[0]!.origin[1] + bounds[0]!.size.height;
+  for (let index = 1; index < bounds.length; index += 1) {
+    const boundsItem = bounds[index]!;
+    minX = Math.min(minX, boundsItem.origin[0]);
+    minY = Math.min(minY, boundsItem.origin[1]);
+    maxX = Math.max(maxX, boundsItem.origin[0] + boundsItem.size.width);
+    maxY = Math.max(maxY, boundsItem.origin[1] + boundsItem.size.height);
+  }
+  return {
+    origin: [minX, minY],
+    size: {
+      width: Math.max(0, maxX - minX),
+      height: Math.max(0, maxY - minY),
+    },
+  };
+};
+
+const transformRectBounds = (
+  rect: Rect,
+  transform: readonly [number, number, number, number, number, number],
+): Rect => {
+  const points: Point2d[] = [
+    rect.origin,
+    [rect.origin[0] + rect.size.width, rect.origin[1]],
+    [rect.origin[0], rect.origin[1] + rect.size.height],
+    [rect.origin[0] + rect.size.width, rect.origin[1] + rect.size.height],
+  ];
+  const transformed = points.map((point) => transformPoint2d(point, transform));
+  const xs = transformed.map((point) => point[0]);
+  const ys = transformed.map((point) => point[1]);
+  const minX = Math.min(...xs);
+  const minY = Math.min(...ys);
+  const maxX = Math.max(...xs);
+  const maxY = Math.max(...ys);
+  return {
+    origin: [minX, minY],
+    size: {
+      width: Math.max(0, maxX - minX),
+      height: Math.max(0, maxY - minY),
+    },
+  };
+};
 
 const pointsEqual = (left: Point2d, right: Point2d): boolean =>
   Math.abs(left[0] - right[0]) <= epsilon && Math.abs(left[1] - right[1]) <= epsilon;
@@ -4810,3 +4930,123 @@ export const prepareDrawingPathCommand = (
   rendererProvider: DrawingRendererProvider,
   command: DrawPathCommand | DrawShapeCommand,
 ): DrawingDrawPreparation => preparePathFill(recording, rendererProvider, command);
+
+export const prepareDrawingTextCommand = (
+  recording: Pick<DrawingRecording, 'caps' | 'targetFormat'>,
+  command: DrawDirectMaskTextCommand | DrawSdfTextCommand,
+): DrawingDrawPreparation => {
+  const preparedClipStack = visitDrawingClipStackForDraw(
+    command.clipStack,
+    (path, transform) => ({
+      bounds: computePathBounds(path, transform),
+    }),
+    (bounds, candidate) => candidate ? intersectBounds(bounds, candidate) : bounds,
+    computeBounds,
+  );
+  const preparedClip = createPreparedDrawClip(preparedClipStack);
+  const color = resolvePaintBaseColor(command.paint);
+  const shader = resolvePaintShader(command.paint);
+  const blendMode = resolveBlendMode(command.paint);
+  const coverage = resolveCoverage(command.paint, true);
+  const dstUsage = computeDstUsage(
+    recording,
+    color,
+    shader,
+    preparedClip,
+    coverage,
+    blendMode,
+    command.paint.blender,
+  );
+
+  if (command.kind === 'drawDirectMaskText') {
+    const glyphs = command.glyphs
+      .filter((glyph): glyph is typeof glyph & { mask: NonNullable<typeof glyph.mask> } =>
+        Boolean(glyph.mask)
+      )
+      .map((glyph) => {
+        const localBounds: Rect = {
+          origin: [glyph.x + glyph.mask.offsetX, glyph.y + glyph.mask.offsetY],
+          size: {
+            width: glyph.mask.width,
+            height: glyph.mask.height,
+          },
+        };
+        return {
+          glyphID: glyph.glyphID,
+          mask: glyph.mask,
+          quadBounds: transformRectBounds(localBounds, command.transform),
+        };
+      });
+    const bounds = unionTextBounds(glyphs.map((glyph) => glyph.quadBounds));
+    if (!bounds) {
+      return { supported: false, reason: 'direct mask text resolved to no drawable glyph masks' };
+    }
+    return {
+      supported: true,
+      draw: {
+        kind: 'directMaskText',
+        renderer: bitmapTextRenderer,
+        triangles: Object.freeze([]),
+        glyphs,
+        color,
+        shader,
+        blendMode,
+        coverage,
+        blender: command.paint.blender,
+        dstUsage,
+        transform: command.transform,
+        bounds,
+        clipRect: preparedClipStack.bounds,
+        clip: preparedClip,
+        usesStencil: Boolean(preparedClipStack.stencilClip?.elements?.length),
+      },
+    };
+  }
+
+  const glyphs = command.glyphs
+    .filter((glyph): glyph is typeof glyph & { sdf: NonNullable<typeof glyph.sdf> } =>
+      Boolean(glyph.sdf)
+    )
+    .map((glyph) => {
+      const localBounds: Rect = {
+        origin: [glyph.x + glyph.sdf.offsetX, glyph.y + glyph.sdf.offsetY],
+        size: {
+          width: glyph.sdf.width,
+          height: glyph.sdf.height,
+        },
+      };
+      return {
+        glyphID: glyph.glyphID,
+        mask: glyph.sdf,
+        quadBounds: transformRectBounds(localBounds, command.transform),
+        sdfInset: glyph.sdfInset,
+        sdfRadius: glyph.sdfRadius,
+      };
+    });
+  const bounds = unionTextBounds(glyphs.map((glyph) => glyph.quadBounds));
+  if (!bounds) {
+    return { supported: false, reason: 'sdf text resolved to no drawable glyph masks' };
+  }
+  return {
+    supported: true,
+    draw: {
+      kind: 'sdfText',
+      renderer: sdfTextRenderer,
+      triangles: Object.freeze([]),
+      glyphs,
+      color,
+      shader,
+      blendMode,
+      coverage,
+      blender: command.paint.blender,
+      dstUsage,
+      transform: command.transform,
+      bounds,
+      clipRect: preparedClipStack.bounds,
+      clip: preparedClip,
+      usesStencil: Boolean(preparedClipStack.stencilClip?.elements?.length),
+      sdfInset: glyphs[0]?.sdfInset ?? 0,
+      sdfRadius: glyphs[0]?.sdfRadius ?? 0,
+    },
+  };
+};

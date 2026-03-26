@@ -103,7 +103,7 @@ const translateSupersampled = (
   x: number,
   y: number,
 ): void => {
-  translateDrawingRecorder(recorder, x * supersampleScale, y * supersampleScale);
+  translateDrawingRecorder(recorder, x, y);
 };
 
 const recordPanelFrame = (

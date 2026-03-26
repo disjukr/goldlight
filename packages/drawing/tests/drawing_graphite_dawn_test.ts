@@ -819,7 +819,7 @@ Deno.test('drawing recorder records transform and clip state into draw commands'
   if (first?.kind !== 'drawPath' || second?.kind !== 'drawPath') {
     throw new Error('expected draw path commands');
   }
-  assertEquals(first.transform, [2, 0, 0, 3, 20, 36]);
+  assertEquals(first.transform, [2, 0, 0, 3, 10, 12]);
   assertEquals(first.clipStack.elements.length, 1);
   assertEquals(first.clipStack.elements[0]?.clip.kind, 'rect');
   if (first.clipStack.elements[0]?.clip.kind !== 'rect') {
@@ -944,7 +944,7 @@ Deno.test('drawing recorder supports explicit transform concatenation', () => {
   if (command?.kind !== 'drawPath') {
     throw new Error('expected drawPath');
   }
-  assertEquals(command.transform, [2, 0, 0, 2, 10, 16]);
+  assertEquals(command.transform, [2, 0, 0, 2, 5, 8]);
 });
 
 Deno.test('drawing recorder finishes into an immutable recording snapshot', () => {

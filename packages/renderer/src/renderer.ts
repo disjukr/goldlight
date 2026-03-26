@@ -135,12 +135,53 @@ export type GpuRenderExecutionContext = Readonly<{
 
 export type FrameState = Readonly<
   & {
-    timeMs?: number;
-    deltaTimeMs?: number;
-    frameIndex?: number;
+    timeMs: number;
+    deltaTimeMs: number;
+    frameIndex: number;
+    viewportWidth: number;
+    viewportHeight: number;
   }
   & Record<string, unknown>
 >;
+
+export type FrameStateInit = Readonly<
+  & Partial<{
+    timeMs: number;
+    deltaTimeMs: number;
+    frameIndex: number;
+    viewportWidth: number;
+    viewportHeight: number;
+  }>
+  & Record<string, unknown>
+>;
+
+export const createFrameState = (initialState: FrameStateInit = {}): FrameState => {
+  const {
+    timeMs = 0,
+    deltaTimeMs = 0,
+    frameIndex = 0,
+    viewportWidth = 1,
+    viewportHeight = 1,
+    ...rest
+  } = initialState;
+  return {
+    ...rest,
+    timeMs,
+    deltaTimeMs,
+    frameIndex,
+    viewportWidth,
+    viewportHeight,
+  };
+};
+
+export const advanceFrameProgression = (
+  previousFrameState: Pick<FrameState, 'frameIndex'>,
+  currentClockMs: number,
+  previousClockMs?: number,
+): Readonly<Pick<FrameState, 'deltaTimeMs' | 'frameIndex'>> => ({
+  deltaTimeMs: previousClockMs === undefined ? 0 : Math.max(0, currentClockMs - previousClockMs),
+  frameIndex: previousFrameState.frameIndex + 1,
+});
 
 export type ForwardRenderResult = Readonly<{
   drawCount: number;
@@ -824,15 +865,32 @@ const createOrthographicProjection = (
   ];
 };
 
+const resolveFrameViewportSize = (
+  binding: Pick<RenderContextBinding, 'target'>,
+  frameState?: FrameState,
+): readonly [number, number] => {
+  const viewportWidth =
+    typeof frameState?.viewportWidth === 'number' && frameState.viewportWidth > 0
+      ? frameState.viewportWidth
+      : binding.target.width;
+  const viewportHeight = typeof frameState?.viewportHeight === 'number' &&
+      frameState.viewportHeight > 0
+    ? frameState.viewportHeight
+    : binding.target.height;
+  return [viewportWidth, viewportHeight];
+};
+
 const createViewProjectionMatrix = (
   binding: RenderContextBinding,
+  frameState: FrameState | undefined,
   activeCamera?: EvaluatedCamera,
 ): readonly number[] => {
   if (!activeCamera) {
     return identityMat4();
   }
 
-  const aspect = binding.target.width / binding.target.height;
+  const [viewportWidth, viewportHeight] = resolveFrameViewportSize(binding, frameState);
+  const aspect = viewportWidth / viewportHeight;
   const projection = activeCamera.camera.type === 'perspective'
     ? createPerspectiveProjection(activeCamera.camera, aspect)
     : createOrthographicProjection(activeCamera.camera);
@@ -913,6 +971,7 @@ const createRaymarchCamera = (
 
 const createRaymarchCameraFromEvaluatedCamera = (
   binding: Pick<RenderContextBinding, 'target'>,
+  frameState: FrameState | undefined,
   activeCamera?: EvaluatedCamera,
 ): RaymarchCamera => {
   if (!activeCamera) {
@@ -955,7 +1014,8 @@ const createRaymarchCameraFromEvaluatedCamera = (
     };
   }
 
-  const aspect = binding.target.width / binding.target.height;
+  const [viewportWidth, viewportHeight] = resolveFrameViewportSize(binding, frameState);
+  const aspect = viewportWidth / viewportHeight;
   const halfFovTan = Math.tan((activeCamera.camera.yfov ?? Math.PI / 3) / 2);
 
   return {
@@ -2855,7 +2915,7 @@ const resolveForwardRenderOptions = (
       postProcessPasses,
       extension: {},
       clearColor: [0.02, 0.02, 0.03, 1],
-      frameState: {},
+      frameState: createFrameState(),
     };
   }
 
@@ -2864,7 +2924,7 @@ const resolveForwardRenderOptions = (
     postProcessPasses: materialRegistryOrOptions.postProcessPasses ?? [],
     extension: materialRegistryOrOptions.extension ?? {},
     clearColor: materialRegistryOrOptions.clearColor ?? [0.02, 0.02, 0.03, 1],
-    frameState: materialRegistryOrOptions.frameState ?? {},
+    frameState: materialRegistryOrOptions.frameState ?? createFrameState(),
   };
 };
 
@@ -3833,9 +3893,11 @@ const ensureForwardEnvironmentBrdfLut = (
 
 const createEnvironmentBackgroundUniformData = (
   binding: RenderContextBinding,
+  frameState: FrameState | undefined,
   activeCamera?: EvaluatedCamera,
 ): Float32Array => {
-  const aspect = binding.target.width / binding.target.height;
+  const [viewportWidth, viewportHeight] = resolveFrameViewportSize(binding, frameState);
+  const aspect = viewportWidth / viewportHeight;
   if (!activeCamera || activeCamera.camera.type !== 'perspective') {
     return Float32Array.from([
       1,
@@ -3893,6 +3955,7 @@ const renderForwardEnvironmentBackground = (
   context: GpuRenderExecutionContext,
   pass: GPURenderPassEncoder,
   binding: RenderContextBinding,
+  frameState: FrameState | undefined,
   residency: RuntimeResidency,
   activeCamera: EvaluatedCamera | undefined,
   environment: Readonly<{
@@ -3906,7 +3969,7 @@ const renderForwardEnvironmentBackground = (
     binding.target.format,
     getRenderTargetMsaaSampleCount(binding),
   );
-  const uniformData = createEnvironmentBackgroundUniformData(binding, activeCamera);
+  const uniformData = createEnvironmentBackgroundUniformData(binding, frameState, activeCamera);
   const uniformBuffer = context.device.createBuffer({
     label: 'forward-environment-background',
     size: uniformData.byteLength,
@@ -5085,11 +5148,11 @@ const createForwardMeshTransformUniformData = (
     ...viewProjectionMatrix.slice(0, 16),
   ]);
 
-const createFrameUniformData = (frameState: FrameState = {}): Float32Array =>
+const createFrameUniformData = (frameState: FrameState): Float32Array =>
   Float32Array.from([
-    typeof frameState.timeMs === 'number' ? frameState.timeMs : 0,
-    typeof frameState.deltaTimeMs === 'number' ? frameState.deltaTimeMs : 0,
-    typeof frameState.frameIndex === 'number' ? frameState.frameIndex : 0,
+    frameState.timeMs,
+    frameState.deltaTimeMs,
+    frameState.frameIndex,
     0,
   ]);
 
@@ -6049,7 +6112,7 @@ const renderForwardFrameInternal = (
     : undefined;
   const resolvedSceneColorView = sceneColorResolveView ?? sceneColorView ?? finalColorView;
   const viewProjectionMatrix = options.viewProjectionMatrix ??
-    createViewProjectionMatrix(binding, evaluatedScene.activeCamera);
+    createViewProjectionMatrix(binding, frameState, evaluatedScene.activeCamera);
   const encoder = context.device.createCommandEncoder({
     label: 'forward-frame',
   });
@@ -6097,6 +6160,7 @@ const renderForwardFrameInternal = (
       context,
       backgroundPass,
       binding,
+      frameState,
       residency,
       evaluatedScene.activeCamera,
       forwardEnvironment,
@@ -6520,7 +6584,11 @@ export const renderDeferredFrame = (
     binding.target.format,
   );
   const directionalLights = extractDirectionalLightItems(evaluatedScene);
-  const viewProjectionMatrix = createViewProjectionMatrix(binding, evaluatedScene.activeCamera);
+  const viewProjectionMatrix = createViewProjectionMatrix(
+    binding,
+    undefined,
+    evaluatedScene.activeCamera,
+  );
   const viewMatrix = evaluatedScene.activeCamera?.viewMatrix ?? identityMat4();
   const inverseViewMatrix = evaluatedScene.activeCamera?.worldMatrix ?? identityMat4();
   const cameraPosition = evaluatedScene.activeCamera
@@ -6796,7 +6864,7 @@ export const renderDeferredFrame = (
       context,
       forwardLitPass,
       residency,
-      { timeMs: evaluatedScene.timeMs },
+      createFrameState({ timeMs: evaluatedScene.timeMs }),
       evaluatedScene.nodes.filter((node) => forwardFallbackNodeIds.has(node.node.id)),
       materialRegistry,
       binding.target.format,
@@ -6879,6 +6947,7 @@ export const renderPathtracedFrame = (
   });
   const raymarchCamera = createRaymarchCameraFromEvaluatedCamera(
     binding,
+    undefined,
     evaluatedScene.activeCamera,
   );
 
@@ -7028,7 +7097,11 @@ export const renderUberFrame = (
     binding.target.format,
   );
   const directionalLights = extractDirectionalLightItems(evaluatedScene);
-  const viewProjectionMatrix = createViewProjectionMatrix(binding, evaluatedScene.activeCamera);
+  const viewProjectionMatrix = createViewProjectionMatrix(
+    binding,
+    undefined,
+    evaluatedScene.activeCamera,
+  );
   const viewMatrix = evaluatedScene.activeCamera?.viewMatrix ?? identityMat4();
   const inverseViewMatrix = evaluatedScene.activeCamera?.worldMatrix ?? identityMat4();
   const cameraPosition = evaluatedScene.activeCamera
@@ -7287,7 +7360,7 @@ export const renderUberFrame = (
       context,
       forwardOpaquePass,
       residency,
-      { timeMs: evaluatedScene.timeMs },
+      createFrameState({ timeMs: evaluatedScene.timeMs }),
       partitions.forwardOpaque,
       materialRegistry,
       binding.target.format,
@@ -7322,7 +7395,7 @@ export const renderUberFrame = (
       context,
       forwardTransparentPass,
       residency,
-      { timeMs: evaluatedScene.timeMs },
+      createFrameState({ timeMs: evaluatedScene.timeMs }),
       partitions.forwardTransparent,
       materialRegistry,
       binding.target.format,
@@ -7369,7 +7442,11 @@ export const renderNodePickFrame = (
   assertNodePickBindingFormat(binding);
   assertNodePickSceneCompatibility(evaluatedScene);
   const pipeline = ensureNodePickPipeline(context, residency, binding.target.format);
-  const viewProjectionMatrix = createViewProjectionMatrix(binding, evaluatedScene.activeCamera);
+  const viewProjectionMatrix = createViewProjectionMatrix(
+    binding,
+    undefined,
+    evaluatedScene.activeCamera,
+  );
   const picks = createNodePickItems(evaluatedScene);
   const pickByNodeId = new Map(picks.map((pick) => [pick.nodeId, pick]));
   const encoder = context.device.createCommandEncoder({
@@ -7522,7 +7599,11 @@ export const renderForwardSnapshot = async (
     context,
     binding,
     residency,
-    { timeMs: evaluatedScene.timeMs },
+    createFrameState({
+      timeMs: evaluatedScene.timeMs,
+      viewportWidth: binding.target.width,
+      viewportHeight: binding.target.height,
+    }),
     evaluatedScene,
     materialRegistry,
     postProcessPasses,
@@ -7663,7 +7744,11 @@ export const renderForwardCubemapSnapshot = async (
       context,
       binding,
       residency,
-      { timeMs: evaluatedScene.timeMs },
+      createFrameState({
+        timeMs: evaluatedScene.timeMs,
+        viewportWidth: binding.target.width,
+        viewportHeight: binding.target.height,
+      }),
       evaluatedScene,
       materialRegistry,
       postProcessPasses,

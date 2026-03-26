@@ -16,14 +16,32 @@ import {
   createReactSceneRoot,
   createReactSceneRootForwardRenderer,
 } from '@goldlight/react/reconciler';
-import type { FrameState, PostProcessPass } from '@goldlight/renderer';
+import {
+  advanceFrameProgression,
+  type FrameState,
+  type PostProcessPass,
+} from '@goldlight/renderer';
 
 import type { DesktopModuleCleanup, DesktopModuleContext } from './app.ts';
 
+export type RuntimeFrameState = Readonly<{
+  deltaTimeMs: number;
+  frameIndex: number;
+  viewportWidth: number;
+  viewportHeight: number;
+}>;
+
 export type FrameStateHandle = Readonly<{
-  getSnapshot: () => FrameState;
+  getSnapshot: () => RuntimeFrameState;
   subscribe: (listener: () => void) => () => void;
-  setFrameState: (nextState: FrameState) => void;
+}>;
+
+export type TimeMsHandle = Readonly<{
+  getSnapshot: () => number;
+  subscribe: (listener: () => void) => () => void;
+  setTimeMs: (
+    nextState: number | ((previousTimeMs: number) => number),
+  ) => void;
 }>;
 
 export type WindowMetrics = Readonly<{
@@ -48,10 +66,13 @@ export type RendererConfig = Readonly<{
 export type RendererConfigHandle = Readonly<{
   getSnapshot: () => RendererConfig;
   subscribe: (listener: () => void) => () => void;
-  setRendererConfig: (nextConfig: RendererConfig) => void;
+  setRendererConfig: (
+    nextConfig: RendererConfig | ((previousConfig: RendererConfig) => RendererConfig),
+  ) => void;
 }>;
 
 export const FrameStateHandleContext = React.createContext<FrameStateHandle | null>(null);
+export const TimeMsHandleContext = React.createContext<TimeMsHandle | null>(null);
 export const WindowMetricsHandleContext = React.createContext<WindowMetricsHandle | null>(null);
 export const RendererConfigHandleContext = React.createContext<RendererConfigHandle | null>(null);
 
@@ -63,11 +84,9 @@ export const useFrameStateHandle = (): FrameStateHandle => {
   return handle;
 };
 
-export const useSetFrameState = (): FrameStateHandle['setFrameState'] => {
-  return useFrameStateHandle().setFrameState;
-};
-
-export const useFrameState = <TFrameState extends FrameState = FrameState>(): TFrameState => {
+export const useFrameState = <
+  TFrameState extends RuntimeFrameState = RuntimeFrameState,
+>(): TFrameState => {
   const handle = React.useContext(FrameStateHandleContext);
   if (!handle) {
     throw new Error('useFrameState() must be used inside initializeWindow()');
@@ -77,6 +96,30 @@ export const useFrameState = <TFrameState extends FrameState = FrameState>(): TF
     handle.getSnapshot,
     handle.getSnapshot,
   ) as TFrameState;
+};
+
+export const useTimeMsHandle = (): TimeMsHandle => {
+  const handle = React.useContext(TimeMsHandleContext);
+  if (!handle) {
+    throw new Error('useTimeMsHandle() must be used inside initializeWindow()');
+  }
+  return handle;
+};
+
+export const useSetTimeMs = (): TimeMsHandle['setTimeMs'] => {
+  return useTimeMsHandle().setTimeMs;
+};
+
+export const useTimeMs = (): number => {
+  const handle = React.useContext(TimeMsHandleContext);
+  if (!handle) {
+    throw new Error('useTimeMs() must be used inside initializeWindow()');
+  }
+  return React.useSyncExternalStore(
+    handle.subscribe,
+    handle.getSnapshot,
+    handle.getSnapshot,
+  );
 };
 
 export const useWindowMetrics = (): WindowMetrics => {
@@ -113,6 +156,14 @@ export const useRendererConfig = (): RendererConfig => {
 
 type FrameStateHandleController = Readonly<{
   handle: FrameStateHandle;
+  setFrameState: (
+    nextState: RuntimeFrameState | ((previousState: RuntimeFrameState) => RuntimeFrameState),
+    options?: { notifyListeners?: boolean; requestFrame?: boolean },
+  ) => void;
+}>;
+
+type TimeMsHandleController = Readonly<{
+  handle: TimeMsHandle;
 }>;
 
 type WindowMetricsHandleController = Readonly<{
@@ -138,16 +189,34 @@ const areRendererConfigsEqual = (
   left.postProcessPasses.every((pass, index) => Object.is(pass, right.postProcessPasses[index]));
 
 const createFrameStateHandleController = (
-  initialFrameState: FrameState,
+  initialFrameState: RuntimeFrameState,
   onChange: () => void,
 ): FrameStateHandleController => {
   let currentFrameState = initialFrameState;
   const listeners = new Set<() => void>();
 
-  const notify = () => {
-    onChange();
+  const notifyListeners = () => {
     for (const listener of [...listeners]) {
       listener();
+    }
+  };
+
+  const applyFrameState = (
+    nextState: RuntimeFrameState | ((previousState: RuntimeFrameState) => RuntimeFrameState),
+    options?: { notifyListeners?: boolean; requestFrame?: boolean },
+  ) => {
+    const resolvedState = typeof nextState === 'function'
+      ? nextState(currentFrameState)
+      : nextState;
+    if (Object.is(currentFrameState, resolvedState)) {
+      return;
+    }
+    currentFrameState = resolvedState;
+    if (options?.notifyListeners !== false) {
+      notifyListeners();
+    }
+    if (options?.requestFrame !== false) {
+      onChange();
     }
   };
 
@@ -160,11 +229,42 @@ const createFrameStateHandleController = (
           listeners.delete(listener);
         };
       },
-      setFrameState: (nextState) => {
-        if (Object.is(currentFrameState, nextState)) {
+    },
+    setFrameState: applyFrameState,
+  };
+};
+
+const createTimeMsHandleController = (
+  initialTimeMs: number,
+  onChange: () => void,
+): TimeMsHandleController => {
+  let currentTimeMs = initialTimeMs;
+  const listeners = new Set<() => void>();
+
+  const notify = () => {
+    onChange();
+    for (const listener of [...listeners]) {
+      listener();
+    }
+  };
+
+  return {
+    handle: {
+      getSnapshot: () => currentTimeMs,
+      subscribe: (listener) => {
+        listeners.add(listener);
+        return () => {
+          listeners.delete(listener);
+        };
+      },
+      setTimeMs: (nextState) => {
+        const resolvedState = typeof nextState === 'function'
+          ? nextState(currentTimeMs)
+          : nextState;
+        if (Object.is(currentTimeMs, resolvedState)) {
           return;
         }
-        currentFrameState = nextState;
+        currentTimeMs = resolvedState;
         notify();
       },
     },
@@ -248,10 +348,13 @@ const createRendererConfigHandleController = (
         };
       },
       setRendererConfig: (nextConfig) => {
-        if (areRendererConfigsEqual(currentConfig, nextConfig)) {
+        const resolvedConfig = typeof nextConfig === 'function'
+          ? nextConfig(currentConfig)
+          : nextConfig;
+        if (areRendererConfigsEqual(currentConfig, resolvedConfig)) {
           return;
         }
-        currentConfig = nextConfig;
+        currentConfig = resolvedConfig;
         notify();
       },
     },
@@ -267,7 +370,7 @@ const destroyBindingResources = (binding: RenderContextBinding): void => {
 };
 
 export type InitializeWindowConfig = Readonly<{
-  initialFrameState?: FrameState;
+  initialTimeMs?: number;
   initialRendererConfig?: RendererConfig;
 }>;
 
@@ -280,6 +383,7 @@ async (
 ): Promise<void | DesktopModuleCleanup> => {
   const rootElement = (
     frameState: FrameStateHandle,
+    timeMs: TimeMsHandle,
     windowMetrics: WindowMetricsHandle,
     rendererConfig: RendererConfigHandle,
   ) =>
@@ -292,19 +396,35 @@ async (
         React.createElement(
           FrameStateHandleContext.Provider,
           { value: frameState },
-          React.createElement(Component),
+          React.createElement(
+            TimeMsHandleContext.Provider,
+            { value: timeMs },
+            React.createElement(Component),
+          ),
         ),
       ),
     );
 
-  let requestFrame = () => {};
-  const { handle: frameState } = createFrameStateHandleController(
-    config?.initialFrameState ?? {},
-    () => requestFrame(),
-  );
+  let requestFrameImpl = () => {};
+  const requestFrame = () => requestFrameImpl();
+  const initialWindowMetrics = readWindowMetrics(window);
   const windowMetrics = createWindowMetricsHandleController(
-    readWindowMetrics(window),
-    () => requestFrame(),
+    initialWindowMetrics,
+    requestFrame,
+  );
+  const frameStateController = createFrameStateHandleController(
+    {
+      deltaTimeMs: 0,
+      frameIndex: 0,
+      viewportWidth: initialWindowMetrics.logicalWidth,
+      viewportHeight: initialWindowMetrics.logicalHeight,
+    },
+    requestFrame,
+  );
+  const frameState = frameStateController.handle;
+  const timeMs = createTimeMsHandleController(
+    config?.initialTimeMs ?? 0,
+    requestFrame,
   );
   let needsRendererReconfigure = false;
   const rendererConfig = createRendererConfigHandleController(
@@ -316,8 +436,13 @@ async (
   );
 
   const sceneRoot = createReactSceneRoot(
+    {
+      rootViewportWidth: windowMetrics.handle.getSnapshot().logicalWidth,
+      rootViewportHeight: windowMetrics.handle.getSnapshot().logicalHeight,
+    },
     rootElement(
       frameState,
+      timeMs.handle,
       windowMetrics.handle,
       rendererConfig.handle,
     ),
@@ -367,6 +492,25 @@ async (
   let disposed = false;
   let needsPresent = true;
   let lastRenderedContentRevision = sceneRoot.getContentRevision();
+  let lastPreparedFrameClockMs: number | undefined;
+
+  const syncRuntimeFrameState = (): void => {
+    const viewportWidth = sceneRoot.getRootViewportWidth();
+    const viewportHeight = sceneRoot.getRootViewportHeight();
+    frameStateController.setFrameState((previousState) => {
+      if (
+        previousState.viewportWidth === viewportWidth &&
+        previousState.viewportHeight === viewportHeight
+      ) {
+        return previousState;
+      }
+      return {
+        ...previousState,
+        viewportWidth,
+        viewportHeight,
+      };
+    }, { requestFrame: false });
+  };
 
   const reconfigureRenderer = () => {
     const nextConfig = getEffectiveRendererConfig();
@@ -381,7 +525,7 @@ async (
     needsPresent = true;
   };
 
-  const drawFrame = (_timeMs: number) => {
+  const drawFrame = (_nowMs: number) => {
     frameHandle = 0;
     if (disposed) {
       return;
@@ -397,19 +541,36 @@ async (
     }
     const nextContentRevision = sceneRoot.getContentRevision();
     if (needsPresent || nextContentRevision !== lastRenderedContentRevision) {
-      currentForwardRenderer.renderFrame(frameState.getSnapshot());
+      currentForwardRenderer.renderFrame(
+        {
+          ...frameState.getSnapshot(),
+          timeMs: timeMs.handle.getSnapshot(),
+        } satisfies FrameState,
+      );
       window.present();
       needsPresent = false;
       lastRenderedContentRevision = nextContentRevision;
     }
   };
 
-  requestFrame = () => {
+  requestFrameImpl = () => {
     if (disposed) {
       return;
     }
     needsPresent = true;
     if (frameHandle === 0) {
+      const nextFrameClockMs = performance.now();
+      const previousFrameState = frameState.getSnapshot();
+      const progression = advanceFrameProgression(
+        previousFrameState,
+        nextFrameClockMs,
+        lastPreparedFrameClockMs,
+      );
+      frameStateController.setFrameState((previousState) => ({
+        ...previousState,
+        ...progression,
+      }), { requestFrame: false });
+      lastPreparedFrameClockMs = nextFrameClockMs;
       frameHandle = requestAnimationFrame(drawFrame);
     }
   };
@@ -421,6 +582,8 @@ async (
     target.height = nextMetrics.physicalHeight;
     resizeSurfaceBindingTarget(binding, nextMetrics.physicalWidth, nextMetrics.physicalHeight);
     windowMetrics.setMetrics(nextMetrics);
+    sceneRoot.setRootViewport(nextMetrics.logicalWidth, nextMetrics.logicalHeight);
+    syncRuntimeFrameState();
     requestFrame();
   };
 
@@ -430,6 +593,8 @@ async (
     target.height = nextMetrics.physicalHeight;
     resizeSurfaceBindingTarget(binding, nextMetrics.physicalWidth, nextMetrics.physicalHeight);
     windowMetrics.setMetrics(nextMetrics);
+    sceneRoot.setRootViewport(nextMetrics.logicalWidth, nextMetrics.logicalHeight);
+    syncRuntimeFrameState();
     requestFrame();
   };
 
@@ -439,6 +604,7 @@ async (
   };
 
   const unsubscribe = sceneRoot.subscribe(() => {
+    syncRuntimeFrameState();
     requestFrame();
   });
 
@@ -446,6 +612,8 @@ async (
   window.runtime.addEventListener('scalefactorchange', handleScaleFactorChange);
   window.runtime.addEventListener('focuschange', handleFocusChange);
 
+  sceneRoot.setRootViewport(initialMetrics.logicalWidth, initialMetrics.logicalHeight);
+  syncRuntimeFrameState();
   requestFrame();
 
   return () => {

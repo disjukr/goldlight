@@ -21,6 +21,7 @@ import {
   assertRendererSceneCapabilities,
   collectRendererCapabilityIssues,
   createDeferredRenderer,
+  createFrameState,
   createMaterialRegistry,
   type GpuRenderExecutionContext,
   renderForwardFrame,
@@ -295,7 +296,7 @@ Deno.bench('forward frame encoding', () => {
     context,
     binding,
     runtimeResidency,
-    {},
+    createFrameState(),
     evaluatedScene,
     createMaterialRegistry(),
   );

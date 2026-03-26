@@ -3,6 +3,7 @@ import { evaluateScene } from '@goldlight/core';
 import { createOffscreenBinding, createRuntimeResidency } from '@goldlight/gpu';
 import { appendMaterial, appendMesh, appendNode, createNode, createSceneIr } from '@goldlight/ir';
 import {
+  createFrameState,
   createMaterialRegistry,
   ensureMaterialPipeline,
   type GpuRenderExecutionContext,
@@ -173,7 +174,7 @@ fn fsMain() -> @location(0) vec4<f32> {
       },
     }),
     residency,
-    {},
+    createFrameState(),
     evaluateScene(scene, { timeMs: 0 }),
     registry,
   );
@@ -575,7 +576,7 @@ fn fsMain() -> @location(0) vec4<f32> {
       },
     }),
     residency,
-    {},
+    createFrameState(),
     evaluateScene(scene, { timeMs: 0 }),
     registry,
   );

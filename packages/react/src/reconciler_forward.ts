@@ -22,11 +22,12 @@ import {
 import type {
   ForwardRenderResult,
   FrameState,
+  FrameStateInit,
   GpuRenderExecutionContext,
   MaterialRegistry,
   PostProcessPass,
 } from '@goldlight/renderer';
-import { renderForwardFrame } from '@goldlight/renderer';
+import { createFrameState, renderForwardFrame } from '@goldlight/renderer';
 
 import type { SceneRootFrameDriverOptions } from './runtime_driver.ts';
 import {
@@ -43,6 +44,8 @@ type React3dSceneRootLike =
     get3dScenes: () => readonly React3dScene[];
     getRootClearColor: () => readonly [number, number, number, number] | undefined;
     getRootMsaaSampleCount: () => number | undefined;
+    getRootViewportWidth: () => number;
+    getRootViewportHeight: () => number;
     getContentRevision: () => number;
   }>;
 
@@ -253,8 +256,12 @@ export const createReactSceneRootForwardRenderer = (
 ): SceneRootForwardRenderer => {
   const scene2dRuntimeStates = new Map<string, Scene2dRuntimeState>();
   const scene3dRuntimeStates = new Map<string, Scene3dRuntimeState>();
-  let currentFrameState: FrameState = options.initialFrameState ?? {};
-  let currentTimeMs = typeof currentFrameState.timeMs === 'number' ? currentFrameState.timeMs : 0;
+  let currentFrameState: FrameState = createFrameState({
+    viewportWidth: options.binding.target.width,
+    viewportHeight: options.binding.target.height,
+    ...(options.initialFrameState as FrameStateInit | undefined),
+  });
+  let currentTimeMs = currentFrameState.timeMs;
 
   const baseRenderer = createSceneRootForwardRenderer(sceneRoot, {
     ...options,
@@ -269,7 +276,7 @@ export const createReactSceneRootForwardRenderer = (
         postProcessPasses,
       ) => {
         currentFrameState = frameState;
-        currentTimeMs = typeof frameState.timeMs === 'number' ? frameState.timeMs : 0;
+        currentTimeMs = frameState.timeMs;
         const activeScene3dIds = new Set<string>();
         for (const scene3d of sceneRoot.get3dScenes()) {
           activeScene3dIds.add(scene3d.id);
@@ -279,6 +286,11 @@ export const createReactSceneRootForwardRenderer = (
             scene3d,
           );
           if (state.renderedRevision !== scene3d.revision) {
+            const nestedFrameState: FrameState = {
+              ...currentFrameState,
+              viewportWidth: scene3d.viewportWidth,
+              viewportHeight: scene3d.viewportHeight,
+            };
             const evaluatedScene3d = evaluateScene(scene3d.scene, { timeMs: currentTimeMs });
             ensureSceneMeshResidency(options.context, residency, scene3d.scene, evaluatedScene3d);
             ensureSceneTextureResidency(options.context, residency, scene3d.scene, {
@@ -288,7 +300,7 @@ export const createReactSceneRootForwardRenderer = (
               context,
               state.binding,
               residency,
-              currentFrameState,
+              nestedFrameState,
               evaluatedScene3d,
               {
                 materialRegistry,
@@ -370,7 +382,7 @@ export const createReactSceneRootForwardRenderer = (
     getFrameDriver: () => baseRenderer.getFrameDriver(),
     renderFrame: (frameState, frameOptions) => {
       currentFrameState = frameState;
-      currentTimeMs = typeof frameState.timeMs === 'number' ? frameState.timeMs : 0;
+      currentTimeMs = frameState.timeMs;
       return baseRenderer.renderFrame(frameState, frameOptions);
     },
     dispose: () => {

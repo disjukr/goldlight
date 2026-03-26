@@ -1,7 +1,7 @@
 import { type EvaluatedScene, evaluateScene, reevaluateSceneTransforms } from '@goldlight/core';
 import { applyRuntimeResidencyPlan, type RuntimeResidency } from '@goldlight/gpu';
 import type { SceneIr } from '@goldlight/ir';
-import type { FrameState } from '@goldlight/renderer';
+import { createFrameState, type FrameState, type FrameStateInit } from '@goldlight/renderer';
 
 import {
   canApplySceneRootTransformUpdates,
@@ -33,7 +33,7 @@ export type SceneRootFrameAdvanceOptions = Readonly<{
 
 export type SceneRootFrameDriverOptions = Readonly<{
   residency?: RuntimeResidency;
-  initialFrameState?: FrameState;
+  initialFrameState?: FrameStateInit;
 }>;
 
 export type SceneRootFrameResult = Readonly<{
@@ -78,10 +78,9 @@ export const createSceneRootFrameDriver = (
   let fullUpdateCount = 0;
   let targetedInvalidationCount = 0;
   let resetInvalidationCount = 0;
-  const resolveTimeMs = (frameState: FrameState): number =>
-    typeof frameState.timeMs === 'number' ? frameState.timeMs : 0;
+  const initialFrameState = createFrameState(options.initialFrameState ?? {});
   let evaluatedScene = currentScene
-    ? evaluateScene(currentScene, { timeMs: resolveTimeMs(options.initialFrameState ?? {}) })
+    ? evaluateScene(currentScene, { timeMs: initialFrameState.timeMs })
     : undefined;
 
   if (evaluatedScene) {
@@ -112,7 +111,7 @@ export const createSceneRootFrameDriver = (
     }
 
     const evaluationOptions = {
-      timeMs: resolveTimeMs(frameState),
+      timeMs: frameState.timeMs,
       clipId: advanceOptions.clipId,
     };
     const commit = pendingCommit;

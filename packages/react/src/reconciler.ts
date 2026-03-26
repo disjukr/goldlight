@@ -263,6 +263,10 @@ type HostContainer = {
   current3dScenes: readonly React3dScene[];
   currentRootClearColor?: readonly [number, number, number, number];
   currentRootMsaaSampleCount?: number;
+  currentRootViewportWidth: number;
+  currentRootViewportHeight: number;
+  runtimeRootViewportWidth: number;
+  runtimeRootViewportHeight: number;
   revision: number;
   contentRevision: number;
   contentTreeRevision?: number;
@@ -281,9 +285,17 @@ export type React3dSceneRoot = Readonly<{
   get3dScenes: () => readonly React3dScene[];
   getRootClearColor: () => readonly [number, number, number, number] | undefined;
   getRootMsaaSampleCount: () => number | undefined;
+  getRootViewportWidth: () => number;
+  getRootViewportHeight: () => number;
+  setRootViewport: (width: number, height: number) => void;
   getRevision: () => number;
   getContentRevision: () => number;
   subscribe: (subscriber: G3dSceneRootSubscriber) => () => void;
+}>;
+
+export type CreateReactSceneRootConfig = Readonly<{
+  rootViewportWidth: number;
+  rootViewportHeight: number;
 }>;
 
 const default2dSceneTextureSize = 512;
@@ -1016,6 +1028,8 @@ const syncContainerSceneDocument = (container: HostContainer): void => {
     container.current3dScenes = [];
     container.currentRootClearColor = undefined;
     container.currentRootMsaaSampleCount = undefined;
+    container.currentRootViewportWidth = container.runtimeRootViewportWidth;
+    container.currentRootViewportHeight = container.runtimeRootViewportHeight;
     if (previousScene) {
       const commit = createG3dSceneRootCommit(
         g3dSceneDocumentToSceneIr(createG3dSceneDocument(previousScene.id)),
@@ -1071,6 +1085,10 @@ const syncContainerSceneDocument = (container: HostContainer): void => {
     container.current3dScenes = [];
     container.currentRootClearColor = undefined;
     container.currentRootMsaaSampleCount = rootInstance.props.msaaSampleCount;
+    container.currentRootViewportWidth = rootInstance.props.viewportWidth ??
+      container.runtimeRootViewportWidth;
+    container.currentRootViewportHeight = rootInstance.props.viewportHeight ??
+      container.runtimeRootViewportHeight;
     if (container.contentTreeRevision !== rootSubtreeRevision) {
       container.contentTreeRevision = rootSubtreeRevision;
       container.contentRevision += 1;
@@ -1091,6 +1109,10 @@ const syncContainerSceneDocument = (container: HostContainer): void => {
   container.current3dScenes = snapshot.scenes3d;
   container.currentRootClearColor = rootInstance.props.clearColor;
   container.currentRootMsaaSampleCount = rootInstance.props.msaaSampleCount;
+  container.currentRootViewportWidth = rootInstance.props.viewportWidth ??
+    container.runtimeRootViewportWidth;
+  container.currentRootViewportHeight = rootInstance.props.viewportHeight ??
+    container.runtimeRootViewportHeight;
   if (container.contentTreeRevision !== rootSubtreeRevision) {
     container.contentTreeRevision = rootSubtreeRevision;
     container.contentRevision += 1;
@@ -1102,12 +1124,16 @@ const syncContainerSceneDocument = (container: HostContainer): void => {
   }
 };
 
-const createRootContainer = (): HostContainer => ({
+const createRootContainer = (config: CreateReactSceneRootConfig): HostContainer => ({
   rootChildren: [],
   current2dScenes: [],
   current3dScenes: [],
   currentRootClearColor: undefined,
   currentRootMsaaSampleCount: undefined,
+  currentRootViewportWidth: Math.max(1, Math.round(config.rootViewportWidth)),
+  currentRootViewportHeight: Math.max(1, Math.round(config.rootViewportHeight)),
+  runtimeRootViewportWidth: Math.max(1, Math.round(config.rootViewportWidth)),
+  runtimeRootViewportHeight: Math.max(1, Math.round(config.rootViewportHeight)),
   revision: 0,
   contentRevision: 0,
   contentTreeRevision: undefined,
@@ -1167,8 +1193,11 @@ export const flushReactSceneUpdates = (work?: () => void): void => {
   throwPendingContainerErrors(activeContainers);
 };
 
-export const createReactSceneRoot = (initialElement?: ReactNode): React3dSceneRoot => {
-  const container = createRootContainer();
+export const createReactSceneRoot = (
+  config: CreateReactSceneRootConfig,
+  initialElement?: ReactNode,
+): React3dSceneRoot => {
+  const container = createRootContainer(config);
   const fiberRoot = createFiberRoot(container);
   activeContainers.add(container);
 
@@ -1192,6 +1221,31 @@ export const createReactSceneRoot = (initialElement?: ReactNode): React3dSceneRo
     activeContainers.delete(container);
   };
 
+  const setRootViewport = (width: number, height: number): void => {
+    const nextWidth = Math.max(1, Math.round(width));
+    const nextHeight = Math.max(1, Math.round(height));
+    if (
+      container.runtimeRootViewportWidth === nextWidth &&
+      container.runtimeRootViewportHeight === nextHeight
+    ) {
+      return;
+    }
+    container.runtimeRootViewportWidth = nextWidth;
+    container.runtimeRootViewportHeight = nextHeight;
+    const rootInstance = container.rootChildren[0];
+    if (!rootInstance) {
+      container.currentRootViewportWidth = nextWidth;
+      container.currentRootViewportHeight = nextHeight;
+      return;
+    }
+    if (rootInstance.props.viewportWidth === undefined) {
+      container.currentRootViewportWidth = nextWidth;
+    }
+    if (rootInstance.props.viewportHeight === undefined) {
+      container.currentRootViewportHeight = nextHeight;
+    }
+  };
+
   if (initialElement !== undefined) {
     render(initialElement);
   }
@@ -1205,6 +1259,9 @@ export const createReactSceneRoot = (initialElement?: ReactNode): React3dSceneRo
     get3dScenes: () => container.current3dScenes,
     getRootClearColor: () => container.currentRootClearColor,
     getRootMsaaSampleCount: () => container.currentRootMsaaSampleCount,
+    getRootViewportWidth: () => container.currentRootViewportWidth,
+    getRootViewportHeight: () => container.currentRootViewportHeight,
+    setRootViewport,
     getRevision: () => container.revision,
     getContentRevision: () => container.contentRevision,
     subscribe: (subscriber) => {

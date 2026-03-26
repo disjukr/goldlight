@@ -5,12 +5,7 @@
 
 import React from 'npm:react@19.2.0';
 import { createQuaternionFromEulerDegrees } from '@goldlight/core';
-import {
-  initializeWindow,
-  useFrameState,
-  useSetFrameState,
-  useWindowMetrics,
-} from '@goldlight/desktop';
+import { initializeWindow, useSetTimeMs, useTimeMs, useWindowMetrics } from '@goldlight/desktop';
 import { createBoxMesh, createPath2d, type Path2d } from '@goldlight/geometry';
 import { G3dDirectionalLight, G3dPerspectiveCamera } from '@goldlight/react/reconciler';
 
@@ -35,40 +30,27 @@ const createStarPath = (
   return createPath2d(...commands);
 };
 
-type DemoFrameState = Readonly<{
-  timeMs: number;
-}>;
-
 const DemoFrameDriver = () => {
-  const setFrameState = useSetFrameState();
+  const setTimeMs = useSetTimeMs();
 
   React.useEffect(() => {
     const startMs = performance.now();
-    let frameIndex = 0;
-    let lastTimeMs = 0;
     let handle = 0;
 
     const tick = (nowMs: number) => {
-      const timeMs = nowMs - startMs;
-      setFrameState({
-        timeMs,
-        deltaTimeMs: timeMs - lastTimeMs,
-        frameIndex,
-      });
-      lastTimeMs = timeMs;
-      frameIndex += 1;
+      setTimeMs(nowMs - startMs);
       handle = requestAnimationFrame(tick);
     };
 
     handle = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(handle);
-  }, [setFrameState]);
+  }, [setTimeMs]);
 
   return null;
 };
 
 const DemoScene = () => {
-  const { timeMs = 0 } = useFrameState<DemoFrameState>();
+  const timeMs = useTimeMs();
   const { scaleFactor } = useWindowMetrics();
   const t = timeMs / 1000;
   const panelViewportWidth = 384;

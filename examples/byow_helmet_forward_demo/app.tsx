@@ -21,6 +21,8 @@ import {
   G3dPerspectiveCamera,
 } from '@goldlight/react/reconciler';
 import {
+  advanceFrameProgression,
+  createFrameState,
   createMaterialRegistry,
   type ForwardDebugView,
   type ForwardEnvironmentMap,
@@ -168,7 +170,10 @@ export default async (
   let normalDebugEnabled = false;
   let selectedDebugView: ForwardDebugView = 'normal-world-mapped';
   let selectedEnvironmentMap: ForwardEnvironmentMap = environmentMaps[0]!;
-  const sceneRoot = createReactSceneRoot(<HelmetScene />);
+  const sceneRoot = createReactSceneRoot({
+    rootViewportWidth: window.getState().width,
+    rootViewportHeight: window.getState().height,
+  }, <HelmetScene />);
   const target = {
     kind: 'surface' as const,
     width: window.surfaceInfo.width,
@@ -189,17 +194,17 @@ export default async (
     binding,
     residency,
     materialRegistry,
-    initialTimeMs: performance.now(),
     hooks: {
       renderForwardFrame: (
         context,
         binding,
         residency,
+        frameState,
         evaluatedScene,
         materialRegistry,
         postProcessPasses,
       ) =>
-        renderForwardFrame(context, binding, residency, {}, evaluatedScene, {
+        renderForwardFrame(context, binding, residency, frameState, evaluatedScene, {
           materialRegistry,
           postProcessPasses,
           extension: {
@@ -274,11 +279,28 @@ export default async (
     target.width = detail.width;
     target.height = detail.height;
     resizeSurfaceBindingTarget(binding, detail.width, detail.height);
+    currentFrameState = {
+      ...currentFrameState,
+      viewportWidth: detail.width,
+      viewportHeight: detail.height,
+    };
   });
 
   let frameHandle = 0;
+  let currentFrameState = createFrameState({
+    viewportWidth: window.getState().width,
+    viewportHeight: window.getState().height,
+  });
+  let lastFrameClockMs: number | undefined;
   const drawFrame = (timeMs: number) => {
-    forwardRenderer.renderFrame({ timeMs });
+    const progression = advanceFrameProgression(currentFrameState, timeMs, lastFrameClockMs);
+    lastFrameClockMs = timeMs;
+    currentFrameState = {
+      ...currentFrameState,
+      ...progression,
+      timeMs,
+    };
+    forwardRenderer.renderFrame(currentFrameState);
     window.present();
     frameHandle = requestAnimationFrame(drawFrame);
   };

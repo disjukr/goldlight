@@ -13,7 +13,8 @@
     "./packages/importers",
     "./packages/exporters",
     "./packages/react",
-    "./packages/desktop"
+    "./packages/desktop",
+    "./packages/text"
   ],
   "imports": {
     "@std/fs": "jsr:@std/fs@1",
@@ -35,7 +36,8 @@
     "@goldlight/react/reconciler": "./packages/react/reconciler.ts",
     "@goldlight/react/jsx-runtime": "./packages/react/jsx-runtime.ts",
     "@goldlight/react/jsx-dev-runtime": "./packages/react/jsx-dev-runtime.ts",
-    "@goldlight/desktop": "./packages/desktop/mod.ts"
+    "@goldlight/desktop": "./packages/desktop/mod.ts",
+    "@goldlight/text": "./packages/text/mod.ts"
   },
   "tasks": {
     "generate:ir": "deno run -A ./scripts/generate_bdl_ts.ts",
@@ -52,6 +54,8 @@
     "asset:sponza": "deno run -A ./scripts/fetch_example_asset.ts sponza",
     "desktop:host:build": "deno run -A ./scripts/build_desktop_host.ts",
     "desktop:host:check": "deno run -A ./scripts/build_desktop_host.ts --check",
+    "text:host:build": "deno run -A ./scripts/build_text_host.ts",
+    "text:host:check": "deno run -A ./scripts/build_text_host.ts --check",
     "example:headless:check": "deno check --unstable-webgpu --unstable-raw-imports ./scripts/render_headless_snapshot.ts",
     "example:headless:png": "deno run -A --unstable-webgpu --unstable-raw-imports ./scripts/render_headless_snapshot.ts",
     "example:byow:check": "deno check --unstable-ffi --unstable-webgpu --unstable-raw-imports ./examples/byow_native_demo/main.ts",

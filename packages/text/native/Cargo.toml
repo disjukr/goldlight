@@ -1,0 +1,12 @@
+[package]
+name = "goldlight_text_host"
+version = "0.0.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+fontdb = "0.23"
+harfbuzz-sys = { version = "0.6.1", default-features = false, features = ["bundled"] }
+ttf-parser = "0.25"

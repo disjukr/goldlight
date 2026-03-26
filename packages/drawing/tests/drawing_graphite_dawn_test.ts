@@ -2749,6 +2749,37 @@ Deno.test('drawing prepared stroke patches keep open contour joins chained acros
   assertEquals(conicPatches[0]?.joinControlPoint, [410, 820]);
 });
 
+Deno.test('drawing prepared recording budgets enough tessellated stroke vertices for split cubics', () => {
+  const mock = createMockGpuContext();
+  const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
+  const recorder = createDrawingRecorder(sharedContext);
+
+  recordDrawPath(
+    recorder,
+    createPath2d(
+      { kind: 'moveTo', to: [90, 585] },
+      { kind: 'cubicTo', control1: [280, 440], control2: [970, 700], to: [1210, 555] },
+    ),
+    { style: 'stroke', strokeWidth: 2, strokeJoin: 'miter', strokeCap: 'butt' },
+  );
+
+  const prepared = prepareDawnRecording(sharedContext, finishDrawingRecorder(recorder));
+  const draw = prepared.prepared.passes[0]?.steps[0]?.draw;
+  assertEquals(draw?.kind, 'pathStroke');
+  if (draw?.kind !== 'pathStroke') {
+    throw new Error('expected pathStroke draw');
+  }
+  assertEquals(draw.usesTessellatedStrokePatches, true);
+  assertEquals(draw.patches.length, 2);
+
+  const step = prepared.resources.tasks[0]?.passes[0]?.steps[0];
+  if (!step) {
+    throw new Error('expected prepared step resources');
+  }
+  assertEquals(step.instanceCount, 2);
+  assertEquals(step.vertexCount, 58);
+});
+
 Deno.test('drawing prepared stroke patches rewrite closed contour first join control point', () => {
   const mock = createMockGpuContext();
   const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));

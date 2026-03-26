@@ -91,7 +91,7 @@ export const renderTextOnPathSnapshot = async (): Promise<
   });
   const hangulRun = textHost.shapeText({
     typeface: hangulMatch.typeface,
-    text: '다람쥐 헌 쳇바퀴에 타고파',
+    text: '\uB2E4\uB78C\uC950 \uD5CC \uCC57\uBC14\uD034\uC5D0 \uD0C0\uACE0\uD30C',
     size: 42,
     language: 'ko',
   });
@@ -111,27 +111,39 @@ export const renderTextOnPathSnapshot = async (): Promise<
     color: [0.94, 0.56, 0.24, 0.55],
     strokeWidth: 2,
   });
-  const latinPlacements = recordPathFallbackRunOnPath(
-    textHost,
-    recorder,
-    latinRun,
-    latinPath,
-    { color: [0.97, 0.95, 0.9, 1] },
-    { align: 'center', normalOffset: -8 },
-  );
-
   recordDrawPath(recorder, hangulPath, {
     style: 'stroke',
     color: [0.24, 0.76, 0.64, 0.55],
     strokeWidth: 2,
   });
-  const hangulPlacements = recordPathFallbackRunOnPath(
+
+  recordPathFallbackRunOnPath(
+    textHost,
+    recorder,
+    latinRun,
+    latinPath,
+    {
+      style: 'fill',
+      color: [0.98, 0.97, 0.94, 1],
+    },
+    {
+      align: 'center',
+      normalOffset: -20,
+    },
+  );
+  recordPathFallbackRunOnPath(
     textHost,
     recorder,
     hangulRun,
     hangulPath,
-    { color: [0.84, 0.95, 0.91, 1] },
-    { align: 'center', normalOffset: -10 },
+    {
+      style: 'fill',
+      color: [0.9, 1, 0.96, 1],
+    },
+    {
+      align: 'center',
+      normalOffset: -20,
+    },
   );
 
   const recording = finishDrawingRecorder(recorder);
@@ -166,12 +178,12 @@ export const renderTextOnPathSnapshot = async (): Promise<
       {
         label: 'Latin',
         family: latinMatch.family,
-        placementCount: latinPlacements.length,
+        placementCount: latinRun.glyphIDs.length,
       },
       {
         label: 'Hangul',
         family: hangulMatch.family,
-        placementCount: hangulPlacements.length,
+        placementCount: hangulRun.glyphIDs.length,
       },
     ],
   };

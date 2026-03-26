@@ -92,6 +92,7 @@ const curvePatchFloats = 12;
 const strokePatchFloats = 14;
 const maxPatchResolveLevel = 5;
 const maxStrokeEdges = (1 << 14) - 1;
+const patchPrecision = 4;
 
 const numCurveTrianglesAtResolveLevel = (resolveLevel: number): number =>
   resolveLevel <= 0 ? 0 : (1 << resolveLevel) - 1;
@@ -1392,7 +1393,7 @@ const createGradientPayload = (
 
 const calcNumRadialSegmentsPerRadian = (approxStrokeRadius: number): number => {
   const radius = Math.max(approxStrokeRadius, 0.5);
-  const cosTheta = 1 - ((1 / 4) / radius);
+  const cosTheta = 1 - ((1 / patchPrecision) / radius);
   return 0.5 / Math.acos(Math.max(cosTheta, -1));
 };
 
@@ -1406,7 +1407,8 @@ const cubicWangsFormulaP4 = (
   const v1y = p0[1] - (2 * p1[1]) + p2[1];
   const v2x = p1[0] - (2 * p2[0]) + p3[0];
   const v2y = p1[1] - (2 * p2[1]) + p3[1];
-  return Math.max((v1x * v1x) + (v1y * v1y), (v2x * v2x) + (v2y * v2y)) * (4 * (81 / 64));
+  return Math.max((v1x * v1x) + (v1y * v1y), (v2x * v2x) + (v2y * v2y)) *
+    (((3 * 3) * (2 * 2) / 64) * (patchPrecision * patchPrecision));
 };
 
 const conicWangsFormulaP4 = (
@@ -1432,8 +1434,8 @@ const conicWangsFormulaP4 = (
     c0[1] + c2[1] - (2 * weight * c1[1]),
   ];
   const dw = Math.abs(2 - (2 * weight));
-  const rpMinus1 = Math.max(0, (maxLen * 4) - 1);
-  const numer = (Math.hypot(dp[0], dp[1]) * 4) + (rpMinus1 * dw);
+  const rpMinus1 = Math.max(0, (maxLen * patchPrecision) - 1);
+  const numer = (Math.hypot(dp[0], dp[1]) * patchPrecision) + (rpMinus1 * dw);
   const denom = 4 * Math.min(weight, 1);
   const p2Val = denom <= 1e-5 ? Infinity : Math.max(0, numer / denom);
   return p2Val * p2Val;

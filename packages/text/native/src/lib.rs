@@ -56,6 +56,12 @@ pub struct TextGlyphMaskInfo {
     pub offset_y: i32,
 }
 
+#[derive(Clone)]
+struct GlyphBitmap {
+    info: TextGlyphMaskInfo,
+    pixels: Vec<u8>,
+}
+
 struct TextHostState {
     source: SystemSource,
     family_names: Vec<String>,
@@ -177,7 +183,7 @@ fn rasterize_glyph_mask(
     typeface: &TypefaceState,
     glyph_id: u32,
     size: f32,
-) -> Option<(TextGlyphMaskInfo, Vec<u8>)> {
+) -> Option<GlyphBitmap> {
     let bounds = typeface
         .font
         .raster_bounds(
@@ -195,8 +201,8 @@ fn rasterize_glyph_mask(
     let offset_y = bounds.origin_y();
 
     if width == 0 || height == 0 {
-        return Some((
-            TextGlyphMaskInfo {
+        return Some(GlyphBitmap {
+            info: TextGlyphMaskInfo {
                 width,
                 height,
                 stride: 0,
@@ -204,8 +210,8 @@ fn rasterize_glyph_mask(
                 offset_x,
                 offset_y,
             },
-            Vec::new(),
-        ));
+            pixels: Vec::new(),
+        });
     }
 
     let mut canvas = Canvas::new(Vector2I::new(width as i32, height as i32), Format::A8);
@@ -223,8 +229,8 @@ fn rasterize_glyph_mask(
         )
         .ok()?;
 
-    Some((
-        TextGlyphMaskInfo {
+    Some(GlyphBitmap {
+        info: TextGlyphMaskInfo {
             width,
             height,
             stride: canvas.stride as u32,
@@ -232,8 +238,106 @@ fn rasterize_glyph_mask(
             offset_x,
             offset_y,
         },
-        canvas.pixels,
-    ))
+        pixels: canvas.pixels,
+    })
+}
+
+fn clamp_f32(value: f32, min: f32, max: f32) -> f32 {
+    value.max(min).min(max)
+}
+
+fn mask_pixel_is_inside(bitmap: &GlyphBitmap, x: i32, y: i32) -> bool {
+    if x < 0 || y < 0 || x >= bitmap.info.width as i32 || y >= bitmap.info.height as i32 {
+        return false;
+    }
+    let index = y as usize * bitmap.info.stride as usize + x as usize;
+    bitmap.pixels.get(index).copied().unwrap_or_default() >= 128
+}
+
+fn distance_to_nearest(bitmap: &GlyphBitmap, target_x: f32, target_y: f32, inside: bool) -> f32 {
+    let mut best_distance_sq = f32::INFINITY;
+    for y in 0..bitmap.info.height as i32 {
+        for x in 0..bitmap.info.width as i32 {
+            if mask_pixel_is_inside(bitmap, x, y) != inside {
+                continue;
+            }
+            let dx = x as f32 + 0.5 - target_x;
+            let dy = y as f32 + 0.5 - target_y;
+            let distance_sq = dx * dx + dy * dy;
+            if distance_sq < best_distance_sq {
+                best_distance_sq = distance_sq;
+            }
+        }
+    }
+
+    if best_distance_sq.is_finite() {
+        best_distance_sq.sqrt()
+    } else {
+        0.0
+    }
+}
+
+fn create_sdf_from_mask(bitmap: &GlyphBitmap, inset: u32, radius: f32) -> GlyphBitmap {
+    if bitmap.info.width == 0 || bitmap.info.height == 0 {
+        return GlyphBitmap {
+            info: TextGlyphMaskInfo {
+                width: 0,
+                height: 0,
+                stride: 0,
+                format: 1,
+                offset_x: bitmap.info.offset_x,
+                offset_y: bitmap.info.offset_y,
+            },
+            pixels: Vec::new(),
+        };
+    }
+
+    let width = bitmap.info.width + inset * 2;
+    let height = bitmap.info.height + inset * 2;
+    let stride = width;
+    let mut pixels = vec![0u8; (width * height) as usize];
+
+    for y in 0..height as i32 {
+        for x in 0..width as i32 {
+            let source_x = x - inset as i32;
+            let source_y = y - inset as i32;
+            let is_inside = mask_pixel_is_inside(bitmap, source_x, source_y);
+            let nearest_outside =
+                distance_to_nearest(bitmap, source_x as f32 + 0.5, source_y as f32 + 0.5, false);
+            let nearest_inside =
+                distance_to_nearest(bitmap, source_x as f32 + 0.5, source_y as f32 + 0.5, true);
+            let signed_distance = if is_inside {
+                nearest_outside
+            } else {
+                -nearest_inside
+            };
+            let normalized = clamp_f32((signed_distance / radius) * 0.5 + 0.5, 0.0, 1.0);
+            pixels[y as usize * stride as usize + x as usize] = (normalized * 255.0).round() as u8;
+        }
+    }
+
+    GlyphBitmap {
+        info: TextGlyphMaskInfo {
+            width,
+            height,
+            stride,
+            format: 1,
+            offset_x: bitmap.info.offset_x - inset as i32,
+            offset_y: bitmap.info.offset_y - inset as i32,
+        },
+        pixels,
+    }
+}
+
+fn create_glyph_sdf(
+    typeface: &TypefaceState,
+    glyph_id: u32,
+    size: f32,
+    inset: u32,
+    radius: f32,
+) -> Option<GlyphBitmap> {
+    let bitmap = rasterize_glyph_mask(typeface, glyph_id, size)?;
+    Some(create_sdf_from_mask(&bitmap, inset, radius))
 }
 
 struct SvgPathBuilder {
@@ -638,12 +742,12 @@ pub extern "C" fn text_host_get_glyph_mask_info(
         let Some(typeface) = state.typefaces.get(&typeface_handle) else {
             return 0;
         };
-        let Some((info, _)) = rasterize_glyph_mask(typeface, glyph_id, size) else {
+        let Some(bitmap) = rasterize_glyph_mask(typeface, glyph_id, size) else {
             return 0;
         };
 
         unsafe {
-            *out_info = info;
+            *out_info = bitmap.info;
         }
         TEXT_HOST_RESULT_OK
     })
@@ -662,10 +766,67 @@ pub extern "C" fn text_host_copy_glyph_mask_pixels(
         let Some(typeface) = state.typefaces.get(&typeface_handle) else {
             return 0;
         };
-        let Some((_, pixels)) = rasterize_glyph_mask(typeface, glyph_id, size) else {
+        let Some(bitmap) = rasterize_glyph_mask(typeface, glyph_id, size) else {
             return 0;
         };
-        write_bytes(&pixels, out_buffer, out_buffer_len)
+        write_bytes(&bitmap.pixels, out_buffer, out_buffer_len)
+    })
+    .unwrap_or_default()
+}
+
+#[no_mangle]
+pub extern "C" fn text_host_get_glyph_sdf_info(
+    typeface_handle: u64,
+    glyph_id: u32,
+    size: f32,
+    inset: u32,
+    radius: f32,
+    out_info: *mut TextGlyphMaskInfo,
+) -> u8 {
+    if out_info.is_null() {
+        return 0;
+    }
+
+    let inset = inset.max(1);
+    let radius = radius.max(1.0);
+
+    with_state(|state| {
+        let Some(typeface) = state.typefaces.get(&typeface_handle) else {
+            return 0;
+        };
+        let Some(bitmap) = create_glyph_sdf(typeface, glyph_id, size, inset, radius) else {
+            return 0;
+        };
+
+        unsafe {
+            *out_info = bitmap.info;
+        }
+        TEXT_HOST_RESULT_OK
+    })
+    .unwrap_or_default()
+}
+
+#[no_mangle]
+pub extern "C" fn text_host_copy_glyph_sdf_pixels(
+    typeface_handle: u64,
+    glyph_id: u32,
+    size: f32,
+    inset: u32,
+    radius: f32,
+    out_buffer: *mut c_void,
+    out_buffer_len: usize,
+) -> usize {
+    let inset = inset.max(1);
+    let radius = radius.max(1.0);
+
+    with_state(|state| {
+        let Some(typeface) = state.typefaces.get(&typeface_handle) else {
+            return 0;
+        };
+        let Some(bitmap) = create_glyph_sdf(typeface, glyph_id, size, inset, radius) else {
+            return 0;
+        };
+        write_bytes(&bitmap.pixels, out_buffer, out_buffer_len)
     })
     .unwrap_or_default()
 }

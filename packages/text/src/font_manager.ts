@@ -38,6 +38,15 @@ export class TextFontManager {
     return this.#host.getGlyphMask(typeface, glyphID, size);
   }
 
+  getGlyphSdf(
+    typeface: TypefaceHandle,
+    glyphID: number,
+    size: number,
+    options?: Readonly<{ inset?: number; radius?: number }>,
+  ) {
+    return this.#host.getGlyphSdf(typeface, glyphID, size, options);
+  }
+
   close(): void {
     this.#host.close();
   }

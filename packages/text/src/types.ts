@@ -85,6 +85,24 @@ export type DirectMaskSubRun = Readonly<{
   glyphs: readonly DirectMaskGlyph[];
 }>;
 
+export type SdfGlyph = Readonly<{
+  glyphID: number;
+  x: number;
+  y: number;
+  mask: GlyphMask | null;
+  sdf: GlyphMask | null;
+  sdfInset: number;
+  sdfRadius: number;
+}>;
+
+export type SdfSubRun = Readonly<{
+  typeface: TypefaceHandle;
+  size: number;
+  glyphs: readonly SdfGlyph[];
+  sdfInset: number;
+  sdfRadius: number;
+}>;
+
 export type TextHost = Readonly<{
   listFamilies: () => readonly string[];
   matchTypeface: (query: FontQuery) => TypefaceHandle | null;
@@ -92,5 +110,11 @@ export type TextHost = Readonly<{
   shapeText: (input: ShapeTextInput) => ShapedRun;
   getGlyphPath: (typeface: TypefaceHandle, glyphID: number, size: number) => Path2d | null;
   getGlyphMask: (typeface: TypefaceHandle, glyphID: number, size: number) => GlyphMask | null;
+  getGlyphSdf: (
+    typeface: TypefaceHandle,
+    glyphID: number,
+    size: number,
+    options?: Readonly<{ inset?: number; radius?: number }>,
+  ) => GlyphMask | null;
   close: () => void;
 }>;

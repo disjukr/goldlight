@@ -65,6 +65,14 @@ type TextHostLibrary = Deno.DynamicLibrary<{
     parameters: ['u64', 'u32', 'f32', 'buffer', 'usize'];
     result: 'usize';
   };
+  text_host_get_glyph_sdf_info: {
+    parameters: ['u64', 'u32', 'f32', 'u32', 'f32', 'buffer'];
+    result: 'u8';
+  };
+  text_host_copy_glyph_sdf_pixels: {
+    parameters: ['u64', 'u32', 'f32', 'u32', 'f32', 'buffer', 'usize'];
+    result: 'usize';
+  };
   text_host_shaped_run_get_info: {
     parameters: ['u64', 'buffer'];
     result: 'u8';
@@ -294,6 +302,14 @@ export const createTextHost = (options: TextHostOptions = {}): TextHost => {
       parameters: ['u64', 'u32', 'f32', 'buffer', 'usize'],
       result: 'usize',
     },
+    text_host_get_glyph_sdf_info: {
+      parameters: ['u64', 'u32', 'f32', 'u32', 'f32', 'buffer'],
+      result: 'u8',
+    },
+    text_host_copy_glyph_sdf_pixels: {
+      parameters: ['u64', 'u32', 'f32', 'u32', 'f32', 'buffer', 'usize'],
+      result: 'usize',
+    },
     text_host_shaped_run_get_info: {
       parameters: ['u64', 'buffer'],
       result: 'u8',
@@ -450,6 +466,65 @@ export const createTextHost = (options: TextHostOptions = {}): TextHost => {
     };
   };
 
+  const getGlyphSdf = (
+    typeface: TypefaceHandle,
+    glyphID: number,
+    size: number,
+    options: Readonly<{ inset?: number; radius?: number }> = {},
+  ): GlyphMask | null => {
+    const inset = Math.max(1, Math.floor(options.inset ?? 8));
+    const radius = Math.max(1, options.radius ?? inset);
+    const infoBuffer = new Uint8Array(ffiGlyphMaskInfoBufferSize);
+    if (
+      library.symbols.text_host_get_glyph_sdf_info(
+        typeface,
+        glyphID >>> 0,
+        size,
+        inset >>> 0,
+        radius,
+        infoBuffer,
+      ) !== textHostMetricsResultOk
+    ) {
+      return null;
+    }
+
+    const info = decodeGlyphMaskInfo(infoBuffer);
+    if (info.formatCode !== 1) {
+      throw new Error(`Unsupported glyph sdf format code: ${info.formatCode}`);
+    }
+
+    const pixelLength = Math.max(0, info.stride * info.height);
+    const pixels = new Uint8Array(pixelLength);
+    if (pixelLength > 0) {
+      const copiedLength = Number(
+        library.symbols.text_host_copy_glyph_sdf_pixels(
+          typeface,
+          glyphID >>> 0,
+          size,
+          inset >>> 0,
+          radius,
+          pixels,
+          BigInt(pixels.byteLength),
+        ),
+      );
+      if (copiedLength !== pixelLength) {
+        throw new Error(
+          `Text host copied ${copiedLength} glyph sdf bytes, expected ${pixelLength}`,
+        );
+      }
+    }
+
+    return {
+      width: info.width,
+      height: info.height,
+      stride: info.stride,
+      format: 'a8',
+      offsetX: info.offsetX,
+      offsetY: info.offsetY,
+      pixels,
+    };
+  };
+
   const shapeText = (input: ShapeTextInput): ShapedRun => {
     const textBytes = textEncoder.encode(input.text);
     const languageBytes = input.language ? textEncoder.encode(input.language) : new Uint8Array();
@@ -542,6 +617,7 @@ export const createTextHost = (options: TextHostOptions = {}): TextHost => {
     shapeText,
     getGlyphPath,
     getGlyphMask,
+    getGlyphSdf,
     close,
   };
 };

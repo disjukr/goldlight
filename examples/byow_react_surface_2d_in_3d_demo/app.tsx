@@ -14,6 +14,7 @@ import {
   type Path2d,
 } from '@goldlight/geometry';
 import { G3dDirectionalLight, G3dPerspectiveCamera } from '@goldlight/react/reconciler';
+import { createFxaaPostProcessPass } from '@goldlight/renderer';
 
 const DemoScene = () => (
   <g3d-scene
@@ -31,7 +32,17 @@ const DemoScene = () => (
   </g3d-scene>
 );
 
-export default initializeWindow(DemoScene);
+export default initializeWindow(DemoScene, {
+  initialRendererConfig: {
+    msaaSampleCount: 1,
+    postProcessPasses: [createFxaaPostProcessPass({
+      contrastThreshold: 0.047,
+      relativeThreshold: 0.146,
+      subpixelBlending: 0.094,
+      maxSpan: 7,
+    })],
+  },
+});
 
 const panelViewportWidth = 384;
 const panelViewportHeight = 384;
@@ -89,19 +100,18 @@ function createStarPath(
   outerRadius: number,
   points: number,
 ): Path2d {
-  const commands: Array<{ kind: 'moveTo' | 'lineTo'; to: [number, number] } | { kind: 'close' }> =
-    [];
+  const verbs: Path2d['verbs'][number][] = [];
 
   for (let index = 0; index < points * 2; index += 1) {
     const radius = index % 2 === 0 ? outerRadius : innerRadius;
     const angle = (Math.PI * index) / points;
     const x = Math.cos(angle) * radius;
     const y = Math.sin(angle) * radius;
-    commands.push(index === 0 ? { kind: 'moveTo', to: [x, y] } : { kind: 'lineTo', to: [x, y] });
+    verbs.push(index === 0 ? { kind: 'moveTo', to: [x, y] } : { kind: 'lineTo', to: [x, y] });
   }
 
-  commands.push({ kind: 'close' });
-  return createPath2d(...commands);
+  verbs.push({ kind: 'close' });
+  return createPath2d(...verbs);
 }
 
 function createRotationMatrix2d(radians: number) {
@@ -121,11 +131,16 @@ const DemoFrameDriver = () => {
   const setTimeMs = useSetTimeMs();
 
   React.useEffect(() => {
-    const startMs = performance.now();
+    let previousNowMs = performance.now();
+    let accumulatedTimeMs = 0;
     let handle = 0;
 
     const tick = (nowMs: number) => {
-      setTimeMs(nowMs - startMs);
+      const deltaTimeMs = Math.max(0, nowMs - previousNowMs);
+      previousNowMs = nowMs;
+      const clampedDeltaTimeMs = Math.min(deltaTimeMs, 33.333);
+      accumulatedTimeMs += clampedDeltaTimeMs;
+      setTimeMs(accumulatedTimeMs);
       handle = requestAnimationFrame(tick);
     };
 

@@ -57,6 +57,9 @@ import builtInNodePickShader from './shaders/built_in_node_pick.wgsl' with { typ
 import builtInPostProcessBlitShader from './shaders/built_in_post_process_blit.wgsl' with {
   type: 'text',
 };
+import builtInPostProcessFxaaShader from './shaders/built_in_post_process_fxaa.wgsl' with {
+  type: 'text',
+};
 import builtInEnvironmentBackgroundShader from './shaders/built_in_environment_background.wgsl' with {
   type: 'text',
 };
@@ -481,6 +484,13 @@ export type PostProcessPass = Readonly<{
   uniformData?: ArrayBuffer | ArrayBufferView;
 }>;
 
+export type FxaaPostProcessOptions = Readonly<{
+  contrastThreshold?: number;
+  relativeThreshold?: number;
+  subpixelBlending?: number;
+  maxSpan?: number;
+}>;
+
 export type PathtracedSdfPrimitive = Readonly<{
   id: string;
   op: 'sphere' | 'box';
@@ -609,6 +619,7 @@ const builtInSdfRaymarchProgramId = 'built-in:sdf-raymarch';
 const builtInVolumeRaymarchProgramId = 'built-in:volume-raymarch';
 const builtInNodePickProgramId = 'built-in:node-pick';
 const builtInPostProcessBlitProgramId = 'built-in:post-process-blit';
+const builtInPostProcessFxaaProgramId = 'built-in:post-process-fxaa';
 const nodePickTargetFormat = 'rgba8unorm';
 const textureBindingUsage = 0x04;
 const renderAttachmentUsage = 0x10;
@@ -1900,6 +1911,14 @@ const builtInPostProcessBlitProgram: PostProcessProgram = {
   fragmentEntryPoint: 'fsMain',
 };
 
+const builtInPostProcessFxaaProgram: PostProcessProgram = {
+  id: builtInPostProcessFxaaProgramId,
+  label: 'Built-in Post-Process FXAA',
+  wgsl: builtInPostProcessFxaaShader,
+  fragmentEntryPoint: 'fsMain',
+  usesUniformBuffer: true,
+};
+
 const builtInEnvironmentBackgroundBlurProgram: PostProcessProgram = {
   id: 'built-in:environment-background-blur',
   label: 'Built-in Environment Background Blur',
@@ -1915,6 +1934,37 @@ export const createBlitPostProcessPass = (
   id,
   label,
   program: builtInPostProcessBlitProgram,
+});
+
+const defaultFxaaPostProcessOptions: Required<FxaaPostProcessOptions> = {
+  contrastThreshold: 0.0312,
+  relativeThreshold: 0.125,
+  subpixelBlending: 0.125,
+  maxSpan: 8,
+};
+
+const createFxaaUniformData = (options?: FxaaPostProcessOptions): Float32Array => {
+  const resolved = {
+    ...defaultFxaaPostProcessOptions,
+    ...options,
+  };
+  return Float32Array.from([
+    resolved.contrastThreshold,
+    resolved.relativeThreshold,
+    resolved.subpixelBlending,
+    resolved.maxSpan,
+  ]);
+};
+
+export const createFxaaPostProcessPass = (
+  options: FxaaPostProcessOptions = {},
+  id = 'post-process:fxaa',
+  label = 'FXAA',
+): PostProcessPass => ({
+  id,
+  label,
+  program: builtInPostProcessFxaaProgram,
+  uniformData: createFxaaUniformData(options),
 });
 
 const createVertexBufferLayouts = (

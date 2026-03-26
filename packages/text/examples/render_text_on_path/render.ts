@@ -91,7 +91,7 @@ export const renderTextOnPathSnapshot = async (): Promise<
   });
   const hangulRun = textHost.shapeText({
     typeface: hangulMatch.typeface,
-    text: '\uB2E4\uB78C\uC950 \uD5CC \uCC57\uBC14\uD034\uC5D0 \uD0C0\uACE0\uD30C',
+    text: '다람쥐 헌 쳇바퀴에 타고파',
     size: 42,
     language: 'ko',
   });

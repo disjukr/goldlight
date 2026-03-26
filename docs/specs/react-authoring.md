@@ -2,160 +2,107 @@
 
 ## Position
 
-React integration is a separate package. It must not become the source of truth for core scene data.
+React integration is an adapter layer. It must not become the source of truth for core scene data,
+renderer ownership, or GPU residency ownership.
 
-## Contract
+Core scene, evaluation, GPU, and renderer packages remain usable without React.
 
-- JSX authoring trees are built through `@goldlight/react` primitives such as `<scene>` and
-  `<node>`.
-- Authored trees may also declare scene resources such as `<camera>`, `<mesh>`, `<material>`,
-  `<light>`, `<texture>`, `<asset>`, and `<animationClip>`.
-- Node-like authoring elements may expose React-style shorthands such as `<group>` plus transform
-  props such as `position`, `rotation`, and `scale` when they still lower cleanly into the same
-  node-oriented Scene IR structure.
-- Higher-level camera/light composition should prefer React convenience components built from
-  `<camera>`, `<light>`, and `<node>` instead of expanding the primitive JSX surface with more
-  built-in combined object tags; the package now exports `G3dPerspectiveCamera`,
-  `G3dOrthographicCamera`, and `G3dDirectionalLight` as the first shared examples of that pattern.
-- Node-like authoring elements may use transform shorthands such as `position`, `rotation`, and
-  `scale`; these fold into the existing Scene IR transform object during lowering.
-- Authored trees are lowered into complete Scene IR or evaluated scene inputs.
-- Core packages remain usable without React.
+## Two Integration Surfaces
 
-## Scope
+`@goldlight/react` currently exposes two distinct integration surfaces.
 
-The current package owns JSX authoring, lowering, the snapshot-style `createG3dSceneRoot()`
-implementation, and an experimental `@goldlight/react/reconciler` entrypoint that mounts normal
-React components into the package-local scene document before publishing committed `SceneIr`
-snapshots.
+### Snapshot Bridge
 
-## Direction
+The snapshot bridge is centered on `createG3dSceneRoot()`.
 
-The current package now supports normal TSX scene authoring and component composition, plus an
-experimental reconciler host that can drive goldlight-owned scene data from normal React state and
-lifecycle updates. The remaining direction is to evolve that surface toward a fuller
-`react-three-fiber` style adapter with a smoother React-runtime JSX experience.
+- app code authors a TSX tree
+- the bridge lowers that tree into a committed `SceneIr` snapshot
+- consumers can derive update summaries and targeted invalidation plans from each commit
+- the bridge is useful when an integration wants explicit control over when snapshots are committed
+  and how GPU residency is invalidated
 
-That direction matters for a few reasons:
+This is still a valid path, especially in browser integrations and lower-level runtime experiments.
 
-- it aligns the package name with user expectations of an actual React integration
-- it removes the extra mental model of manually building authoring nodes with helper functions for
-  the common path
-- it enables composition patterns that React users expect, such as JSX trees, props, and component
-  boundaries
-- it creates a cleaner path toward live updates driven by React reconciliation instead of one-shot
-  lowering helpers
+### Live Reconciler
 
-Core scene/runtime packages must still remain usable without React. A React-facing renderer should
-be an adapter layer over the existing IR, evaluation, and rendering systems, not a replacement for
-them.
+The live reconciler is centered on `@goldlight/react/reconciler` and `createReactSceneRoot()`.
 
-The current repository still exposes some built-in combined camera/light aliases, but the proposed
-boundary in [`../adr/0005-react-scene-object-aliases.md`](../adr/0005-react-scene-object-aliases.md)
-now prefers moving that convenience into React components while keeping primitive JSX authoring
-aligned with explicit `<camera>`, `<light>`, and `<node>` concepts. That avoids turning each new
-combined scene object into another primitive-surface decision.
+- normal React components mount into a package-local scene document
+- React state and lifecycle drive authored scene changes directly
+- reconciler roots publish committed scene snapshots to the renderer-side helpers
+- nested `g2d-scene` and `g3d-scene` outputs participate in scene-level revision tracking and
+  offscreen texture caching
 
-The next proposed step for issue `#64` is now captured in
-[`../adr/0006-react-scene-root-bridge.md`](../adr/0006-react-scene-root-bridge.md): move from the
-current provisional snapshot bridge toward a scene update boundary that can apply high-frequency
-node changes without whole-scene residency rebuilds, while still keeping residency, rendering,
-offscreen targets, and multi-scene orchestration outside the React package. The repository currently
-has a first implementation waypoint in `createG3dSceneRoot()`, but ADR 0006 does not treat that
-full-snapshot publication shape as the final contract.
+This is the current path used by the desktop React demos.
 
-Issue `#112` has now reached its first experimental reconciler milestone through
-[`@goldlight/react/reconciler`](../../packages/react/reconciler.ts), which mounts a real
-`react-reconciler` host onto the internal scene document described by
-[`../adr/0008-react-reconciler-scene-document.md`](../adr/0008-react-reconciler-scene-document.md).
-Issue `#117` provided the first scene-document implementation slice that this host now targets.
+## Current Authoring Model
 
-## Current Status
+The current live JSX surface is scene-oriented.
 
-- The React package currently lowers declarative authoring structures into SceneIr-friendly data.
-- The package now exposes a JSX runtime so TSX can author scene trees directly.
-- Authoring nodes lower core node metadata such as names, mesh/camera/light bindings, and transforms
-  into Scene IR, including React-style `position`/`rotation`/`scale` shorthands.
-- The JSX surface currently includes group-style node aliases, while common camera/light composition
-  can now be authored through exported convenience components instead of relying on built-in
-  combined intrinsics.
-- Root scene trees can now also declare cameras, meshes, materials, lights, textures, and assets in
-  the same TSX surface before lowering.
-- The preferred long-term direction is to move camera/light convenience toward reusable React
-  components while keeping primitive JSX authoring tied to explicit IR concepts.
-- `G3dPerspectiveCamera`, `G3dOrthographicCamera`, and `G3dDirectionalLight` now compose those
-  explicit primitives into reusable React-facing scene objects without changing the underlying IR
-  semantics.
-- `createG3dSceneRoot()` now provides a data-only commit bridge that publishes full `SceneIr`
-  snapshots plus previous-scene/revision metadata, commit summaries, update plans, and a data-only
-  `updatePayload` to caller-owned subscribers as a current implementation waypoint.
-- `createG3dSceneRoot()` now keeps an internal React-owned scene document so stable resource and
-  node host instances can survive repeated commits even though the published subscriber payload is
-  still a data-only `SceneIr` snapshot.
-- `@goldlight/react/reconciler` now provides an experimental real React renderer that accepts normal
-  React components, applies mount/update/unmount work to the internal scene document, and publishes
-  live `SceneIr` snapshots plus the same derived summary/update-plan/update-payload commit metadata
-  through `createReactSceneRoot()`.
-- that live reconciler JSX surface keeps its primitive contract focused on `<scene>`, `<node>`,
-  `<group>`, `<camera>`, `<light>`, `<mesh>`, `<material>`, `<texture>`, and `<asset>`, while
-  camera/light convenience stays in exported React components instead of additional built-in
-  combined intrinsics
-- `createReactSceneRoot()` now publishes a terminal empty-scene snapshot on unmount before clearing
-  its retained `getScene()` value, so subscriber-driven integrations can explicitly clear any
-  previously rendered scene state.
-- The reconciler entrypoint now also augments the normal React JSX runtime so `<scene>`, `<node>`,
-  `<camera>`, `<light>`, `<mesh>`, `<material>`, `<texture>`, and `<asset>` can be authored in plain
-  TSX on the live path.
-- `@goldlight/react/reconciler` now exports React-runtime `G3dPerspectiveCamera`,
-  `G3dOrthographicCamera`, and `G3dDirectionalLight` convenience components so live reconciler
-  scenes can keep the same high-level camera/light composition style as the snapshot authoring
-  surface.
-- `createReactSceneRoot()` now exposes `flushUpdates()` so deterministic integrations can force
-  scheduled React work through one reconciler root and rethrow that root's pending reconciler errors
-  before advancing renderer-side frame work.
-- The scene document currently supports stable node/resource identity, parent-child reordering, and
-  subtree/resource removal as the first package-local waypoint before a real reconciler host lands.
-- `summarizeSceneRootCommit()` can derive resource-level added/removed/updated/unchanged ID sets
-  from snapshot commits so integrations can make selective invalidation decisions while a finer
-  runtime-facing partial-apply contract is designed.
-- `planSceneRootCommitUpdates()` now derives a data-only update plan from snapshot commits that
-  separates node transform-only changes from parenting, resource-binding, and metadata changes so
-  integrations can avoid full residency resets for high-frequency transform updates without pulling
-  GPU ownership into `@goldlight/react`; descendant nodes whose world transforms move because an
-  ancestor changed are included in the transform buckets even when their local node data is
-  otherwise unchanged.
-- `@goldlight/gpu` now exposes ID-keyed targeted invalidation helpers, so snapshot consumers can
-  drop changed mesh/material/texture residency entries before falling back to a full reset for
-  scene-topology changes.
-- `commitSummaryNeedsResidencyReset()` captures the current safe residency-reset boundary for
-  snapshot consumers: resource changes plus node/topology changes still require a full reset until
-  finer-grained residency pruning exists.
-- Integrations that cache GPU residency against scene/resource IDs must invalidate or rebuild that
-  residency when a new committed snapshot replaces resource contents under stable IDs; commit
-  summaries now let them scope that rebuild without missing node-only changes that can remap which
-  stable resources remain live.
-- Rendering, residency preparation, and execution continue to live in the core/gpu/renderer layers.
-- `createSceneRootForwardRenderer()` and `createSceneRootUberRenderer()` now provide convenience
-  adapters that bundle scene flushing, evaluation, residency upload, and renderer invocation without
-  moving pass orchestration into React application code; scene roots now own any flush behavior
-  directly instead of requiring a separate runtime callback option.
-- The browser example still demonstrates full-scene JSX authoring plus the current snapshot-based
-  `createG3dSceneRoot()` flow, while the BYOW React Bunny demo now exercises the experimental
-  reconciler-driven path.
-- The next unresolved architecture question is how React-authored changes should cross into runtime
-  update planning so frequent node changes can avoid whole-scene resets while multi-scene
-  composition remains outside React ownership.
-- The next unresolved implementation question for a real reconciler host is what internal scene
-  document shape should absorb React mount/update/unmount operations before publishing data-only
-  scene updates outward.
-- Issue `#89` now tracks follow-up implementation work around the next runtime-facing update
-  contract.
-- The React-runtime JSX surface now accepts intrinsic `key` props directly on scene/resource
-  intrinsics, so normal mapped JSX lists no longer need to fall back to lower-level
-  `React.createElement()` calls.
-- [`../../examples/browser_react_authoring/README.md`](../../examples/browser_react_authoring/README.md)
-  shows the reference browser flow: author a tree with `@goldlight/react` TSX, commit it through
-  `createG3dSceneRoot()`, derive an update plan plus summary from that commit, drop targeted
-  residency entries where stable resource IDs changed, avoid resets for transform-only node updates,
-  fall back to a full reset for scene-topology or binding changes, then hand the published scene
-  snapshot to the existing runtime and renderer layers.
+- `g3d-scene` is the authored 3D scene root and optional offscreen output boundary
+- `g2d-scene` is the authored vector-drawing 2D scene root and optional offscreen output boundary
+- nested scenes compose by naming an `outputTextureId` that a parent scene can consume as a normal
+  texture
+- `g3d-scene` supports a separate `viewportWidth` / `viewportHeight` and `textureWidth` /
+  `textureHeight`
+- `g2d-scene` supports the same viewport-versus-texture split
+
+That split matters because viewport size describes scene coordinates and camera framing, while
+texture size describes output resolution.
+
+## Scene Composition
+
+The main React authoring story today is scene composition.
+
+- you can embed a vector-drawn `g2d-scene` inside a `g3d-scene`
+- you can embed a `g3d-scene` inside another `g3d-scene` with a different camera
+- nested scene drawing and final composition happen in one GPU context
+- except for the root scene, nested scene outputs are cached by scene revision
+
+That last point means a parent `g3d-scene` can keep animating while an unchanged nested `g2d-scene`
+or `g3d-scene` keeps reusing its cached output texture.
+
+The currently unsupported direction is `3d in 2d`: `@goldlight/drawing` does not yet support drawing
+images or textures, so a `g2d-scene` cannot yet consume a `g3d-scene` output.
+
+## Desktop Runtime Integration
+
+`initializeWindow(...)` is the current high-level React desktop bootstrap.
+
+It provides context handles for:
+
+- runtime-managed frame state
+- app-managed `timeMs`
+- window metrics
+- renderer config
+
+Rendering cadence is application-controlled.
+
+- if an app drives `useSetTimeMs()` from its own RAF loop, the window behaves like a
+  continuously-updating renderer
+- if it does not, the runtime redraws only when React state changes or when the system requires a
+  new frame, such as resize or restore
+
+This is an intentional part of the contract, not just a demo detail.
+
+## Current Guarantees
+
+- `createReactSceneRoot()` now requires an explicit root viewport size
+- runtime-owned frame fields such as `viewportWidth`, `viewportHeight`, `frameIndex`, and
+  `deltaTimeMs` are kept separate from app-owned `timeMs`
+- renderer-facing `FrameState` is fully defined when rendering happens
+- root and nested scene viewport sizes are explicit instead of inferred from texture size alone
+- nested scene outputs use scene-level revision tracking instead of deep value fingerprint caches
+
+## References
+
+- Snapshot bridge browser example:
+  [`../../examples/browser_react_authoring/README.md`](../../examples/browser_react_authoring/README.md)
+- Live reconciler desktop examples:
+  [`../../examples/byow_react_bunny_demo/README.md`](../../examples/byow_react_bunny_demo/README.md),
+  [`../../examples/byow_react_surface_2d_in_3d_demo/README.md`](../../examples/byow_react_surface_2d_in_3d_demo/README.md),
+  [`../../examples/byow_react_scene3d_in_3d_demo/README.md`](../../examples/byow_react_scene3d_in_3d_demo/README.md)
+- Reconciler scene document ADR:
+  [`../adr/0008-react-reconciler-scene-document.md`](../adr/0008-react-reconciler-scene-document.md)
+- Snapshot bridge ADR:
+  [`../adr/0006-react-scene-root-bridge.md`](../adr/0006-react-scene-root-bridge.md)

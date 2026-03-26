@@ -18,7 +18,7 @@ The repository is organized as a Deno workspace with packages for:
 - `@goldlight/react/reconciler`: experimental React reconciler host over the package-local scene
   document
 - `@goldlight/exporters`: output encoders such as PNG
-- `@goldlight/desktop`: single-process desktop shell bootstrap over a Rust `winit` FFI host
+- `@goldlight/desktop`: desktop shell bootstrap over a Rust `winit` FFI host
 
 The design source of truth lives in [`docs/specs`](./docs/specs) and [`docs/adr`](./docs/adr).
 
@@ -34,6 +34,24 @@ Utility and generation modules are organized around role-oriented boundaries suc
 - Browse [`docs/adr/README.md`](./docs/adr/README.md) for accepted architectural decisions.
 - Browse [`docs/adr/proposals.md`](./docs/adr/proposals.md) for proposed architectural decisions.
 - Browse [`examples/README.md`](./examples/README.md) for runnable example entry points.
+
+## Scene Composition
+
+The current React authoring story is centered on scene composition:
+
+- you can embed a vector-drawn `<g2d-scene>` inside a `<g3d-scene>`
+- you can embed a `<g3d-scene>` inside another `<g3d-scene>` with a different camera
+- nested scene drawing and final composition happen inside one GPU context
+- except for the root scene, nested scene outputs are cached by scene revision, so unchanged nested
+  scenes do not rerender just because their parent scene keeps animating
+
+The currently unsupported direction is `3d in 2d`: `@goldlight/drawing` does not yet support drawing
+images or textures, so a `g2d-scene` cannot yet consume the output of a `g3d-scene`.
+
+Rendering cadence is application-controlled. If an app drives `const setTimeMs = useSetTimeMs();`
+from its own `requestAnimationFrame` loop, it behaves like a game-style continuously updating
+renderer. If it does not, the desktop runtime behaves like a normal application shell and redraws
+only when React state changes or when the system requires a new frame, such as resize or restore.
 
 ## Status
 
@@ -92,18 +110,14 @@ Implemented today:
   PLY mesh, generating runtime normals for built-in lit shading, and publishing live bunny rotation
   updates through the experimental React reconciler host
 - a browser React authoring example plus the current `createG3dSceneRoot()` snapshot path that
-  commits JSX-authored trees into `SceneIr` snapshots before rendering, including JSX-authored scene
-  resources such as meshes, materials, cameras, textures, assets, and animation clips, exported
-  convenience components for common camera/light composition, an internal React-owned scene document
-  that preserves stable resource and node host instances across commits before publishing data-only
-  snapshots, and commit-summary, update-plan, plus `updatePayload` helpers for targeted residency
-  invalidation without forcing resets for transform-only node changes
+  commits JSX-authored trees into `SceneIr` snapshots before rendering, including targeted residency
+  invalidation planning for stable resource IDs
 - an experimental `@goldlight/react/reconciler` entrypoint that mounts normal React components into
   the package-local scene document so hooks, state updates, and layout effects can publish live
-  `SceneIr` snapshots without rebuilding authored trees by hand
-- that live reconciler path now supports typed TSX scene/resource intrinsics plus React-runtime
-  camera/light convenience components built from the primitive `<camera>`, `<light>`, and `<node>`
-  surface, and the BYOW Stanford Bunny demo now uses that normal TSX authoring flow
+  scene updates without rebuilding authored trees by hand
+- live React scene composition through nested `g2d-scene` and `g3d-scene`, including `2d in 3d`,
+  `3d in 3d`, explicit viewport-versus-texture sizing, application-controlled redraw cadence through
+  `useSetTimeMs()`, and scene-level offscreen texture caching for unchanged nested scenes
 - `createSceneRootForwardRenderer()` and `createSceneRootUberRenderer()` convenience adapters that
   bundle scene flushing, evaluation, residency upload, and renderer invocation
 - proposed ADR/discussion tracking for the next React live-update boundary decision around

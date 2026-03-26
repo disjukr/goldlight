@@ -24,10 +24,11 @@ Runnable examples live here. Each example should document how to build, serve, o
 - [`byow_react_bunny_demo/README.md`](./byow_react_bunny_demo/README.md): Windows-native BYOW demo
   mounted through `@goldlight/react/reconciler` and rendering the vendored Stanford Bunny PLY mesh
 - [`byow_react_surface_2d_in_3d_demo/README.md`](./byow_react_surface_2d_in_3d_demo/README.md):
-  Windows-native BYOW demo rendering a React-authored `g2d-scene` into a texture-backed 3D panel
+  Windows-native BYOW demo showing vector-drawn `g2d-scene` composition inside `g3d-scene`, scene
+  texture caching, and app-controlled frame driving through `useSetTimeMs()`
 - [`byow_react_scene3d_in_3d_demo/README.md`](./byow_react_scene3d_in_3d_demo/README.md):
-  Windows-native BYOW demo rendering a nested React-authored `g3d-scene` into a texture-backed 3D
-  panel
+  Windows-native BYOW demo showing nested `g3d-scene` composition with a different child camera
+  rendered into a texture-backed 3D panel
 - [`byow_multiwindow_demo/README.md`](./byow_multiwindow_demo/README.md): Windows-native BYOW demo
   opening two small windows at once to validate multiwindow orchestration
 - [`assets/README.md`](./assets/README.md): in-repo small example assets plus refresh commands
@@ -115,9 +116,10 @@ For React integrations, read the examples in this order:
 - [`byow_react_bunny_demo/README.md`](./byow_react_bunny_demo/README.md) for the experimental
   `@goldlight/react/reconciler` live host
 - [`byow_react_surface_2d_in_3d_demo/README.md`](./byow_react_surface_2d_in_3d_demo/README.md) for
-  the current `g2d-scene` offscreen-to-texture path inside the reconciler host
+  the current `g2d-scene` vector-drawing-in-`g3d-scene` path, scene output caching, and
+  app-controlled frame driving
 - [`byow_react_scene3d_in_3d_demo/README.md`](./byow_react_scene3d_in_3d_demo/README.md) for the
-  current `g3d-scene` offscreen-to-texture path inside the reconciler host
+  current `g3d-scene`-in-`g3d-scene` offscreen-to-texture path with a different child camera
 
 ## Related Docs
 

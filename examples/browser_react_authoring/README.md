@@ -1,20 +1,24 @@
 # Browser React Authoring Example
 
-This example shows the current bridge between `@goldlight/react` and the existing runtime layers. It
-authors a scene with TSX, including the exported `G3dPerspectiveCamera` convenience component plus
-node transform shorthands such as `position`, commits that tree through `createG3dSceneRoot()`, then
-renders the published `SceneIr` snapshot through the browser forward pipeline. Because the bridge
-publishes whole-scene snapshots, the example also uses `planG3dSceneRootResidencyInvalidation()`
-together with `@goldlight/gpu`'s `applyRuntimeResidencyPlan()` helper so cached GPU residency can
-drop changed mesh/material/texture entries by ID, keep transform-only node updates on the lighter
-path, and still fall back to a full reset for node topology or binding changes.
+This example documents the snapshot bridge side of `@goldlight/react`.
+
+It authors a scene with TSX, commits that tree through `createG3dSceneRoot()`, then renders the
+published `SceneIr` snapshot through the browser forward pipeline. This path is useful when an
+integration wants explicit control over when scene snapshots are committed and how targeted GPU
+residency invalidation is applied.
+
+Because the bridge publishes whole-scene snapshots, the example also uses
+`planG3dSceneRootResidencyInvalidation()` together with `@goldlight/gpu`'s
+`applyRuntimeResidencyPlan()` helper so cached GPU residency can drop changed mesh/material/texture
+entries by ID, keep transform-only node updates on the lighter path, and still fall back to a full
+reset for node topology or binding changes.
 
 The example follows ADR 0005's preferred direction: camera/light convenience lives in reusable React
 components while primitive JSX authoring stays closer to explicit Scene IR concepts such as
 `<g3d-camera>`, `<g3d-light>`, and `<g3d-node>`. It intentionally documents the snapshot path, not
 the live reconciler path.
 
-`@goldlight/react` now has two distinct integration surfaces:
+`@goldlight/react` currently has two distinct integration surfaces:
 
 - `createG3dSceneRoot()` for JSX authoring plus snapshot commits, summaries, and targeted update
   planning
@@ -22,7 +26,7 @@ the live reconciler path.
   `SceneIr` snapshots from normal React state and lifecycle updates
 
 If you want the live reconciler path instead of the snapshot bridge, use the BYOW React Bunny demo
-as the current reference example.
+and the nested-scene desktop demos as the current reference examples.
 
 Build the example bundle:
 

@@ -7,6 +7,10 @@ source of truth for package boundaries and feature expectations.
 
 - [`architecture.md`](./architecture.md): top-level runtime layers and package responsibilities
 - [`scene-ir.md`](./scene-ir.md): serializable scene schema and lowering expectations
+- [`react-authoring.md`](./react-authoring.md): current snapshot bridge, live reconciler, scene
+  composition, and desktop React runtime model
+- [`desktop-shell.md`](./desktop-shell.md): desktop host/runtime boundary, shared manager worker,
+  multiwindow model, and redraw behavior
 - [`interop-gltf.md`](./interop-gltf.md): interchange strategy for Blender, glTF, OBJ, and STL
 - [`procedural-generation.md`](./procedural-generation.md): procedural sampling, texture, and volume
   generation helpers
@@ -17,9 +21,6 @@ source of truth for package boundaries and feature expectations.
 - [`cubemap-export.md`](./cubemap-export.md): CPU-side reprojection/export layouts built on captured
   cubemap faces
 - [`interaction.md`](./interaction.md): screen-to-world interaction ray construction
-- [`react-authoring.md`](./react-authoring.md): React package role, snapshot bridge, and
-  experimental reconciler boundaries
-- [`desktop-shell.md`](./desktop-shell.md): desktop host/runtime boundary and host-driven RAF model
 
 ## Runtime Behavior
 

@@ -7,6 +7,8 @@ Use this page as the main navigation hub.
 
 - Understand the system shape: [`specs/architecture.md`](./specs/architecture.md)
 - Understand the scene data model: [`specs/scene-ir.md`](./specs/scene-ir.md)
+- Understand the current scene-composition story, including `g2d-scene in g3d-scene` and
+  `g3d-scene in g3d-scene`: [`../examples/README.md`](../examples/README.md)
 - Understand the renderer light and material support surface:
   [`specs/rendering.md`](./specs/rendering.md)
 - Understand the post-processing scene-color and fullscreen-pass boundary:
@@ -19,8 +21,9 @@ Use this page as the main navigation hub.
 - Understand forward vs. minimal deferred capability boundaries:
   [`specs/renderer-capabilities.md`](./specs/renderer-capabilities.md)
 - Understand importer and interchange direction: [`specs/interop-gltf.md`](./specs/interop-gltf.md)
-- Understand JSX authoring boundaries: [`specs/react-authoring.md`](./specs/react-authoring.md)
-- Understand the desktop shell host/runtime split and host-driven RAF boundary:
+- Understand React snapshot-bridge versus live-reconciler boundaries:
+  [`specs/react-authoring.md`](./specs/react-authoring.md)
+- Understand the desktop shell host/runtime split, multiwindow model, and redraw behavior:
   [`specs/desktop-shell.md`](./specs/desktop-shell.md)
 - Review the tracked native follow-up for modal move/resize frame delivery:
   [`issues/0001-native-modal-loop-frame-ticks.md`](./issues/0001-native-modal-loop-frame-ticks.md)

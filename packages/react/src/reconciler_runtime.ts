@@ -74,9 +74,6 @@ export type Reconciler2dSceneProps = Readonly<{
 
 export type Reconciler2dGroupProps = Readonly<{
   transform?: Matrix2d;
-  translation?: readonly [number, number];
-  rotation?: number;
-  scale?: readonly [number, number];
   children?: ReactNode;
 }>;
 

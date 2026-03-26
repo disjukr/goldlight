@@ -53,7 +53,6 @@ import {
   createCirclePath2d,
   createRect,
   createRectPath2d,
-  type Matrix2d,
 } from '@goldlight/geometry';
 
 type ResourceIntrinsicType =
@@ -455,33 +454,12 @@ const create2dPaint = (
   dashOffset: props.dashOffset,
 });
 
-const createRotationMatrix2d = (radians: number): Matrix2d => {
-  const cos = Math.cos(radians);
-  const sin = Math.sin(radians);
-  return [cos, sin, -sin, cos, 0, 0];
-};
-
 const render2dChild = (recorder: DrawingRecorder, child: HostChild): void => {
   switch (child.type) {
     case 'g2d-group':
       saveDrawingRecorder(recorder);
       if (child.props.transform) {
         concatDrawingRecorderTransform(recorder, child.props.transform);
-      }
-      if (child.props.translation) {
-        concatDrawingRecorderTransform(
-          recorder,
-          [1, 0, 0, 1, child.props.translation[0], child.props.translation[1]],
-        );
-      }
-      if (child.props.rotation !== undefined) {
-        concatDrawingRecorderTransform(recorder, createRotationMatrix2d(child.props.rotation));
-      }
-      if (child.props.scale) {
-        concatDrawingRecorderTransform(
-          recorder,
-          [child.props.scale[0], 0, 0, child.props.scale[1], 0, 0],
-        );
       }
       for (const grandChild of child.children) {
         render2dChild(recorder, grandChild);

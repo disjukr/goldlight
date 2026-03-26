@@ -8,11 +8,13 @@ import type { DesktopWorkerSurfaceInfo } from './worker_protocol.ts';
 
 export type DesktopWindowManagerInitMessage = Readonly<{
   kind: 'init';
+  requestId: number;
   options: DesktopWindowOptions & DesktopHostOptions;
 }>;
 
 export type DesktopWindowManagerRequestRedrawMessage = Readonly<{
   kind: 'request-redraw';
+  requestId: number;
 }>;
 
 export type DesktopWindowManagerShutdownMessage = Readonly<{
@@ -21,6 +23,7 @@ export type DesktopWindowManagerShutdownMessage = Readonly<{
 
 export type DesktopWindowManagerCloseWindowMessage = Readonly<{
   kind: 'close-window';
+  requestId: number;
 }>;
 
 export type DesktopWindowManagerInboundMessage =
@@ -31,6 +34,7 @@ export type DesktopWindowManagerInboundMessage =
 
 export type DesktopWindowManagerReadyMessage = Readonly<{
   kind: 'ready';
+  requestId: number;
   windowId: bigint;
   surfaceInfo: DesktopWorkerSurfaceInfo;
   windowState: DesktopWindowState;
@@ -43,11 +47,14 @@ export type DesktopWindowManagerEventMessage = Readonly<{
 
 export type DesktopWindowManagerExitedMessage = Readonly<{
   kind: 'exited';
+  requestId: number;
+  windowId?: bigint;
   reason?: string;
 }>;
 
 export type DesktopWindowManagerErrorMessage = Readonly<{
   kind: 'error';
+  requestId?: number;
   message: string;
   stack?: string;
 }>;

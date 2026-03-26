@@ -1,6 +1,6 @@
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle};
-use std::cell::{Cell, RefCell};
-use std::collections::VecDeque;
+use std::cell::RefCell;
+use std::collections::{HashMap, VecDeque};
 use std::ffi::c_char;
 use std::time::{Duration, Instant};
 use winit::application::ApplicationHandler;
@@ -77,13 +77,10 @@ struct SharedWindowState {
 struct DesktopHostApplication {
     start_time: Instant,
     events: VecDeque<DesktopHostEvent>,
-    window_state: Option<SharedWindowState>,
-    window: Option<Window>,
-    pending_close_window_id: Option<u64>,
-    #[cfg(target_os = "windows")]
-    background_brush: Option<HBRUSH>,
-    #[cfg(target_os = "windows")]
-    original_wnd_proc: Option<isize>,
+    window_states: HashMap<winit::window::WindowId, SharedWindowState>,
+    windows: HashMap<u64, Window>,
+    window_id_by_winit_id: HashMap<winit::window::WindowId, u64>,
+    pending_close_window_ids: Vec<u64>,
 }
 
 impl DesktopHostApplication {
@@ -134,9 +131,9 @@ struct HostRuntime {
 thread_local! {
     static HOST_RUNTIME: RefCell<Option<HostRuntime>> = const { RefCell::new(None) };
     #[cfg(target_os = "windows")]
-    static WINDOW_BACKGROUND_BRUSH: Cell<HBRUSH> = const { Cell::new(std::ptr::null_mut()) };
+    static WINDOW_BACKGROUND_BRUSHES: RefCell<HashMap<isize, HBRUSH>> = RefCell::new(HashMap::new());
     #[cfg(target_os = "windows")]
-    static ORIGINAL_WND_PROC: Cell<isize> = const { Cell::new(0) };
+    static ORIGINAL_WND_PROCS: RefCell<HashMap<isize, isize>> = RefCell::new(HashMap::new());
 }
 
 #[cfg(target_os = "windows")]
@@ -147,8 +144,12 @@ unsafe extern "system" fn background_window_proc(
     lparam: LPARAM,
 ) -> LRESULT {
     if message == WM_ERASEBKGND {
-        let handled = WINDOW_BACKGROUND_BRUSH.with(|background_brush| {
-            let brush = background_brush.get();
+        let handled = WINDOW_BACKGROUND_BRUSHES.with(|background_brushes| {
+            let brush = background_brushes
+                .borrow()
+                .get(&(hwnd as isize))
+                .copied()
+                .unwrap_or(std::ptr::null_mut());
             if brush.is_null() {
                 return false;
             }
@@ -172,7 +173,13 @@ unsafe extern "system" fn background_window_proc(
         }
     }
 
-    let original_proc = ORIGINAL_WND_PROC.with(|original_wnd_proc| original_wnd_proc.get());
+    let original_proc = ORIGINAL_WND_PROCS.with(|original_wnd_procs| {
+        original_wnd_procs
+            .borrow()
+            .get(&(hwnd as isize))
+            .copied()
+            .unwrap_or(0)
+    });
     if original_proc != 0 {
         return unsafe {
             CallWindowProcW(
@@ -206,6 +213,30 @@ fn with_runtime<T>(callback: impl FnOnce(&HostRuntime) -> T) -> Option<T> {
 
 fn with_runtime_mut<T>(callback: impl FnOnce(&mut HostRuntime) -> T) -> Option<T> {
     HOST_RUNTIME.with(|runtime| runtime.borrow_mut().as_mut().map(callback))
+}
+
+fn destroy_window_in_runtime(runtime: &mut HostRuntime, window_id: u64, retain_close_event: bool) {
+    let Some(window) = runtime.app.windows.remove(&window_id) else {
+        return;
+    };
+    let winit_window_id = window.id();
+    runtime.app.window_states.remove(&winit_window_id);
+    runtime.app.window_id_by_winit_id.remove(&winit_window_id);
+    runtime
+        .app
+        .pending_close_window_ids
+        .retain(|pending_window_id| *pending_window_id != window_id);
+    #[cfg(target_os = "windows")]
+    {
+        destroy_window_background(&window);
+    }
+    runtime.app.events.retain(|event| {
+        if retain_close_event {
+            event.kind == EVENT_CLOSE_REQUESTED || event.window_id != window_id
+        } else {
+            event.window_id != window_id
+        }
+    });
 }
 
 fn resolve_surface_info(
@@ -274,8 +305,14 @@ fn install_window_background(window: &Window, rgba: u32) -> (Option<HBRUSH>, Opt
             background_window_proc as *const () as isize,
         )
     };
-    WINDOW_BACKGROUND_BRUSH.with(|background_brush| background_brush.set(brush));
-    ORIGINAL_WND_PROC.with(|stored_original_proc| stored_original_proc.set(original_proc));
+    WINDOW_BACKGROUND_BRUSHES.with(|background_brushes| {
+        background_brushes.borrow_mut().insert(hwnd as isize, brush);
+    });
+    ORIGINAL_WND_PROCS.with(|stored_original_procs| {
+        stored_original_procs
+            .borrow_mut()
+            .insert(hwnd as isize, original_proc);
+    });
     (Some(brush), if original_proc == 0 { None } else { Some(original_proc) })
 }
 
@@ -285,14 +322,26 @@ fn install_window_background(_window: &Window, _rgba: u32) -> (Option<()>, Optio
 }
 
 #[cfg(target_os = "windows")]
-fn destroy_background_brush(brush: HBRUSH) {
-    if !brush.is_null() {
+fn destroy_window_background(window: &Window) {
+    let raw_window = match window.window_handle().ok().map(|value| value.as_raw()) {
+        Some(raw_handle) => raw_handle,
+        None => return,
+    };
+    let RawWindowHandle::Win32(handle) = raw_window else {
+        return;
+    };
+    let hwnd = handle.hwnd.get() as isize;
+    let brush = WINDOW_BACKGROUND_BRUSHES.with(|background_brushes| {
+        background_brushes.borrow_mut().remove(&hwnd)
+    });
+    if let Some(brush) = brush.filter(|brush| !brush.is_null()) {
         unsafe {
             DeleteObject(brush);
         }
     }
-    WINDOW_BACKGROUND_BRUSH.with(|background_brush| background_brush.set(std::ptr::null_mut()));
-    ORIGINAL_WND_PROC.with(|original_wnd_proc| original_wnd_proc.set(0));
+    ORIGINAL_WND_PROCS.with(|original_wnd_procs| {
+        original_wnd_procs.borrow_mut().remove(&hwnd);
+    });
 }
 
 fn to_desktop_key_code(physical_key: &PhysicalKey) -> i64 {
@@ -353,17 +402,20 @@ impl ApplicationHandler for DesktopHostApplication {
     fn window_event(
         &mut self,
         event_loop: &winit::event_loop::ActiveEventLoop,
-        _window_id: winit::window::WindowId,
+        window_id: winit::window::WindowId,
         event: WindowEvent,
     ) {
-        let Some(mut state) = self.window_state else {
+        let Some(host_window_id) = self.window_id_by_winit_id.get(&window_id).copied() else {
+            return;
+        };
+        let Some(mut state) = self.window_states.get(&window_id).copied() else {
             return;
         };
 
         match event {
             WindowEvent::CloseRequested => {
-                self.pending_close_window_id = Some(state.id);
-                if let Some(window) = self.window.as_ref() {
+                self.pending_close_window_ids.push(state.id);
+                if let Some(window) = self.windows.get(&host_window_id) {
                     window.set_visible(false);
                 }
                 self.push_event(DesktopHostEvent {
@@ -375,7 +427,6 @@ impl ApplicationHandler for DesktopHostApplication {
                     arg2: 0,
                     arg3: 0,
                 });
-                event_loop.exit();
             }
             WindowEvent::RedrawRequested => {
                 self.push_frame_event(state.id);
@@ -386,7 +437,7 @@ impl ApplicationHandler for DesktopHostApplication {
                 state.height = logical_size.height.round().max(1.0) as u32;
                 state.surface_info.width = size.width;
                 state.surface_info.height = size.height;
-                self.window_state = Some(state);
+                self.window_states.insert(window_id, state);
                 self.push_event(DesktopHostEvent {
                     kind: EVENT_RESIZED,
                     reserved: 0,
@@ -400,7 +451,7 @@ impl ApplicationHandler for DesktopHostApplication {
             }
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
                 state.surface_info.scale_factor = scale_factor;
-                self.window_state = Some(state);
+                self.window_states.insert(window_id, state);
                 self.push_event(DesktopHostEvent {
                     kind: EVENT_SCALE_FACTOR_CHANGED,
                     reserved: 0,
@@ -413,12 +464,12 @@ impl ApplicationHandler for DesktopHostApplication {
                 self.push_frame_event(state.id);
             }
             WindowEvent::Moved(_) => {
-                self.window_state = Some(state);
+                self.window_states.insert(window_id, state);
                 self.push_frame_event(state.id);
             }
             WindowEvent::Focused(focused) => {
                 state.focused = focused;
-                self.window_state = Some(state);
+                self.window_states.insert(window_id, state);
                 self.push_event(DesktopHostEvent {
                     kind: EVENT_FOCUS_CHANGED,
                     reserved: 0,
@@ -497,13 +548,10 @@ pub extern "C" fn desktop_host_init() -> u8 {
             app: DesktopHostApplication {
                 start_time: Instant::now(),
                 events: VecDeque::new(),
-                window_state: None,
-                window: None,
-                pending_close_window_id: None,
-                #[cfg(target_os = "windows")]
-                background_brush: None,
-                #[cfg(target_os = "windows")]
-                original_wnd_proc: None,
+                window_states: HashMap::new(),
+                windows: HashMap::new(),
+                window_id_by_winit_id: HashMap::new(),
+                pending_close_window_ids: Vec::new(),
             },
             next_window_id: 1,
         });
@@ -516,10 +564,9 @@ pub extern "C" fn desktop_host_shutdown() {
     HOST_RUNTIME.with(|runtime| {
         #[cfg(target_os = "windows")]
         if let Some(runtime) = runtime.borrow_mut().as_mut() {
-            if let Some(brush) = runtime.app.background_brush.take() {
-                destroy_background_brush(brush);
+            for window in runtime.app.windows.values() {
+                destroy_window_background(window);
             }
-            runtime.app.original_wnd_proc = None;
         }
         runtime.borrow_mut().take();
     });
@@ -538,10 +585,6 @@ pub extern "C" fn desktop_host_create_window(
     };
 
     with_runtime_mut(|runtime| {
-        if runtime.app.window.is_some() {
-            return 0;
-        }
-
         let window_id = runtime.next_window_id;
         runtime.next_window_id += 1;
         let attributes: WindowAttributes = Window::default_attributes()
@@ -557,10 +600,7 @@ pub extern "C" fn desktop_host_create_window(
 
         #[cfg(target_os = "windows")]
         if background_color_rgba != 0 {
-            let (brush, original_wnd_proc) =
-                install_window_background(&window, background_color_rgba);
-            runtime.app.background_brush = brush;
-            runtime.app.original_wnd_proc = original_wnd_proc;
+            let _ = install_window_background(&window, background_color_rgba);
         }
 
         let Some(shared_window_state) = resolve_surface_info(&window, window_id, width, height)
@@ -568,8 +608,13 @@ pub extern "C" fn desktop_host_create_window(
             return 0;
         };
 
-        runtime.app.window_state = Some(shared_window_state);
-        runtime.app.window = Some(window);
+        let winit_window_id = window.id();
+        runtime
+            .app
+            .window_id_by_winit_id
+            .insert(winit_window_id, window_id);
+        runtime.app.window_states.insert(winit_window_id, shared_window_state);
+        runtime.app.windows.insert(window_id, window);
         window_id
     })
     .unwrap_or(0)
@@ -578,11 +623,7 @@ pub extern "C" fn desktop_host_create_window(
 #[no_mangle]
 pub extern "C" fn desktop_host_show_window(window_id: u64) -> u8 {
     with_runtime_mut(|runtime| {
-        if runtime.app.window_state.map(|entry| entry.id) != Some(window_id) {
-            return 0;
-        }
-
-        if let Some(window) = runtime.app.window.as_ref() {
+        if let Some(window) = runtime.app.windows.get(&window_id) {
             window.set_visible(true);
             window.request_redraw();
             HOST_RESULT_OK
@@ -596,29 +637,7 @@ pub extern "C" fn desktop_host_show_window(window_id: u64) -> u8 {
 #[no_mangle]
 pub extern "C" fn desktop_host_destroy_window(window_id: u64) -> u8 {
     with_runtime_mut(|runtime| {
-        let current_id = runtime.app.window_state.map(|entry| entry.id);
-        if current_id != Some(window_id) {
-            return if current_id.is_none() {
-                HOST_RESULT_OK
-            } else {
-                0
-            };
-        }
-
-        runtime.app.window = None;
-        runtime.app.window_state = None;
-        runtime.app.pending_close_window_id = None;
-        #[cfg(target_os = "windows")]
-        {
-            if let Some(brush) = runtime.app.background_brush.take() {
-                destroy_background_brush(brush);
-            }
-            runtime.app.original_wnd_proc = None;
-        }
-        runtime
-            .app
-            .events
-            .retain(|event| event.window_id != window_id);
+        destroy_window_in_runtime(runtime, window_id, false);
         HOST_RESULT_OK
     })
     .unwrap_or_default()
@@ -627,11 +646,7 @@ pub extern "C" fn desktop_host_destroy_window(window_id: u64) -> u8 {
 #[no_mangle]
 pub extern "C" fn desktop_host_request_redraw(window_id: u64) -> u8 {
     with_runtime_mut(|runtime| {
-        if runtime.app.window_state.map(|entry| entry.id) != Some(window_id) {
-            return 0;
-        }
-
-        if let Some(window) = runtime.app.window.as_ref() {
+        if let Some(window) = runtime.app.windows.get(&window_id) {
             window.request_redraw();
             HOST_RESULT_OK
         } else {
@@ -648,21 +663,16 @@ pub extern "C" fn desktop_host_poll_events(timeout_ms: u32) -> u32 {
         let status = runtime
             .event_loop
             .pump_app_events(timeout, &mut runtime.app);
-        if matches!(status, PumpStatus::Exit(_)) || runtime.app.pending_close_window_id.is_some() {
-            let window_id = runtime.app.pending_close_window_id.take();
-            runtime.app.window = None;
-            runtime.app.window_state = None;
-            #[cfg(target_os = "windows")]
-            {
-                if let Some(brush) = runtime.app.background_brush.take() {
-                    destroy_background_brush(brush);
-                }
-                runtime.app.original_wnd_proc = None;
+        if matches!(status, PumpStatus::Exit(_)) {
+            let window_ids: Vec<u64> = runtime.app.windows.keys().copied().collect();
+            for window_id in window_ids {
+                destroy_window_in_runtime(runtime, window_id, false);
             }
-            if let Some(window_id) = window_id {
-                runtime.app.events.retain(|event| {
-                    event.kind == EVENT_CLOSE_REQUESTED || event.window_id != window_id
-                });
+        }
+        if !runtime.app.pending_close_window_ids.is_empty() {
+            let pending_window_ids = std::mem::take(&mut runtime.app.pending_close_window_ids);
+            for window_id in pending_window_ids {
+                destroy_window_in_runtime(runtime, window_id, true);
             }
         }
         runtime.app.events.len() as u32
@@ -698,12 +708,15 @@ pub extern "C" fn desktop_host_get_window_surface_info(
     }
 
     with_runtime(|runtime| {
-        let Some(window_state) = runtime.app.window_state else {
+        let Some(window_state) = runtime
+            .app
+            .window_states
+            .values()
+            .find(|window_state| window_state.id == window_id)
+            .copied()
+        else {
             return 0;
         };
-        if window_state.id != window_id {
-            return 0;
-        }
         unsafe {
             *out_info = window_state.surface_info;
         }
@@ -722,12 +735,15 @@ pub extern "C" fn desktop_host_get_window_state(
     }
 
     with_runtime(|runtime| {
-        let Some(window_state) = runtime.app.window_state else {
+        let Some(window_state) = runtime
+            .app
+            .window_states
+            .values()
+            .find(|window_state| window_state.id == window_id)
+            .copied()
+        else {
             return 0;
         };
-        if window_state.id != window_id {
-            return 0;
-        }
 
         unsafe {
             *out_state = DesktopWindowState {

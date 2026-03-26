@@ -23,27 +23,25 @@ type ManagerState = {
   initialized: boolean;
   running: boolean;
   managerShutdownRequested: boolean;
-  windowId?: bigint;
-  windowDestroyed: boolean;
   host?: ReturnType<typeof createDesktopHost>;
-  exitReason?: string;
+  hostLibraryPath?: string;
+  windows: Map<number, { windowId: bigint; destroyed: boolean }>;
 };
 
 const state: ManagerState = {
   initialized: false,
   running: false,
   managerShutdownRequested: false,
-  windowDestroyed: false,
+  windows: new Map(),
 };
 
 const resetManagerState = (): void => {
   state.initialized = false;
   state.running = false;
   state.managerShutdownRequested = false;
-  state.windowId = undefined;
-  state.windowDestroyed = false;
   state.host = undefined;
-  state.exitReason = undefined;
+  state.hostLibraryPath = undefined;
+  state.windows.clear();
 };
 
 const postToMain = (message: DesktopWindowManagerOutboundMessage): void => {
@@ -133,85 +131,98 @@ const coalesceDesktopWindowEvents = (
   return coalescedEvents;
 };
 
-const destroyHostWindow = (): void => {
-  if (!state.host || state.windowId === undefined || state.windowDestroyed) {
+const destroyHostWindow = (requestId: number): void => {
+  const windowState = state.windows.get(requestId);
+  if (!state.host || !windowState || windowState.destroyed) {
     return;
   }
 
   try {
-    state.host.destroyWindow(state.windowId);
+    state.host.destroyWindow(windowState.windowId);
   } catch {
     // Window may already be gone during close flow.
   }
-  state.windowDestroyed = true;
+  windowState.destroyed = true;
 };
 
 const cleanupManager = (): void => {
   state.running = false;
-  destroyHostWindow();
+  for (const requestId of state.windows.keys()) {
+    destroyHostWindow(requestId);
+  }
   state.host?.close();
   state.host = undefined;
-  state.windowId = undefined;
 };
 
 const failManager = (error: unknown): void => {
   const normalized = error instanceof Error ? error : new Error(String(error));
-  state.exitReason = `manager-error: ${normalized.message}`;
   postToMain({
     kind: 'error',
     message: normalized.message,
     stack: normalized.stack,
   });
   cleanupManager();
-  postToMain({ kind: 'exited', reason: state.exitReason });
+  for (const [requestId, windowState] of state.windows.entries()) {
+    postToMain({
+      kind: 'exited',
+      requestId,
+      windowId: windowState.windowId,
+      reason: `manager-error: ${normalized.message}`,
+    });
+  }
   resetManagerState();
 };
 
-const runManager = async (
+const ensureHost = (
   message: Extract<DesktopWindowManagerInboundMessage, { kind: 'init' }>,
-): Promise<void> => {
-  const host = createDesktopHost(message.options);
-  const windowId = host.createWindow(message.options);
-  const surfaceInfo = host.getWindowSurfaceInfo(windowId);
-  const windowState = host.getWindowState(windowId);
-  host.showWindow(windowId);
+): ReturnType<typeof createDesktopHost> => {
+  if (!state.host) {
+    state.host = createDesktopHost(message.options);
+    state.hostLibraryPath = message.options.libraryPath;
+  }
+  return state.host;
+};
 
-  state.initialized = true;
-  state.running = true;
-  state.host = host;
-  state.windowId = windowId;
-  state.windowDestroyed = false;
-
-  postToMain({
-    kind: 'ready',
-    windowId,
-    surfaceInfo: toWorkerSurfaceInfo(surfaceInfo),
-    windowState,
-  });
-
+const runManager = async (): Promise<void> => {
   while (state.running) {
+    const host = state.host;
+    if (!host) {
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      continue;
+    }
     const events = coalesceDesktopWindowEvents(host.pollEvents(4));
     for (const hostEvent of events) {
-      if (hostEvent.windowId !== windowId) {
-        continue;
-      }
-
       postToMain({
         kind: 'event',
         event: hostEvent,
       });
 
       if (hostEvent.kind === 'close-requested') {
-        state.exitReason = 'host-close-requested';
-        state.running = false;
+        const requestEntry = [...state.windows.entries()].find(([, windowState]) =>
+          windowState.windowId === hostEvent.windowId
+        );
+        if (requestEntry) {
+          const [requestId] = requestEntry;
+          destroyHostWindow(requestId);
+          postToMain({
+            kind: 'exited',
+            requestId,
+            windowId: hostEvent.windowId,
+            reason: 'host-close-requested',
+          });
+          state.windows.delete(requestId);
+        }
       }
+    }
+
+    if (state.managerShutdownRequested && state.windows.size === 0) {
+      state.running = false;
     }
 
     await new Promise((resolve) => setTimeout(resolve, 1));
   }
 
   cleanupManager();
-  postToMain({ kind: 'exited', reason: state.exitReason ?? 'manager-loop-complete' });
   resetManagerState();
 };
 
@@ -220,40 +231,73 @@ const runManager = async (
 ) => {
   const message = event.data;
   if (message.kind === 'init') {
-    if (state.initialized) {
-      return;
-    }
+    const host = ensureHost(message);
+    const windowId = host.createWindow(message.options);
+    const surfaceInfo = host.getWindowSurfaceInfo(windowId);
+    const windowState = host.getWindowState(windowId);
+    host.showWindow(windowId);
 
-    void runManager(message).catch((error) => {
-      failManager(error);
+    state.initialized = true;
+    if (!state.running) {
+      state.running = true;
+      void runManager().catch((error) => {
+        failManager(error);
+      });
+    }
+    state.windows.set(message.requestId, { windowId, destroyed: false });
+    postToMain({
+      kind: 'ready',
+      requestId: message.requestId,
+      windowId,
+      surfaceInfo: toWorkerSurfaceInfo(surfaceInfo),
+      windowState,
     });
     return;
   }
 
   if (message.kind === 'shutdown') {
     state.managerShutdownRequested = true;
-    state.exitReason = state.exitReason ?? 'manager-shutdown-requested';
-    state.running = false;
-    return;
-  }
-
-  if (message.kind === 'request-redraw') {
-    if (!state.host || state.windowId === undefined || state.windowDestroyed || !state.running) {
-      return;
-    }
-    try {
-      state.host.requestRedraw(state.windowId);
-    } catch {
-      state.windowDestroyed = true;
-      state.exitReason = state.exitReason ?? 'host-close-requested';
+    if (state.windows.size === 0) {
       state.running = false;
     }
     return;
   }
 
+  if (message.kind === 'request-redraw') {
+    const windowState = state.windows.get(message.requestId);
+    if (!state.host || !windowState || windowState.destroyed || !state.running) {
+      return;
+    }
+    try {
+      state.host.requestRedraw(windowState.windowId);
+    } catch {
+      windowState.destroyed = true;
+      postToMain({
+        kind: 'exited',
+        requestId: message.requestId,
+        windowId: windowState.windowId,
+        reason: 'host-close-requested',
+      });
+      state.windows.delete(message.requestId);
+    }
+    return;
+  }
+
   if (message.kind === 'close-window') {
-    state.exitReason = state.exitReason ?? 'host-close-requested';
-    state.running = false;
-    destroyHostWindow();
+    const windowState = state.windows.get(message.requestId);
+    if (!windowState) {
+      return;
+    }
+    destroyHostWindow(message.requestId);
+    postToMain({
+      kind: 'exited',
+      requestId: message.requestId,
+      windowId: windowState.windowId,
+      reason: 'host-close-requested',
+    });
+    state.windows.delete(message.requestId);
+    if (state.managerShutdownRequested && state.windows.size === 0) {
+      state.running = false;
+    }
   }
 };

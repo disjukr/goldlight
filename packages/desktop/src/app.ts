@@ -69,6 +69,8 @@ type CoalescedWindowEvents = Readonly<{
 }>;
 
 type DesktopManagerWorkerSession = {
+  requestId: number;
+  windowId?: bigint;
   ready: boolean;
   exited: boolean;
   closing: boolean;
@@ -96,8 +98,10 @@ type DesktopManagerWorkerSession = {
 
 type DesktopManagerWorkerController = {
   worker: Worker;
-  session?: DesktopManagerWorkerSession;
+  sessionsByRequestId: Map<number, DesktopManagerWorkerSession>;
+  requestIdByWindowId: Map<bigint, number>;
   activeRunCount: number;
+  nextRequestId: number;
   poisoned: boolean;
 };
 
@@ -261,6 +265,7 @@ const queueMessageEvent = (
 
 const createGoldlightWindowSession = (
   postToManager: (message: DesktopWindowManagerInboundMessage) => void,
+  requestId: number,
   options: GoldlightWindowOptions,
 ): DesktopManagerWorkerSession => {
   let readyResolve: (() => void) | undefined;
@@ -283,6 +288,7 @@ const createGoldlightWindowSession = (
   let closeEventDispatched = false;
 
   const session: DesktopManagerWorkerSession = {
+    requestId,
     ready: false,
     exited: false,
     closing: false,
@@ -316,7 +322,7 @@ const createGoldlightWindowSession = (
           return;
         }
         session.closing = true;
-        postToManager({ kind: 'close-window' });
+        postToManager({ kind: 'close-window', requestId });
       },
       postMessage: (message) => {
         if (session.exited) {
@@ -386,11 +392,11 @@ const createGoldlightWindowSession = (
         finalizeReady();
         return;
       case 'request-redraw':
-        postToManager({ kind: 'request-redraw' });
+        postToManager({ kind: 'request-redraw', requestId });
         return;
       case 'close-window':
         session.closing = true;
-        postToManager({ kind: 'close-window' });
+        postToManager({ kind: 'close-window', requestId });
         return;
       case 'shutdown-complete':
         session.moduleShutdownComplete = true;
@@ -413,6 +419,7 @@ const createGoldlightWindowSession = (
   session.handleManagerMessage = (message) => {
     switch (message.kind) {
       case 'ready': {
+        session.windowId = message.windowId;
         session.managerReady = true;
         const moduleWorker = new Worker(new URL('./worker_module.ts', import.meta.url).href, {
           type: 'module',
@@ -493,12 +500,13 @@ const failDesktopManagerWorkerSession = (
   controller: DesktopManagerWorkerController,
   error: Error,
 ): void => {
-  const session = controller.session;
-  if (!session) {
+  if (controller.sessionsByRequestId.size === 0) {
     controller.poisoned = true;
     return;
   }
-  session.fail(error);
+  for (const session of controller.sessionsByRequestId.values()) {
+    session.fail(error);
+  }
 };
 
 const createDesktopManagerWorkerController = (): DesktopManagerWorkerController => {
@@ -507,16 +515,33 @@ const createDesktopManagerWorkerController = (): DesktopManagerWorkerController 
   });
   const controller: DesktopManagerWorkerController = {
     worker,
+    sessionsByRequestId: new Map(),
+    requestIdByWindowId: new Map(),
     activeRunCount: 0,
+    nextRequestId: 1,
     poisoned: false,
   };
 
   worker.onmessage = (event: MessageEvent<DesktopWindowManagerOutboundMessage>) => {
-    const session = controller.session;
+    const message = event.data;
+    const session = 'requestId' in message && typeof message.requestId === 'number'
+      ? controller.sessionsByRequestId.get(message.requestId)
+      : message.kind === 'event'
+      ? controller.requestIdByWindowId.get(message.event.windowId) !== undefined
+        ? controller.sessionsByRequestId.get(
+          controller.requestIdByWindowId.get(message.event.windowId)!,
+        )
+        : undefined
+      : undefined;
     if (!session) {
       return;
     }
-    session.handleManagerMessage(event.data);
+    if (message.kind === 'ready') {
+      controller.requestIdByWindowId.set(message.windowId, message.requestId);
+    } else if (message.kind === 'exited' && message.windowId !== undefined) {
+      controller.requestIdByWindowId.delete(message.windowId);
+    }
+    session.handleManagerMessage(message);
   };
   worker.onerror = (event: ErrorEvent) => {
     const error = event.error instanceof Error
@@ -536,9 +561,13 @@ const createDesktopManagerWorkerController = (): DesktopManagerWorkerController 
   return controller;
 };
 
-const disposeDesktopManagerWorkerController = (): void => {
-  desktopManagerWorkerController?.worker.terminate();
-  desktopManagerWorkerController = undefined;
+const disposeDesktopManagerWorkerController = (
+  controller: DesktopManagerWorkerController,
+): void => {
+  controller.worker.terminate();
+  if (desktopManagerWorkerController === controller) {
+    desktopManagerWorkerController = undefined;
+  }
 };
 
 const isExpectedPreReadyManagerExitReason = (reason?: string): boolean =>
@@ -547,15 +576,6 @@ const isExpectedPreReadyManagerExitReason = (reason?: string): boolean =>
 const isExpectedPreReadyCloseError = (error: unknown): boolean =>
   error instanceof Error &&
   error.message.startsWith('Window closed before initialization completed');
-
-const ensureDesktopManagerWorkerController = (): DesktopManagerWorkerController => {
-  if (!desktopManagerWorkerController || desktopManagerWorkerController.poisoned) {
-    disposeDesktopManagerWorkerController();
-    desktopManagerWorkerController = createDesktopManagerWorkerController();
-  }
-
-  return desktopManagerWorkerController;
-};
 
 const assertDesktopInitialized = (): void => {
   if (!desktopInitialized) {
@@ -569,12 +589,16 @@ export const initializeMain = async (): Promise<void> => {
   if (!initializePromise) {
     initializePromise = (async () => {
       await ensureDesktopWebGpuContext();
-      ensureDesktopManagerWorkerController();
+      if (!desktopManagerWorkerController) {
+        desktopManagerWorkerController = createDesktopManagerWorkerController();
+      }
       desktopInitialized = true;
     })().catch((error) => {
       initializePromise = undefined;
       desktopInitialized = false;
-      disposeDesktopManagerWorkerController();
+      if (desktopManagerWorkerController) {
+        disposeDesktopManagerWorkerController(desktopManagerWorkerController);
+      }
       throw error;
     });
   }
@@ -587,10 +611,16 @@ export const disposeMain = async (): Promise<void> => {
     return;
   }
 
-  const controller = desktopManagerWorkerController;
-  const session = controller?.session;
-  if (session && !session.exited) {
+  const sessions = desktopManagerWorkerController
+    ? [...desktopManagerWorkerController.sessionsByRequestId.values()]
+    : [];
+  for (const session of sessions) {
+    if (session.exited) {
+      continue;
+    }
     session.window.close();
+  }
+  for (const session of sessions) {
     try {
       await session.window.whenClosed();
     } catch {
@@ -598,7 +628,9 @@ export const disposeMain = async (): Promise<void> => {
     }
   }
 
-  disposeDesktopManagerWorkerController();
+  if (desktopManagerWorkerController) {
+    disposeDesktopManagerWorkerController(desktopManagerWorkerController);
+  }
   desktopInitialized = false;
   initializePromise = undefined;
 };
@@ -649,19 +681,20 @@ export const createWindow = (
   options: GoldlightWindowOptions,
 ): GoldlightWindow => {
   assertDesktopInitialized();
-  const controller = ensureDesktopManagerWorkerController();
-  if (controller.activeRunCount > 0 || controller.session) {
+  if (!desktopManagerWorkerController) {
     throw new Error(
-      'createWindow already has an active desktop module session; the desktop window manager worker is process-global',
+      '@goldlight/desktop main thread manager worker is unavailable; call await initializeMain() before creating windows',
     );
   }
+  const controller = desktopManagerWorkerController;
 
   const postToManager = (message: DesktopWindowManagerInboundMessage): void => {
     controller.worker.postMessage(message);
   };
-  const session = createGoldlightWindowSession(postToManager, options);
+  const requestId = controller.nextRequestId++;
+  const session = createGoldlightWindowSession(postToManager, requestId, options);
   controller.activeRunCount += 1;
-  controller.session = session;
+  controller.sessionsByRequestId.set(requestId, session);
 
   session.closedPromise.finally(async () => {
     if (session.moduleWorker && !session.moduleShutdownComplete) {
@@ -680,22 +713,19 @@ export const createWindow = (
     }
     session.moduleWorker?.terminate();
     session.moduleWorker = undefined;
-    if (!session.exited && !controller.poisoned) {
-      postToManager({ kind: 'shutdown' });
-      const shutdownDeadline = Date.now() + 250;
-      while (!session.exited && Date.now() < shutdownDeadline) {
-        await new Promise((resolve) => setTimeout(resolve, 5));
-      }
+    if (session.windowId !== undefined) {
+      controller.requestIdByWindowId.delete(session.windowId);
     }
-    controller.session = undefined;
+    controller.sessionsByRequestId.delete(requestId);
     controller.activeRunCount = Math.max(0, controller.activeRunCount - 1);
     if (controller.poisoned) {
-      disposeDesktopManagerWorkerController();
+      disposeDesktopManagerWorkerController(controller);
     }
   });
 
   postToManager({
     kind: 'init',
+    requestId,
     options,
   });
 

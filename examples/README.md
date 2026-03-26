@@ -28,6 +28,8 @@ Runnable examples live here. Each example should document how to build, serve, o
 - [`byow_react_scene3d_in_3d_demo/README.md`](./byow_react_scene3d_in_3d_demo/README.md):
   Windows-native BYOW demo rendering a nested React-authored `g3d-scene` into a texture-backed 3D
   panel
+- [`byow_multiwindow_demo/README.md`](./byow_multiwindow_demo/README.md): Windows-native BYOW demo
+  opening two small windows at once to validate multiwindow orchestration
 - [`assets/README.md`](./assets/README.md): in-repo small example assets plus refresh commands
   including the Stanford Bunny PLY source mesh
 - [`browser_forward/README.md`](./browser_forward/README.md): browser-based forward rendering flow
@@ -70,6 +72,10 @@ Runnable examples live here. Each example should document how to build, serve, o
   `deno run -A --unstable-ffi --unstable-webgpu --unstable-raw-imports examples/byow_react_scene3d_in_3d_demo/main.ts`
 - Type-check the BYOW React 3D scene-in-scene demo:
   `deno check --unstable-raw-imports examples/byow_react_scene3d_in_3d_demo/main.ts examples/byow_react_scene3d_in_3d_demo/app.tsx`
+- Run the BYOW multiwindow demo:
+  `deno run -A --unstable-ffi --unstable-webgpu --unstable-raw-imports examples/byow_multiwindow_demo/main.ts`
+- Type-check the BYOW multiwindow demo:
+  `deno check --unstable-raw-imports examples/byow_multiwindow_demo/main.ts`
 - Build the desktop host library: `deno task desktop:host:build`
 - Refresh the in-repo example assets: `deno task asset:examples`
 - Refresh the Stanford Bunny source and extracted mesh: `deno task asset:stanford-bunny`

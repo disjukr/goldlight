@@ -34,7 +34,7 @@ const renderFixture = async (
     width: 16,
     height: 16,
     format: 'rgba8unorm',
-    sampleCount: 1,
+    msaaSampleCount: 1,
   } as const;
   const gpuContext = await requestGpuContext({ target });
 
@@ -73,7 +73,13 @@ const renderRecoveryFixture = async (
 
   try {
     initialContext = await requestGpuContext({
-      target: { kind: 'offscreen', width: 16, height: 16, format: 'rgba8unorm', sampleCount: 1 },
+      target: {
+        kind: 'offscreen',
+        width: 16,
+        height: 16,
+        format: 'rgba8unorm',
+        msaaSampleCount: 1,
+      },
     });
     rebuildRuntimeResidency(initialContext, residency, scene, evaluatedScene, assets);
     await renderForwardSnapshot(
@@ -86,7 +92,13 @@ const renderRecoveryFixture = async (
     initialContext = undefined;
 
     recoveredContext = await requestGpuContext({
-      target: { kind: 'offscreen', width: 16, height: 16, format: 'rgba8unorm', sampleCount: 1 },
+      target: {
+        kind: 'offscreen',
+        width: 16,
+        height: 16,
+        format: 'rgba8unorm',
+        msaaSampleCount: 1,
+      },
     });
     rebuildRuntimeResidency(recoveredContext, residency, scene, evaluatedScene, assets);
     const snapshot = await renderForwardSnapshot(

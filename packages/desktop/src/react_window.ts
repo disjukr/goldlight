@@ -8,15 +8,13 @@ import {
   createRuntimeResidency,
   createSurfaceBinding,
   type RenderContextBinding,
-  resolveSupportedMsaaSampleCount,
   requestGpuContext,
   resizeSurfaceBindingTarget,
+  resolveSupportedMsaaSampleCount,
 } from '@goldlight/gpu';
 import {
   createReactSceneRoot,
   createReactSceneRootForwardRenderer,
-  type React3dSceneRoot,
-  type SceneRootForwardRenderer,
 } from '@goldlight/react/reconciler';
 import type { FrameState, PostProcessPass } from '@goldlight/renderer';
 
@@ -364,12 +362,6 @@ async (
       msaaSampleCount: config.msaaSampleCount,
     });
   let currentForwardRenderer = createForwardRenderer(binding, getEffectiveRendererConfig());
-  const forwardRenderer: SceneRootForwardRenderer = {
-    getFrameDriver: () => currentForwardRenderer.getFrameDriver(),
-    renderFrame: (frameState, frameOptions) =>
-      currentForwardRenderer.renderFrame(frameState, frameOptions),
-    dispose: () => currentForwardRenderer.dispose(),
-  };
 
   let frameHandle = 0;
   let disposed = false;

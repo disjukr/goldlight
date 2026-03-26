@@ -646,7 +646,8 @@ export const createDawnCaps = (
   const requiredBytesPerRowAlignment = 256;
   const maxSampleCount = chooseMaxSampleCount(backend, limits);
   const defaultSampleCount: 1 | 4 =
-    backend.target.kind === 'offscreen' && backend.target.msaaSampleCount === 4 && maxSampleCount === 4
+    backend.target.kind === 'offscreen' && backend.target.msaaSampleCount === 4 &&
+      maxSampleCount === 4
       ? 4
       : 1;
   const avoidMSAA = maxSampleCount < 4;

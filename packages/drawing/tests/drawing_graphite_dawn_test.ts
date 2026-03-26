@@ -219,7 +219,7 @@ const createMockGpuContext = () => {
         width: 256,
         height: 256,
         format: 'rgba8unorm',
-        sampleCount: 1,
+        msaaSampleCount: 1,
       } as const,
     },
     ticks,
@@ -4005,7 +4005,7 @@ Deno.test('dawn pipelines honor target sample count for MSAA', () => {
     ...mock.context,
     target: {
       ...mock.context.target,
-      sampleCount: 4,
+      msaaSampleCount: 4,
     } as const,
   };
   const sharedContext = createDawnSharedContext(createDawnBackendContext(context));

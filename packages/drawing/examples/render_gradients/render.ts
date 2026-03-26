@@ -119,7 +119,7 @@ export const renderGradientsSnapshot = async (): Promise<
       width: outputWidth * supersampleScale,
       height: outputHeight * supersampleScale,
       format: 'rgba8unorm',
-      sampleCount: 4,
+      msaaSampleCount: 4,
     },
   });
 

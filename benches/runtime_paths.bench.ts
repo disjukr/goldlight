@@ -282,7 +282,13 @@ Deno.bench('forward frame encoding', () => {
   const context = createRenderBenchContext();
   const binding = createOffscreenBinding({
     device: context.device,
-    target: { kind: 'offscreen', width: 64, height: 64, format: 'rgba8unorm', sampleCount: 1 },
+    target: {
+      kind: 'offscreen',
+      width: 64,
+      height: 64,
+      format: 'rgba8unorm',
+      msaaSampleCount: 1,
+    },
   });
 
   renderForwardFrame(

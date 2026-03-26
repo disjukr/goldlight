@@ -8,9 +8,9 @@ import {
   type OffscreenBinding,
   type OffscreenTarget,
   type RenderContextBinding,
+  resolveSupportedMsaaSampleCount,
   type RuntimeResidency,
   type TextureResidency,
-  resolveSupportedMsaaSampleCount,
 } from '@goldlight/gpu';
 import { evaluateScene } from '@goldlight/core';
 import {

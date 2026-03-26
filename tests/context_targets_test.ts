@@ -112,7 +112,13 @@ Deno.test('createOffscreenBinding allocates color and depth textures and views',
   const { device, textures } = createMockDevice();
   const offscreen = createOffscreenBinding({
     device: device as GPUDevice,
-    target: { kind: 'offscreen', width: 320, height: 240, format: 'rgba8unorm', sampleCount: 1 },
+    target: {
+      kind: 'offscreen',
+      width: 320,
+      height: 240,
+      format: 'rgba8unorm',
+      msaaSampleCount: 1,
+    },
   });
 
   assertEquals(offscreen.kind, 'offscreen');
@@ -127,7 +133,13 @@ Deno.test('createOffscreenBinding allocates resolve texture for multisampled tar
   const { device, textures } = createMockDevice();
   const offscreen = createOffscreenBinding({
     device: device as GPUDevice,
-    target: { kind: 'offscreen', width: 320, height: 240, format: 'rgba8unorm', sampleCount: 4 },
+    target: {
+      kind: 'offscreen',
+      width: 320,
+      height: 240,
+      format: 'rgba8unorm',
+      msaaSampleCount: 4,
+    },
   });
 
   assertEquals(textures.length, 3);
@@ -162,7 +174,13 @@ Deno.test('bindRenderTarget chooses surface or offscreen binding based on input'
   const offscreenBinding = bindRenderTarget(
     {
       device: device as GPUDevice,
-      target: { kind: 'offscreen', width: 100, height: 50, format: 'rgba8unorm', sampleCount: 1 },
+      target: {
+        kind: 'offscreen',
+        width: 100,
+        height: 50,
+        format: 'rgba8unorm',
+        msaaSampleCount: 1,
+      },
     },
     { offscreen: true },
   );
@@ -201,7 +219,13 @@ Deno.test('acquireColorAttachmentView returns a view for surface and offscreen b
     { device: device as GPUDevice },
     createOffscreenBinding({
       device: device as GPUDevice,
-      target: { kind: 'offscreen', width: 10, height: 10, format: 'rgba8unorm', sampleCount: 1 },
+      target: {
+        kind: 'offscreen',
+        width: 10,
+        height: 10,
+        format: 'rgba8unorm',
+        msaaSampleCount: 1,
+      },
     }),
   );
 
@@ -214,7 +238,13 @@ Deno.test('acquireColorResolveView returns a resolve view for multisampled offsc
   const { device } = createMockDevice();
   const binding = createOffscreenBinding({
     device: device as GPUDevice,
-    target: { kind: 'offscreen', width: 10, height: 10, format: 'rgba8unorm', sampleCount: 4 },
+    target: {
+      kind: 'offscreen',
+      width: 10,
+      height: 10,
+      format: 'rgba8unorm',
+      msaaSampleCount: 4,
+    },
   });
 
   assertEquals(Boolean(acquireColorResolveView(binding)), true);
@@ -347,7 +377,13 @@ Deno.test('surface/offscreen helpers reject mismatched target kinds and expose t
     createSurfaceBinding(
       {
         device: {} as GPUDevice,
-        target: { kind: 'offscreen', width: 8, height: 8, format: 'rgba8unorm', sampleCount: 1 },
+        target: {
+          kind: 'offscreen',
+          width: 8,
+          height: 8,
+          format: 'rgba8unorm',
+          msaaSampleCount: 1,
+        },
       },
       {} as GPUCanvasContext,
     )
@@ -372,7 +408,7 @@ Deno.test('surface/offscreen helpers reject mismatched target kinds and expose t
       width: 8,
       height: 4,
       format: 'rgba8unorm',
-      sampleCount: 1,
+      msaaSampleCount: 1,
     }),
     { width: 8, height: 4 },
   );
@@ -382,7 +418,7 @@ Deno.test('surface/offscreen helpers reject mismatched target kinds and expose t
       width: 8,
       height: 4,
       format: 'rgba8unorm',
-      sampleCount: 1,
+      msaaSampleCount: 1,
     }),
     128,
   );

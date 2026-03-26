@@ -74,7 +74,7 @@ export const renderBasicPathsSnapshot = async (): Promise<
       width: outputSize * supersampleScale,
       height: outputSize * supersampleScale,
       format: 'rgba8unorm',
-      sampleCount: 4,
+      msaaSampleCount: 4,
     },
   });
 

@@ -164,7 +164,13 @@ fn fsMain() -> @location(0) vec4<f32> {
     mocks as unknown as GpuRenderExecutionContext,
     createOffscreenBinding({
       device: mocks.device as unknown as GPUDevice,
-      target: { kind: 'offscreen', width: 16, height: 16, format: 'rgba8unorm', sampleCount: 1 },
+      target: {
+        kind: 'offscreen',
+        width: 16,
+        height: 16,
+        format: 'rgba8unorm',
+        msaaSampleCount: 1,
+      },
     }),
     residency,
     {},
@@ -560,7 +566,13 @@ fn fsMain() -> @location(0) vec4<f32> {
     mocks as unknown as GpuRenderExecutionContext,
     createOffscreenBinding({
       device: mocks.device as unknown as GPUDevice,
-      target: { kind: 'offscreen', width: 16, height: 16, format: 'rgba8unorm', sampleCount: 1 },
+      target: {
+        kind: 'offscreen',
+        width: 16,
+        height: 16,
+        format: 'rgba8unorm',
+        msaaSampleCount: 1,
+      },
     }),
     residency,
     {},

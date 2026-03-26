@@ -388,7 +388,7 @@ export const renderTigerSnapshot = async (): Promise<
       width: outputWidth,
       height: outputHeight,
       format: 'rgba8unorm',
-      sampleCount: 4,
+      msaaSampleCount: 4,
     },
   });
 

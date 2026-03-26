@@ -115,7 +115,7 @@ const main = async () => {
     width,
     height,
     format: 'rgba8unorm',
-    sampleCount: 1,
+    msaaSampleCount: 1,
   } as const;
   const context = await requestGpuContext({ target });
   const residency = createRuntimeResidency();

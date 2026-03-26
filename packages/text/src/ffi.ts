@@ -6,6 +6,7 @@ import { createPath2d, type PathVerb2d } from '@goldlight/geometry';
 import type {
   FontMetrics,
   FontQuery,
+  GlyphMask,
   ShapedRun,
   ShapeTextInput,
   TextDirection,
@@ -21,6 +22,7 @@ const textHostFamilyNameBufferMinSize = 256;
 const ffiFontMetricsBufferSize = 40;
 const ffiShapedRunInfoBufferSize = 32;
 const ffiGlyphPathBufferMinSize = 2048;
+const ffiGlyphMaskInfoBufferSize = 24;
 
 type TextHostLibrary = Deno.DynamicLibrary<{
   text_host_init: {
@@ -52,6 +54,14 @@ type TextHostLibrary = Deno.DynamicLibrary<{
     result: 'u64';
   };
   text_host_get_glyph_svg_path: {
+    parameters: ['u64', 'u32', 'f32', 'buffer', 'usize'];
+    result: 'usize';
+  };
+  text_host_get_glyph_mask_info: {
+    parameters: ['u64', 'u32', 'f32', 'buffer'];
+    result: 'u8';
+  };
+  text_host_copy_glyph_mask_pixels: {
     parameters: ['u64', 'u32', 'f32', 'buffer', 'usize'];
     result: 'usize';
   };
@@ -109,6 +119,20 @@ const decodeMetrics = (bytes: Uint8Array): FontMetrics => {
     underlineThickness: view.getFloat32(28, true),
     strikeoutPosition: view.getFloat32(32, true),
     strikeoutThickness: view.getFloat32(36, true),
+  };
+};
+
+const decodeGlyphMaskInfo = (
+  bytes: Uint8Array,
+): Omit<GlyphMask, 'pixels' | 'format'> & { formatCode: number } => {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  return {
+    width: view.getUint32(0, true),
+    height: view.getUint32(4, true),
+    stride: view.getUint32(8, true),
+    formatCode: view.getUint32(12, true),
+    offsetX: view.getInt32(16, true),
+    offsetY: view.getInt32(20, true),
   };
 };
 
@@ -262,6 +286,14 @@ export const createTextHost = (options: TextHostOptions = {}): TextHost => {
       parameters: ['u64', 'u32', 'f32', 'buffer', 'usize'],
       result: 'usize',
     },
+    text_host_get_glyph_mask_info: {
+      parameters: ['u64', 'u32', 'f32', 'buffer'],
+      result: 'u8',
+    },
+    text_host_copy_glyph_mask_pixels: {
+      parameters: ['u64', 'u32', 'f32', 'buffer', 'usize'],
+      result: 'usize',
+    },
     text_host_shaped_run_get_info: {
       parameters: ['u64', 'buffer'],
       result: 'u8',
@@ -370,6 +402,54 @@ export const createTextHost = (options: TextHostOptions = {}): TextHost => {
     return parseSvgOutlinePath(textDecoder.decode(buffer.subarray(0, length)));
   };
 
+  const getGlyphMask = (
+    typeface: TypefaceHandle,
+    glyphID: number,
+    size: number,
+  ): GlyphMask | null => {
+    const infoBuffer = new Uint8Array(ffiGlyphMaskInfoBufferSize);
+    if (
+      library.symbols.text_host_get_glyph_mask_info(typeface, glyphID >>> 0, size, infoBuffer) !==
+        textHostMetricsResultOk
+    ) {
+      return null;
+    }
+
+    const info = decodeGlyphMaskInfo(infoBuffer);
+    if (info.formatCode !== 1) {
+      throw new Error(`Unsupported glyph mask format code: ${info.formatCode}`);
+    }
+
+    const pixelLength = Math.max(0, info.stride * info.height);
+    const pixels = new Uint8Array(pixelLength);
+    if (pixelLength > 0) {
+      const copiedLength = Number(
+        library.symbols.text_host_copy_glyph_mask_pixels(
+          typeface,
+          glyphID >>> 0,
+          size,
+          pixels,
+          BigInt(pixels.byteLength),
+        ),
+      );
+      if (copiedLength !== pixelLength) {
+        throw new Error(
+          `Text host copied ${copiedLength} glyph mask bytes, expected ${pixelLength}`,
+        );
+      }
+    }
+
+    return {
+      width: info.width,
+      height: info.height,
+      stride: info.stride,
+      format: 'a8',
+      offsetX: info.offsetX,
+      offsetY: info.offsetY,
+      pixels,
+    };
+  };
+
   const shapeText = (input: ShapeTextInput): ShapedRun => {
     const textBytes = textEncoder.encode(input.text);
     const languageBytes = input.language ? textEncoder.encode(input.language) : new Uint8Array();
@@ -461,6 +541,7 @@ export const createTextHost = (options: TextHostOptions = {}): TextHost => {
     getFontMetrics,
     shapeText,
     getGlyphPath,
+    getGlyphMask,
     close,
   };
 };

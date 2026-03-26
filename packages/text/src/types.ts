@@ -33,6 +33,18 @@ export type FontMetrics = Readonly<{
   strikeoutThickness: number;
 }>;
 
+export type GlyphMaskFormat = 'a8';
+
+export type GlyphMask = Readonly<{
+  width: number;
+  height: number;
+  stride: number;
+  format: GlyphMaskFormat;
+  offsetX: number;
+  offsetY: number;
+  pixels: Uint8Array;
+}>;
+
 export type ShapedRun = Readonly<{
   typeface: TypefaceHandle;
   text: string;
@@ -60,11 +72,25 @@ export type GlyphCluster = Readonly<{
   advanceY: number;
 }>;
 
+export type DirectMaskGlyph = Readonly<{
+  glyphID: number;
+  x: number;
+  y: number;
+  mask: GlyphMask | null;
+}>;
+
+export type DirectMaskSubRun = Readonly<{
+  typeface: TypefaceHandle;
+  size: number;
+  glyphs: readonly DirectMaskGlyph[];
+}>;
+
 export type TextHost = Readonly<{
   listFamilies: () => readonly string[];
   matchTypeface: (query: FontQuery) => TypefaceHandle | null;
   getFontMetrics: (typeface: TypefaceHandle, size: number) => FontMetrics;
   shapeText: (input: ShapeTextInput) => ShapedRun;
   getGlyphPath: (typeface: TypefaceHandle, glyphID: number, size: number) => Path2d | null;
+  getGlyphMask: (typeface: TypefaceHandle, glyphID: number, size: number) => GlyphMask | null;
   close: () => void;
 }>;

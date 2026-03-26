@@ -34,6 +34,10 @@ export class TextFontManager {
     return this.#host.getGlyphPath(typeface, glyphID, size);
   }
 
+  getGlyphMask(typeface: TypefaceHandle, glyphID: number, size: number) {
+    return this.#host.getGlyphMask(typeface, glyphID, size);
+  }
+
   close(): void {
     this.#host.close();
   }

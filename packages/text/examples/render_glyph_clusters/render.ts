@@ -115,16 +115,25 @@ const drawHorizontalRule = (
   });
 };
 
-const pickFamily = (
-  families: readonly string[],
+const matchCandidateTypeface = (
+  host: ReturnType<typeof createTextHost>,
   candidates: readonly string[],
-): string | null => {
+) => {
   for (const candidate of candidates) {
-    if (families.includes(candidate)) {
-      return candidate;
+    const typeface = host.matchTypeface({ family: candidate });
+    if (typeface !== null) {
+      return { family: candidate, typeface };
     }
   }
-  return families[0] ?? null;
+
+  for (const family of host.listFamilies()) {
+    const typeface = host.matchTypeface({ family });
+    if (typeface !== null) {
+      return { family, typeface };
+    }
+  }
+
+  return null;
 };
 
 const getPathBounds = (path: Path2d) => {
@@ -204,25 +213,19 @@ export const renderGlyphClustersSnapshot = async (): Promise<
       color: [0.1, 0.11, 0.13, 1],
     });
 
-    const availableFamilies = textHost.listFamilies();
     const summaries: RenderedSampleSummary[] = [];
     let y = pagePadding;
 
     for (const [sampleIndex, sample] of clusterSamples.entries()) {
-      const family = pickFamily(availableFamilies, sample.familyCandidates);
-      if (!family) {
-        continue;
-      }
-
-      const typeface = textHost.matchTypeface({ family });
-      if (!typeface) {
+      const matched = matchCandidateTypeface(textHost, sample.familyCandidates);
+      if (!matched) {
         continue;
       }
 
       const fontSize = 32;
-      const metrics = textHost.getFontMetrics(typeface, fontSize);
+      const metrics = textHost.getFontMetrics(matched.typeface, fontSize);
       const shapedRun = textHost.shapeText({
-        typeface,
+        typeface: matched.typeface,
         text: sample.text,
         size: fontSize,
         direction: 'ltr',
@@ -231,12 +234,12 @@ export const renderGlyphClustersSnapshot = async (): Promise<
       const clusters = buildGlyphClusters(shapedRun);
       const glyphPaths = Array.from(
         shapedRun.glyphIDs,
-        (glyphID) => textHost.getGlyphPath(typeface, glyphID, fontSize),
+        (glyphID) => textHost.getGlyphPath(matched.typeface, glyphID, fontSize),
       );
 
       summaries.push({
         label: sample.label,
-        family,
+        family: matched.family,
         glyphCount: shapedRun.glyphIDs.length,
         clusterCount: clusters.length,
       });

@@ -37,6 +37,7 @@ const desktopEventKinds = {
   pointerButton: 6,
   keyboard: 7,
   message: 8,
+  scaleFactorChanged: 9,
 } as const;
 
 type DesktopHostLibrary = Deno.DynamicLibrary<{
@@ -186,6 +187,12 @@ const decodeEvent = (bytes: Uint8Array): DesktopWindowEvent => {
         windowId,
         messageKind: Number(arg0),
         messageData: Number(arg1),
+      };
+    case desktopEventKinds.scaleFactorChanged:
+      return {
+        kind: 'scale-factor-changed',
+        windowId,
+        scaleFactor: Number(arg0) / 1000,
       };
     default:
       throw new Error(`Unsupported desktop host event kind: ${kind}`);

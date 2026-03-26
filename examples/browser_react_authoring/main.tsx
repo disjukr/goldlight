@@ -99,7 +99,7 @@ const drawFrame = () => {
 
   const evaluatedScene = evaluateScene(currentScene, { timeMs: performance.now() });
   ensureSceneMeshResidency(gpuContext, residency, currentScene, evaluatedScene);
-  renderForwardFrame(gpuContext, surface, residency, evaluatedScene, materialRegistry);
+  renderForwardFrame(gpuContext, surface, residency, {}, evaluatedScene, materialRegistry);
   requestAnimationFrame(drawFrame);
 };
 

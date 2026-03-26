@@ -6,6 +6,7 @@ import type {
 } from '@goldlight/gpu';
 import { ensureSceneMeshResidency, ensureSceneTextureResidency } from '@goldlight/gpu';
 import type {
+  FrameState,
   GpuRenderExecutionContext,
   MaterialRegistry,
   PostProcessPass,
@@ -40,6 +41,7 @@ export type SceneRootRenderFrameHook<TRenderResult> = (
   context: GpuRenderExecutionContext,
   binding: RenderContextBinding,
   residency: RuntimeResidency,
+  frameState: FrameState,
   evaluatedScene: SceneRootFrameResult['evaluatedScene'],
   materialRegistry: MaterialRegistry,
   postProcessPasses: readonly PostProcessPass[],
@@ -73,7 +75,7 @@ export type SceneRootRenderFrameResult<TRenderResult> = Readonly<
 export type SceneRootRenderer<TRenderResult> = Readonly<{
   getFrameDriver: () => SceneRootFrameDriver;
   renderFrame: (
-    timeMs: number,
+    frameState: FrameState,
     options?: SceneRootFrameAdvanceOptions,
   ) => SceneRootRenderFrameResult<TRenderResult>;
   dispose: () => void;
@@ -85,7 +87,7 @@ export const createSceneRootRenderer = <TRenderResult>(
 ): SceneRootRenderer<TRenderResult> => {
   const frameDriver = createSceneRootFrameDriver(sceneRoot, {
     residency: options.residency,
-    initialTimeMs: options.initialTimeMs,
+    initialFrameState: options.initialFrameState,
   });
   const ensureMeshResidency = options.hooks?.ensureSceneMeshResidency ?? ensureSceneMeshResidency;
   const ensureTextureResidency = options.hooks?.ensureSceneTextureResidency ??
@@ -101,8 +103,8 @@ export const createSceneRootRenderer = <TRenderResult>(
 
   return {
     getFrameDriver: () => frameDriver,
-    renderFrame: (timeMs, frameOptions) => {
-      const frame = frameDriver.advanceFrame(timeMs, frameOptions);
+    renderFrame: (frameState, frameOptions) => {
+      const frame = frameDriver.advanceFrame(frameState, frameOptions);
       ensureMeshResidency(
         options.context,
         options.residency,
@@ -121,6 +123,7 @@ export const createSceneRootRenderer = <TRenderResult>(
           options.context,
           options.binding,
           options.residency,
+          frameState,
           frame.evaluatedScene,
           materialRegistry,
           postProcessPasses,

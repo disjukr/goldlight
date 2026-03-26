@@ -167,6 +167,7 @@ fn fsMain() -> @location(0) vec4<f32> {
       target: { kind: 'offscreen', width: 16, height: 16, format: 'rgba8unorm', sampleCount: 1 },
     }),
     residency,
+    {},
     evaluateScene(scene, { timeMs: 0 }),
     registry,
   );
@@ -562,6 +563,7 @@ fn fsMain() -> @location(0) vec4<f32> {
       target: { kind: 'offscreen', width: 16, height: 16, format: 'rgba8unorm', sampleCount: 1 },
     }),
     residency,
+    {},
     evaluateScene(scene, { timeMs: 0 }),
     registry,
   );

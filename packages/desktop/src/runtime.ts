@@ -145,6 +145,11 @@ export const createDesktopWindowRuntime = (
           height: event.height,
         });
         return;
+      case 'scale-factor-changed':
+        dispatchTypedEvent(target, 'scalefactorchange', {
+          scaleFactor: event.scaleFactor,
+        });
+        return;
       case 'close-requested':
         dispatchTypedEvent(target, 'close');
         return;

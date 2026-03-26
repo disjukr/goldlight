@@ -110,7 +110,7 @@ const materialRegistry = createMaterialRegistry();
 const drawFrame = () => {
   const evaluatedScene = evaluateScene(scene, { timeMs: performance.now() });
   ensureSceneMeshResidency(gpuContext, residency, scene, evaluatedScene);
-  renderForwardFrame(gpuContext, surface, residency, evaluatedScene, materialRegistry);
+  renderForwardFrame(gpuContext, surface, residency, {}, evaluatedScene, materialRegistry);
   requestAnimationFrame(drawFrame);
 };
 

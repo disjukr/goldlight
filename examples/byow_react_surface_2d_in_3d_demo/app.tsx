@@ -5,7 +5,12 @@
 
 import React from 'npm:react@19.2.0';
 import { createQuaternionFromEulerDegrees } from '@goldlight/core';
-import { initializeWindow } from '@goldlight/desktop';
+import {
+  initializeWindow,
+  useFrameState,
+  useSetFrameState,
+  useWindowMetrics,
+} from '@goldlight/desktop';
 import { createBoxMesh, createPath2d, type Path2d } from '@goldlight/geometry';
 import { G3dDirectionalLight, G3dPerspectiveCamera } from '@goldlight/react/reconciler';
 
@@ -30,12 +35,43 @@ const createStarPath = (
   return createPath2d(...commands);
 };
 
-type DemoSceneProps = Readonly<{
+type DemoFrameState = Readonly<{
   timeMs: number;
 }>;
 
-const DemoScene = ({ timeMs }: DemoSceneProps) => {
+const DemoFrameDriver = () => {
+  const setFrameState = useSetFrameState();
+
+  React.useEffect(() => {
+    const startMs = performance.now();
+    let frameIndex = 0;
+    let lastTimeMs = 0;
+    let handle = 0;
+
+    const tick = (nowMs: number) => {
+      const timeMs = nowMs - startMs;
+      setFrameState({
+        timeMs,
+        deltaTimeMs: timeMs - lastTimeMs,
+        frameIndex,
+      });
+      lastTimeMs = timeMs;
+      frameIndex += 1;
+      handle = requestAnimationFrame(tick);
+    };
+
+    handle = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(handle);
+  }, [setFrameState]);
+
+  return null;
+};
+
+const DemoScene = () => {
+  const { timeMs = 0 } = useFrameState<DemoFrameState>();
+  const { scaleFactor } = useWindowMetrics();
   const t = timeMs / 1000;
+  const panelTextureSize = Math.max(1, Math.round(512 * scaleFactor));
   const starRotation = t * 1.7;
   const glow = 0.5 + (Math.sin(t * 2.2) * 0.5);
   const pulse = 0.5 + (Math.sin(t * 3.4) * 0.5);
@@ -62,6 +98,7 @@ const DemoScene = ({ timeMs }: DemoSceneProps) => {
       activeCameraId='camera-main'
       clearColor={[0.08, 0.19, 0.26, 1]}
     >
+      <DemoFrameDriver />
       <g3d-material
         id='box-material'
         kind='lit'
@@ -157,8 +194,8 @@ const DemoScene = ({ timeMs }: DemoSceneProps) => {
       <g2d-scene
         id='status-panel'
         outputTextureId='status-panel-texture'
-        textureWidth={512}
-        textureHeight={512}
+        textureWidth={panelTextureSize}
+        textureHeight={panelTextureSize}
       >
         <g2d-group translation={[256, 256]}>
           <g2d-path

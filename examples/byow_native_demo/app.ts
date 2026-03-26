@@ -242,7 +242,7 @@ export default async ({ window }: DesktopModuleContext): Promise<() => void> => 
 
   let frameHandle = 0;
   const drawFrame = () => {
-    renderForwardFrame(gpuContext, binding, residency, evaluatedScene, materialRegistry);
+    renderForwardFrame(gpuContext, binding, residency, {}, evaluatedScene, materialRegistry);
     window.present();
     frameHandle = requestAnimationFrame(drawFrame);
   };

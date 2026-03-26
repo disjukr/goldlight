@@ -40,6 +40,7 @@ export type TemplateMaterialProgram = Readonly<{
   vertexAttributes: readonly TemplateMaterialVertexAttribute[];
   usesMaterialBindings?: boolean;
   usesTransformBindings?: boolean;
+  usesFrameBindings?: boolean;
   programBindings?: readonly TemplateMaterialBindingDescriptor[];
   materialBindings?: readonly TemplateMaterialBindingDescriptor[];
 }>;
@@ -144,6 +145,7 @@ export type ProgramSpec = Readonly<{
   fragmentEntryPoint: string;
   usesMaterialBindings: boolean;
   usesTransformBindings: boolean;
+  usesFrameBindings: boolean;
 }>;
 
 export type TemplateBakeReport<TVariant extends BaseTemplateVariant = TemplateMaterialVariant> =

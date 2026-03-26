@@ -5,16 +5,52 @@
 
 import React from 'npm:react@19.2.0';
 import { createQuaternionFromEulerDegrees } from '@goldlight/core';
-import { initializeWindow } from '@goldlight/desktop';
+import {
+  initializeWindow,
+  useFrameState,
+  useSetFrameState,
+  useWindowMetrics,
+} from '@goldlight/desktop';
 import { createBoxMesh } from '@goldlight/geometry';
 import { G3dDirectionalLight, G3dPerspectiveCamera } from '@goldlight/react/reconciler';
 
-type DemoSceneProps = Readonly<{
+type DemoFrameState = Readonly<{
   timeMs: number;
 }>;
 
-const DemoScene = ({ timeMs }: DemoSceneProps) => {
+const DemoFrameDriver = () => {
+  const setFrameState = useSetFrameState();
+
+  React.useEffect(() => {
+    const startMs = performance.now();
+    let frameIndex = 0;
+    let lastTimeMs = 0;
+    let handle = 0;
+
+    const tick = (nowMs: number) => {
+      const timeMs = nowMs - startMs;
+      setFrameState({
+        timeMs,
+        deltaTimeMs: timeMs - lastTimeMs,
+        frameIndex,
+      });
+      lastTimeMs = timeMs;
+      frameIndex += 1;
+      handle = requestAnimationFrame(tick);
+    };
+
+    handle = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(handle);
+  }, [setFrameState]);
+
+  return null;
+};
+
+const DemoScene = () => {
+  const { timeMs = 0 } = useFrameState<DemoFrameState>();
+  const { scaleFactor } = useWindowMetrics();
   const t = timeMs / 1000;
+  const inspectorTextureSize = Math.max(1, Math.round(640 * scaleFactor));
   const screenOffsetX = -0.92 + (Math.sin(t * 0.9) * 0.9);
   const screenOffsetY = 0.38 + (Math.cos(t * 1.1) * 0.18);
   const screenOffsetZ = 0.52 + (Math.sin(t * 0.7) * 0.16);
@@ -45,6 +81,7 @@ const DemoScene = ({ timeMs }: DemoSceneProps) => {
       activeCameraId='camera-main'
       clearColor={[0.08, 0.2, 0.26, 1]}
     >
+      <DemoFrameDriver />
       <g3d-material
         id='room-material'
         kind='lit'
@@ -139,8 +176,8 @@ const DemoScene = ({ timeMs }: DemoSceneProps) => {
         id='inspector-scene'
         activeCameraId='inspector-camera'
         outputTextureId='inspector-scene-texture'
-        textureWidth={768}
-        textureHeight={768}
+        textureWidth={inspectorTextureSize}
+        textureHeight={inspectorTextureSize}
         clearColor={[0.72, 0.62, 0.44, 1]}
       >
         <g3d-material

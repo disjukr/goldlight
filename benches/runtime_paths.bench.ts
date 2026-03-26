@@ -289,6 +289,7 @@ Deno.bench('forward frame encoding', () => {
     context,
     binding,
     runtimeResidency,
+    {},
     evaluatedScene,
     createMaterialRegistry(),
   );

@@ -29,6 +29,7 @@ const EVENT_FOCUS_CHANGED: u32 = 4;
 const EVENT_POINTER_MOVED: u32 = 5;
 const EVENT_POINTER_BUTTON: u32 = 6;
 const EVENT_KEYBOARD: u32 = 7;
+const EVENT_SCALE_FACTOR_CHANGED: u32 = 9;
 const SYSTEM_WIN32: u32 = 1;
 
 #[repr(C)]
@@ -213,6 +214,8 @@ fn resolve_surface_info(
     width: u32,
     height: u32,
 ) -> Option<SharedWindowState> {
+    let scale_factor = window.scale_factor();
+    let inner_size = window.inner_size();
     let raw_window = window.window_handle().ok()?.as_raw();
     let raw_display = window.display_handle().ok()?.as_raw();
 
@@ -230,9 +233,9 @@ fn resolve_surface_info(
                     .hinstance
                     .map(|value| value.get() as u64)
                     .unwrap_or(0),
-                width,
-                height,
-                scale_factor: window.scale_factor(),
+                width: inner_size.width,
+                height: inner_size.height,
+                scale_factor,
             },
         }),
         _ => None,
@@ -378,8 +381,9 @@ impl ApplicationHandler for DesktopHostApplication {
                 self.push_frame_event(state.id);
             }
             WindowEvent::Resized(size) => {
-                state.width = size.width;
-                state.height = size.height;
+                let logical_size = size.to_logical::<f64>(state.surface_info.scale_factor);
+                state.width = logical_size.width.round().max(1.0) as u32;
+                state.height = logical_size.height.round().max(1.0) as u32;
                 state.surface_info.width = size.width;
                 state.surface_info.height = size.height;
                 self.window_state = Some(state);
@@ -387,8 +391,22 @@ impl ApplicationHandler for DesktopHostApplication {
                     kind: EVENT_RESIZED,
                     reserved: 0,
                     window_id: state.id,
-                    arg0: size.width as i64,
-                    arg1: size.height as i64,
+                    arg0: state.width as i64,
+                    arg1: state.height as i64,
+                    arg2: 0,
+                    arg3: 0,
+                });
+                self.push_frame_event(state.id);
+            }
+            WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+                state.surface_info.scale_factor = scale_factor;
+                self.window_state = Some(state);
+                self.push_event(DesktopHostEvent {
+                    kind: EVENT_SCALE_FACTOR_CHANGED,
+                    reserved: 0,
+                    window_id: state.id,
+                    arg0: (scale_factor * 1000.0).round() as i64,
+                    arg1: 0,
                     arg2: 0,
                     arg3: 0,
                 });

@@ -53,6 +53,7 @@ const queuePendingHostEvent = (event: DesktopWindowEvent): void => {
 
   if (
     event.kind === 'resized' ||
+    event.kind === 'scale-factor-changed' ||
     event.kind === 'focus-changed' ||
     event.kind === 'pointer-moved'
   ) {
@@ -120,6 +121,13 @@ const createWorkerDesktopContext = (
     height: surfaceInfo.height,
   });
   const canvasContext = surface.getContext('webgpu');
+  const resizeSurfaceFromLogicalSize = (logicalWidth: number, logicalHeight: number) => {
+    const physicalWidth = Math.max(1, Math.round(logicalWidth * surfaceInfo.scaleFactor));
+    const physicalHeight = Math.max(1, Math.round(logicalHeight * surfaceInfo.scaleFactor));
+    surface.resize(physicalWidth, physicalHeight);
+    (surfaceInfo as { width: number; height: number }).width = physicalWidth;
+    (surfaceInfo as { width: number; height: number }).height = physicalHeight;
+  };
 
   runtime.addEventListener('resize', (event) => {
     const detail = (event as CustomEvent<{ width: number; height: number }>).detail;
@@ -128,9 +136,16 @@ const createWorkerDesktopContext = (
       width: detail.width,
       height: detail.height,
     };
-    surface.resize(detail.width, detail.height);
-    (surfaceInfo as { width: number; height: number }).width = detail.width;
-    (surfaceInfo as { width: number; height: number }).height = detail.height;
+    resizeSurfaceFromLogicalSize(detail.width, detail.height);
+  });
+
+  runtime.addEventListener('scalefactorchange', (event) => {
+    const detail = (event as CustomEvent<{ scaleFactor: number }>).detail;
+    (surfaceInfo as { scaleFactor: number }).scaleFactor = detail.scaleFactor;
+    resizeSurfaceFromLogicalSize(
+      runtimeWindowState.current.width,
+      runtimeWindowState.current.height,
+    );
   });
 
   runtime.addEventListener('focuschange', (event) => {
@@ -178,9 +193,7 @@ const createWorkerDesktopContext = (
     },
     present: () => surface.present(),
     resizeSurface: (width, height) => {
-      surface.resize(width, height);
-      (surfaceInfo as { width: number; height: number }).width = width;
-      (surfaceInfo as { width: number; height: number }).height = height;
+      resizeSurfaceFromLogicalSize(width, height);
     },
     close: () => {
       postToHost({ kind: 'close-window' });

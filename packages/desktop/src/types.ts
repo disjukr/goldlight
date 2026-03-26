@@ -30,6 +30,12 @@ export type DesktopResizeEvent = Readonly<{
   height: number;
 }>;
 
+export type DesktopScaleFactorChangedEvent = Readonly<{
+  kind: 'scale-factor-changed';
+  windowId: bigint;
+  scaleFactor: number;
+}>;
+
 export type DesktopCloseRequestedEvent = Readonly<{
   kind: 'close-requested';
   windowId: bigint;
@@ -72,6 +78,7 @@ export type DesktopMessageEnvelopeEvent = Readonly<{
 export type DesktopWindowEvent =
   | DesktopFrameEvent
   | DesktopResizeEvent
+  | DesktopScaleFactorChangedEvent
   | DesktopCloseRequestedEvent
   | DesktopFocusChangedEvent
   | DesktopPointerMovedEvent

@@ -20,6 +20,7 @@ import {
 } from '@goldlight/drawing';
 import type {
   ForwardRenderResult,
+  FrameState,
   GpuRenderExecutionContext,
   MaterialRegistry,
   PostProcessPass,
@@ -40,6 +41,7 @@ type React3dSceneRootLike =
     get2dScenes: () => readonly React2dScene[];
     get3dScenes: () => readonly React3dScene[];
     getRootClearColor: () => readonly [number, number, number, number] | undefined;
+    getContentRevision: () => number;
   }>;
 
 type ReactSceneRootForwardRendererHooks = Readonly<{
@@ -47,7 +49,8 @@ type ReactSceneRootForwardRendererHooks = Readonly<{
     context: GpuRenderExecutionContext,
     binding: RenderContextBinding,
     residency: RuntimeResidency,
-    evaluatedScene: Parameters<typeof renderForwardFrame>[3],
+    frameState: FrameState,
+    evaluatedScene: Parameters<typeof renderForwardFrame>[4],
     materialRegistry: MaterialRegistry,
     postProcessPasses: readonly PostProcessPass[],
     clearColor?: readonly [number, number, number, number],
@@ -72,6 +75,7 @@ type Scene2dRuntimeState = {
   binding: OffscreenBinding;
   drawingContext: DrawingContext;
   sampler: GPUSampler;
+  renderedRevision?: number;
 };
 
 type Scene3dRuntimeState = {
@@ -79,6 +83,7 @@ type Scene3dRuntimeState = {
   target: OffscreenTarget;
   binding: OffscreenBinding;
   sampler: GPUSampler;
+  renderedRevision?: number;
 };
 
 const surfaceTextureFormat = 'rgba8unorm' as const;
@@ -238,7 +243,8 @@ export const createReactSceneRootForwardRenderer = (
 ): SceneRootForwardRenderer => {
   const scene2dRuntimeStates = new Map<string, Scene2dRuntimeState>();
   const scene3dRuntimeStates = new Map<string, Scene3dRuntimeState>();
-  let currentTimeMs = options.initialTimeMs ?? 0;
+  let currentFrameState: FrameState = options.initialFrameState ?? {};
+  let currentTimeMs = typeof currentFrameState.timeMs === 'number' ? currentFrameState.timeMs : 0;
 
   const baseRenderer = createSceneRootForwardRenderer(sceneRoot, {
     ...options,
@@ -247,30 +253,37 @@ export const createReactSceneRootForwardRenderer = (
         context,
         binding,
         residency,
+        frameState,
         evaluatedScene,
         materialRegistry,
         postProcessPasses,
       ) => {
+        currentFrameState = frameState;
+        currentTimeMs = typeof frameState.timeMs === 'number' ? frameState.timeMs : 0;
         const activeScene3dIds = new Set<string>();
         for (const scene3d of sceneRoot.get3dScenes()) {
           activeScene3dIds.add(scene3d.id);
           const state = syncScene3dRuntimeState(options.context, scene3dRuntimeStates, scene3d);
-          const evaluatedScene3d = evaluateScene(scene3d.scene, { timeMs: currentTimeMs });
-          ensureSceneMeshResidency(options.context, residency, scene3d.scene, evaluatedScene3d);
-          ensureSceneTextureResidency(options.context, residency, scene3d.scene, {
-            images: new Map(),
-          });
-          renderForwardFrame(
-            context,
-            state.binding,
-            residency,
-            evaluatedScene3d,
-            {
-              materialRegistry,
-              postProcessPasses,
-              clearColor: scene3d.clearColor,
-            },
-          );
+          if (state.renderedRevision !== scene3d.revision) {
+            const evaluatedScene3d = evaluateScene(scene3d.scene, { timeMs: currentTimeMs });
+            ensureSceneMeshResidency(options.context, residency, scene3d.scene, evaluatedScene3d);
+            ensureSceneTextureResidency(options.context, residency, scene3d.scene, {
+              images: new Map(),
+            });
+            renderForwardFrame(
+              context,
+              state.binding,
+              residency,
+              currentFrameState,
+              evaluatedScene3d,
+              {
+                materialRegistry,
+                postProcessPasses,
+                clearColor: scene3d.clearColor,
+              },
+            );
+            state.renderedRevision = scene3d.revision;
+          }
           residency.textures.set(scene3d.textureId, create3dSceneTextureResidency(scene3d, state));
         }
 
@@ -278,15 +291,18 @@ export const createReactSceneRootForwardRenderer = (
         for (const scene2d of sceneRoot.get2dScenes()) {
           activeScene2dIds.add(scene2d.id);
           const state = syncSurfaceRuntimeState(options.context, scene2dRuntimeStates, scene2d);
-          const recorder = state.drawingContext.createRecorder();
-          scene2d.draw(recorder, currentTimeMs);
-          const recording = finishDrawingRecorder(recorder);
-          const commandBuffer = encodeDawnCommandBuffer(
-            state.drawingContext.sharedContext,
-            recording,
-            state.binding,
-          );
-          context.queue.submit([commandBuffer.commandBuffer]);
+          if (state.renderedRevision !== scene2d.revision) {
+            const recorder = state.drawingContext.createRecorder();
+            scene2d.draw(recorder, currentFrameState);
+            const recording = finishDrawingRecorder(recorder);
+            const commandBuffer = encodeDawnCommandBuffer(
+              state.drawingContext.sharedContext,
+              recording,
+              state.binding,
+            );
+            context.queue.submit([commandBuffer.commandBuffer]);
+            state.renderedRevision = scene2d.revision;
+          }
           residency.textures.set(scene2d.textureId, create2dSceneTextureResidency(scene2d, state));
         }
 
@@ -313,6 +329,7 @@ export const createReactSceneRootForwardRenderer = (
             context,
             binding,
             residency,
+            frameState,
             evaluatedScene,
             materialRegistry,
             postProcessPasses,
@@ -323,6 +340,7 @@ export const createReactSceneRootForwardRenderer = (
           context,
           binding,
           residency,
+          frameState,
           evaluatedScene,
           {
             materialRegistry,
@@ -336,9 +354,10 @@ export const createReactSceneRootForwardRenderer = (
 
   return {
     getFrameDriver: () => baseRenderer.getFrameDriver(),
-    renderFrame: (timeMs, frameOptions) => {
-      currentTimeMs = timeMs;
-      return baseRenderer.renderFrame(timeMs, frameOptions);
+    renderFrame: (frameState, frameOptions) => {
+      currentFrameState = frameState;
+      currentTimeMs = typeof frameState.timeMs === 'number' ? frameState.timeMs : 0;
+      return baseRenderer.renderFrame(frameState, frameOptions);
     },
     dispose: () => {
       for (const state of scene2dRuntimeStates.values()) {

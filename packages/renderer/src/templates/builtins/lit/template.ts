@@ -210,6 +210,13 @@ const builtInLitShaderTemplate: ShaderTemplate<BuiltInLitTemplateVariant> = {
   label: 'Built-in Lit Template',
   source: templateSource,
   baseResources: [{
+    id: 'frameUniforms',
+    kind: 'uniform',
+    group: 0,
+    binding: 1,
+    varName: 'frameUniforms',
+    typeName: 'FrameUniforms',
+  }, {
     id: 'materialUniforms',
     kind: 'uniform',
     group: 1,

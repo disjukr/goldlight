@@ -199,7 +199,7 @@ export default async (
         materialRegistry,
         postProcessPasses,
       ) =>
-        renderForwardFrame(context, binding, residency, evaluatedScene, {
+        renderForwardFrame(context, binding, residency, {}, evaluatedScene, {
           materialRegistry,
           postProcessPasses,
           extension: {
@@ -278,7 +278,7 @@ export default async (
 
   let frameHandle = 0;
   const drawFrame = (timeMs: number) => {
-    forwardRenderer.renderFrame(timeMs);
+    forwardRenderer.renderFrame({ timeMs });
     window.present();
     frameHandle = requestAnimationFrame(drawFrame);
   };

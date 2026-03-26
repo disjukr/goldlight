@@ -10,6 +10,8 @@ export const emitMaterialProgram = (spec: ProgramSpec): TemplateMaterialProgram 
   usesMaterialBindings: spec.usesMaterialBindings &&
     spec.bindings.some((binding) => binding.group === 1),
   usesTransformBindings: spec.usesTransformBindings,
+  usesFrameBindings: spec.usesFrameBindings ||
+    spec.bindings.some((binding) => binding.group === 0 && binding.binding === 1),
   programBindings: spec.bindings,
   materialBindings: spec.bindings
     .filter((binding) => binding.group === 1)

@@ -197,6 +197,7 @@ export const inspectShaderTemplate = <TVariant extends BaseTemplateVariant>(
     fragmentEntryPoint: 'fsMain',
     usesMaterialBindings: true,
     usesTransformBindings: true,
+    usesFrameBindings: false,
   };
   return {
     variant,

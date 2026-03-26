@@ -6,6 +6,13 @@ struct MeshTransform {
   normal: mat4x4<f32>,
 };
 
+struct FrameUniforms {
+  timeMs: f32,
+  deltaTimeMs: f32,
+  frameIndex: f32,
+  _padding: f32,
+};
+
 struct MaterialUniforms {
   values: array<vec4<f32>, 16>,
 };

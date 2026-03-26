@@ -1,6 +1,7 @@
 import { type EvaluatedScene, evaluateScene, reevaluateSceneTransforms } from '@goldlight/core';
 import { applyRuntimeResidencyPlan, type RuntimeResidency } from '@goldlight/gpu';
 import type { SceneIr } from '@goldlight/ir';
+import type { FrameState } from '@goldlight/renderer';
 
 import {
   canApplySceneRootTransformUpdates,
@@ -32,7 +33,7 @@ export type SceneRootFrameAdvanceOptions = Readonly<{
 
 export type SceneRootFrameDriverOptions = Readonly<{
   residency?: RuntimeResidency;
-  initialTimeMs?: number;
+  initialFrameState?: FrameState;
 }>;
 
 export type SceneRootFrameResult = Readonly<{
@@ -48,7 +49,10 @@ export type SceneRootFrameDriver = Readonly<{
   getScene: () => SceneIr | undefined;
   getEvaluatedScene: () => EvaluatedScene | undefined;
   getStats: () => SceneRootFrameDriverStats;
-  advanceFrame: (timeMs: number, options?: SceneRootFrameAdvanceOptions) => SceneRootFrameResult;
+  advanceFrame: (
+    frameState: FrameState,
+    options?: SceneRootFrameAdvanceOptions,
+  ) => SceneRootFrameResult;
   dispose: () => void;
 }>;
 
@@ -74,8 +78,10 @@ export const createSceneRootFrameDriver = (
   let fullUpdateCount = 0;
   let targetedInvalidationCount = 0;
   let resetInvalidationCount = 0;
+  const resolveTimeMs = (frameState: FrameState): number =>
+    typeof frameState.timeMs === 'number' ? frameState.timeMs : 0;
   let evaluatedScene = currentScene
-    ? evaluateScene(currentScene, { timeMs: options.initialTimeMs ?? 0 })
+    ? evaluateScene(currentScene, { timeMs: resolveTimeMs(options.initialFrameState ?? {}) })
     : undefined;
 
   if (evaluatedScene) {
@@ -96,7 +102,7 @@ export const createSceneRootFrameDriver = (
     );
 
   const advanceFrame = (
-    timeMs: number,
+    frameState: FrameState,
     advanceOptions: SceneRootFrameAdvanceOptions = {},
   ): SceneRootFrameResult => {
     sceneRoot.flushUpdates?.();
@@ -106,7 +112,7 @@ export const createSceneRootFrameDriver = (
     }
 
     const evaluationOptions = {
-      timeMs,
+      timeMs: resolveTimeMs(frameState),
       clipId: advanceOptions.clipId,
     };
     const commit = pendingCommit;

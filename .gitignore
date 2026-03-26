@@ -6,3 +6,4 @@ packages/desktop/native/target
 packages/drawing/examples/render_tiger_png/tiger.png
 packages/drawing/**/out.png
 packages/drawing/**/ckout.png
+tmp/

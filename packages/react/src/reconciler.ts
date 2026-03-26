@@ -30,6 +30,7 @@ import type {
 import { createG3dSceneRootCommit, type G3dSceneRootSubscriber } from './scene_root.ts';
 import type { SceneIr, TextureRef } from '@goldlight/ir';
 import type { DrawingPaint, DrawingRecorder } from '@goldlight/drawing';
+import type { FrameState } from '@goldlight/renderer';
 import {
   concatDrawingRecorderTransform,
   recordClear,
@@ -236,13 +237,15 @@ export type React2dScene = Readonly<{
   textureId: string;
   textureWidth: number;
   textureHeight: number;
-  draw: (recorder: DrawingRecorder, timeMs: number) => void;
+  revision: number;
+  draw: (recorder: DrawingRecorder, frameState: FrameState) => void;
 }>;
 export type React3dScene = Readonly<{
   id: string;
   textureId: string;
   textureWidth: number;
   textureHeight: number;
+  revision: number;
   scene: SceneIr;
   clearColor?: readonly [number, number, number, number];
 }>;
@@ -254,6 +257,8 @@ type HostContainer = {
   current3dScenes: readonly React3dScene[];
   currentRootClearColor?: readonly [number, number, number, number];
   revision: number;
+  contentRevision: number;
+  contentTreeRevision?: number;
   subscribers: Set<G3dSceneRootSubscriber>;
   pendingError?: Error;
 };
@@ -269,11 +274,128 @@ export type React3dSceneRoot = Readonly<{
   get3dScenes: () => readonly React3dScene[];
   getRootClearColor: () => readonly [number, number, number, number] | undefined;
   getRevision: () => number;
+  getContentRevision: () => number;
   subscribe: (subscriber: G3dSceneRootSubscriber) => () => void;
 }>;
 
 const default2dSceneTextureSize = 512;
 const default3dSceneTextureSize = 512;
+const HASH_OFFSET = 2166136261;
+const HASH_PRIME = 16777619;
+const numberHashBuffer = new ArrayBuffer(8);
+const numberHashView = new DataView(numberHashBuffer);
+
+type HostRevisionState = {
+  selfFingerprint?: number;
+  selfVersion: number;
+  subtreeRevision: number;
+  lastChildRefs: readonly HostChild[];
+  lastChildSubtreeRevisions: readonly number[];
+};
+
+const hostRevisionStates = new WeakMap<HostInstance, HostRevisionState>();
+const mixHash = (hash: number, byte: number): number => {
+  return Math.imul(hash ^ byte, HASH_PRIME) >>> 0;
+};
+
+const hashString = (hash: number, value: string): number => {
+  let nextHash = hash;
+  for (let index = 0; index < value.length; index += 1) {
+    nextHash = mixHash(nextHash, value.charCodeAt(index) & 0xff);
+    nextHash = mixHash(nextHash, value.charCodeAt(index) >>> 8);
+  }
+  return nextHash;
+};
+
+const hashNumber = (hash: number, value: number): number => {
+  numberHashView.setFloat64(0, value, true);
+  let nextHash = hash;
+  for (let index = 0; index < 8; index += 1) {
+    nextHash = mixHash(nextHash, numberHashView.getUint8(index));
+  }
+  return nextHash;
+};
+
+const fingerprintValue = (value: unknown): number => {
+  if (value === null) return hashString(HASH_OFFSET, 'null');
+  if (value === undefined) return hashString(HASH_OFFSET, 'undefined');
+  if (typeof value === 'string') return hashString(HASH_OFFSET, value);
+  if (typeof value === 'number') return hashNumber(HASH_OFFSET, value);
+  if (typeof value === 'boolean') return hashString(HASH_OFFSET, value ? 'true' : 'false');
+  if (Array.isArray(value)) {
+    let hash = hashString(HASH_OFFSET, 'array');
+    for (const item of value) {
+      const itemFingerprint = fingerprintValue(item);
+      hash = mixHash(hash, 0xff);
+      hash = mixHash(hash, itemFingerprint & 0xff);
+      hash = mixHash(hash, (itemFingerprint >>> 8) & 0xff);
+      hash = mixHash(hash, (itemFingerprint >>> 16) & 0xff);
+      hash = mixHash(hash, itemFingerprint >>> 24);
+    }
+    return hash;
+  }
+  if (typeof value === 'object') {
+    let hash = hashString(HASH_OFFSET, 'object');
+    const entries = Object.entries(value).sort(([left], [right]) => left.localeCompare(right));
+    for (const [key, entryValue] of entries) {
+      hash = hashString(hash, key);
+      const entryFingerprint = fingerprintValue(entryValue);
+      hash = mixHash(hash, entryFingerprint & 0xff);
+      hash = mixHash(hash, (entryFingerprint >>> 8) & 0xff);
+      hash = mixHash(hash, (entryFingerprint >>> 16) & 0xff);
+      hash = mixHash(hash, entryFingerprint >>> 24);
+    }
+    return hash;
+  }
+  return hashString(HASH_OFFSET, String(value));
+};
+
+const createInitialHostRevisionState = (): HostRevisionState => ({
+  selfVersion: 0,
+  subtreeRevision: 0,
+  lastChildRefs: [],
+  lastChildSubtreeRevisions: [],
+});
+
+const initializeHostRevisionState = <TInstance extends HostInstance>(instance: TInstance): TInstance => {
+  hostRevisionStates.set(instance, createInitialHostRevisionState());
+  return instance;
+};
+
+const getHostRevisionState = (instance: HostInstance): HostRevisionState => {
+  const state = hostRevisionStates.get(instance);
+  if (!state) {
+    throw new Error(`missing revision state for <${instance.type}> host instance`);
+  }
+  return state;
+};
+
+const getHostSubtreeRevision = (instance: HostInstance): number => getHostRevisionState(instance).subtreeRevision;
+
+const syncHostSubtreeRevision = (instance: HostInstance): number => {
+  const state = getHostRevisionState(instance);
+  const selfFingerprint = fingerprintValue(instance.props);
+  const selfChanged = state.selfFingerprint !== selfFingerprint;
+  if (selfChanged) {
+    state.selfFingerprint = selfFingerprint;
+    state.selfVersion += 1;
+  }
+
+  const childRefs = [...instance.children];
+  const childSubtreeRevisions = childRefs.map((child) => syncHostSubtreeRevision(child));
+  const childListChanged = state.lastChildRefs.length !== childRefs.length ||
+    childRefs.some((child, index) => state.lastChildRefs[index] !== child);
+  const childRevisionChanged = state.lastChildSubtreeRevisions.length !== childSubtreeRevisions.length ||
+    childSubtreeRevisions.some((revision, index) => state.lastChildSubtreeRevisions[index] !== revision);
+
+  if (selfChanged || childListChanged || childRevisionChanged || state.subtreeRevision === 0) {
+    state.subtreeRevision += 1;
+    state.lastChildRefs = childRefs;
+    state.lastChildSubtreeRevisions = childSubtreeRevisions;
+  }
+
+  return state.subtreeRevision;
+};
 
 const get2dSceneTextureId = (props: Reconciler2dSceneProps): string => props.outputTextureId;
 const get3dSceneTextureId = (props: Reconciler3dSceneProps): string => {
@@ -382,7 +504,7 @@ const create2dSceneDraw = (
   props: Reconciler2dSceneProps,
   children: readonly HostChild[],
 ): React2dScene['draw'] => {
-  return (recorder) => {
+  return (recorder, _frameState) => {
     recordClear(recorder, props.clearColor ?? [0, 0, 0, 0]);
     for (const child of children) {
       render2dChild(recorder, child);
@@ -393,11 +515,13 @@ const create2dSceneDraw = (
 const create2dSceneDescriptor = (
   props: Reconciler2dSceneProps,
   children: readonly HostChild[],
+  revision: number,
 ): React2dScene => ({
   id: props.id,
   textureId: get2dSceneTextureId(props),
   textureWidth: props.textureWidth ?? default2dSceneTextureSize,
   textureHeight: props.textureHeight ?? default2dSceneTextureSize,
+  revision,
   draw: create2dSceneDraw(props, children),
 });
 
@@ -411,11 +535,13 @@ const create3dSceneTextureRef = (props: Reconciler3dSceneProps): TextureRef => (
 const create3dSceneDescriptor = (
   props: Reconciler3dSceneProps,
   scene: SceneIr,
+  revision: number,
 ): React3dScene => ({
   id: props.id,
   textureId: get3dSceneTextureId(props),
   textureWidth: props.textureWidth ?? default3dSceneTextureSize,
   textureHeight: props.textureHeight ?? default3dSceneTextureSize,
+  revision,
   scene,
   clearColor: props.clearColor,
 });
@@ -541,62 +667,62 @@ const createHostInstance = (
   const intrinsicType = assertHostIntrinsicType(type);
   const normalizedProps = extractProps(intrinsicType, props);
   if (intrinsicType === 'g3d-scene') {
-    return {
+    return initializeHostRevisionState({
       type: intrinsicType,
       props: normalizedProps as HostPropsWithoutChildren<'g3d-scene'>,
       children: [],
-    };
+    });
   }
   if (intrinsicType === 'g3d-node') {
-    return {
+    return initializeHostRevisionState({
       type: intrinsicType,
       props: normalizedProps as HostPropsWithoutChildren<'g3d-node'>,
       children: [],
-    };
+    });
   }
   if (intrinsicType === 'g3d-group') {
-    return {
+    return initializeHostRevisionState({
       type: intrinsicType,
       props: normalizedProps as HostPropsWithoutChildren<'g3d-group'>,
       children: [],
-    };
+    });
   }
   if (intrinsicType === 'g2d-scene') {
-    return {
+    return initializeHostRevisionState({
       type: intrinsicType,
       props: normalizedProps as HostPropsWithoutChildren<'g2d-scene'>,
       children: [],
-    };
+    });
   }
   if (intrinsicType === 'g2d-group') {
-    return {
+    return initializeHostRevisionState({
       type: intrinsicType,
       props: normalizedProps as HostPropsWithoutChildren<'g2d-group'>,
       children: [],
-    };
+    });
   }
   if (intrinsicType === 'g2d-path') {
-    return {
+    return initializeHostRevisionState({
       type: intrinsicType,
       props: normalizedProps as HostPropsWithoutChildren<'g2d-path'>,
       children: [],
-    };
+    });
   }
   if (intrinsicType === 'g2d-rect') {
-    return {
+    return initializeHostRevisionState({
       type: intrinsicType,
       props: normalizedProps as HostPropsWithoutChildren<'g2d-rect'>,
       children: [],
-    };
+    });
   }
   if (intrinsicType === 'g2d-circle') {
-    return {
+    return initializeHostRevisionState({
       type: intrinsicType,
       props: normalizedProps as HostPropsWithoutChildren<'g2d-circle'>,
       children: [],
-    };
+    });
   }
-  return {
+  return initializeHostRevisionState({
     type: intrinsicType,
     props: normalizedProps as
       & HostPropsWithoutChildren<'g3d-asset'>
@@ -607,7 +733,7 @@ const createHostInstance = (
       & HostPropsWithoutChildren<'g3d-animation-clip'>
       & HostPropsWithoutChildren<'g3d-camera'>,
     children: [],
-  } as ResourceHostInstance;
+  } as ResourceHostInstance);
 };
 
 const extractProps = <TType extends HostIntrinsicType>(
@@ -757,7 +883,11 @@ const reconcile3DSceneSnapshot = (
   ): number => {
     if (child.type === 'g3d-scene') {
       const nestedSnapshot = reconcile3DSceneSnapshot(child);
-      const scene3d = create3dSceneDescriptor(child.props, nestedSnapshot.scene);
+      const scene3d = create3dSceneDescriptor(
+        child.props,
+        nestedSnapshot.scene,
+        getHostSubtreeRevision(child),
+      );
       scenes2d.push(...nestedSnapshot.scenes2d);
       scenes3d.push(...nestedSnapshot.scenes3d, scene3d);
       visitedResourceIds.texture.add(scene3d.textureId);
@@ -779,7 +909,11 @@ const reconcile3DSceneSnapshot = (
       return nodeIndex + 1;
     }
     if (child.type === 'g2d-scene') {
-      const scene2d = create2dSceneDescriptor(child.props, child.children);
+      const scene2d = create2dSceneDescriptor(
+        child.props,
+        child.children,
+        getHostSubtreeRevision(child),
+      );
       scenes2d.push(scene2d);
       visitedResourceIds.texture.add(scene2d.textureId);
       upsertG3dSceneDocumentResource(document, {
@@ -872,6 +1006,8 @@ const syncContainerSceneDocument = (container: HostContainer): void => {
         subscriber(commit);
       }
     }
+    container.contentTreeRevision = undefined;
+    container.contentRevision = 0;
     return;
   }
 
@@ -883,10 +1019,15 @@ const syncContainerSceneDocument = (container: HostContainer): void => {
 
   const previousScene = container.currentScene;
   const rootInstance = container.rootChildren[0];
+  const rootSubtreeRevision = syncHostSubtreeRevision(rootInstance);
   if (rootInstance.type === 'g2d-scene') {
     const document = container.document ?? createG3dSceneDocument(rootInstance.props.id);
     container.document = document;
-    const scene2d = create2dSceneDescriptor(rootInstance.props, rootInstance.children);
+    const scene2d = create2dSceneDescriptor(
+      rootInstance.props,
+      rootInstance.children,
+      rootSubtreeRevision,
+    );
     upsertG3dSceneDocumentResource(document, {
       kind: 'texture',
       value: create2dSceneTextureRef(rootInstance.props),
@@ -908,6 +1049,10 @@ const syncContainerSceneDocument = (container: HostContainer): void => {
     container.current2dScenes = [scene2d];
     container.current3dScenes = [];
     container.currentRootClearColor = undefined;
+    if (container.contentTreeRevision !== rootSubtreeRevision) {
+      container.contentTreeRevision = rootSubtreeRevision;
+      container.contentRevision += 1;
+    }
     container.revision = commit.revision;
     for (const subscriber of [...container.subscribers]) {
       subscriber(commit);
@@ -923,6 +1068,10 @@ const syncContainerSceneDocument = (container: HostContainer): void => {
   container.current2dScenes = snapshot.scenes2d;
   container.current3dScenes = snapshot.scenes3d;
   container.currentRootClearColor = rootInstance.props.clearColor;
+  if (container.contentTreeRevision !== rootSubtreeRevision) {
+    container.contentTreeRevision = rootSubtreeRevision;
+    container.contentRevision += 1;
+  }
   container.revision = commit.revision;
 
   for (const subscriber of [...container.subscribers]) {
@@ -936,6 +1085,8 @@ const createRootContainer = (): HostContainer => ({
   current3dScenes: [],
   currentRootClearColor: undefined,
   revision: 0,
+  contentRevision: 0,
+  contentTreeRevision: undefined,
   subscribers: new Set(),
 });
 
@@ -1030,6 +1181,7 @@ export const createReactSceneRoot = (initialElement?: ReactNode): React3dSceneRo
     get3dScenes: () => container.current3dScenes,
     getRootClearColor: () => container.currentRootClearColor,
     getRevision: () => container.revision,
+    getContentRevision: () => container.contentRevision,
     subscribe: (subscriber) => {
       container.subscribers.add(subscriber);
       return () => {

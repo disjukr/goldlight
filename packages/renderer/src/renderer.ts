@@ -133,6 +133,15 @@ export type GpuRenderExecutionContext = Readonly<{
   queue: Pick<GPUQueue, 'submit' | 'writeBuffer'> & Partial<Pick<GPUQueue, 'writeTexture'>>;
 }>;
 
+export type FrameState = Readonly<
+  & {
+    timeMs?: number;
+    deltaTimeMs?: number;
+    frameIndex?: number;
+  }
+  & Record<string, unknown>
+>;
+
 export type ForwardRenderResult = Readonly<{
   drawCount: number;
   submittedCommandBufferCount: number;
@@ -309,6 +318,7 @@ export type MaterialProgram = Readonly<{
   vertexAttributes: readonly MaterialVertexAttribute[];
   usesMaterialBindings?: boolean;
   usesTransformBindings?: boolean;
+  usesFrameBindings?: boolean;
   programBindings?: readonly MaterialBindingDescriptor[];
   materialBindings?: readonly MaterialBindingDescriptor[];
 }>;
@@ -488,6 +498,7 @@ export type ForwardRenderOptions = Readonly<{
   postProcessPasses?: readonly PostProcessPass[];
   extension?: ForwardSceneExtension;
   clearColor?: readonly [number, number, number, number];
+  frameState?: FrameState;
 }>;
 
 export type VolumePassItem = Readonly<{
@@ -1339,6 +1350,7 @@ const builtInUnlitProgram: MaterialProgram = {
   fragmentEntryPoint: 'fsMain',
   usesMaterialBindings: true,
   usesTransformBindings: true,
+  usesFrameBindings: true,
   programBindings: [{
     kind: 'uniform',
     group: 1,
@@ -1365,6 +1377,7 @@ const builtInLitProgram: MaterialProgram = {
   fragmentEntryPoint: 'fsMain',
   usesMaterialBindings: true,
   usesTransformBindings: true,
+  usesFrameBindings: true,
   programBindings: [
     {
       kind: 'uniform',
@@ -1431,6 +1444,7 @@ const builtInTexturedUnlitProgram: MaterialProgram = {
   fragmentEntryPoint: 'fsMain',
   usesMaterialBindings: true,
   usesTransformBindings: true,
+  usesFrameBindings: true,
   programBindings: [
     {
       kind: 'uniform',
@@ -1489,6 +1503,7 @@ const builtInTexturedLitProgram: MaterialProgram = {
   fragmentEntryPoint: 'fsMain',
   usesMaterialBindings: true,
   usesTransformBindings: true,
+  usesFrameBindings: true,
   programBindings: [
     {
       kind: 'uniform',
@@ -2177,6 +2192,11 @@ const getProgramBindingDescriptors = (
   program.programBindings ?? program.materialBindings ??
     (program.usesMaterialBindings ? defaultMaterialBindings : []);
 
+const hasExplicitFrameBindingDescriptor = (program: MaterialProgram): boolean =>
+  getProgramBindingDescriptors(program).some((descriptor) =>
+    getProgramBindingGroup(descriptor) === 0 && descriptor.binding === 1
+  );
+
 const getMaterialBindingDescriptors = (
   program: MaterialProgram,
 ): readonly MaterialBindingDescriptor[] =>
@@ -2834,6 +2854,7 @@ const resolveForwardRenderOptions = (
       postProcessPasses,
       extension: {},
       clearColor: [0.02, 0.02, 0.03, 1],
+      frameState: {},
     };
   }
 
@@ -2842,6 +2863,7 @@ const resolveForwardRenderOptions = (
     postProcessPasses: materialRegistryOrOptions.postProcessPasses ?? [],
     extension: materialRegistryOrOptions.extension ?? {},
     clearColor: materialRegistryOrOptions.clearColor ?? [0.02, 0.02, 0.03, 1],
+    frameState: materialRegistryOrOptions.frameState ?? {},
   };
 };
 
@@ -4128,6 +4150,7 @@ const renderForwardMeshPass = (
   context: GpuRenderExecutionContext,
   pass: GPURenderPassEncoder,
   residency: RuntimeResidency,
+  frameState: FrameState,
   nodes: readonly EvaluatedScene['nodes'][number][],
   materialRegistry: MaterialRegistry,
   format: GPUTextureFormat,
@@ -4143,6 +4166,14 @@ const renderForwardMeshPass = (
 ): number => {
   let drawCount = 0;
   const environmentBrdfLut = ensureForwardEnvironmentBrdfLut(context, residency);
+  const frameUniformData = createFrameUniformData(frameState);
+  const frameUniformBuffer = context.device.createBuffer({
+    label: `forward-frame-uniforms:${passKind}`,
+    size: frameUniformData.byteLength,
+    usage: uniformUsage | bufferCopyDstUsage,
+  });
+  transientBuffers.push(frameUniformBuffer);
+  context.queue.writeBuffer(frameUniformBuffer, 0, toBufferSource(frameUniformData));
 
   for (const node of nodes) {
     const mesh = node.mesh;
@@ -4222,12 +4253,22 @@ const renderForwardMeshPass = (
       const transformBindGroup = context.device.createBindGroup({
         label: `${node.node.id}:transform-bind-group`,
         layout: pipeline.getBindGroupLayout(0),
-        entries: [{
-          binding: 0,
-          resource: {
-            buffer: transformBuffer,
+        entries: [
+          {
+            binding: 0,
+            resource: {
+              buffer: transformBuffer,
+            },
           },
-        }],
+          ...(program.usesFrameBindings
+            ? [{
+              binding: 1,
+              resource: {
+                buffer: frameUniformBuffer,
+              },
+            }]
+            : []),
+        ],
       });
       pass.setBindGroup(0, transformBindGroup);
     }
@@ -4563,7 +4604,13 @@ export const ensureMaterialPipeline = (
   const programBindings = getProgramBindingDescriptors(preparedProgram.program);
   const bindGroupDescriptors = new Map<number, MaterialBindingDescriptor[]>();
   if (preparedProgram.program.usesTransformBindings) {
-    bindGroupDescriptors.set(0, [{ kind: 'uniform', group: 0, binding: 0 }]);
+    bindGroupDescriptors.set(0, [
+      { kind: 'uniform', group: 0, binding: 0 },
+      ...((preparedProgram.program.usesFrameBindings &&
+          !hasExplicitFrameBindingDescriptor(preparedProgram.program))
+        ? [{ kind: 'uniform', group: 0, binding: 1 } as const]
+        : []),
+    ]);
   }
   for (const descriptor of programBindings) {
     const group = getProgramBindingGroup(descriptor);
@@ -5028,6 +5075,14 @@ const createForwardMeshTransformUniformData = (
   Float32Array.from([
     ...worldMatrix.slice(0, 16),
     ...viewProjectionMatrix.slice(0, 16),
+  ]);
+
+const createFrameUniformData = (frameState: FrameState = {}): Float32Array =>
+  Float32Array.from([
+    typeof frameState.timeMs === 'number' ? frameState.timeMs : 0,
+    typeof frameState.deltaTimeMs === 'number' ? frameState.deltaTimeMs : 0,
+    typeof frameState.frameIndex === 'number' ? frameState.frameIndex : 0,
+    0,
   ]);
 
 const createForwardLitMeshTransformUniformData = (
@@ -5910,6 +5965,7 @@ export const renderForwardFrame = (
   context: GpuRenderExecutionContext,
   binding: RenderContextBinding,
   residency: RuntimeResidency,
+  frameState: FrameState,
   evaluatedScene: EvaluatedScene,
   materialRegistryOrOptions: MaterialRegistry | ForwardRenderOptions = createMaterialRegistry(),
   postProcessPasses: readonly PostProcessPass[] = [],
@@ -5919,12 +5975,14 @@ export const renderForwardFrame = (
     context,
     binding,
     residency,
+    frameState,
     evaluatedScene,
     options.materialRegistry,
     options.postProcessPasses,
     {
       clearColor: options.clearColor,
       extension: options.extension,
+      frameState: options.frameState ?? frameState,
     },
   );
 };
@@ -5933,6 +5991,7 @@ const renderForwardFrameInternal = (
   context: GpuRenderExecutionContext,
   binding: RenderContextBinding,
   residency: RuntimeResidency,
+  frameState: FrameState,
   evaluatedScene: EvaluatedScene,
   materialRegistry = createMaterialRegistry(),
   postProcessPasses: readonly PostProcessPass[] = [],
@@ -5943,6 +6002,7 @@ const renderForwardFrameInternal = (
     raymarchCamera?: RaymarchCamera;
     extension?: ForwardSceneExtension;
     clearColor?: readonly [number, number, number, number];
+    frameState?: FrameState;
   }> = {},
 ): ForwardRenderResult => {
   assertRendererSceneCapabilities(
@@ -6056,6 +6116,7 @@ const renderForwardFrameInternal = (
     context,
     pass,
     residency,
+    options.frameState ?? frameState,
     forwardOpaqueNodes,
     materialRegistry,
     binding.target.format,
@@ -6089,6 +6150,7 @@ const renderForwardFrameInternal = (
       context,
       transparentPass,
       residency,
+      options.frameState ?? frameState,
       forwardTransparentNodes,
       materialRegistry,
       binding.target.format,
@@ -6699,6 +6761,7 @@ export const renderDeferredFrame = (
       context,
       forwardLitPass,
       residency,
+      { timeMs: evaluatedScene.timeMs },
       evaluatedScene.nodes.filter((node) => forwardFallbackNodeIds.has(node.node.id)),
       materialRegistry,
       binding.target.format,
@@ -7188,6 +7251,7 @@ export const renderUberFrame = (
       context,
       forwardOpaquePass,
       residency,
+      { timeMs: evaluatedScene.timeMs },
       partitions.forwardOpaque,
       materialRegistry,
       binding.target.format,
@@ -7221,6 +7285,7 @@ export const renderUberFrame = (
       context,
       forwardTransparentPass,
       residency,
+      { timeMs: evaluatedScene.timeMs },
       partitions.forwardTransparent,
       materialRegistry,
       binding.target.format,
@@ -7419,6 +7484,7 @@ export const renderForwardSnapshot = async (
     context,
     binding,
     residency,
+    { timeMs: evaluatedScene.timeMs },
     evaluatedScene,
     materialRegistry,
     postProcessPasses,
@@ -7559,6 +7625,7 @@ export const renderForwardCubemapSnapshot = async (
       context,
       binding,
       residency,
+      { timeMs: evaluatedScene.timeMs },
       evaluatedScene,
       materialRegistry,
       postProcessPasses,

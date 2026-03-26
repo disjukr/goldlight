@@ -9,7 +9,7 @@ import {
   createQuaternionFromEulerDegrees,
   getMeshBounds,
 } from '@goldlight/core';
-import { initializeWindow, type WindowSceneProps } from '@goldlight/desktop';
+import { initializeWindow } from '@goldlight/desktop';
 import type { MeshPrimitive } from '@goldlight/ir';
 import { importPlyFromText } from '@goldlight/importers';
 import { G3dDirectionalLight, G3dPerspectiveCamera } from '@goldlight/react/reconciler';
@@ -39,7 +39,7 @@ const lightRotation = createQuaternionFromEulerDegrees(-42, -36, 0);
 const bunnyRotationDegreesPerSecond = 60;
 const maxRotationDeltaMs = 100;
 
-const BunnyScene = (_props: WindowSceneProps) => {
+const BunnyScene = () => {
   const [yawDegrees, setYawDegrees] = React.useState(22);
 
   React.useEffect(() => {

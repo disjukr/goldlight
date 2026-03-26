@@ -63,6 +63,7 @@ export type GoldlightWindow = Readonly<{
 
 type CoalescedWindowEvents = Readonly<{
   resized?: DesktopWindowEvent;
+  scaleFactorChanged?: DesktopWindowEvent;
   focusChanged?: DesktopWindowEvent;
   pointerMoved?: DesktopWindowEvent;
 }>;
@@ -110,9 +111,11 @@ const resizeDesktopSurface = (
   width: number,
   height: number,
 ): void => {
-  surface.resize(width, height);
-  (surfaceInfo as { width: number; height: number }).width = width;
-  (surfaceInfo as { width: number; height: number }).height = height;
+  const physicalWidth = Math.max(1, Math.round(width * surfaceInfo.scaleFactor));
+  const physicalHeight = Math.max(1, Math.round(height * surfaceInfo.scaleFactor));
+  surface.resize(physicalWidth, physicalHeight);
+  (surfaceInfo as { width: number; height: number }).width = physicalWidth;
+  (surfaceInfo as { width: number; height: number }).height = physicalHeight;
 };
 
 const flushCoalescedWindowEvents = (
@@ -127,6 +130,9 @@ const flushCoalescedWindowEvents = (
 
   if (pending.resized) {
     events.push(pending.resized);
+  }
+  if (pending.scaleFactorChanged) {
+    events.push(pending.scaleFactorChanged);
   }
   if (pending.focusChanged) {
     events.push(pending.focusChanged);
@@ -159,6 +165,14 @@ const coalesceDesktopWindowEvents = (
         pendingByWindowId.set(event.windowId, {
           ...pending,
           focusChanged: event,
+        });
+        break;
+      }
+      case 'scale-factor-changed': {
+        const pending = pendingByWindowId.get(event.windowId) ?? {};
+        pendingByWindowId.set(event.windowId, {
+          ...pending,
+          scaleFactorChanged: event,
         });
         break;
       }
@@ -203,6 +217,10 @@ export const createDesktopWindow = (
   runtime.addEventListener('resize', (event) => {
     const detail = (event as CustomEvent<{ width: number; height: number }>).detail;
     resizeDesktopSurface(surface, surfaceInfo, detail.width, detail.height);
+  });
+  runtime.addEventListener('scalefactorchange', (event) => {
+    const detail = (event as CustomEvent<{ scaleFactor: number }>).detail;
+    (surfaceInfo as { scaleFactor: number }).scaleFactor = detail.scaleFactor;
   });
 
   return {

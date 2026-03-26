@@ -156,7 +156,7 @@ ensureSceneMeshResidency(gpuContext, residency, scene, evaluatedScene);
 ensureSceneTextureResidency(gpuContext, residency, scene, assetSource);
 
 const drawFrame = () => {
-  renderForwardFrame(gpuContext, surface, residency, evaluatedScene, materialRegistry);
+  renderForwardFrame(gpuContext, surface, residency, {}, evaluatedScene, materialRegistry);
   requestAnimationFrame(drawFrame);
 };
 

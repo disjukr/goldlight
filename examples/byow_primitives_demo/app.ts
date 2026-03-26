@@ -315,7 +315,7 @@ export default async ({ window }: DesktopModuleContext): Promise<() => void> => 
     const animatedScene = createPrimitiveScene(timeMs);
     const evaluatedScene = evaluateScene(animatedScene, { timeMs });
     ensureSceneMaterialResidency(gpuContext, residency, evaluatedScene);
-    renderForwardFrame(gpuContext, binding, residency, evaluatedScene, materialRegistry);
+    renderForwardFrame(gpuContext, binding, residency, { timeMs }, evaluatedScene, materialRegistry);
     window.present();
     frameHandle = requestAnimationFrame(drawFrame);
   };

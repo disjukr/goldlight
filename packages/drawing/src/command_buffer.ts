@@ -178,6 +178,7 @@ const createStepClipTextureBindGroup = (
       resources.clipTextureView ?? undefined,
       dstTextureView,
       resources.sampledTextureView ?? undefined,
+      resources.sampledTextureFilter,
     );
 
 const createDstSnapshotView = (
@@ -275,10 +276,12 @@ const encodePreparedStep = (
   pass.setBindGroup(2, commandResources.gradientBindGroup);
   pass.setBindGroup(3, clipTextureBindGroup);
 
-  if (resources.vertexBuffer && resources.vertexCount > 0) {
-    pass.setVertexBuffer(0, resources.vertexBuffer);
+  if (resources.vertexCount > 0) {
+    if (resources.vertexBuffer) {
+      pass.setVertexBuffer(0, resources.vertexBuffer);
+    }
     if (resources.instanceBuffer) {
-      pass.setVertexBuffer(1, resources.instanceBuffer);
+      pass.setVertexBuffer(resources.vertexBuffer ? 1 : 0, resources.instanceBuffer);
     }
     pass.draw(resources.vertexCount, resources.instanceCount);
   }

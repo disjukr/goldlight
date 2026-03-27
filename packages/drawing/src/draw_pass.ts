@@ -47,7 +47,7 @@ export type DrawingVertexLayoutKey =
   | 'wedge-patch-instance'
   | 'curve-patch-instance'
   | 'stroke-patch-instance'
-  | 'text-vertex';
+  | 'text-instance';
 
 export type DrawingDepthStencilKey =
   | 'none'
@@ -1342,17 +1342,21 @@ const getPipelineDescsForDraw = (
       return [createPipelineDesc(
         usesStencilClip ? 'drawing-text-bitmap-clip-cover' : 'drawing-text-bitmap-cover',
         'bitmap-text',
-        'text-vertex',
+        'text-instance',
         pipelineBlendMode,
         usesStencilClip ? 'clip-cover' : 'direct',
+        false,
+        'triangle-strip',
       )];
     case 'sdfText':
       return [createPipelineDesc(
         usesStencilClip ? 'drawing-text-sdf-clip-cover' : 'drawing-text-sdf-cover',
         'sdf-text',
-        'text-vertex',
+        'text-instance',
         pipelineBlendMode,
         usesStencilClip ? 'clip-cover' : 'direct',
+        false,
+        'triangle-strip',
       )];
   }
 };

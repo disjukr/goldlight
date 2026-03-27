@@ -47,6 +47,7 @@ export type DawnResourceProvider = Readonly<{
     clipTextureView?: GPUTextureView,
     dstTextureView?: GPUTextureView,
     sampledTextureView?: GPUTextureView,
+    sampledTextureFilter?: GPUFilterMode,
   ) => GPUBindGroup;
   createGraphicsPipelineHandle: (
     descriptor: DrawingGraphicsPipelineDesc,
@@ -397,6 +398,7 @@ struct StepUniform {
   gradientColor7: vec4<f32>,
   shaderLocalMatrix0: vec4<f32>,
   shaderLocalMatrix1: vec4<f32>,
+  textInfo: vec4<f32>,
 };
 `;
 
@@ -1961,17 +1963,34 @@ struct VertexOut {
 };
 
 @vertex
-fn vs_main(@location(0) position: vec2<f32>, @location(1) uv: vec2<f32>) -> VertexOut {
+fn vs_main(
+  @builtin(vertex_index) vertexIndex: u32,
+  @location(0) size: vec2<f32>,
+  @location(1) uvPos: vec2<f32>,
+  @location(2) xyPos: vec2<f32>,
+  @location(3) indexAndFlags: vec2<f32>,
+  @location(4) strikeToSourceScale: f32,
+) -> VertexOut {
+  let unitCorner = vec2<f32>(f32(vertexIndex >> 1u), f32(vertexIndex & 1u));
+  let localPosition = xyPos + (unitCorner * size * strikeToSourceScale);
+  let devicePosition = vec2<f32>(
+    (step.matrix0.x * localPosition.x) + (step.matrix0.z * localPosition.y) + step.matrix1.x,
+    (step.matrix0.y * localPosition.x) + (step.matrix0.w * localPosition.y) + step.matrix1.y,
+  );
   var out: VertexOut;
-  out.position = vec4<f32>((position * viewport.scale) + viewport.translate, step.matrix1.w, 1.0);
-  out.devicePosition = position;
-  out.uv = uv;
+  out.position = vec4<f32>(
+    (devicePosition * viewport.scale) + viewport.translate,
+    step.matrix1.w,
+    1.0,
+  );
+  out.devicePosition = devicePosition;
+  out.uv = (uvPos + (unitCorner * size)) * step.textInfo.xy;
   return out;
 }
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
-  let coverage = textureSample(textTexture, textSampler, in.uv).a * clip_coverage(in.devicePosition);
+  let coverage = textureSample(textTexture, textSampler, in.uv).r * clip_coverage(in.devicePosition);
   var color = apply_clip_shader(paint_shader_color(in.devicePosition));
   color.a *= coverage;
   return blend_with_dst(color, in.devicePosition);
@@ -1999,18 +2018,35 @@ struct VertexOut {
 };
 
 @vertex
-fn vs_main(@location(0) position: vec2<f32>, @location(1) uv: vec2<f32>) -> VertexOut {
+fn vs_main(
+  @builtin(vertex_index) vertexIndex: u32,
+  @location(0) size: vec2<f32>,
+  @location(1) uvPos: vec2<f32>,
+  @location(2) xyPos: vec2<f32>,
+  @location(3) indexAndFlags: vec2<f32>,
+  @location(4) strikeToSourceScale: f32,
+) -> VertexOut {
+  let unitCorner = vec2<f32>(f32(vertexIndex >> 1u), f32(vertexIndex & 1u));
+  let localPosition = xyPos + (unitCorner * size * strikeToSourceScale);
+  let devicePosition = vec2<f32>(
+    (step.matrix0.x * localPosition.x) + (step.matrix0.z * localPosition.y) + step.matrix1.x,
+    (step.matrix0.y * localPosition.x) + (step.matrix0.w * localPosition.y) + step.matrix1.y,
+  );
   var out: VertexOut;
-  out.position = vec4<f32>((position * viewport.scale) + viewport.translate, step.matrix1.w, 1.0);
-  out.devicePosition = position;
-  out.uv = uv;
+  out.position = vec4<f32>(
+    (devicePosition * viewport.scale) + viewport.translate,
+    step.matrix1.w,
+    1.0,
+  );
+  out.devicePosition = devicePosition;
+  out.uv = (uvPos + (unitCorner * size)) * step.textInfo.xy;
   return out;
 }
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
-  let distance = textureSample(textTexture, textSampler, in.uv).a;
-  let coverage = smoothstep(step.shaderParams0.x, step.shaderParams0.y, distance) *
+  let distance = textureSample(textTexture, textSampler, in.uv).r;
+  let coverage = smoothstep(step.textInfo.z, step.textInfo.w, distance) *
     clip_coverage(in.devicePosition);
   var color = apply_clip_shader(paint_shader_color(in.devicePosition));
   color.a *= coverage;
@@ -2167,11 +2203,15 @@ export const createDawnResourceProvider = (
     ],
   });
 
-  const createTextVertexLayout = (): GPUVertexBufferLayout => ({
-    arrayStride: floatBytes * 4,
+  const createTextInstanceLayout = (): GPUVertexBufferLayout => ({
+    arrayStride: floatBytes * 9,
+    stepMode: 'instance',
     attributes: [
-      { shaderLocation: 0, offset: 0, format: 'float32x2' },
+      { shaderLocation: 0, offset: floatBytes * 0, format: 'float32x2' },
       { shaderLocation: 1, offset: floatBytes * 2, format: 'float32x2' },
+      { shaderLocation: 2, offset: floatBytes * 4, format: 'float32x2' },
+      { shaderLocation: 3, offset: floatBytes * 6, format: 'float32x2' },
+      { shaderLocation: 4, offset: floatBytes * 8, format: 'float32' },
     ],
   });
 
@@ -2408,8 +2448,8 @@ export const createDawnResourceProvider = (
       ? [createPatchResolveVertexLayout(), createWedgePatchInstanceLayout()]
       : descriptor.vertexLayout === 'curve-patch-instance'
       ? [createPatchResolveVertexLayout(), createCurvePatchInstanceLayout()]
-      : descriptor.vertexLayout === 'text-vertex'
-      ? [createTextVertexLayout()]
+      : descriptor.vertexLayout === 'text-instance'
+      ? [createTextInstanceLayout()]
       : [createStrokePatchLayout()];
 
   const getDepthStencil = (
@@ -2572,7 +2612,12 @@ export const createDawnResourceProvider = (
           },
         }],
       }),
-    createClipTextureBindGroup: (clipTextureView, dstTextureView, sampledTextureView) =>
+    createClipTextureBindGroup: (
+      clipTextureView,
+      dstTextureView,
+      sampledTextureView,
+      sampledTextureFilter = 'linear',
+    ) =>
       backend.device.createBindGroup({
         label: 'drawing-clip-texture-bind-group',
         layout: getClipTextureBindGroupLayout(),
@@ -2605,8 +2650,8 @@ export const createDawnResourceProvider = (
             binding: 4,
             resource: provider.createSampler({
               label: 'drawing-sampled-texture-sampler',
-              magFilter: 'linear',
-              minFilter: 'linear',
+              magFilter: sampledTextureFilter,
+              minFilter: sampledTextureFilter,
             }),
           },
           {

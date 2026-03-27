@@ -318,17 +318,20 @@ export type DrawingPreparedPathStroke = Readonly<{
   usesStencil: boolean;
 }>;
 
-export type DrawingPreparedTextAtlasGlyph = Readonly<{
+export type DrawingPreparedTextGlyphInstance = Readonly<{
   glyphID: number;
   mask: NonNullable<DrawDirectMaskTextCommand['glyphs'][number]['mask']>;
-  quadBounds: Rect;
+  size: readonly [number, number];
+  xyPos: readonly [number, number];
+  indexAndFlags: readonly [number, number];
+  strikeToSourceScale: number;
 }>;
 
 export type DrawingPreparedDirectMaskText = Readonly<{
   kind: 'directMaskText';
   renderer: DrawingRenderer;
   triangles: readonly Point2d[];
-  glyphs: readonly DrawingPreparedTextAtlasGlyph[];
+  glyphs: readonly DrawingPreparedTextGlyphInstance[];
   color: readonly [number, number, number, number];
   shader?: DrawingPreparedShader;
   blendMode: DrawingBlendMode;
@@ -347,7 +350,7 @@ export type DrawingPreparedSdfText = Readonly<{
   renderer: DrawingRenderer;
   triangles: readonly Point2d[];
   glyphs: readonly (
-    & DrawingPreparedTextAtlasGlyph
+    & DrawingPreparedTextGlyphInstance
     & Readonly<{
       sdfInset: number;
       sdfRadius: number;
@@ -4959,6 +4962,7 @@ export const prepareDrawingTextCommand = (
   );
 
   if (command.kind === 'drawDirectMaskText') {
+    const glyphBounds: Rect[] = [];
     const glyphs = command.glyphs
       .filter((glyph): glyph is typeof glyph & { mask: NonNullable<typeof glyph.mask> } =>
         Boolean(glyph.mask)
@@ -4971,13 +4975,17 @@ export const prepareDrawingTextCommand = (
             height: glyph.mask.height,
           },
         };
+        glyphBounds.push(transformRectBounds(localBounds, command.transform));
         return {
           glyphID: glyph.glyphID,
           mask: glyph.mask,
-          quadBounds: transformRectBounds(localBounds, command.transform),
+          size: [glyph.mask.width, glyph.mask.height] as const,
+          xyPos: [localBounds.origin[0], localBounds.origin[1]] as const,
+          indexAndFlags: [0, 0] as const,
+          strikeToSourceScale: glyph.strikeToSourceScale ?? 1,
         };
       });
-    const bounds = unionTextBounds(glyphs.map((glyph) => glyph.quadBounds));
+    const bounds = unionTextBounds(glyphBounds);
     if (!bounds) {
       return { supported: false, reason: 'direct mask text resolved to no drawable glyph masks' };
     }
@@ -5003,6 +5011,7 @@ export const prepareDrawingTextCommand = (
     };
   }
 
+  const glyphBounds: Rect[] = [];
   const glyphs = command.glyphs
     .filter((glyph): glyph is typeof glyph & { sdf: NonNullable<typeof glyph.sdf> } =>
       Boolean(glyph.sdf)
@@ -5015,15 +5024,19 @@ export const prepareDrawingTextCommand = (
           height: glyph.sdf.height,
         },
       };
+      glyphBounds.push(transformRectBounds(localBounds, command.transform));
       return {
         glyphID: glyph.glyphID,
         mask: glyph.sdf,
-        quadBounds: transformRectBounds(localBounds, command.transform),
+        size: [glyph.sdf.width, glyph.sdf.height] as const,
+        xyPos: [localBounds.origin[0], localBounds.origin[1]] as const,
+        indexAndFlags: [0, 0] as const,
+        strikeToSourceScale: glyph.strikeToSourceScale ?? 1,
         sdfInset: glyph.sdfInset,
         sdfRadius: glyph.sdfRadius,
       };
     });
-  const bounds = unionTextBounds(glyphs.map((glyph) => glyph.quadBounds));
+  const bounds = unionTextBounds(glyphBounds);
   if (!bounds) {
     return { supported: false, reason: 'sdf text resolved to no drawable glyph masks' };
   }

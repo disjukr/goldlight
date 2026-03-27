@@ -41,6 +41,7 @@ import {
   prepareDrawingRecording,
   pushDrawingClipStackSave,
   recordClear,
+  recordDrawDirectMaskText,
   recordDrawPath,
   recordDrawShape,
   restoreDrawingRecorder,
@@ -999,6 +1000,45 @@ Deno.test('drawing prepared recording groups clear and prepared steps into passe
   assertEquals(prepared.passes[1]?.loadOp, 'clear');
   assertEquals(prepared.passes[1]?.steps.length, 0);
   assertEquals(prepared.unsupportedCommands.length, 0);
+});
+
+Deno.test('dawn text preparation uses Graphite-style instanced quad draws', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  recordDrawDirectMaskText(
+    recorder,
+    [{
+      glyphID: 7,
+      x: 18,
+      y: 32,
+      mask: {
+        width: 12,
+        height: 16,
+        stride: 12,
+        format: 'a8',
+        offsetX: -1,
+        offsetY: -14,
+        pixels: new Uint8Array(12 * 16).fill(255),
+      },
+      strikeToSourceScale: 1,
+    }],
+    { color: [1, 1, 1, 1] },
+  );
+
+  const prepared = prepareDawnRecording(
+    drawingContext.sharedContext,
+    finishDrawingRecorder(recorder),
+  );
+  const pass = prepared.resources.tasks[0]!.passes[0]!;
+  const step = pass.steps[0]!;
+
+  assertEquals(step.vertexCount, 4);
+  assertEquals(step.instanceCount, 1);
+  assertEquals(step.vertexBuffer, null);
+  assertEquals(step.instanceBuffer !== null, true);
+  assertEquals(mock.created.textures.some((descriptor) => descriptor.format === 'r8unorm'), true);
 });
 
 Deno.test('drawing prepared recording preserves supported coeff blend modes', () => {

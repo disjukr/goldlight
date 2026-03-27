@@ -250,6 +250,7 @@ export type DrawingDirectMaskGlyph = Readonly<{
   x: number;
   y: number;
   mask: DrawingGlyphMask | null;
+  strikeToSourceScale?: number;
 }>;
 
 export type DrawingSdfGlyph = Readonly<{
@@ -260,6 +261,7 @@ export type DrawingSdfGlyph = Readonly<{
   sdf: DrawingGlyphMask | null;
   sdfInset: number;
   sdfRadius: number;
+  strikeToSourceScale?: number;
 }>;
 
 export type DrawingStrokeStyle = Readonly<{

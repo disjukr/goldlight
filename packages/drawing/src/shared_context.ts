@@ -9,9 +9,11 @@ import {
 } from './renderer_provider.ts';
 import { createDawnResourceProvider, type DawnResourceProvider } from './resource_provider.ts';
 import type { DawnBackendContext } from './dawn_backend_context.ts';
+import { createDawnTextAtlasManager, type DawnTextAtlasManager } from './text_atlas_manager.ts';
 
 export type DawnAtlasProvider = Readonly<{
   getClipAtlasManager: () => DawnClipAtlasManager;
+  getTextAtlasManager: () => DawnTextAtlasManager;
 }>;
 
 export type DawnSharedContext = Readonly<{
@@ -113,6 +115,7 @@ export const createDawnSharedContext = (
     resourceBudget: options.resourceBudget,
   });
   const clipAtlasManager = createDawnClipAtlasManager(backend, resourceProvider);
+  const textAtlasManager = createDawnTextAtlasManager(backend, resourceProvider);
   return {
     backend,
     caps,
@@ -121,6 +124,7 @@ export const createDawnSharedContext = (
     threadSafeResourceProvider: resourceProvider,
     atlasProvider: {
       getClipAtlasManager: () => clipAtlasManager,
+      getTextAtlasManager: () => textAtlasManager,
     },
     queueManager: createDawnQueueManager(backend),
     noopFragmentShader: createNoopFragmentShader(backend),

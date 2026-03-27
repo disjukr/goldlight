@@ -1,8 +1,9 @@
 import { exportPngRgba } from '@goldlight/exporters';
 import { createOffscreenBinding, readOffscreenSnapshot } from '@goldlight/gpu';
-import { createRect, createRectPath2d } from '@goldlight/geometry';
+import { createRect, createRectPath2d, type Matrix2d } from '@goldlight/geometry';
 import {
   checkForFinishedDawnQueueWork,
+  concatDrawingRecorderTransform,
   encodeDawnCommandBuffer,
   finishDrawingRecorder,
   recordClear,
@@ -24,13 +25,13 @@ import {
 } from '@goldlight/text';
 
 const outputWidth = 1280;
-const outputHeight = 900;
+const outputHeight = 980;
 const supersampleScale = 2;
 const panelWidth = 360;
 const panelHeight = 220;
 const panelGap = 36;
 const panelOriginX = 72;
-const panelOriginY = 110;
+const panelOriginY = 108;
 const panelPaddingX = 28;
 
 type ModeSummary = Readonly<{
@@ -40,6 +41,13 @@ type ModeSummary = Readonly<{
 }>;
 
 type Recorder = ReturnType<Awaited<ReturnType<typeof requestDrawingContext>>['createRecorder']>;
+
+const createRotationMatrix2d = (degrees: number): Matrix2d => {
+  const radians = degrees * (Math.PI / 180);
+  const cosine = Math.cos(radians);
+  const sine = Math.sin(radians);
+  return [cosine, sine, -sine, cosine, 0, 0];
+};
 
 const downsampleRgba = (
   bytes: Uint8Array,
@@ -98,14 +106,6 @@ const matchCandidateTypeface = (
   return null;
 };
 
-const translateSupersampled = (
-  recorder: Recorder,
-  x: number,
-  y: number,
-): void => {
-  translateDrawingRecorder(recorder, x, y);
-};
-
 const recordPanelFrame = (
   recorder: Recorder,
   x: number,
@@ -148,10 +148,23 @@ const recordPathText = (
     language,
   });
   saveDrawingRecorder(recorder);
-  translateSupersampled(recorder, x, y);
+  translateDrawingRecorder(recorder, x, y);
   recordPathFallbackRun(host, recorder, run, { color });
   restoreDrawingRecorder(recorder);
   return run;
+};
+
+const recordRotatedText = (
+  recorder: Recorder,
+  origin: readonly [number, number],
+  degrees: number,
+  draw: () => void,
+) => {
+  saveDrawingRecorder(recorder);
+  translateDrawingRecorder(recorder, origin[0], origin[1]);
+  concatDrawingRecorderTransform(recorder, createRotationMatrix2d(degrees));
+  draw();
+  restoreDrawingRecorder(recorder);
 };
 
 export const renderDrawingTextModesSnapshot = async (): Promise<
@@ -229,21 +242,21 @@ export const renderDrawingTextModesSnapshot = async (): Promise<
   recordPanelFrame(recorder, fallbackX, panelOriginY, [0.35, 0.54, 0.94, 1]);
 
   saveDrawingRecorder(recorder);
-  translateSupersampled(recorder, directX + panelPaddingX, panelOriginY + 150);
+  translateDrawingRecorder(recorder, directX + panelPaddingX, panelOriginY + 150);
   recordDirectMaskSubRun(recorder, directSubRun, {
     color: [0.96, 0.95, 0.9, 1],
   });
   restoreDrawingRecorder(recorder);
 
   saveDrawingRecorder(recorder);
-  translateSupersampled(recorder, sdfX + panelPaddingX, panelOriginY + 150);
+  translateDrawingRecorder(recorder, sdfX + panelPaddingX, panelOriginY + 150);
   recordSdfSubRun(recorder, sdfSubRun, {
     color: [0.96, 0.95, 0.9, 1],
   });
   restoreDrawingRecorder(recorder);
 
   saveDrawingRecorder(recorder);
-  translateSupersampled(recorder, fallbackX + panelPaddingX, panelOriginY + 178);
+  translateDrawingRecorder(recorder, fallbackX + panelPaddingX, panelOriginY + 178);
   recordPathFallbackRun(textHost, recorder, fallbackRun, {
     color: [0.96, 0.95, 0.9, 1],
   });
@@ -345,28 +358,28 @@ export const renderDrawingTextModesSnapshot = async (): Promise<
   );
 
   saveDrawingRecorder(recorder);
-  translateSupersampled(recorder, comparisonColumnXs[0], comparisonTop + 52);
+  translateDrawingRecorder(recorder, comparisonColumnXs[0], comparisonTop + 52);
   recordDirectMaskSubRun(recorder, a8EnglishSubRun1, { color: comparisonColors[0] });
   restoreDrawingRecorder(recorder);
   saveDrawingRecorder(recorder);
-  translateSupersampled(recorder, comparisonColumnXs[0], comparisonTop + 88);
+  translateDrawingRecorder(recorder, comparisonColumnXs[0], comparisonTop + 88);
   recordDirectMaskSubRun(recorder, a8EnglishSubRun2, { color: comparisonColors[0] });
   restoreDrawingRecorder(recorder);
   saveDrawingRecorder(recorder);
-  translateSupersampled(recorder, comparisonColumnXs[0], comparisonTop + 142);
+  translateDrawingRecorder(recorder, comparisonColumnXs[0], comparisonTop + 142);
   recordDirectMaskSubRun(recorder, a8KoreanSubRun, { color: comparisonColors[0] });
   restoreDrawingRecorder(recorder);
 
   saveDrawingRecorder(recorder);
-  translateSupersampled(recorder, comparisonColumnXs[1], comparisonTop + 52);
+  translateDrawingRecorder(recorder, comparisonColumnXs[1], comparisonTop + 52);
   recordSdfSubRun(recorder, sdfEnglishSubRun1, { color: comparisonColors[1] });
   restoreDrawingRecorder(recorder);
   saveDrawingRecorder(recorder);
-  translateSupersampled(recorder, comparisonColumnXs[1], comparisonTop + 88);
+  translateDrawingRecorder(recorder, comparisonColumnXs[1], comparisonTop + 88);
   recordSdfSubRun(recorder, sdfEnglishSubRun2, { color: comparisonColors[1] });
   restoreDrawingRecorder(recorder);
   saveDrawingRecorder(recorder);
-  translateSupersampled(recorder, comparisonColumnXs[1], comparisonTop + 142);
+  translateDrawingRecorder(recorder, comparisonColumnXs[1], comparisonTop + 142);
   recordSdfSubRun(recorder, sdfKoreanSubRun, { color: comparisonColors[1] });
   restoreDrawingRecorder(recorder);
 
@@ -403,6 +416,78 @@ export const renderDrawingTextModesSnapshot = async (): Promise<
     comparisonColors[2],
     'ko',
   );
+
+  const transformedBandTop = 760;
+  recordDrawPath(
+    recorder,
+    createRectPath2d(createRect(96, transformedBandTop - 44, outputWidth - 192, 2)),
+    {
+      style: 'fill',
+      color: [0.22, 0.24, 0.29, 1],
+    },
+  );
+  recordPathText(
+    textHost,
+    recorder,
+    latinMatch.typeface,
+    'Affine group transform',
+    22,
+    104,
+    transformedBandTop - 10,
+    comparisonLabelColor,
+    'en',
+  );
+
+  recordRotatedText(recorder, [180, transformedBandTop + 92], -12, () => {
+    recordDirectMaskSubRun(
+      recorder,
+      buildDirectMaskSubRun(
+        textHost,
+        textHost.shapeText({
+          typeface: latinMatch.typeface,
+          text: 'Rotated A8 atlas',
+          size: 30,
+          language: 'en',
+        }),
+      ),
+      {
+        color: comparisonColors[0],
+      },
+    );
+  });
+  recordRotatedText(recorder, [520, transformedBandTop + 108], 10, () => {
+    recordSdfSubRun(
+      recorder,
+      buildSdfSubRun(
+        textHost,
+        textHost.shapeText({
+          typeface: hangulMatch.typeface,
+          text: '회전 SDF 텍스트',
+          size: 32,
+          language: 'ko',
+        }),
+        { inset: 8, radius: 8 },
+      ),
+      {
+        color: comparisonColors[1],
+      },
+    );
+  });
+  recordRotatedText(recorder, [892, transformedBandTop + 110], -9, () => {
+    recordPathFallbackRun(
+      textHost,
+      recorder,
+      textHost.shapeText({
+        typeface: latinMatch.typeface,
+        text: 'Path fallback transform',
+        size: 28,
+        language: 'en',
+      }),
+      {
+        color: comparisonColors[2],
+      },
+    );
+  });
 
   const recording = finishDrawingRecorder(recorder);
   textHost.close();

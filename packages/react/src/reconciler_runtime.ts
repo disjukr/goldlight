@@ -1,6 +1,7 @@
 import React, { type ReactNode } from 'npm:react@19.2.0';
 import type { DrawingBlendMode } from '@goldlight/drawing';
 import type { Matrix2d, Path2d } from '@goldlight/geometry';
+import type { TextDirection, TextHost } from '@goldlight/text';
 
 import type {
   AnimationClipJsxProps,
@@ -67,8 +68,9 @@ export type Reconciler2dSceneProps = Readonly<{
   viewportHeight?: number;
   textureWidth?: number;
   textureHeight?: number;
-  outputTextureId: string;
+  outputTextureId?: string;
   clearColor?: readonly [number, number, number, number];
+  textHost?: TextHost;
   children?: ReactNode;
 }>;
 
@@ -110,6 +112,25 @@ export type Reconciler2dCircleProps = Readonly<
     cy: number;
     radius: number;
     segments?: number;
+  } & Reconciler2dPaintProps
+>;
+
+export type Reconciler2dGlyphMode = 'a8' | 'sdf' | 'path';
+
+export type Reconciler2dGlyphProps = Readonly<
+  {
+    text: string;
+    x: number;
+    y: number;
+    fontSize: number;
+    fontFamily?: string | readonly string[];
+    direction?: TextDirection;
+    language?: string;
+    scriptTag?: string;
+    mode?: Reconciler2dGlyphMode;
+    textHost?: TextHost;
+    sdfInset?: number;
+    sdfRadius?: number;
   } & Reconciler2dPaintProps
 >;
 
@@ -239,6 +260,7 @@ declare global {
       'g2d-path': WithJsxKey<Reconciler2dPathProps>;
       'g2d-rect': WithJsxKey<Reconciler2dRectProps>;
       'g2d-circle': WithJsxKey<Reconciler2dCircleProps>;
+      'g2d-glyphs': WithJsxKey<Reconciler2dGlyphProps>;
     }
   }
 }

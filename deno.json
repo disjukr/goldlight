@@ -76,6 +76,8 @@
     "example:byow:helmet-pathtraced:run": "deno run -A --unstable-ffi --unstable-webgpu --unstable-raw-imports ./scripts/run_byow_example.ts ./examples/byow_helmet_pathtraced_demo/main.ts",
     "example:byow:react-bunny:check": "deno check --unstable-ffi --unstable-webgpu --unstable-raw-imports ./examples/byow_react_bunny_demo/main.tsx",
     "example:byow:react-bunny:run": "deno run -A --unstable-ffi --unstable-webgpu --unstable-raw-imports ./scripts/run_byow_example.ts ./examples/byow_react_bunny_demo/main.tsx",
+    "example:byow:react-glyphs:check": "deno check --unstable-ffi --unstable-webgpu --unstable-raw-imports ./examples/byow_react_glyphs_demo/main.tsx ./examples/byow_react_glyphs_demo/app.tsx",
+    "example:byow:react-glyphs:run": "deno run -A --unstable-ffi --unstable-webgpu --unstable-raw-imports ./scripts/run_byow_example.ts ./examples/byow_react_glyphs_demo/main.tsx",
     "example:browser:build": "deno bundle --platform browser --unstable-raw-imports -o ./examples/browser_forward/dist/main.js ./examples/browser_forward/main.ts",
     "example:browser:react:build": "deno bundle --platform browser --unstable-raw-imports -o ./examples/browser_react_authoring/dist/main.js ./examples/browser_react_authoring/main.tsx",
     "example:browser:textured:build": "deno bundle --platform browser --unstable-raw-imports -o ./examples/browser_textured_forward/dist/main.js ./examples/browser_textured_forward/main.ts",

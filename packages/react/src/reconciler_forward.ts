@@ -1,4 +1,5 @@
 import {
+  acquireColorAttachmentView,
   createOffscreenBinding,
   ensureSceneMeshResidency,
   ensureSceneTextureResidency,
@@ -18,6 +19,7 @@ import {
   type DrawingContext,
   encodeDawnCommandBuffer,
   finishDrawingRecorder,
+  scaleDrawingRecorder,
 } from '@goldlight/drawing';
 import type {
   ForwardRenderResult,
@@ -40,6 +42,7 @@ import type { React2dScene, React3dScene, React3dSceneRoot } from './reconciler.
 type React3dSceneRootLike =
   & React3dSceneRoot
   & Readonly<{
+    getRootType: () => 'g3d-scene' | 'g2d-scene' | undefined;
     get2dScenes: () => readonly React2dScene[];
     get3dScenes: () => readonly React3dScene[];
     getRootClearColor: () => readonly [number, number, number, number] | undefined;
@@ -92,7 +95,40 @@ type Scene3dRuntimeState = {
   renderedRevision?: number;
 };
 
+type Root2dPresentResources = {
+  pipeline: GPURenderPipeline;
+  sampler: GPUSampler;
+};
+
 const surfaceTextureFormat = 'rgba8unorm' as const;
+const root2dPresentShaderSource = /* wgsl */ `
+struct VertexOutput {
+  @builtin(position) position : vec4f,
+  @location(0) uv : vec2f,
+};
+
+@vertex
+fn vs_main(@builtin(vertex_index) vertexIndex : u32) -> VertexOutput {
+  var positions = array<vec2f, 3>(
+    vec2f(-1.0, -3.0),
+    vec2f(-1.0,  1.0),
+    vec2f( 3.0,  1.0),
+  );
+  let xy = positions[vertexIndex];
+  var out : VertexOutput;
+  out.position = vec4f(xy, 0.0, 1.0);
+  out.uv = 0.5 * vec2f(xy.x + 1.0, 1.0 - xy.y);
+  return out;
+}
+
+@group(0) @binding(0) var presentSampler : sampler;
+@group(0) @binding(1) var presentTexture : texture_2d<f32>;
+
+@fragment
+fn fs_main(in : VertexOutput) -> @location(0) vec4f {
+  return textureSample(presentTexture, presentSampler, in.uv);
+}
+`;
 
 const create2dSceneTarget = (
   adapter: GpuContext['adapter'],
@@ -248,6 +284,38 @@ const create3dSceneTextureResidency = (
   format: state.target.format,
 });
 
+const createRoot2dPresentResources = (
+  device: GPUDevice,
+  targetFormat: GPUTextureFormat,
+): Root2dPresentResources => {
+  const shaderModule = device.createShaderModule({
+    label: 'react-root-g2d-present-shader',
+    code: root2dPresentShaderSource,
+  });
+  const pipeline = device.createRenderPipeline({
+    label: 'react-root-g2d-present-pipeline',
+    layout: 'auto',
+    vertex: {
+      module: shaderModule,
+      entryPoint: 'vs_main',
+    },
+    fragment: {
+      module: shaderModule,
+      entryPoint: 'fs_main',
+      targets: [{ format: targetFormat }],
+    },
+    primitive: {
+      topology: 'triangle-list',
+    },
+  });
+  const sampler = device.createSampler({
+    label: 'react-root-g2d-present-sampler',
+    magFilter: 'linear',
+    minFilter: 'linear',
+  });
+  return { pipeline, sampler };
+};
+
 export type ReactSceneRootForwardFrameResult = SceneRootForwardFrameResult;
 
 export const createReactSceneRootForwardRenderer = (
@@ -256,6 +324,11 @@ export const createReactSceneRootForwardRenderer = (
 ): SceneRootForwardRenderer => {
   const scene2dRuntimeStates = new Map<string, Scene2dRuntimeState>();
   const scene3dRuntimeStates = new Map<string, Scene3dRuntimeState>();
+  let root2dRuntimeState: Scene2dRuntimeState | undefined;
+  const root2dPresentResources = createRoot2dPresentResources(
+    options.context.device,
+    options.binding.target.format,
+  );
   let currentFrameState: FrameState = createFrameState({
     viewportWidth: options.binding.target.width,
     viewportHeight: options.binding.target.height,
@@ -277,6 +350,114 @@ export const createReactSceneRootForwardRenderer = (
       ) => {
         currentFrameState = frameState;
         currentTimeMs = frameState.timeMs;
+        if (sceneRoot.getRootType() === 'g2d-scene') {
+          const rootScene2d = sceneRoot.get2dScenes()[0];
+          if (!rootScene2d) {
+            return {
+              drawCount: 0,
+              submittedCommandBufferCount: 0,
+            };
+          }
+          const rootTargetWidth = rootScene2d.usesBindingTextureSize
+            ? Math.max(1, options.binding.target.width)
+            : rootScene2d.textureWidth;
+          const rootTargetHeight = rootScene2d.usesBindingTextureSize
+            ? Math.max(1, options.binding.target.height)
+            : rootScene2d.textureHeight;
+          const rootTargetMsaaSampleCount = resolveSupportedMsaaSampleCount(
+            options.context.adapter,
+            rootScene2d.msaaSampleCount,
+          );
+          root2dRuntimeState = root2dRuntimeState &&
+              root2dRuntimeState.target.width === rootTargetWidth &&
+              root2dRuntimeState.target.height === rootTargetHeight &&
+              root2dRuntimeState.target.msaaSampleCount === rootTargetMsaaSampleCount
+            ? ((root2dRuntimeState.scene2d = rootScene2d), root2dRuntimeState)
+            : (() => {
+              if (root2dRuntimeState) {
+                destroySurfaceRuntimeState(root2dRuntimeState);
+              }
+              const target: OffscreenTarget = {
+                kind: 'offscreen',
+                width: rootTargetWidth,
+                height: rootTargetHeight,
+                format: surfaceTextureFormat,
+                msaaSampleCount: rootTargetMsaaSampleCount,
+              };
+              const surfaceContext: GpuContext = {
+                adapter: options.context.adapter,
+                device: options.context.device,
+                queue: options.context.queue,
+                target,
+              };
+              return {
+                scene2d: rootScene2d,
+                target,
+                binding: createOffscreenBinding(surfaceContext),
+                drawingContext: createDrawingContextFromGpuContext(surfaceContext),
+                sampler: options.context.device.createSampler({
+                  label: `${rootScene2d.id}:g2d-scene-sampler`,
+                  magFilter: 'linear',
+                  minFilter: 'linear',
+                }),
+              };
+            })();
+          const recorder = root2dRuntimeState.drawingContext.createRecorder();
+          const nestedFrameState: FrameState = {
+            ...currentFrameState,
+            viewportWidth: rootScene2d.viewportWidth,
+            viewportHeight: rootScene2d.viewportHeight,
+          };
+          const scaleX = root2dRuntimeState.target.width / Math.max(1, rootScene2d.viewportWidth);
+          const scaleY = root2dRuntimeState.target.height / Math.max(1, rootScene2d.viewportHeight);
+          if (Math.abs(scaleX - 1) > 1e-5 || Math.abs(scaleY - 1) > 1e-5) {
+            scaleDrawingRecorder(recorder, scaleX, scaleY);
+          }
+          rootScene2d.draw(recorder, nestedFrameState);
+          const recording = finishDrawingRecorder(recorder);
+          const offscreenCommandBuffer = encodeDawnCommandBuffer(
+            root2dRuntimeState.drawingContext.sharedContext,
+            recording,
+            root2dRuntimeState.binding,
+          );
+          const encoder = context.device.createCommandEncoder({
+            label: 'react-root-g2d-present-encoder',
+          });
+          const pass = encoder.beginRenderPass({
+            label: 'react-root-g2d-present-pass',
+            colorAttachments: [{
+              view: acquireColorAttachmentView({ device: context.device }, binding),
+              clearValue: {
+                r: sceneRoot.getRootClearColor()?.[0] ?? 0,
+                g: sceneRoot.getRootClearColor()?.[1] ?? 0,
+                b: sceneRoot.getRootClearColor()?.[2] ?? 0,
+                a: sceneRoot.getRootClearColor()?.[3] ?? 0,
+              },
+              loadOp: 'clear',
+              storeOp: 'store',
+            }],
+          });
+          const bindGroup = context.device.createBindGroup({
+            label: 'react-root-g2d-present-bind-group',
+            layout: root2dPresentResources.pipeline.getBindGroupLayout(0),
+            entries: [
+              { binding: 0, resource: root2dPresentResources.sampler },
+              { binding: 1, resource: root2dRuntimeState.binding.view },
+            ],
+          });
+          pass.setPipeline(root2dPresentResources.pipeline);
+          pass.setBindGroup(0, bindGroup);
+          pass.draw(3);
+          pass.end();
+          const presentCommandBuffer = encoder.finish({
+            label: 'react-root-g2d-present-command-buffer',
+          });
+          context.queue.submit([offscreenCommandBuffer.commandBuffer, presentCommandBuffer]);
+          return {
+            drawCount: recording.commands.length,
+            submittedCommandBufferCount: 2,
+          };
+        }
         const activeScene3dIds = new Set<string>();
         for (const scene3d of sceneRoot.get3dScenes()) {
           activeScene3dIds.add(scene3d.id);
@@ -319,7 +500,17 @@ export const createReactSceneRootForwardRenderer = (
           const state = syncSurfaceRuntimeState(options.context, scene2dRuntimeStates, scene2d);
           if (state.renderedRevision !== scene2d.revision) {
             const recorder = state.drawingContext.createRecorder();
-            scene2d.draw(recorder, currentFrameState);
+            const nestedFrameState: FrameState = {
+              ...currentFrameState,
+              viewportWidth: scene2d.viewportWidth,
+              viewportHeight: scene2d.viewportHeight,
+            };
+            const scaleX = state.target.width / Math.max(1, scene2d.viewportWidth);
+            const scaleY = state.target.height / Math.max(1, scene2d.viewportHeight);
+            if (Math.abs(scaleX - 1) > 1e-5 || Math.abs(scaleY - 1) > 1e-5) {
+              scaleDrawingRecorder(recorder, scaleX, scaleY);
+            }
+            scene2d.draw(recorder, nestedFrameState);
             const recording = finishDrawingRecorder(recorder);
             const commandBuffer = encodeDawnCommandBuffer(
               state.drawingContext.sharedContext,
@@ -386,6 +577,10 @@ export const createReactSceneRootForwardRenderer = (
       return baseRenderer.renderFrame(frameState, frameOptions);
     },
     dispose: () => {
+      if (root2dRuntimeState) {
+        destroySurfaceRuntimeState(root2dRuntimeState);
+        root2dRuntimeState = undefined;
+      }
       for (const state of scene2dRuntimeStates.values()) {
         destroySurfaceRuntimeState(state);
       }

@@ -174,17 +174,6 @@ const drawAnalyticAntialiasInverse = (recorder: DrawingRecorder): void => {
   });
 };
 
-const downsampleRgba = (
-  bytes: Uint8Array,
-  width: number,
-  height: number,
-): Uint8Array => {
-  if (width === outputWidth && height === outputHeight) {
-    return bytes;
-  }
-  throw new Error('Unexpected snapshot size');
-};
-
 export const renderAaaSnapshot = async (): Promise<
   Readonly<{
     png: Uint8Array;
@@ -198,7 +187,7 @@ export const renderAaaSnapshot = async (): Promise<
       width: outputWidth,
       height: outputHeight,
       format: 'rgba8unorm',
-      msaaSampleCount: 4,
+      msaaSampleCount: 1,
     },
   });
 
@@ -231,7 +220,7 @@ export const renderAaaSnapshot = async (): Promise<
     png: exportPngRgba({
       width: outputWidth,
       height: outputHeight,
-      bytes: downsampleRgba(snapshot.bytes, snapshot.width, snapshot.height),
+      bytes: snapshot.bytes,
     }),
     passCount: commandBuffer.passCount,
     unsupportedCommandCount: commandBuffer.unsupportedCommands.length,

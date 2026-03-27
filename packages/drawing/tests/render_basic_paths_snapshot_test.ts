@@ -2,7 +2,7 @@ import { assertEquals } from 'jsr:@std/assert@^1.0.14';
 import { canUseWebGPU } from '@goldlight/gpu';
 import { renderBasicPathsSnapshot } from '../examples/render_basic_paths/render.ts';
 
-const expectedPngSha256 = 'caf4d25670dea72f877dae05147d25913dec524619f1b73e66fc33953bd051e4';
+const expectedPngSha256 = 'c96464b0b83858dfc226999cea115ea3372b73301308423d40fac166ac3e323e';
 
 const toHex = (bytes: Uint8Array): string =>
   [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');

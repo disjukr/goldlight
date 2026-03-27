@@ -9,7 +9,6 @@ import {
   recordDrawPath,
   requestDrawingContext,
   saveDrawingRecorder,
-  scaleDrawingRecorder,
   submitToDawnQueueManager,
 } from '@goldlight/drawing';
 
@@ -19,7 +18,6 @@ const numRows = 9;
 const padSize = 10;
 const outputWidth = numColumns * (cellSize + padSize);
 const outputHeight = numRows * (cellSize + padSize);
-const supersampleScale = 4;
 
 type GradientStop = Readonly<{
   offset: number;
@@ -76,45 +74,6 @@ const gradientCases: readonly (readonly GradientStop[])[] = [
   ]),
 ];
 
-const downsampleRgba = (
-  bytes: Uint8Array,
-  width: number,
-  height: number,
-  scale: number,
-): Uint8Array => {
-  const nextWidth = Math.floor(width / scale);
-  const nextHeight = Math.floor(height / scale);
-  const downsampled = new Uint8Array(nextWidth * nextHeight * 4);
-
-  for (let y = 0; y < nextHeight; y += 1) {
-    for (let x = 0; x < nextWidth; x += 1) {
-      let r = 0;
-      let g = 0;
-      let b = 0;
-      let a = 0;
-      for (let sampleY = 0; sampleY < scale; sampleY += 1) {
-        for (let sampleX = 0; sampleX < scale; sampleX += 1) {
-          const sourceX = (x * scale) + sampleX;
-          const sourceY = (y * scale) + sampleY;
-          const sourceOffset = ((sourceY * width) + sourceX) * 4;
-          r += bytes[sourceOffset];
-          g += bytes[sourceOffset + 1];
-          b += bytes[sourceOffset + 2];
-          a += bytes[sourceOffset + 3];
-        }
-      }
-      const targetOffset = ((y * nextWidth) + x) * 4;
-      const sampleCount = scale * scale;
-      downsampled[targetOffset] = Math.round(r / sampleCount);
-      downsampled[targetOffset + 1] = Math.round(g / sampleCount);
-      downsampled[targetOffset + 2] = Math.round(b / sampleCount);
-      downsampled[targetOffset + 3] = Math.round(a / sampleCount);
-    }
-  }
-
-  return downsampled;
-};
-
 export const renderFillrectGradientSnapshot = async (): Promise<
   Readonly<{
     png: Uint8Array;
@@ -125,10 +84,10 @@ export const renderFillrectGradientSnapshot = async (): Promise<
   const drawingContext = await requestDrawingContext({
     target: {
       kind: 'offscreen',
-      width: outputWidth * supersampleScale,
-      height: outputHeight * supersampleScale,
+      width: outputWidth,
+      height: outputHeight,
       format: 'rgba8unorm',
-      msaaSampleCount: 4,
+      msaaSampleCount: 1,
     },
   });
 
@@ -136,7 +95,6 @@ export const renderFillrectGradientSnapshot = async (): Promise<
   const recorder = drawingContext.createRecorder();
 
   saveDrawingRecorder(recorder);
-  scaleDrawingRecorder(recorder, supersampleScale, supersampleScale);
 
   recordClear(recorder, [1, 1, 1, 1]);
 
@@ -178,18 +136,12 @@ export const renderFillrectGradientSnapshot = async (): Promise<
     { device: drawingContext.backend.device, queue: drawingContext.backend.queue },
     binding,
   );
-  const downsampled = downsampleRgba(
-    snapshot.bytes,
-    snapshot.width,
-    snapshot.height,
-    supersampleScale,
-  );
 
   return {
     png: exportPngRgba({
       width: outputWidth,
       height: outputHeight,
-      bytes: downsampled,
+      bytes: snapshot.bytes,
     }),
     passCount: commandBuffer.passCount,
     unsupportedCommandCount: commandBuffer.unsupportedCommands.length,

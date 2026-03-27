@@ -21,12 +21,21 @@ import type {
 import { normalizeCameraJsxProps, normalizeNodeProps } from './authoring.ts';
 import type {
   Reconciler2dCircleProps,
+  Reconciler2dGlyphProps,
   Reconciler2dGroupProps,
   Reconciler2dPathProps,
   Reconciler2dRectProps,
   Reconciler2dSceneProps,
   Reconciler3dSceneProps,
 } from './reconciler_runtime.ts';
+import {
+  buildDirectMaskSubRun,
+  buildSdfSubRun,
+  recordDirectMaskSubRun,
+  recordPathFallbackRun,
+  recordSdfSubRun,
+  type TextHost,
+} from '@goldlight/text';
 import { createG3dSceneRootCommit, type G3dSceneRootSubscriber } from './scene_root.ts';
 import type { SceneIr, TextureRef } from '@goldlight/ir';
 import type { DrawingPaint, DrawingRecorder } from '@goldlight/drawing';
@@ -72,6 +81,7 @@ type HostIntrinsicType =
   | 'g2d-path'
   | 'g2d-rect'
   | 'g2d-circle'
+  | 'g2d-glyphs'
   | 'g3d-asset'
   | 'g3d-texture'
   | 'g3d-material'
@@ -88,6 +98,7 @@ const supportedIntrinsicTypes = new Set<HostIntrinsicType>([
   'g2d-path',
   'g2d-rect',
   'g2d-circle',
+  'g2d-glyphs',
   'g3d-asset',
   'g3d-texture',
   'g3d-material',
@@ -105,6 +116,7 @@ type HostPropsByType = {
   'g2d-path': Reconciler2dPathProps;
   'g2d-rect': Reconciler2dRectProps;
   'g2d-circle': Reconciler2dCircleProps;
+  'g2d-glyphs': Reconciler2dGlyphProps;
   'g3d-asset': AssetJsxProps;
   'g3d-texture': TextureJsxProps;
   'g3d-material': MaterialJsxProps;
@@ -210,6 +222,12 @@ type Circle2dHostInstance = {
   children: HostChild[];
 };
 
+type Glyph2dHostInstance = {
+  readonly type: 'g2d-glyphs';
+  props: HostPropsWithoutChildren<'g2d-glyphs'>;
+  children: HostChild[];
+};
+
 type ResourceHostInstance =
   | AssetHostInstance
   | TextureHostInstance
@@ -228,12 +246,14 @@ type HostChild =
   | Path2dHostInstance
   | Rect2dHostInstance
   | Circle2dHostInstance
+  | Glyph2dHostInstance
   | ResourceHostInstance;
 type RootHostInstance = SceneHostInstance | Scene2dHostInstance;
 type HostInstance = RootHostInstance | HostChild;
 export type React2dScene = Readonly<{
   id: string;
   textureId: string;
+  usesBindingTextureSize: boolean;
   msaaSampleCount: number;
   viewportWidth: number;
   viewportHeight: number;
@@ -279,6 +299,7 @@ export type React3dSceneRoot = Readonly<{
   render: (element: ReactNode) => SceneIr | undefined;
   flushUpdates: (work?: () => void) => void;
   unmount: () => void;
+  getRootType: () => 'g3d-scene' | 'g2d-scene' | undefined;
   getScene: () => SceneIr | undefined;
   get2dScenes: () => readonly React2dScene[];
   get3dScenes: () => readonly React3dScene[];
@@ -422,7 +443,18 @@ const syncHostSubtreeRevision = (instance: HostInstance): number => {
   return state.subtreeRevision;
 };
 
-const get2dSceneTextureId = (props: Reconciler2dSceneProps): string => props.outputTextureId;
+const get2dSceneTextureId = (
+  props: Reconciler2dSceneProps,
+  nested: boolean,
+): string => {
+  if (props.outputTextureId) {
+    return props.outputTextureId;
+  }
+  if (nested) {
+    throw new Error('<g2d-scene> requires outputTextureId when used as a nested scene');
+  }
+  return `__root_g2d_scene_texture__:${props.id}`;
+};
 const get3dSceneTextureId = (props: Reconciler3dSceneProps): string => {
   if (!props.outputTextureId) {
     throw new Error('<g3d-scene> requires outputTextureId when used as a nested scene');
@@ -431,7 +463,7 @@ const get3dSceneTextureId = (props: Reconciler3dSceneProps): string => {
 };
 
 const create2dSceneTextureRef = (props: Reconciler2dSceneProps): TextureRef => ({
-  id: get2dSceneTextureId(props),
+  id: get2dSceneTextureId(props, true),
   semantic: 'baseColor',
   colorSpace: 'srgb',
   sampler: 'linear',
@@ -441,7 +473,8 @@ const create2dPaint = (
   props:
     | Reconciler2dPathProps
     | Reconciler2dRectProps
-    | Reconciler2dCircleProps,
+    | Reconciler2dCircleProps
+    | Reconciler2dGlyphProps,
 ): DrawingPaint => ({
   color: props.color,
   blendMode: props.blendMode,
@@ -454,7 +487,114 @@ const create2dPaint = (
   dashOffset: props.dashOffset,
 });
 
-const render2dChild = (recorder: DrawingRecorder, child: HostChild): void => {
+const resolve2dGlyphTextHost = (
+  sceneProps: Reconciler2dSceneProps,
+  props: Reconciler2dGlyphProps,
+  frameState: FrameState,
+): TextHost => {
+  const fromScene = sceneProps.textHost;
+  if (fromScene) {
+    return fromScene;
+  }
+  const fromProps = props.textHost;
+  if (fromProps) {
+    return fromProps;
+  }
+  const frameTextHost = frameState.textHost;
+  if (
+    frameTextHost &&
+    typeof frameTextHost === 'object' &&
+    'shapeText' in frameTextHost &&
+    typeof frameTextHost.shapeText === 'function'
+  ) {
+    return frameTextHost as TextHost;
+  }
+  throw new Error(
+    '<g2d-glyphs> requires a TextHost via <g2d-scene textHost={...}> or frameState.textHost',
+  );
+};
+
+const resolve2dGlyphTypeface = (host: TextHost, props: Reconciler2dGlyphProps): bigint => {
+  const families = props.fontFamily === undefined
+    ? []
+    : Array.isArray(props.fontFamily)
+    ? props.fontFamily
+    : [props.fontFamily];
+  for (const family of families) {
+    const typeface = host.matchTypeface({ family });
+    if (typeface !== null) {
+      return typeface;
+    }
+  }
+  const defaultTypeface = host.matchTypeface({});
+  if (defaultTypeface !== null) {
+    return defaultTypeface;
+  }
+  const firstFamily = host.listFamilies()[0];
+  if (firstFamily) {
+    const fallbackTypeface = host.matchTypeface({ family: firstFamily });
+    if (fallbackTypeface !== null) {
+      return fallbackTypeface;
+    }
+  }
+  throw new Error('<g2d-glyphs> could not resolve a typeface');
+};
+
+const render2dGlyph = (
+  recorder: DrawingRecorder,
+  sceneProps: Reconciler2dSceneProps,
+  props: Reconciler2dGlyphProps,
+  frameState: FrameState,
+): void => {
+  const host = resolve2dGlyphTextHost(sceneProps, props, frameState);
+  const typeface = resolve2dGlyphTypeface(host, props);
+  const run = host.shapeText({
+    typeface,
+    text: props.text,
+    size: props.fontSize,
+    direction: props.direction,
+    language: props.language,
+    scriptTag: props.scriptTag,
+  });
+  const paint = create2dPaint(props);
+  if ((props.mode ?? 'a8') === 'path') {
+    recordPathFallbackRun(host, recorder, {
+      typeface: run.typeface,
+      size: run.size,
+      glyphIDs: run.glyphIDs,
+      positions: run.positions.map((value, index) =>
+        index % 2 === 0 ? value + props.x : value + props.y
+      ),
+      offsets: run.offsets,
+    }, paint);
+    return;
+  }
+  const translatedRun = {
+    ...run,
+    positions: run.positions.map((value, index) =>
+      index % 2 === 0 ? value + props.x : value + props.y
+    ),
+  };
+  if ((props.mode ?? 'a8') === 'sdf') {
+    recordSdfSubRun(
+      recorder,
+      buildSdfSubRun(host, translatedRun, {
+        inset: props.sdfInset,
+        radius: props.sdfRadius,
+      }),
+      paint,
+    );
+    return;
+  }
+  recordDirectMaskSubRun(recorder, buildDirectMaskSubRun(host, translatedRun), paint);
+};
+
+const render2dChild = (
+  recorder: DrawingRecorder,
+  child: HostChild,
+  sceneProps: Reconciler2dSceneProps,
+  frameState: FrameState,
+): void => {
   switch (child.type) {
     case 'g2d-group':
       saveDrawingRecorder(recorder);
@@ -462,7 +602,7 @@ const render2dChild = (recorder: DrawingRecorder, child: HostChild): void => {
         concatDrawingRecorderTransform(recorder, child.props.transform);
       }
       for (const grandChild of child.children) {
-        render2dChild(recorder, grandChild);
+        render2dChild(recorder, grandChild, sceneProps, frameState);
       }
       restoreDrawingRecorder(recorder);
       return;
@@ -497,6 +637,12 @@ const render2dChild = (recorder: DrawingRecorder, child: HostChild): void => {
         create2dPaint(child.props),
       );
       return;
+    case 'g2d-glyphs':
+      if (child.children.length > 0) {
+        throw new Error('<g2d-glyphs> does not support children');
+      }
+      render2dGlyph(recorder, sceneProps, child.props, frameState);
+      return;
     case 'g2d-scene':
       throw new Error('nested <g2d-scene> is not supported');
     default:
@@ -508,10 +654,10 @@ const create2dSceneDraw = (
   props: Reconciler2dSceneProps,
   children: readonly HostChild[],
 ): React2dScene['draw'] => {
-  return (recorder, _frameState) => {
+  return (recorder, frameState) => {
     recordClear(recorder, props.clearColor ?? [0, 0, 0, 0]);
     for (const child of children) {
-      render2dChild(recorder, child);
+      render2dChild(recorder, child, props, frameState);
     }
   };
 };
@@ -520,14 +666,23 @@ const create2dSceneDescriptor = (
   props: Reconciler2dSceneProps,
   children: readonly HostChild[],
   revision: number,
+  options: Readonly<{
+    nested: boolean;
+    defaultViewportWidth: number;
+    defaultViewportHeight: number;
+    defaultTextureWidth: number;
+    defaultTextureHeight: number;
+  }>,
 ): React2dScene => ({
   id: props.id,
-  textureId: get2dSceneTextureId(props),
+  textureId: get2dSceneTextureId(props, options.nested),
+  usesBindingTextureSize: !options.nested && props.textureWidth === undefined &&
+    props.textureHeight === undefined,
   msaaSampleCount: props.msaaSampleCount ?? 1,
-  viewportWidth: props.viewportWidth ?? props.textureWidth ?? default2dSceneTextureSize,
-  viewportHeight: props.viewportHeight ?? props.textureHeight ?? default2dSceneTextureSize,
-  textureWidth: props.textureWidth ?? default2dSceneTextureSize,
-  textureHeight: props.textureHeight ?? default2dSceneTextureSize,
+  viewportWidth: props.viewportWidth ?? props.textureWidth ?? options.defaultViewportWidth,
+  viewportHeight: props.viewportHeight ?? props.textureHeight ?? options.defaultViewportHeight,
+  textureWidth: props.textureWidth ?? options.defaultTextureWidth,
+  textureHeight: props.textureHeight ?? options.defaultTextureHeight,
   revision,
   draw: create2dSceneDraw(props, children),
 });
@@ -619,6 +774,7 @@ const renderer = Reconciler({
       & HostPropsWithoutChildren<'g2d-path'>
       & HostPropsWithoutChildren<'g2d-rect'>
       & HostPropsWithoutChildren<'g2d-circle'>
+      & HostPropsWithoutChildren<'g2d-glyphs'>
       & HostPropsWithoutChildren<'g3d-asset'>
       & HostPropsWithoutChildren<'g3d-texture'>
       & HostPropsWithoutChildren<'g3d-material'>
@@ -729,6 +885,13 @@ const createHostInstance = (
     return initializeHostRevisionState({
       type: intrinsicType,
       props: normalizedProps as HostPropsWithoutChildren<'g2d-circle'>,
+      children: [],
+    });
+  }
+  if (intrinsicType === 'g2d-glyphs') {
+    return initializeHostRevisionState({
+      type: intrinsicType,
+      props: normalizedProps as HostPropsWithoutChildren<'g2d-glyphs'>,
       children: [],
     });
   }
@@ -923,6 +1086,13 @@ const reconcile3DSceneSnapshot = (
         child.props,
         child.children,
         getHostSubtreeRevision(child),
+        {
+          nested: true,
+          defaultViewportWidth: default2dSceneTextureSize,
+          defaultViewportHeight: default2dSceneTextureSize,
+          defaultTextureWidth: default2dSceneTextureSize,
+          defaultTextureHeight: default2dSceneTextureSize,
+        },
       );
       scenes2d.push(scene2d);
       visitedResourceIds.texture.add(scene2d.textureId);
@@ -938,6 +1108,7 @@ const reconcile3DSceneSnapshot = (
       case 'g2d-path':
       case 'g2d-rect':
       case 'g2d-circle':
+      case 'g2d-glyphs':
         throw new Error(`<${child.type}> must be placed inside <g2d-scene>`);
       case 'g3d-asset':
         visitedResourceIds.asset.add(child.props.id);
@@ -1040,17 +1211,20 @@ const syncContainerSceneDocument = (container: HostContainer): void => {
       rootInstance.props,
       rootInstance.children,
       rootSubtreeRevision,
+      {
+        nested: false,
+        defaultViewportWidth: container.runtimeRootViewportWidth,
+        defaultViewportHeight: container.runtimeRootViewportHeight,
+        defaultTextureWidth: container.runtimeRootViewportWidth,
+        defaultTextureHeight: container.runtimeRootViewportHeight,
+      },
     );
-    upsertG3dSceneDocumentResource(document, {
-      kind: 'texture',
-      value: create2dSceneTextureRef(rootInstance.props),
-    });
     applyG3dSceneDocumentScene(document, { id: rootInstance.props.id });
     for (const nodeId of [...document.nodes.order].reverse()) {
       removeG3dSceneDocumentNode(document, nodeId);
     }
     sweepUnvisitedResourceIds(document, 'asset', new Set());
-    sweepUnvisitedResourceIds(document, 'texture', new Set([scene2d.textureId]));
+    sweepUnvisitedResourceIds(document, 'texture', new Set());
     sweepUnvisitedResourceIds(document, 'material', new Set());
     sweepUnvisitedResourceIds(document, 'light', new Set());
     sweepUnvisitedResourceIds(document, 'mesh', new Set());
@@ -1232,6 +1406,7 @@ export const createReactSceneRoot = (
     render,
     flushUpdates,
     unmount,
+    getRootType: () => container.rootChildren[0]?.type,
     getScene: () => container.currentScene,
     get2dScenes: () => container.current2dScenes,
     get3dScenes: () => container.current3dScenes,

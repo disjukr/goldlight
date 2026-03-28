@@ -20,7 +20,6 @@ const DemoScene = () => (
   <g3d-scene
     id='byow-react-surface2d-demo'
     activeCameraId='camera-main'
-    msaaSampleCount={1}
     clearColor={[0.08, 0.19, 0.26, 1]}
   >
     <DemoFrameDriver />

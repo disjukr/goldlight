@@ -46,7 +46,6 @@ type React3dSceneRootLike =
     get2dScenes: () => readonly React2dScene[];
     get3dScenes: () => readonly React3dScene[];
     getRootClearColor: () => readonly [number, number, number, number] | undefined;
-    getRootMsaaSampleCount: () => number | undefined;
     getRootViewportWidth: () => number;
     getRootViewportHeight: () => number;
     getContentRevision: () => number;
@@ -133,30 +132,33 @@ fn fs_main(in : VertexOutput) -> @location(0) vec4f {
 const create2dSceneTarget = (
   adapter: GpuContext['adapter'],
   scene2d: React2dScene,
+  msaaSampleCount: number,
 ): OffscreenTarget => ({
   kind: 'offscreen',
   width: scene2d.textureWidth,
   height: scene2d.textureHeight,
   format: surfaceTextureFormat,
-  msaaSampleCount: resolveSupportedMsaaSampleCount(adapter, scene2d.msaaSampleCount),
+  msaaSampleCount: resolveSupportedMsaaSampleCount(adapter, msaaSampleCount),
 });
 
 const create3dSceneTarget = (
   adapter: GpuContext['adapter'],
   scene3d: React3dScene,
+  msaaSampleCount: number,
 ): OffscreenTarget => ({
   kind: 'offscreen',
   width: scene3d.textureWidth,
   height: scene3d.textureHeight,
   format: surfaceTextureFormat,
-  msaaSampleCount: resolveSupportedMsaaSampleCount(adapter, scene3d.msaaSampleCount),
+  msaaSampleCount: resolveSupportedMsaaSampleCount(adapter, msaaSampleCount),
 });
 
 const create2dSceneRuntimeState = (
   context: ReactSceneRootForwardRendererOptions['context'],
   scene2d: React2dScene,
+  msaaSampleCount: number,
 ): Scene2dRuntimeState => {
-  const target = create2dSceneTarget(context.adapter, scene2d);
+  const target = create2dSceneTarget(context.adapter, scene2d, msaaSampleCount);
   const surfaceContext: GpuContext = {
     adapter: context.adapter,
     device: context.device,
@@ -179,8 +181,9 @@ const create2dSceneRuntimeState = (
 const create3dSceneRuntimeState = (
   context: ReactSceneRootForwardRendererOptions['context'],
   scene3d: React3dScene,
+  msaaSampleCount: number,
 ): Scene3dRuntimeState => {
-  const target = create3dSceneTarget(context.adapter, scene3d);
+  const target = create3dSceneTarget(context.adapter, scene3d, msaaSampleCount);
   const surfaceContext: GpuContext = {
     adapter: context.adapter,
     device: context.device,
@@ -211,9 +214,10 @@ const syncSurfaceRuntimeState = (
   context: ReactSceneRootForwardRendererOptions['context'],
   runtimeStates: Map<string, Scene2dRuntimeState>,
   scene2d: React2dScene,
+  msaaSampleCount: number,
 ): Scene2dRuntimeState => {
   const current = runtimeStates.get(scene2d.id);
-  const nextTarget = create2dSceneTarget(context.adapter, scene2d);
+  const nextTarget = create2dSceneTarget(context.adapter, scene2d, msaaSampleCount);
   if (
     current &&
     current.target.width === nextTarget.width &&
@@ -227,7 +231,7 @@ const syncSurfaceRuntimeState = (
     destroySurfaceRuntimeState(current);
   }
 
-  const next = create2dSceneRuntimeState(context, scene2d);
+  const next = create2dSceneRuntimeState(context, scene2d, msaaSampleCount);
   runtimeStates.set(scene2d.id, next);
   return next;
 };
@@ -236,9 +240,10 @@ const syncScene3dRuntimeState = (
   context: ReactSceneRootForwardRendererOptions['context'],
   runtimeStates: Map<string, Scene3dRuntimeState>,
   scene3d: React3dScene,
+  msaaSampleCount: number,
 ): Scene3dRuntimeState => {
   const current = runtimeStates.get(scene3d.id);
-  const nextTarget = create3dSceneTarget(context.adapter, scene3d);
+  const nextTarget = create3dSceneTarget(context.adapter, scene3d, msaaSampleCount);
   if (
     current &&
     current.target.width === nextTarget.width &&
@@ -253,7 +258,7 @@ const syncScene3dRuntimeState = (
     destroySurfaceRuntimeState(current);
   }
 
-  const next = create3dSceneRuntimeState(context, scene3d);
+  const next = create3dSceneRuntimeState(context, scene3d, msaaSampleCount);
   runtimeStates.set(scene3d.id, next);
   return next;
 };
@@ -366,7 +371,7 @@ export const createReactSceneRootForwardRenderer = (
             : rootScene2d.textureHeight;
           const rootTargetMsaaSampleCount = resolveSupportedMsaaSampleCount(
             options.context.adapter,
-            rootScene2d.msaaSampleCount,
+            options.msaaSampleCount ?? 1,
           );
           root2dRuntimeState = root2dRuntimeState &&
               root2dRuntimeState.target.width === rootTargetWidth &&
@@ -465,6 +470,7 @@ export const createReactSceneRootForwardRenderer = (
             options.context,
             scene3dRuntimeStates,
             scene3d,
+            options.msaaSampleCount ?? 1,
           );
           if (state.renderedRevision !== scene3d.revision) {
             const nestedFrameState: FrameState = {
@@ -497,7 +503,12 @@ export const createReactSceneRootForwardRenderer = (
         const activeScene2dIds = new Set<string>();
         for (const scene2d of sceneRoot.get2dScenes()) {
           activeScene2dIds.add(scene2d.id);
-          const state = syncSurfaceRuntimeState(options.context, scene2dRuntimeStates, scene2d);
+          const state = syncSurfaceRuntimeState(
+            options.context,
+            scene2dRuntimeStates,
+            scene2d,
+            options.msaaSampleCount ?? 1,
+          );
           if (state.renderedRevision !== scene2d.revision) {
             const recorder = state.drawingContext.createRecorder();
             const nestedFrameState: FrameState = {

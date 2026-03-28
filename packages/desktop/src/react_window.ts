@@ -448,12 +448,7 @@ async (
     ),
   );
   const getEffectiveRendererConfig = (): RendererConfig => {
-    const baseConfig = rendererConfig.handle.getSnapshot();
-    const rootMsaaSampleCount = sceneRoot.getRootMsaaSampleCount();
-    return rootMsaaSampleCount === undefined ? baseConfig : {
-      ...baseConfig,
-      msaaSampleCount: rootMsaaSampleCount,
-    };
+    return rendererConfig.handle.getSnapshot();
   };
   const initialMetrics = windowMetrics.handle.getSnapshot();
   const createTarget = (metrics: WindowMetrics, config: RendererConfig) => ({

@@ -262,7 +262,6 @@ const DemoScene = () => {
   return (
     <g2d-scene
       id='byow-react-glyphs-demo'
-      msaaSampleCount={1}
       clearColor={backgroundColor}
       textHost={demoTextHost}
     >

@@ -256,7 +256,6 @@ export type React2dScene = Readonly<{
   id: string;
   textureId: string;
   usesBindingTextureSize: boolean;
-  msaaSampleCount: number;
   viewportWidth: number;
   viewportHeight: number;
   textureWidth: number;
@@ -267,7 +266,6 @@ export type React2dScene = Readonly<{
 export type React3dScene = Readonly<{
   id: string;
   textureId: string;
-  msaaSampleCount: number;
   viewportWidth: number;
   viewportHeight: number;
   textureWidth: number;
@@ -283,7 +281,6 @@ type HostContainer = {
   current2dScenes: readonly React2dScene[];
   current3dScenes: readonly React3dScene[];
   currentRootClearColor?: readonly [number, number, number, number];
-  currentRootMsaaSampleCount?: number;
   currentRootViewportWidth: number;
   currentRootViewportHeight: number;
   runtimeRootViewportWidth: number;
@@ -306,7 +303,6 @@ export type React3dSceneRoot = Readonly<{
   get2dScenes: () => readonly React2dScene[];
   get3dScenes: () => readonly React3dScene[];
   getRootClearColor: () => readonly [number, number, number, number] | undefined;
-  getRootMsaaSampleCount: () => number | undefined;
   getRootViewportWidth: () => number;
   getRootViewportHeight: () => number;
   setRootViewport: (width: number, height: number) => void;
@@ -785,7 +781,6 @@ const create2dSceneDescriptor = (
   textureId: get2dSceneTextureId(props, options.nested),
   usesBindingTextureSize: !options.nested && props.textureWidth === undefined &&
     props.textureHeight === undefined,
-  msaaSampleCount: props.msaaSampleCount ?? 1,
   viewportWidth: props.viewportWidth ?? props.textureWidth ?? options.defaultViewportWidth,
   viewportHeight: props.viewportHeight ?? props.textureHeight ?? options.defaultViewportHeight,
   textureWidth: props.textureWidth ?? options.defaultTextureWidth,
@@ -808,7 +803,6 @@ const create3dSceneDescriptor = (
 ): React3dScene => ({
   id: props.id,
   textureId: get3dSceneTextureId(props),
-  msaaSampleCount: props.msaaSampleCount ?? 1,
   viewportWidth: props.viewportWidth ?? props.textureWidth ?? default3dSceneTextureSize,
   viewportHeight: props.viewportHeight ?? props.textureHeight ?? default3dSceneTextureSize,
   textureWidth: props.textureWidth ?? default3dSceneTextureSize,
@@ -1283,7 +1277,6 @@ const syncContainerSceneDocument = (container: HostContainer): void => {
     container.current2dScenes = [];
     container.current3dScenes = [];
     container.currentRootClearColor = undefined;
-    container.currentRootMsaaSampleCount = undefined;
     container.currentRootViewportWidth = container.runtimeRootViewportWidth;
     container.currentRootViewportHeight = container.runtimeRootViewportHeight;
     if (previousScene) {
@@ -1343,7 +1336,6 @@ const syncContainerSceneDocument = (container: HostContainer): void => {
     container.current2dScenes = [scene2d];
     container.current3dScenes = [];
     container.currentRootClearColor = undefined;
-    container.currentRootMsaaSampleCount = rootInstance.props.msaaSampleCount;
     container.currentRootViewportWidth = rootInstance.props.viewportWidth ??
       container.runtimeRootViewportWidth;
     container.currentRootViewportHeight = rootInstance.props.viewportHeight ??
@@ -1367,7 +1359,6 @@ const syncContainerSceneDocument = (container: HostContainer): void => {
   container.current2dScenes = snapshot.scenes2d;
   container.current3dScenes = snapshot.scenes3d;
   container.currentRootClearColor = rootInstance.props.clearColor;
-  container.currentRootMsaaSampleCount = rootInstance.props.msaaSampleCount;
   container.currentRootViewportWidth = rootInstance.props.viewportWidth ??
     container.runtimeRootViewportWidth;
   container.currentRootViewportHeight = rootInstance.props.viewportHeight ??
@@ -1388,7 +1379,6 @@ const createRootContainer = (config: CreateReactSceneRootConfig): HostContainer 
   current2dScenes: [],
   current3dScenes: [],
   currentRootClearColor: undefined,
-  currentRootMsaaSampleCount: undefined,
   currentRootViewportWidth: Math.max(1, Math.round(config.rootViewportWidth)),
   currentRootViewportHeight: Math.max(1, Math.round(config.rootViewportHeight)),
   runtimeRootViewportWidth: Math.max(1, Math.round(config.rootViewportWidth)),
@@ -1518,7 +1508,6 @@ export const createReactSceneRoot = (
     get2dScenes: () => container.current2dScenes,
     get3dScenes: () => container.current3dScenes,
     getRootClearColor: () => container.currentRootClearColor,
-    getRootMsaaSampleCount: () => container.currentRootMsaaSampleCount,
     getRootViewportWidth: () => container.currentRootViewportWidth,
     getRootViewportHeight: () => container.currentRootViewportHeight,
     setRootViewport,

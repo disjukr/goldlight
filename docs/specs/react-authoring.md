@@ -97,8 +97,6 @@ This is an intentional part of the contract, not just a demo detail.
 
 ## References
 
-- Snapshot bridge browser example:
-  [`../../examples/browser/react_authoring/README.md`](../../examples/browser/react_authoring/README.md)
 - Live reconciler desktop examples:
   [`../../examples/byow/react_bunny_demo/README.md`](../../examples/byow/react_bunny_demo/README.md),
   [`../../examples/byow/react_surface_2d_in_3d_demo/README.md`](../../examples/byow/react_surface_2d_in_3d_demo/README.md),

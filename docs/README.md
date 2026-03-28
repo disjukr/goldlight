@@ -55,10 +55,7 @@ Use this page as the main navigation hub.
   [`adr/0004-react-jsx-authoring.md`](./adr/0004-react-jsx-authoring.md)
 - Review the accepted React scene update boundary decision:
   [`adr/0006-react-scene-root-bridge.md`](./adr/0006-react-scene-root-bridge.md)
-- Run the browser and native examples, including the textured and custom-material browser workflows:
-  [`../examples/README.md`](../examples/README.md)
-- Review the React authoring browser example with full-scene TSX lowering and scene-root commits:
-  [`../examples/browser/react_authoring/README.md`](../examples/browser/react_authoring/README.md)
+- Run the native and headless examples: [`../examples/README.md`](../examples/README.md)
 - Review the accepted React scene update planning boundary, internal scene-document waypoint, and
   current helper surface: [`specs/react-authoring.md`](./specs/react-authoring.md)
 - Run the headless snapshot PNG workflow:

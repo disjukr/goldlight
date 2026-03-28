@@ -160,12 +160,9 @@ Read in this order when onboarding:
 2. [`docs/specs/scene-ir.md`](./docs/specs/scene-ir.md)
 3. [`docs/specs/runtime-residency.md`](./docs/specs/runtime-residency.md)
 4. [`docs/specs/rendering.md`](./docs/specs/rendering.md)
-5. [`examples/browser/forward/README.md`](./examples/browser/forward/README.md)
-6. [`examples/browser/textured_forward/README.md`](./examples/browser/textured_forward/README.md)
-7. [`examples/browser/react_authoring/README.md`](./examples/browser/react_authoring/README.md)
-8. [`examples/byow/primitives_demo/README.md`](./examples/byow/primitives_demo/README.md)
-9. [`examples/byow/native_demo/README.md`](./examples/byow/native_demo/README.md)
-10. [`examples/headless_snapshot/README.md`](./examples/headless_snapshot/README.md)
+5. [`examples/byow/primitives_demo/README.md`](./examples/byow/primitives_demo/README.md)
+6. [`examples/byow/native_demo/README.md`](./examples/byow/native_demo/README.md)
+7. [`examples/headless_snapshot/README.md`](./examples/headless_snapshot/README.md)
 
 ## Tasks
 
@@ -184,11 +181,6 @@ Read in this order when onboarding:
 - `deno task example:headless:check`: type-check the headless snapshot PNG workflow
 - `deno task example:headless:png`: render a headless frame and write
   `examples/headless_snapshot/out/forward.png`
-- `deno task example:browser:build`: bundle the browser forward-rendering example
-- `deno task example:browser:react:build`: bundle the React authoring browser example
-- `deno task example:browser:textured:build`: bundle the textured browser forward example
-- `deno task example:browser:custom-textured:build`: bundle the custom textured browser example
-- `deno task example:browser:serve`: serve the repository for local browser testing
 - `deno task example:byow:check`: type-check the Windows BYOW native demo
 - `deno task example:byow:run`: open the Windows BYOW native demo
 - `deno task example:byow:triangle:check`: type-check the Windows BYOW triangle smoke test

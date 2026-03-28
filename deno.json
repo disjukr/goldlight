@@ -28,7 +28,7 @@
     "test": "deno test --allow-env=NODE_ENV --unstable-raw-imports",
     "bench": "deno bench --unstable-raw-imports",
     "renderer:template:inspect": "deno run -A --unstable-raw-imports ./scripts/inspect_template_bake.ts",
-    "docs:check": "deno fmt --check --ignore=examples/browser/forward/dist,examples/browser/textured_forward/dist,examples/browser/react_authoring/dist,examples/browser/custom_textured_forward/dist docs engine tests benches examples",
+    "docs:check": "deno fmt --check docs engine tests benches examples",
     "asset:examples": "deno run -A ./scripts/fetch_example_asset.ts included",
     "asset:stanford-bunny": "deno run -A ./scripts/fetch_example_asset.ts stanford-bunny",
     "asset:damaged-helmet": "deno run -A ./scripts/fetch_example_asset.ts damaged-helmet",
@@ -63,20 +63,11 @@
     "example:byow:react-bunny:run": "deno run -A --unstable-ffi --unstable-webgpu --unstable-raw-imports ./scripts/run_byow_example.ts ./examples/byow/react_bunny_demo/main.tsx",
     "example:byow:react-glyphs:check": "deno check --unstable-ffi --unstable-webgpu --unstable-raw-imports ./examples/byow/react_glyphs_demo/main.tsx ./examples/byow/react_glyphs_demo/app.tsx",
     "example:byow:react-glyphs:run": "deno run -A --unstable-ffi --unstable-webgpu --unstable-raw-imports ./scripts/run_byow_example.ts ./examples/byow/react_glyphs_demo/main.tsx",
-    "example:browser:build": "deno bundle --platform browser --unstable-raw-imports -o ./examples/browser/forward/dist/main.js ./examples/browser/forward/main.ts",
-    "example:browser:react:build": "deno bundle --platform browser --unstable-raw-imports -o ./examples/browser/react_authoring/dist/main.js ./examples/browser/react_authoring/main.tsx",
-    "example:browser:textured:build": "deno bundle --platform browser --unstable-raw-imports -o ./examples/browser/textured_forward/dist/main.js ./examples/browser/textured_forward/main.ts",
-    "example:browser:custom-textured:build": "deno bundle --platform browser --unstable-raw-imports -o ./examples/browser/custom_textured_forward/dist/main.js ./examples/browser/custom_textured_forward/main.ts",
     "example:drawing": "deno run -A --unstable-webgpu --unstable-raw-imports ./scripts/run_drawing_example.ts",
-    "example:drawing:png": "deno task example:drawing -- all png",
-    "example:browser:serve": "deno run -A jsr:@std/http@1/file-server ."
+    "example:drawing:png": "deno task example:drawing -- all png"
   },
   "fmt": {
     "exclude": [
-      "examples/browser/forward/dist",
-      "examples/browser/textured_forward/dist",
-      "examples/browser/react_authoring/dist",
-      "examples/browser/custom_textured_forward/dist",
       "engine/desktop/native/target",
       "engine/text/native/target"
     ],
@@ -87,10 +78,6 @@
   },
   "lint": {
     "exclude": [
-      "examples/browser/forward/dist",
-      "examples/browser/textured_forward/dist",
-      "examples/browser/react_authoring/dist",
-      "examples/browser/custom_textured_forward/dist",
       "engine/desktop/native/target",
       "engine/text/native/target"
     ],

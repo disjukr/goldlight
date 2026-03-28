@@ -36,14 +36,6 @@ Runnable examples live here. Each example should document how to build, serve, o
   opening two small windows at once to validate multiwindow orchestration
 - [`assets/README.md`](./assets/README.md): in-repo small example assets plus refresh commands
   including the Stanford Bunny PLY source mesh
-- [`browser/forward/README.md`](./browser/forward/README.md): browser-based forward rendering flow
-- [`browser/react_authoring/README.md`](./browser/react_authoring/README.md): browser forward flow
-  with scene nodes authored through `@disjukr/goldlight/react` TSX and committed through the `g3d-*`
-  snapshot bridge
-- [`browser/textured_forward/README.md`](./browser/textured_forward/README.md): browser forward flow
-  with uploaded texture residency and built-in unlit sampling
-- [`browser/custom_textured_forward/README.md`](./browser/custom_textured_forward/README.md):
-  browser forward flow with a custom WGSL program that declares texture and sampler bindings
 - [`headless_snapshot/README.md`](./headless_snapshot/README.md): offscreen render-to-PNG workflow
 - [`byow/triangle/README.md`](./byow/triangle/README.md): Windows BYOW surface presentation smoke
   test
@@ -87,12 +79,7 @@ Runnable examples live here. Each example should document how to build, serve, o
 - Refresh the Stanford Bunny source and extracted mesh: `deno task asset:stanford-bunny`
 - Refresh the Damaged Helmet sample: `deno task asset:damaged-helmet`
 - Download the external Sponza sample: `deno task asset:sponza`
-- Build the browser bundle: `deno task example:browser:build`
-- Build the React authoring browser bundle: `deno task example:browser:react:build`
-- Build the textured browser bundle: `deno task example:browser:textured:build`
-- Build the custom textured browser bundle: `deno task example:browser:custom-textured:build`
 - Render a headless PNG snapshot: `deno task example:headless:png`
-- Serve the repository for local testing: `deno task example:browser:serve`
 
 ## Primitive Authoring
 
@@ -116,8 +103,6 @@ reconciler host instead of the snapshot-only JSX lowering helper.
 
 For React integrations, read the examples in this order:
 
-- [`browser/react_authoring/README.md`](./browser/react_authoring/README.md) for the data-only
-  `createG3dSceneRoot()` snapshot bridge
 - [`byow/react_bunny_demo/README.md`](./byow/react_bunny_demo/README.md) for the experimental
   `@disjukr/goldlight/react/reconciler` live host
 - [`byow/react_glyphs_demo/README.md`](./byow/react_glyphs_demo/README.md) for root-`g2d-scene`

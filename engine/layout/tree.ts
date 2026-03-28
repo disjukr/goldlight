@@ -2,6 +2,19 @@ import type { ParagraphPrepareOptions, ParagraphTextStyle, PreparedParagraph } f
 
 export type LayoutAxis = 'row' | 'column';
 export type LayoutLength = number | 'auto';
+export type LayoutAlignItems =
+  | 'start'
+  | 'end'
+  | 'center'
+  | 'stretch';
+export type LayoutAlignSelf = LayoutAlignItems | 'auto';
+export type LayoutJustifyContent =
+  | 'start'
+  | 'end'
+  | 'center'
+  | 'space-between'
+  | 'space-around'
+  | 'space-evenly';
 
 export type LayoutInsets = Readonly<{
   top: number;
@@ -22,22 +35,38 @@ export type LayoutBoxStyle = Readonly<{
   minHeight?: number;
   maxWidth?: number;
   maxHeight?: number;
+  flexBasis?: LayoutLength;
+  flexGrow?: number;
+  flexShrink?: number;
+  alignSelf?: LayoutAlignSelf;
   padding?: LayoutInsetsInput;
   gap?: number;
   direction?: LayoutAxis;
+  justifyContent?: LayoutJustifyContent;
+  alignItems?: LayoutAlignItems;
   backgroundColor?: readonly [number, number, number, number];
   borderColor?: readonly [number, number, number, number];
   borderWidth?: number;
   cornerRadius?: number;
 }>;
 
+export type LayoutItemStyle = Readonly<{
+  width?: LayoutLength;
+  height?: LayoutLength;
+  minWidth?: number;
+  minHeight?: number;
+  maxWidth?: number;
+  maxHeight?: number;
+  flexBasis?: LayoutLength;
+  flexGrow?: number;
+  flexShrink?: number;
+  alignSelf?: LayoutAlignSelf;
+}>;
+
 export type LayoutTextNode = Readonly<{
   kind: 'text';
   prepared: PreparedParagraph;
-  style?: Readonly<{
-    width?: LayoutLength;
-    height?: LayoutLength;
-  }>;
+  style?: LayoutItemStyle;
 }>;
 
 export type LayoutBoxNode = Readonly<{

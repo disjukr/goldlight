@@ -118,6 +118,7 @@ const buildDemoTree = (
   const oscillation = (Math.sin(timeMs / 900) + 1) * 0.5;
   const inspectorWidth = 340 + (oscillation * 220);
   const contentWidth = Math.min(1120, viewportWidth - 80);
+  const flowingCardMaxWidth = Math.max(contentWidth - 280, 280);
 
   const title = createTextLayoutNode(
     prepareParagraph(host, 'Goldlight Layout Prototype', {
@@ -222,6 +223,11 @@ const buildDemoTree = (
     ],
     {
       width: inspectorWidth,
+      minWidth: 280,
+      maxWidth: flowingCardMaxWidth,
+      flexBasis: inspectorWidth,
+      flexGrow: 0,
+      flexShrink: 1,
       padding: 20,
       gap: 14,
       backgroundColor: [0.15, 0.16, 0.2, 1],
@@ -256,6 +262,11 @@ const buildDemoTree = (
     ],
     {
       width: 260,
+      minWidth: 260,
+      maxWidth: 260,
+      flexBasis: 260,
+      flexGrow: 0,
+      flexShrink: 0,
       padding: 18,
       gap: 12,
       backgroundColor: [0.11, 0.15, 0.18, 1],
@@ -273,6 +284,7 @@ const buildDemoTree = (
         {
           direction: 'row',
           gap: 20,
+          alignItems: 'start',
         },
       ),
     ],

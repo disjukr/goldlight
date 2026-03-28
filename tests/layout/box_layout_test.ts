@@ -1,4 +1,4 @@
-import { assertEquals } from 'jsr:@std/assert@^1.0.14';
+import { assertAlmostEquals, assertEquals } from 'jsr:@std/assert@^1.0.14';
 import {
   computeLayout,
   createBoxLayoutNode,
@@ -112,7 +112,7 @@ Deno.test('computeLayout stacks text nodes in a column with padding and gap', ()
   assertEquals(layout.children.length, 2);
   assertEquals(layout.children[0]?.x, 10);
   assertEquals(layout.children[0]?.y, 10);
-  assertEquals(layout.children[0]?.width, 11);
+  assertEquals(layout.children[0]?.width, 60);
   assertEquals(layout.children[1]?.y, layout.children[0]!.y + layout.children[0]!.height + 5);
 });
 
@@ -131,4 +131,68 @@ Deno.test('computeLayout measures row children with max-content widths', () => {
   assertEquals(layout.children[1]?.width, 4);
   assertEquals(layout.children[1]?.x, 4 + 3 + 3);
   assertEquals(layout.width, 4 + 3 + 3 + 4 + 4);
+});
+
+Deno.test('computeLayout distributes free space with flex-grow in rows', () => {
+  const left = createTextLayoutNode(prepareParagraph(mockHost, 'abc', defaultStyle), {
+    flexGrow: 1,
+  });
+  const right = createTextLayoutNode(prepareParagraph(mockHost, 'de', defaultStyle), {
+    flexGrow: 2,
+  });
+  const root = createBoxLayoutNode([left, right], {
+    direction: 'row',
+    width: 30,
+    gap: 2,
+  });
+
+  const layout = computeLayout(root, definite(30, 100));
+  assertAlmostEquals(layout.children[0]?.width ?? 0, 32 / 3);
+  assertAlmostEquals(layout.children[1]?.width ?? 0, 52 / 3);
+  assertAlmostEquals(layout.children[1]?.x ?? 0, 38 / 3);
+});
+
+Deno.test('computeLayout applies justify-content spacing in rows', () => {
+  const left = createTextLayoutNode(prepareParagraph(mockHost, 'ab', defaultStyle));
+  const right = createTextLayoutNode(prepareParagraph(mockHost, 'cd', defaultStyle));
+  const root = createBoxLayoutNode([left, right], {
+    direction: 'row',
+    width: 20,
+    justifyContent: 'space-between',
+  });
+
+  const layout = computeLayout(root, definite(20, 100));
+  assertEquals(layout.children[0]?.x, 0);
+  assertEquals(layout.children[1]?.x, 18);
+});
+
+Deno.test('computeLayout applies align-items to cross axis', () => {
+  const top = createTextLayoutNode(prepareParagraph(mockHost, 'a', defaultStyle));
+  const bottom = createTextLayoutNode(prepareParagraph(mockHost, 'bb', defaultStyle));
+  const root = createBoxLayoutNode([top, bottom], {
+    direction: 'column',
+    width: 20,
+    alignItems: 'center',
+  });
+
+  const layout = computeLayout(root, definite(20, 100));
+  assertEquals(layout.children[0]?.x, 9.5);
+  assertEquals(layout.children[1]?.x, 9);
+});
+
+Deno.test('computeLayout stretches box children across the cross axis by default', () => {
+  const child = createBoxLayoutNode(
+    [createTextLayoutNode(prepareParagraph(mockHost, 'content', defaultStyle))],
+    {
+      padding: 4,
+    },
+  );
+  const root = createBoxLayoutNode([child], {
+    width: 40,
+    padding: 2,
+  });
+
+  const layout = computeLayout(root, definite(40, 100));
+  assertEquals(layout.children[0]?.x, 2);
+  assertEquals(layout.children[0]?.width, 36);
 });

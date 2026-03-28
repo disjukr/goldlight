@@ -382,7 +382,7 @@ export const renderSdfTextSnapshot = (): Readonly<{
         direction: 'ltr',
         language: sample.language,
       });
-      const subrun = buildSdfSubRun(textHost, shapedRun, { inset: 10, radius: 10 });
+      const subrun = buildSdfSubRun(textHost, shapedRun);
       subruns.push(subrun);
       summaries.push({
         label: sample.label,

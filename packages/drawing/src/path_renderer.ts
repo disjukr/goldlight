@@ -370,6 +370,7 @@ export type DrawingPreparedTextGlyphInstance = Readonly<{
   mask: NonNullable<DrawDirectMaskTextCommand['glyphs'][number]['mask']>;
   size: readonly [number, number];
   xyPos: readonly [number, number];
+  uvInset: readonly [number, number];
   indexAndFlags: readonly [number, number];
   strikeToSourceScale: number;
 }>;
@@ -5646,6 +5647,7 @@ export const prepareDrawingTextCommand = (
           mask: glyph.mask,
           size: [glyph.mask.width, glyph.mask.height] as const,
           xyPos: [localBounds.origin[0], localBounds.origin[1]] as const,
+          uvInset: [0, 0] as const,
           indexAndFlags: [0, 0] as const,
           strikeToSourceScale: glyph.strikeToSourceScale ?? 1,
         };
@@ -5682,19 +5684,25 @@ export const prepareDrawingTextCommand = (
       Boolean(glyph.sdf)
     )
     .map((glyph) => {
+      const visibleWidth = Math.max(0, glyph.sdf.width - glyph.sdfInset * 2);
+      const visibleHeight = Math.max(0, glyph.sdf.height - glyph.sdfInset * 2);
       const localBounds: Rect = {
-        origin: [glyph.x + glyph.sdf.offsetX, glyph.y + glyph.sdf.offsetY],
+        origin: [
+          glyph.x + glyph.sdf.offsetX + glyph.sdfInset,
+          glyph.y + glyph.sdf.offsetY + glyph.sdfInset,
+        ],
         size: {
-          width: glyph.sdf.width,
-          height: glyph.sdf.height,
+          width: visibleWidth,
+          height: visibleHeight,
         },
       };
       glyphBounds.push(transformRectBounds(localBounds, command.transform));
       return {
         glyphID: glyph.glyphID,
         mask: glyph.sdf,
-        size: [glyph.sdf.width, glyph.sdf.height] as const,
+        size: [visibleWidth, visibleHeight] as const,
         xyPos: [localBounds.origin[0], localBounds.origin[1]] as const,
+        uvInset: [glyph.sdfInset, glyph.sdfInset] as const,
         indexAndFlags: [0, 0] as const,
         strikeToSourceScale: glyph.strikeToSourceScale ?? 1,
         sdfInset: glyph.sdfInset,

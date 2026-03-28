@@ -331,39 +331,332 @@ fn rasterize_glyph_mask(
     })
 }
 
-fn clamp_f32(value: f32, min: f32, max: f32) -> f32 {
-    value.max(min).min(max)
+const SK_DISTANCE_FIELD_MAGNITUDE: f32 = 4.0;
+const SK_DISTANCE_FIELD_PAD: u32 = 4;
+const SK_SQRT_2: f32 = std::f32::consts::SQRT_2;
+
+#[derive(Clone, Copy)]
+struct DistanceFieldData {
+    alpha: f32,
+    dist_sq: f32,
+    dist_vector: [f32; 2],
 }
 
-fn mask_pixel_is_inside(bitmap: &GlyphBitmap, x: i32, y: i32) -> bool {
-    if x < 0 || y < 0 || x >= bitmap.info.width as i32 || y >= bitmap.info.height as i32 {
-        return false;
+const K_LEFT_NEIGHBOR_FLAG: u32 = 0x01;
+const K_RIGHT_NEIGHBOR_FLAG: u32 = 0x02;
+const K_TOP_LEFT_NEIGHBOR_FLAG: u32 = 0x04;
+const K_TOP_NEIGHBOR_FLAG: u32 = 0x08;
+const K_TOP_RIGHT_NEIGHBOR_FLAG: u32 = 0x10;
+const K_BOTTOM_LEFT_NEIGHBOR_FLAG: u32 = 0x20;
+const K_BOTTOM_NEIGHBOR_FLAG: u32 = 0x40;
+const K_BOTTOM_RIGHT_NEIGHBOR_FLAG: u32 = 0x80;
+const K_ALL_NEIGHBOR_FLAGS: u32 = 0xff;
+
+fn found_edge(image: &[u8], index: usize, width: usize, neighbor_flags: u32) -> bool {
+    const OFFSETS: [(i32, u32); 8] = [
+        (-1, K_LEFT_NEIGHBOR_FLAG),
+        (1, K_RIGHT_NEIGHBOR_FLAG),
+        (0, K_TOP_LEFT_NEIGHBOR_FLAG),
+        (0, K_TOP_NEIGHBOR_FLAG),
+        (0, K_TOP_RIGHT_NEIGHBOR_FLAG),
+        (0, K_BOTTOM_LEFT_NEIGHBOR_FLAG),
+        (0, K_BOTTOM_NEIGHBOR_FLAG),
+        (0, K_BOTTOM_RIGHT_NEIGHBOR_FLAG),
+    ];
+    let dynamic_offsets = [
+        -1isize,
+        1isize,
+        -(width as isize) - 1,
+        -(width as isize),
+        -(width as isize) + 1,
+        width as isize - 1,
+        width as isize,
+        width as isize + 1,
+    ];
+
+    let curr_val = image[index];
+    let curr_check = curr_val >> 7;
+    for (neighbor_index, (_, flag)) in OFFSETS.iter().enumerate() {
+        let neighbor_val = if (neighbor_flags & *flag) != 0 {
+            image[(index as isize + dynamic_offsets[neighbor_index]) as usize]
+        } else {
+            0
+        };
+        let neighbor_check = neighbor_val >> 7;
+        if curr_check != neighbor_check
+            || (curr_check == 0 && neighbor_check == 0 && curr_val != 0 && neighbor_val != 0)
+        {
+            return true;
+        }
     }
-    let index = y as usize * bitmap.info.stride as usize + x as usize;
-    bitmap.pixels.get(index).copied().unwrap_or_default() >= 128
+    false
 }
 
-fn distance_to_nearest(bitmap: &GlyphBitmap, target_x: f32, target_y: f32, inside: bool) -> f32 {
-    let mut best_distance_sq = f32::INFINITY;
-    for y in 0..bitmap.info.height as i32 {
-        for x in 0..bitmap.info.width as i32 {
-            if mask_pixel_is_inside(bitmap, x, y) != inside {
-                continue;
+fn normalize_fast(vector: &mut [f32; 2]) {
+    let length_sq = vector[0] * vector[0] + vector[1] * vector[1];
+    if length_sq > 0.0 {
+        let inv_length = length_sq.sqrt().recip();
+        vector[0] *= inv_length;
+        vector[1] *= inv_length;
+    } else {
+        vector[0] = 0.0;
+        vector[1] = 0.0;
+    }
+}
+
+fn edge_distance(direction: [f32; 2], alpha: f32) -> f32 {
+    let mut dx = direction[0];
+    let mut dy = direction[1];
+    if dx.abs() <= f32::EPSILON || dy.abs() <= f32::EPSILON {
+        return 0.5 - alpha;
+    }
+    dx = dx.abs();
+    dy = dy.abs();
+    if dx < dy {
+        std::mem::swap(&mut dx, &mut dy);
+    }
+    let a1_num = 0.5 * dy;
+    if alpha * dx < a1_num {
+        0.5 * (dx + dy) - (2.0 * dx * dy * alpha).sqrt()
+    } else if alpha * dx < (dx - a1_num) {
+        (0.5 - alpha) * dx
+    } else {
+        -0.5 * (dx + dy) + (2.0 * dx * dy * (1.0 - alpha)).sqrt()
+    }
+}
+
+fn update_distance_field_data(
+    data: &mut [DistanceFieldData],
+    curr: usize,
+    dist_vec: [f32; 2],
+    dist_sq: f32,
+) {
+    if dist_sq < data[curr].dist_sq {
+        data[curr].dist_sq = dist_sq;
+        data[curr].dist_vector = dist_vec;
+    }
+}
+
+fn f1(data: &mut [DistanceFieldData], curr: usize, width: usize) {
+    let check = curr - width - 1;
+    let mut dist_vec = data[check].dist_vector;
+    let dist_sq = data[check].dist_sq - 2.0 * (dist_vec[0] + dist_vec[1] - 1.0);
+    dist_vec[0] -= 1.0;
+    dist_vec[1] -= 1.0;
+    update_distance_field_data(data, curr, dist_vec, dist_sq);
+
+    let check = curr - width;
+    let mut dist_vec = data[check].dist_vector;
+    let dist_sq = data[check].dist_sq - 2.0 * dist_vec[1] + 1.0;
+    dist_vec[1] -= 1.0;
+    update_distance_field_data(data, curr, dist_vec, dist_sq);
+
+    let check = curr - width + 1;
+    let mut dist_vec = data[check].dist_vector;
+    let dist_sq = data[check].dist_sq + 2.0 * (dist_vec[0] - dist_vec[1] + 1.0);
+    dist_vec[0] += 1.0;
+    dist_vec[1] -= 1.0;
+    update_distance_field_data(data, curr, dist_vec, dist_sq);
+
+    let check = curr - 1;
+    let mut dist_vec = data[check].dist_vector;
+    let dist_sq = data[check].dist_sq - 2.0 * dist_vec[0] + 1.0;
+    dist_vec[0] -= 1.0;
+    update_distance_field_data(data, curr, dist_vec, dist_sq);
+}
+
+fn f2(data: &mut [DistanceFieldData], curr: usize) {
+    let check = curr + 1;
+    let mut dist_vec = data[check].dist_vector;
+    let dist_sq = data[check].dist_sq + 2.0 * dist_vec[0] + 1.0;
+    dist_vec[0] += 1.0;
+    if dist_sq < data[curr].dist_sq {
+        data[curr].dist_sq = dist_sq;
+        data[curr].dist_vector = dist_vec;
+    }
+}
+
+fn b1(data: &mut [DistanceFieldData], curr: usize) {
+    let check = curr - 1;
+    let mut dist_vec = data[check].dist_vector;
+    let dist_sq = data[check].dist_sq - 2.0 * dist_vec[0] + 1.0;
+    dist_vec[0] -= 1.0;
+    if dist_sq < data[curr].dist_sq {
+        data[curr].dist_sq = dist_sq;
+        data[curr].dist_vector = dist_vec;
+    }
+}
+
+fn b2(data: &mut [DistanceFieldData], curr: usize, width: usize) {
+    let check = curr + 1;
+    let mut dist_vec = data[check].dist_vector;
+    let dist_sq = data[check].dist_sq + 2.0 * dist_vec[0] + 1.0;
+    dist_vec[0] += 1.0;
+    update_distance_field_data(data, curr, dist_vec, dist_sq);
+
+    let check = curr + width - 1;
+    let mut dist_vec = data[check].dist_vector;
+    let dist_sq = data[check].dist_sq - 2.0 * (dist_vec[0] - dist_vec[1] - 1.0);
+    dist_vec[0] -= 1.0;
+    dist_vec[1] += 1.0;
+    update_distance_field_data(data, curr, dist_vec, dist_sq);
+
+    let check = curr + width;
+    let mut dist_vec = data[check].dist_vector;
+    let dist_sq = data[check].dist_sq + 2.0 * dist_vec[1] + 1.0;
+    dist_vec[1] += 1.0;
+    update_distance_field_data(data, curr, dist_vec, dist_sq);
+
+    let check = curr + width + 1;
+    let mut dist_vec = data[check].dist_vector;
+    let dist_sq = data[check].dist_sq + 2.0 * (dist_vec[0] + dist_vec[1] + 1.0);
+    dist_vec[0] += 1.0;
+    dist_vec[1] += 1.0;
+    update_distance_field_data(data, curr, dist_vec, dist_sq);
+}
+
+fn pack_distance_field_value(dist: f32) -> u8 {
+    let clamped = (-dist).clamp(
+        -SK_DISTANCE_FIELD_MAGNITUDE,
+        SK_DISTANCE_FIELD_MAGNITUDE * 127.0 / 128.0,
+    );
+    let shifted = clamped + SK_DISTANCE_FIELD_MAGNITUDE;
+    ((shifted / (2.0 * SK_DISTANCE_FIELD_MAGNITUDE) * 256.0).round() as i32).clamp(0, 255) as u8
+}
+
+fn generate_distance_field_from_a8_image(image: &[u8], width: usize, height: usize) -> Vec<u8> {
+    let padded_width = width + 2;
+    let padded_height = height + 2;
+    let mut padded = vec![0u8; padded_width * padded_height];
+    for y in 0..height {
+        let src_start = y * width;
+        let dst_start = (y + 1) * padded_width + 1;
+        padded[dst_start..dst_start + width].copy_from_slice(&image[src_start..src_start + width]);
+    }
+
+    let pad = SK_DISTANCE_FIELD_PAD as usize + 1;
+    let data_width = width + 2 * pad;
+    let data_height = height + 2 * pad;
+    let mut data = vec![
+        DistanceFieldData {
+            alpha: 0.0,
+            dist_sq: 0.0,
+            dist_vector: [0.0, 0.0],
+        };
+        data_width * data_height
+    ];
+    let mut edges = vec![0u8; data_width * data_height];
+
+    for j in 0..padded_height {
+        for i in 0..padded_width {
+            let image_index = j * padded_width + i;
+            let data_index = (j + SK_DISTANCE_FIELD_PAD as usize) * data_width
+                + (i + SK_DISTANCE_FIELD_PAD as usize);
+            let alpha = padded[image_index] as f32 * (1.0 / 255.0);
+            data[data_index].alpha = alpha;
+
+            let mut check_mask = K_ALL_NEIGHBOR_FLAGS;
+            if i == 0 {
+                check_mask &= !(K_LEFT_NEIGHBOR_FLAG
+                    | K_TOP_LEFT_NEIGHBOR_FLAG
+                    | K_BOTTOM_LEFT_NEIGHBOR_FLAG);
             }
-            let dx = x as f32 + 0.5 - target_x;
-            let dy = y as f32 + 0.5 - target_y;
-            let distance_sq = dx * dx + dy * dy;
-            if distance_sq < best_distance_sq {
-                best_distance_sq = distance_sq;
+            if i == padded_width - 1 {
+                check_mask &= !(K_RIGHT_NEIGHBOR_FLAG
+                    | K_TOP_RIGHT_NEIGHBOR_FLAG
+                    | K_BOTTOM_RIGHT_NEIGHBOR_FLAG);
+            }
+            if j == 0 {
+                check_mask &= !(K_TOP_LEFT_NEIGHBOR_FLAG
+                    | K_TOP_NEIGHBOR_FLAG
+                    | K_TOP_RIGHT_NEIGHBOR_FLAG);
+            }
+            if j == padded_height - 1 {
+                check_mask &= !(K_BOTTOM_LEFT_NEIGHBOR_FLAG
+                    | K_BOTTOM_NEIGHBOR_FLAG
+                    | K_BOTTOM_RIGHT_NEIGHBOR_FLAG);
+            }
+            if found_edge(&padded, image_index, padded_width, check_mask) {
+                edges[data_index] = 255;
             }
         }
     }
 
-    if best_distance_sq.is_finite() {
-        best_distance_sq.sqrt()
-    } else {
-        0.0
+    for j in 0..data_height {
+        for i in 0..data_width {
+            let index = j * data_width + i;
+            if edges[index] != 0 {
+                let alpha_tl = data[index - data_width - 1].alpha;
+                let alpha_t = data[index - data_width].alpha;
+                let alpha_tr = data[index - data_width + 1].alpha;
+                let alpha_l = data[index - 1].alpha;
+                let alpha_r = data[index + 1].alpha;
+                let alpha_bl = data[index + data_width - 1].alpha;
+                let alpha_b = data[index + data_width].alpha;
+                let alpha_br = data[index + data_width + 1].alpha;
+                let mut grad = [
+                    alpha_tr - alpha_tl + SK_SQRT_2 * alpha_r - SK_SQRT_2 * alpha_l + alpha_br
+                        - alpha_bl,
+                    alpha_bl - alpha_tl + SK_SQRT_2 * alpha_b - SK_SQRT_2 * alpha_t + alpha_br
+                        - alpha_tr,
+                ];
+                normalize_fast(&mut grad);
+                let dist = edge_distance(grad, data[index].alpha);
+                data[index].dist_vector = [grad[0] * dist, grad[1] * dist];
+                data[index].dist_sq = dist * dist;
+            } else {
+                data[index].dist_sq = 2_000_000.0;
+                data[index].dist_vector = [1000.0, 1000.0];
+            }
+        }
     }
+
+    for j in 1..data_height - 1 {
+        for i in 1..data_width - 1 {
+            let index = j * data_width + i;
+            if edges[index] == 0 {
+                f1(&mut data, index, data_width);
+            }
+        }
+        for i in (1..data_width - 1).rev() {
+            let index = j * data_width + i;
+            if edges[index] == 0 {
+                f2(&mut data, index);
+            }
+        }
+    }
+
+    for j in (1..data_height - 1).rev() {
+        for i in 1..data_width - 1 {
+            let index = j * data_width + i;
+            if edges[index] == 0 {
+                b1(&mut data, index);
+            }
+        }
+        for i in (1..data_width - 1).rev() {
+            let index = j * data_width + i;
+            if edges[index] == 0 {
+                b2(&mut data, index, data_width);
+            }
+        }
+    }
+
+    let mut distance_field = vec![0u8; (width + 2 * SK_DISTANCE_FIELD_PAD as usize)
+        * (height + 2 * SK_DISTANCE_FIELD_PAD as usize)];
+    let mut dst = 0usize;
+    for j in 1..data_height - 1 {
+        for i in 1..data_width - 1 {
+            let index = j * data_width + i;
+            let dist = if data[index].alpha > 0.5 {
+                -data[index].dist_sq.sqrt()
+            } else {
+                data[index].dist_sq.sqrt()
+            };
+            distance_field[dst] = pack_distance_field_value(dist);
+            dst += 1;
+        }
+    }
+    distance_field
 }
 
 fn create_sdf_from_mask(bitmap: &GlyphBitmap, inset: u32, radius: f32) -> GlyphBitmap {
@@ -381,29 +674,15 @@ fn create_sdf_from_mask(bitmap: &GlyphBitmap, inset: u32, radius: f32) -> GlyphB
         };
     }
 
-    let width = bitmap.info.width + inset * 2;
-    let height = bitmap.info.height + inset * 2;
+    let _ = (inset, radius);
+    let width = bitmap.info.width + SK_DISTANCE_FIELD_PAD * 2;
+    let height = bitmap.info.height + SK_DISTANCE_FIELD_PAD * 2;
     let stride = width;
-    let mut pixels = vec![0u8; (width * height) as usize];
-
-    for y in 0..height as i32 {
-        for x in 0..width as i32 {
-            let source_x = x - inset as i32;
-            let source_y = y - inset as i32;
-            let is_inside = mask_pixel_is_inside(bitmap, source_x, source_y);
-            let nearest_outside =
-                distance_to_nearest(bitmap, source_x as f32 + 0.5, source_y as f32 + 0.5, false);
-            let nearest_inside =
-                distance_to_nearest(bitmap, source_x as f32 + 0.5, source_y as f32 + 0.5, true);
-            let signed_distance = if is_inside {
-                nearest_outside
-            } else {
-                -nearest_inside
-            };
-            let normalized = clamp_f32((signed_distance / radius) * 0.5 + 0.5, 0.0, 1.0);
-            pixels[y as usize * stride as usize + x as usize] = (normalized * 255.0).round() as u8;
-        }
-    }
+    let pixels = generate_distance_field_from_a8_image(
+        &bitmap.pixels,
+        bitmap.info.width as usize,
+        bitmap.info.height as usize,
+    );
 
     GlyphBitmap {
         info: TextGlyphMaskInfo {
@@ -411,8 +690,8 @@ fn create_sdf_from_mask(bitmap: &GlyphBitmap, inset: u32, radius: f32) -> GlyphB
             height,
             stride,
             format: 1,
-            offset_x: bitmap.info.offset_x - inset as i32,
-            offset_y: bitmap.info.offset_y - inset as i32,
+            offset_x: bitmap.info.offset_x - SK_DISTANCE_FIELD_PAD as i32,
+            offset_y: bitmap.info.offset_y - SK_DISTANCE_FIELD_PAD as i32,
         },
         pixels,
     }

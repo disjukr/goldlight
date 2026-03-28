@@ -115,7 +115,6 @@ export type TextHost = Readonly<{
     typeface: TypefaceHandle,
     glyphID: number,
     size: number,
-    options?: Readonly<{ inset?: number; radius?: number }>,
   ) => GlyphMask | null;
   close: () => void;
 }>;

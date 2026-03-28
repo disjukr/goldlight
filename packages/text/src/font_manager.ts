@@ -42,9 +42,8 @@ export class TextFontManager {
     typeface: TypefaceHandle,
     glyphID: number,
     size: number,
-    options?: Readonly<{ inset?: number; radius?: number }>,
   ) {
-    return this.#host.getGlyphSdf(typeface, glyphID, size, options);
+    return this.#host.getGlyphSdf(typeface, glyphID, size);
   }
 
   close(): void {

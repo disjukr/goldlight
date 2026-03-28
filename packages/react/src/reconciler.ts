@@ -637,13 +637,9 @@ const render2dGlyph = (
   }
   const translatedRun = cache.translatedRun ??= translateGlyphRun(run, props.x, props.y);
   if ((props.mode ?? 'a8') === 'sdf') {
-    const sdfKey = `${props.sdfInset ?? ''}:${props.sdfRadius ?? ''}`;
-    if (!cache.sdfSubRun || cache.sdfKey !== sdfKey) {
-      cache.sdfSubRun = buildSdfSubRun(host, translatedRun, {
-        inset: props.sdfInset,
-        radius: props.sdfRadius,
-      });
-      cache.sdfKey = sdfKey;
+    if (!cache.sdfSubRun) {
+      cache.sdfSubRun = buildSdfSubRun(host, translatedRun);
+      cache.sdfKey = 'graphite-default';
     }
     recordSdfSubRun(
       recorder,

@@ -193,12 +193,16 @@ const createStepClipTextureBindGroup = (
   resources: DrawingPreparedStepResources,
   dstTextureView?: GPUTextureView,
 ): GPUBindGroup =>
-  !resources.clipTextureView && !dstTextureView && !resources.sampledTextureView
+  !resources.clipTextureView &&
+    !dstTextureView &&
+    !resources.sampledTextureView &&
+    resources.textAtlasViews.length === 0
     ? commandResources.defaultClipTextureBindGroup
     : sharedContext.resourceProvider.createClipTextureBindGroup(
       resources.clipTextureView ?? undefined,
       dstTextureView,
       resources.sampledTextureView ?? undefined,
+      resources.textAtlasViews,
       resources.sampledTextureFilter,
     );
 

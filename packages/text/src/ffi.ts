@@ -14,6 +14,7 @@ import type {
   TextHostOptions,
   TypefaceHandle,
 } from './types.ts';
+import { skiaDistanceFieldInset, skiaDistanceFieldRadius } from './sdf.ts';
 
 const textHostInitResultOk = 1;
 const textHostMetricsResultOk = 1;
@@ -548,10 +549,9 @@ export const createTextHost = (options: TextHostOptions = {}): TextHost => {
     typeface: TypefaceHandle,
     glyphID: number,
     size: number,
-    options: Readonly<{ inset?: number; radius?: number }> = {},
   ): GlyphMask | null => {
-    const inset = Math.max(1, Math.floor(options.inset ?? 8));
-    const radius = Math.max(1, options.radius ?? inset);
+    const inset = skiaDistanceFieldInset;
+    const radius = skiaDistanceFieldRadius;
     const cacheKey = `${typeface.toString()}:${glyphID >>> 0}:${size}:${inset}:${radius}`;
     const cached = shared.glyphSdfCache.get(cacheKey);
     if (cached !== undefined) {

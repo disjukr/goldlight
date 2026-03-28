@@ -10,6 +10,7 @@ export type DrawingTextAtlasMask = Readonly<{
 }>;
 
 export type DrawingTextAtlasPlacement = Readonly<{
+  atlasIndex: number;
   atlasPosition: readonly [number, number];
 }>;
 
@@ -19,7 +20,7 @@ export type DawnTextAtlasManager = Readonly<{
     glyphs: readonly Readonly<{ mask: DrawingTextAtlasMask }>[],
   ) =>
     | Readonly<{
-      view: GPUTextureView;
+      views: readonly GPUTextureView[];
       width: number;
       height: number;
       placements: readonly DrawingTextAtlasPlacement[];
@@ -30,41 +31,50 @@ export type DawnTextAtlasManager = Readonly<{
 }>;
 
 type DrawingTextAtlasEntry = Readonly<{
+  atlasIndex: number;
   atlasPosition: readonly [number, number];
   width: number;
   height: number;
 }>;
 
-type DrawingTextAtlasState = {
+type DrawingTextAtlasPage = {
   texture: GPUTexture | null;
   view: GPUTextureView | null;
-  retiredTextures: GPUTexture[];
-  width: number;
-  height: number;
   pixels: Uint8Array;
   cursorX: number;
   cursorY: number;
   rowHeight: number;
+};
+
+type DrawingTextAtlasState = {
+  retiredTextures: GPUTexture[];
+  width: number;
+  height: number;
   entries: Map<string, DrawingTextAtlasEntry>;
+  pages: DrawingTextAtlasPage[];
 };
 
 const textureBindingUsage = 0x04;
 const copyDstUsage = 0x02;
 const atlasPadding = 1;
 const initialAtlasSize = 1024;
-const maxAtlasSize = 4096;
+const maxAtlasPages = 4;
 
-const createEmptyAtlasState = (): DrawingTextAtlasState => ({
+const createEmptyAtlasPage = (): DrawingTextAtlasPage => ({
   texture: null,
   view: null,
-  retiredTextures: [],
-  width: initialAtlasSize,
-  height: initialAtlasSize,
   pixels: new Uint8Array(initialAtlasSize * initialAtlasSize),
   cursorX: atlasPadding,
   cursorY: atlasPadding,
   rowHeight: 0,
+});
+
+const createEmptyAtlasState = (): DrawingTextAtlasState => ({
+  retiredTextures: [],
+  width: initialAtlasSize,
+  height: initialAtlasSize,
   entries: new Map(),
+  pages: [createEmptyAtlasPage()],
 });
 
 const hashMask = (mask: DrawingTextAtlasMask): string => {
@@ -92,12 +102,14 @@ const createAtlasTexture = (
   backend: DawnBackendContext,
   resourceProvider: DawnResourceProvider,
   state: DrawingTextAtlasState,
+  pageIndex: number,
   kind: 'bitmap' | 'sdf',
 ): void => {
-  if (state.texture) {
-    state.retiredTextures.push(state.texture);
+  const page = state.pages[pageIndex]!;
+  if (page.texture) {
+    state.retiredTextures.push(page.texture);
   }
-  state.texture = resourceProvider.createTexture({
+  page.texture = resourceProvider.createTexture({
     label: kind === 'bitmap' ? 'drawing-text-bitmap-atlas' : 'drawing-text-sdf-atlas',
     size: {
       width: state.width,
@@ -107,74 +119,42 @@ const createAtlasTexture = (
     format: 'r8unorm',
     usage: textureBindingUsage | copyDstUsage,
   });
-  state.view = state.texture.createView();
+  page.view = page.texture.createView();
   if ('writeTexture' in backend.queue && typeof backend.queue.writeTexture === 'function') {
     backend.queue.writeTexture(
-      { texture: state.texture },
-      new Uint8Array(state.pixels),
+      { texture: page.texture },
+      new Uint8Array(page.pixels),
       { bytesPerRow: state.width, rowsPerImage: state.height },
       { width: state.width, height: state.height, depthOrArrayLayers: 1 },
     );
   }
 };
 
-const growAtlas = (
-  state: DrawingTextAtlasState,
-  minWidth: number,
-  minHeight: number,
-): void => {
-  let nextWidth = state.width;
-  let nextHeight = state.height;
-  while (nextWidth < minWidth && nextWidth < maxAtlasSize) {
-    nextWidth *= 2;
-  }
-  while (nextHeight < minHeight && nextHeight < maxAtlasSize) {
-    nextHeight *= 2;
-  }
-  if (nextWidth < minWidth || nextHeight < minHeight) {
-    throw new Error('text atlas exceeded maximum supported size');
-  }
-  if (nextWidth === state.width && nextHeight === state.height) {
-    return;
-  }
-  const nextPixels = new Uint8Array(nextWidth * nextHeight);
-  for (let row = 0; row < state.height; row += 1) {
-    const srcStart = row * state.width;
-    const dstStart = row * nextWidth;
-    nextPixels.set(state.pixels.subarray(srcStart, srcStart + state.width), dstStart);
-  }
-  state.width = nextWidth;
-  state.height = nextHeight;
-  state.pixels = nextPixels;
-};
-
 const reservePlacement = (
   state: DrawingTextAtlasState,
+  page: DrawingTextAtlasPage,
   mask: DrawingTextAtlasMask,
-): readonly [number, number] => {
+): readonly [number, number] | null => {
   if (mask.width <= 0 || mask.height <= 0) {
     return [0, 0];
   }
-  if (state.cursorX + mask.width + atlasPadding > state.width) {
-    state.cursorX = atlasPadding;
-    state.cursorY += state.rowHeight + atlasPadding;
-    state.rowHeight = 0;
+  if (page.cursorX + mask.width + atlasPadding > state.width) {
+    page.cursorX = atlasPadding;
+    page.cursorY += page.rowHeight + atlasPadding;
+    page.rowHeight = 0;
   }
-  if (state.cursorY + mask.height + atlasPadding > state.height) {
-    growAtlas(
-      state,
-      Math.max(state.width, state.cursorX + mask.width + atlasPadding),
-      Math.max(state.height, state.cursorY + mask.height + atlasPadding),
-    );
+  if (page.cursorY + mask.height + atlasPadding > state.height) {
+    return null;
   }
-  const placement: readonly [number, number] = [state.cursorX, state.cursorY];
-  state.cursorX += mask.width + atlasPadding;
-  state.rowHeight = Math.max(state.rowHeight, mask.height);
+  const placement: readonly [number, number] = [page.cursorX, page.cursorY];
+  page.cursorX += mask.width + atlasPadding;
+  page.rowHeight = Math.max(page.rowHeight, mask.height);
   return placement;
 };
 
 const blitMaskToAtlas = (
   state: DrawingTextAtlasState,
+  page: DrawingTextAtlasPage,
   placement: readonly [number, number],
   mask: DrawingTextAtlasMask,
 ): void => {
@@ -182,7 +162,7 @@ const blitMaskToAtlas = (
     for (let column = 0; column < mask.width; column += 1) {
       const alpha = mask.pixels[(row * mask.stride) + column] ?? 0;
       const pixelIndex = ((placement[1] + row) * state.width) + placement[0] + column;
-      state.pixels[pixelIndex] = alpha;
+      page.pixels[pixelIndex] = alpha;
     }
   }
 };
@@ -204,33 +184,66 @@ export const createDawnTextAtlasManager = (
 
       const state = states[kind];
       const placements: DrawingTextAtlasPlacement[] = [];
-      let atlasChanged = false;
+      const changedPages = new Set<number>();
 
       for (const glyph of glyphs) {
         const key = hashMask(glyph.mask);
         const cached = state.entries.get(key);
         if (cached) {
-          placements.push({ atlasPosition: cached.atlasPosition });
+          placements.push({
+            atlasIndex: cached.atlasIndex,
+            atlasPosition: cached.atlasPosition,
+          });
           continue;
         }
 
-        const atlasPosition = reservePlacement(state, glyph.mask);
-        blitMaskToAtlas(state, atlasPosition, glyph.mask);
+        let placementPageIndex = -1;
+        let atlasPosition: readonly [number, number] | null = null;
+        for (let pageIndex = 0; pageIndex < state.pages.length; pageIndex += 1) {
+          const candidate = reservePlacement(state, state.pages[pageIndex]!, glyph.mask);
+          if (candidate) {
+            placementPageIndex = pageIndex;
+            atlasPosition = candidate;
+            break;
+          }
+        }
+        if (placementPageIndex < 0 || !atlasPosition) {
+          if (state.pages.length >= maxAtlasPages) {
+            throw new Error('text atlas exceeded maximum supported pages');
+          }
+          const pageIndex = state.pages.length;
+          state.pages.push(createEmptyAtlasPage());
+          const candidate = reservePlacement(state, state.pages[pageIndex]!, glyph.mask);
+          if (!candidate) {
+            throw new Error('text atlas page could not fit glyph');
+          }
+          placementPageIndex = pageIndex;
+          atlasPosition = candidate;
+        }
+        if (!atlasPosition) {
+          throw new Error('text atlas placement failed');
+        }
+        const page = state.pages[placementPageIndex]!;
+        blitMaskToAtlas(state, page, atlasPosition, glyph.mask);
         state.entries.set(key, {
+          atlasIndex: placementPageIndex,
           atlasPosition,
           width: glyph.mask.width,
           height: glyph.mask.height,
         });
-        placements.push({ atlasPosition });
-        atlasChanged = true;
+        placements.push({ atlasIndex: placementPageIndex, atlasPosition });
+        changedPages.add(placementPageIndex);
       }
 
-      if (!state.texture || !state.view || atlasChanged) {
-        createAtlasTexture(backend, resourceProvider, state, kind);
+      for (let pageIndex = 0; pageIndex < state.pages.length; pageIndex += 1) {
+        const page = state.pages[pageIndex]!;
+        if (!page.texture || !page.view || changedPages.has(pageIndex)) {
+          createAtlasTexture(backend, resourceProvider, state, pageIndex, kind);
+        }
       }
 
       return {
-        view: state.view!,
+        views: Object.freeze(state.pages.map((page) => page.view!).filter(Boolean)),
         width: state.width,
         height: state.height,
         placements: Object.freeze(placements),
@@ -239,20 +252,23 @@ export const createDawnTextAtlasManager = (
     compact: () => {},
     freeGpuResources: () => {
       for (const state of Object.values(states)) {
-        state.texture?.destroy?.();
+        for (const page of state.pages) {
+          page.texture?.destroy?.();
+          page.texture = null;
+          page.view = null;
+          page.pixels = new Uint8Array(initialAtlasSize * initialAtlasSize);
+          page.cursorX = atlasPadding;
+          page.cursorY = atlasPadding;
+          page.rowHeight = 0;
+        }
         for (const texture of state.retiredTextures) {
           texture.destroy?.();
         }
-        state.texture = null;
-        state.view = null;
         state.retiredTextures = [];
         state.entries.clear();
-        state.cursorX = atlasPadding;
-        state.cursorY = atlasPadding;
-        state.rowHeight = 0;
         state.width = initialAtlasSize;
         state.height = initialAtlasSize;
-        state.pixels = new Uint8Array(initialAtlasSize * initialAtlasSize);
+        state.pages = [createEmptyAtlasPage()];
       }
     },
   };

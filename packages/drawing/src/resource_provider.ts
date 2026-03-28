@@ -47,6 +47,7 @@ export type DawnResourceProvider = Readonly<{
     clipTextureView?: GPUTextureView,
     dstTextureView?: GPUTextureView,
     sampledTextureView?: GPUTextureView,
+    textTextureViews?: readonly GPUTextureView[],
     sampledTextureFilter?: GPUFilterMode,
   ) => GPUBindGroup;
   createGraphicsPipelineHandle: (
@@ -2393,8 +2394,13 @@ ${commonStepUniformSource}
 @group(1) @binding(0) var<uniform> step: StepUniform;
 ${commonBlendShaderSource}
 ${commonPaintShaderSource}
-@group(3) @binding(4) var textSampler: sampler;
-@group(3) @binding(5) var textTexture: texture_2d<f32>;
+@group(3) @binding(4) var sampledTextureSampler: sampler;
+@group(3) @binding(5) var sampledTexture: texture_2d<f32>;
+@group(3) @binding(6) var textSampler: sampler;
+@group(3) @binding(7) var textTexture0: texture_2d<f32>;
+@group(3) @binding(8) var textTexture1: texture_2d<f32>;
+@group(3) @binding(9) var textTexture2: texture_2d<f32>;
+@group(3) @binding(10) var textTexture3: texture_2d<f32>;
 
 struct VertexOut {
   @builtin(position) position: vec4<f32>,
@@ -2402,8 +2408,21 @@ struct VertexOut {
   @location(1) uv: vec2<f32>,
 };
 
-fn sample_indexed_atlas(textureCoords: vec2<f32>) -> vec4<f32> {
-  return textureSample(textTexture, textSampler, textureCoords);
+fn sample_indexed_atlas(textureCoords: vec2<f32>, atlasIndex: i32) -> vec4<f32> {
+  switch (atlasIndex) {
+    case 1: {
+      return textureSample(textTexture1, textSampler, textureCoords);
+    }
+    case 2: {
+      return textureSample(textTexture2, textSampler, textureCoords);
+    }
+    case 3: {
+      return textureSample(textTexture3, textSampler, textureCoords);
+    }
+    default: {
+      return textureSample(textTexture0, textSampler, textureCoords);
+    }
+  }
 }
 
 fn bitmap_text_coverage_fn(texColor: vec4<f32>) -> vec4<f32> {
@@ -2439,7 +2458,7 @@ fn vs_main(
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
-  let coverage = bitmap_text_coverage_fn(sample_indexed_atlas(in.uv)).r *
+  let coverage = bitmap_text_coverage_fn(sample_indexed_atlas(in.uv, 0)).r *
     clip_coverage(in.devicePosition);
   var color = apply_clip_shader(paint_shader_color(in.devicePosition));
   color.a *= coverage;
@@ -2458,18 +2477,37 @@ ${commonStepUniformSource}
 @group(1) @binding(0) var<uniform> step: StepUniform;
 ${commonBlendShaderSource}
 ${commonPaintShaderSource}
-@group(3) @binding(4) var textSampler: sampler;
-@group(3) @binding(5) var textTexture: texture_2d<f32>;
+@group(3) @binding(4) var sampledTextureSampler: sampler;
+@group(3) @binding(5) var sampledTexture: texture_2d<f32>;
+@group(3) @binding(6) var textSampler: sampler;
+@group(3) @binding(7) var textTexture0: texture_2d<f32>;
+@group(3) @binding(8) var textTexture1: texture_2d<f32>;
+@group(3) @binding(9) var textTexture2: texture_2d<f32>;
+@group(3) @binding(10) var textTexture3: texture_2d<f32>;
 
 struct VertexOut {
   @builtin(position) position: vec4<f32>,
   @location(0) devicePosition: vec2<f32>,
   @location(1) uv: vec2<f32>,
   @location(2) unormTexCoords: vec2<f32>,
+  @location(3) texIndex: f32,
 };
 
-fn sample_indexed_atlas(textureCoords: vec2<f32>) -> vec4<f32> {
-  return textureSample(textTexture, textSampler, textureCoords);
+fn sample_indexed_atlas(textureCoords: vec2<f32>, atlasIndex: i32) -> vec4<f32> {
+  switch (atlasIndex) {
+    case 1: {
+      return textureSample(textTexture1, textSampler, textureCoords);
+    }
+    case 2: {
+      return textureSample(textTexture2, textSampler, textureCoords);
+    }
+    case 3: {
+      return textureSample(textTexture3, textSampler, textureCoords);
+    }
+    default: {
+      return textureSample(textTexture0, textSampler, textureCoords);
+    }
+  }
 }
 
 fn sdf_text_coverage_fn(
@@ -2523,13 +2561,14 @@ fn vs_main(
   out.devicePosition = devicePosition;
   out.unormTexCoords = scaledBaseCoords + uvPos;
   out.uv = out.unormTexCoords * step.textInfo.xy;
+  out.texIndex = indexAndFlags.x;
   return out;
 }
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
   let coverage = sdf_text_coverage_fn(
-    sample_indexed_atlas(in.uv).r,
+    sample_indexed_atlas(in.uv, i32(round(in.texIndex))).r,
     step.textInfo.zw,
     in.unormTexCoords,
   ).r * clip_coverage(in.devicePosition);
@@ -2860,6 +2899,49 @@ export const createDawnResourceProvider = (
             multisampled: false,
           },
         },
+        {
+          binding: 6,
+          visibility: GPUShaderStage.FRAGMENT,
+          sampler: {
+            type: 'filtering',
+          },
+        },
+        {
+          binding: 7,
+          visibility: GPUShaderStage.FRAGMENT,
+          texture: {
+            sampleType: 'float',
+            viewDimension: '2d',
+            multisampled: false,
+          },
+        },
+        {
+          binding: 8,
+          visibility: GPUShaderStage.FRAGMENT,
+          texture: {
+            sampleType: 'float',
+            viewDimension: '2d',
+            multisampled: false,
+          },
+        },
+        {
+          binding: 9,
+          visibility: GPUShaderStage.FRAGMENT,
+          texture: {
+            sampleType: 'float',
+            viewDimension: '2d',
+            multisampled: false,
+          },
+        },
+        {
+          binding: 10,
+          visibility: GPUShaderStage.FRAGMENT,
+          texture: {
+            sampleType: 'float',
+            viewDimension: '2d',
+            multisampled: false,
+          },
+        },
       ],
     });
     return clipTextureBindGroupLayout;
@@ -3151,6 +3233,7 @@ export const createDawnResourceProvider = (
       clipTextureView,
       dstTextureView,
       sampledTextureView,
+      textTextureViews = [],
       sampledTextureFilter = 'linear',
     ) =>
       backend.device.createBindGroup({
@@ -3192,6 +3275,30 @@ export const createDawnResourceProvider = (
           {
             binding: 5,
             resource: sampledTextureView ?? getDefaultClipTextureView(),
+          },
+          {
+            binding: 6,
+            resource: provider.createSampler({
+              label: 'drawing-text-texture-sampler',
+              magFilter: sampledTextureFilter,
+              minFilter: sampledTextureFilter,
+            }),
+          },
+          {
+            binding: 7,
+            resource: textTextureViews[0] ?? getDefaultClipTextureView(),
+          },
+          {
+            binding: 8,
+            resource: textTextureViews[1] ?? getDefaultClipTextureView(),
+          },
+          {
+            binding: 9,
+            resource: textTextureViews[2] ?? getDefaultClipTextureView(),
+          },
+          {
+            binding: 10,
+            resource: textTextureViews[3] ?? getDefaultClipTextureView(),
           },
         ],
       }),

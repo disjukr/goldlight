@@ -219,7 +219,7 @@ export const renderDrawingTextModesSnapshot = async (): Promise<
   });
 
   const directSubRun = buildDirectMaskSubRun(textHost, directRun);
-  const sdfSubRun = buildSdfSubRun(textHost, sdfRun, { inset: 10, radius: 10 });
+  const sdfSubRun = buildSdfSubRun(textHost, sdfRun);
 
   saveDrawingRecorder(recorder);
   scaleDrawingRecorder(recorder, supersampleScale, supersampleScale);
@@ -319,9 +319,9 @@ export const renderDrawingTextModesSnapshot = async (): Promise<
     size: 28,
     language: 'ko',
   });
-  const sdfEnglishSubRun1 = buildSdfSubRun(textHost, sdfEnglishRun1, { inset: 8, radius: 8 });
-  const sdfEnglishSubRun2 = buildSdfSubRun(textHost, sdfEnglishRun2, { inset: 8, radius: 8 });
-  const sdfKoreanSubRun = buildSdfSubRun(textHost, sdfKoreanRun, { inset: 8, radius: 8 });
+  const sdfEnglishSubRun1 = buildSdfSubRun(textHost, sdfEnglishRun1);
+  const sdfEnglishSubRun2 = buildSdfSubRun(textHost, sdfEnglishRun2);
+  const sdfKoreanSubRun = buildSdfSubRun(textHost, sdfKoreanRun);
 
   recordPathText(
     textHost,
@@ -466,7 +466,6 @@ export const renderDrawingTextModesSnapshot = async (): Promise<
           size: 32,
           language: 'ko',
         }),
-        { inset: 8, radius: 8 },
       ),
       {
         color: comparisonColors[1],

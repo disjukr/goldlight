@@ -129,8 +129,6 @@ export type Reconciler2dGlyphProps = Readonly<
     scriptTag?: string;
     mode?: Reconciler2dGlyphMode;
     textHost?: TextHost;
-    sdfInset?: number;
-    sdfRadius?: number;
   } & Reconciler2dPaintProps
 >;
 

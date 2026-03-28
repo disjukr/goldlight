@@ -43,6 +43,7 @@ import {
   recordClear,
   recordDrawDirectMaskText,
   recordDrawPath,
+  recordDrawSdfText,
   recordDrawShape,
   restoreDrawingRecorder,
   saveDrawingRecorder,
@@ -1141,6 +1142,81 @@ Deno.test('dawn text preparation uses Graphite-style instanced quad draws', () =
   assertEquals(step.vertexBuffer, null);
   assertEquals(step.instanceBuffer !== null, true);
   assertEquals(mock.created.textures.some((descriptor) => descriptor.format === 'r8unorm'), true);
+});
+
+Deno.test('drawing prepared sdf text insets uv and visible quad like Graphite SDFT', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  recordDrawSdfText(
+    recorder,
+    [{
+      glyphID: 11,
+      x: 20,
+      y: 40,
+      mask: null,
+      sdfInset: 2,
+      sdfRadius: 4,
+      strikeToSourceScale: 1,
+      sdf: {
+        cacheKey: 'test-sdf',
+        width: 20,
+        height: 28,
+        stride: 20,
+        format: 'a8',
+        offsetX: -4,
+        offsetY: -18,
+        pixels: new Uint8Array(20 * 28).fill(128),
+      },
+    }],
+    { color: [1, 1, 1, 1] },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const draw = prepared.passes[0]?.steps[0]?.draw;
+  assertEquals(draw?.kind, 'sdfText');
+  if (draw?.kind !== 'sdfText') {
+    throw new Error('expected sdfText draw');
+  }
+  assertEquals(draw.glyphs[0]?.xyPos, [18, 24]);
+  assertEquals(draw.glyphs[0]?.size, [16, 24]);
+  assertEquals(draw.glyphs[0]?.uvInset, [2, 2]);
+  assertEquals(draw.sdfInset, 2);
+  assertEquals(draw.sdfRadius, 4);
+});
+
+Deno.test('text atlas manager assigns atlas page indices across multiple pages like Graphite', () => {
+  const mock = createMockGpuContext();
+  const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
+  const atlas = sharedContext.atlasProvider.getTextAtlasManager().findOrCreateEntries('bitmap', [
+    {
+      mask: {
+        cacheKey: 'page-0',
+        width: 1000,
+        height: 1000,
+        stride: 1000,
+        pixels: new Uint8Array(1000 * 1000).fill(255),
+      },
+    },
+    {
+      mask: {
+        cacheKey: 'page-1',
+        width: 1000,
+        height: 1000,
+        stride: 1000,
+        pixels: new Uint8Array(1000 * 1000).fill(127),
+      },
+    },
+  ]);
+
+  if (!atlas) {
+    throw new Error('expected atlas entries');
+  }
+
+  assertEquals(atlas.views.length, 2);
+  assertEquals(atlas.placements[0]?.atlasIndex, 0);
+  assertEquals(atlas.placements[1]?.atlasIndex, 1);
 });
 
 Deno.test('drawing prepared recording preserves supported coeff blend modes', () => {
@@ -4290,7 +4366,7 @@ Deno.test('dawn command buffer snapshots dst for offscreen dst-read blend modes'
 
   assertEquals(commandBuffer.unsupportedCommands.length, 0);
   assertEquals(mock.created.textureCopies.length, 1);
-  assertEquals(mock.created.bindGroups.some((group) => group.entries.length === 6), true);
+  assertEquals(mock.created.bindGroups.some((group) => group.entries.length === 11), true);
   assertEquals(commandBuffer.passCount, 2);
 });
 

@@ -30,6 +30,7 @@ export type DrawingPreparedStepResources = Readonly<{
   stepBindGroup: GPUBindGroup;
   clipTextureView: GPUTextureView | null;
   sampledTextureView: GPUTextureView | null;
+  textAtlasViews: readonly GPUTextureView[];
   sampledTextureFilter: 'nearest' | 'linear';
   clipDrawKey: string | null;
   vertexBuffer: GPUBuffer | null;
@@ -282,10 +283,12 @@ const createTextInstanceData = (
   glyphs: readonly Readonly<{
     size: readonly [number, number];
     xyPos: readonly [number, number];
+    uvInset: readonly [number, number];
     indexAndFlags: readonly [number, number];
     strikeToSourceScale: number;
   }>[],
   placements: readonly Readonly<{
+    atlasIndex: number;
     atlasPosition: readonly [number, number];
   }>[],
 ): Float32Array => {
@@ -296,11 +299,11 @@ const createTextInstanceData = (
     const placement = placements[index]!;
     data[offset++] = glyph.size[0];
     data[offset++] = glyph.size[1];
-    data[offset++] = placement.atlasPosition[0];
-    data[offset++] = placement.atlasPosition[1];
+    data[offset++] = placement.atlasPosition[0] + glyph.uvInset[0];
+    data[offset++] = placement.atlasPosition[1] + glyph.uvInset[1];
     data[offset++] = glyph.xyPos[0];
     data[offset++] = glyph.xyPos[1];
-    data[offset++] = glyph.indexAndFlags[0];
+    data[offset++] = placement.atlasIndex;
     data[offset++] = glyph.indexAndFlags[1];
     data[offset++] = glyph.strikeToSourceScale;
   }
@@ -1755,6 +1758,7 @@ const prepareStepResources = (
   );
   const stepBindGroup = sharedContext.resourceProvider.createStepBindGroup(stepPayloadBuffer);
   let sampledTextureView: GPUTextureView | null = null;
+  let textAtlasViews: readonly GPUTextureView[] = [];
 
   if (step.draw.kind === 'directMaskText' || step.draw.kind === 'sdfText') {
     const atlas = sharedContext.atlasProvider.getTextAtlasManager().findOrCreateEntries(
@@ -1769,6 +1773,7 @@ const prepareStepResources = (
         stepBindGroup,
         clipTextureView: clipAtlasView,
         sampledTextureView: null,
+        textAtlasViews: [],
         sampledTextureFilter: 'nearest',
         clipDrawKey: getClipDrawKey(step),
         vertexBuffer: null,
@@ -1777,7 +1782,8 @@ const prepareStepResources = (
         instanceCount: 0,
       };
     }
-    sampledTextureView = atlas.view;
+    textAtlasViews = atlas.views;
+    sampledTextureView = atlas.views[0] ?? null;
     const instanceBuffer = createVertexBuffer(
       sharedContext,
       createTextInstanceData(step.draw.glyphs, atlas.placements),
@@ -1811,12 +1817,7 @@ const prepareStepResources = (
           1 / Math.max(atlas.width, 1),
           1 / Math.max(atlas.height, 1),
         ] as const,
-        sdfRange: step.draw.kind === 'sdfText'
-          ? [
-            Math.max(0, 0.5 - (0.5 / Math.max(step.draw.sdfRadius, 1))),
-            Math.min(1, 0.5 + (0.5 / Math.max(step.draw.sdfRadius, 1))),
-          ] as const
-          : [0, 0] as const,
+        sdfRange: [0, 0] as const,
       },
     );
     return {
@@ -1826,6 +1827,7 @@ const prepareStepResources = (
       stepBindGroup: sharedContext.resourceProvider.createStepBindGroup(textStepPayloadBuffer),
       clipTextureView: clipAtlasView,
       sampledTextureView,
+      textAtlasViews,
       sampledTextureFilter: step.draw.kind === 'directMaskText' ? 'nearest' : 'linear',
       clipDrawKey: getClipDrawKey(step),
       vertexBuffer: null,
@@ -1847,6 +1849,7 @@ const prepareStepResources = (
       stepBindGroup,
       clipTextureView: clipAtlasView,
       sampledTextureView,
+      textAtlasViews,
       sampledTextureFilter: 'nearest',
       clipDrawKey: getClipDrawKey(step),
       vertexBuffer: null,
@@ -1868,6 +1871,7 @@ const prepareStepResources = (
       stepBindGroup,
       clipTextureView: clipAtlasView,
       sampledTextureView,
+      textAtlasViews,
       sampledTextureFilter: 'nearest',
       clipDrawKey: getClipDrawKey(step),
       vertexBuffer: null,
@@ -1936,6 +1940,7 @@ const prepareStepResources = (
       stepBindGroup,
       clipTextureView: clipAtlasView,
       sampledTextureView,
+      textAtlasViews,
       sampledTextureFilter: 'nearest',
       clipDrawKey: getClipDrawKey(step),
       vertexBuffer,
@@ -1983,6 +1988,7 @@ const prepareStepResources = (
     stepBindGroup,
     clipTextureView: clipAtlasView,
     sampledTextureView,
+    textAtlasViews,
     sampledTextureFilter: 'nearest',
     clipDrawKey: getClipDrawKey(step),
     vertexBuffer,

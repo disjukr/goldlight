@@ -1,17 +1,14 @@
 import type { SdfGlyph, SdfSubRun, ShapedRun, TextHost } from './types.ts';
 
-export type CreateGlyphSdfOptions = Readonly<{
-  inset?: number;
-  radius?: number;
-}>;
+export const skiaDistanceFieldInset = 2;
+export const skiaDistanceFieldRadius = 4;
 
 export const buildSdfSubRun = (
   host: TextHost,
   run: ShapedRun,
-  options: CreateGlyphSdfOptions = {},
 ): SdfSubRun => {
-  const sdfInset = Math.max(1, Math.floor(options.inset ?? 8));
-  const sdfRadius = Math.max(1, options.radius ?? sdfInset);
+  const sdfInset = skiaDistanceFieldInset;
+  const sdfRadius = skiaDistanceFieldRadius;
   const glyphs: SdfGlyph[] = [];
 
   for (let index = 0; index < run.glyphIDs.length; index += 1) {
@@ -24,10 +21,7 @@ export const buildSdfSubRun = (
       x,
       y,
       mask,
-      sdf: host.getGlyphSdf(run.typeface, glyphID, run.size, {
-        inset: sdfInset,
-        radius: sdfRadius,
-      }),
+      sdf: host.getGlyphSdf(run.typeface, glyphID, run.size),
       sdfInset,
       sdfRadius,
     });

@@ -1,7 +1,7 @@
 /// <reference lib="deno.unstable" />
 
 import type { DesktopModuleContext } from '@goldlight/desktop';
-import { evaluateScene } from '@goldlight/core';
+import { evaluateScene } from '@goldlight/renderer';
 import {
   createRuntimeResidency,
   createSurfaceBinding,

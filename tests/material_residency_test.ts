@@ -8,7 +8,7 @@ import {
   type GpuUploadContext,
   uploadMaterialResidency,
 } from '@goldlight/gpu';
-import { evaluateScene } from '@goldlight/core';
+import { evaluateScene } from '@goldlight/renderer';
 import { appendMaterial, appendMesh, appendNode, createNode, createSceneIr } from '@goldlight/ir';
 
 type MockBuffer = Readonly<{

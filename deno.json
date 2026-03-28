@@ -1,7 +1,6 @@
 {
   "workspace": [
     "./packages/ir",
-    "./packages/core",
     "./packages/math",
     "./packages/geometry",
     "./packages/drawing",
@@ -21,7 +20,6 @@
     "@std/path": "jsr:@std/path@1",
     "@std/yaml": "jsr:@std/yaml@1",
     "@goldlight/ir": "./packages/ir/mod.ts",
-    "@goldlight/core": "./packages/core/mod.ts",
     "@goldlight/math": "./packages/math/mod.ts",
     "@goldlight/geometry": "./packages/geometry/mod.ts",
     "@goldlight/drawing": "./packages/drawing/mod.ts",

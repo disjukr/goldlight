@@ -4,7 +4,7 @@
 /// <reference lib="dom" />
 
 import React from 'npm:react@19.2.0';
-import { createQuaternionFromEulerDegrees } from '@goldlight/core';
+import { createQuaternionFromEulerDegrees } from '@goldlight/math';
 import { initializeWindow, useSetTimeMs, useTimeMs, useWindowMetrics } from '@goldlight/desktop';
 import { createBoxMesh } from '@goldlight/geometry';
 import { G3dDirectionalLight, G3dPerspectiveCamera } from '@goldlight/react/reconciler';

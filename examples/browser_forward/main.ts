@@ -1,6 +1,6 @@
 /// <reference lib="dom" />
 
-import { evaluateScene } from '../../packages/core/mod.ts';
+import { evaluateScene } from '../../packages/renderer/mod.ts';
 import {
   createRuntimeResidency,
   createSurfaceBinding,

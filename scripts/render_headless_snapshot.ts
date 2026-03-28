@@ -1,5 +1,5 @@
 import { dirname, fromFileUrl, resolve } from '@std/path';
-import { evaluateScene } from '@goldlight/core';
+import { evaluateScene } from '@goldlight/renderer';
 import {
   createOffscreenBinding,
   createRuntimeResidency,

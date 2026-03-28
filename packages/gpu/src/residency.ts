@@ -1,4 +1,4 @@
-import type { EvaluatedScene } from '@goldlight/core';
+import type { EvaluatedScene } from '@goldlight/renderer';
 import {
   resolveMeshSourceAssetId,
   resolveMeshSourceInline,

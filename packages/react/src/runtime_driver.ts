@@ -1,4 +1,4 @@
-import { type EvaluatedScene, evaluateScene, reevaluateSceneTransforms } from '@goldlight/core';
+import { type EvaluatedScene, evaluateScene, reevaluateSceneTransforms } from '@goldlight/renderer';
 import { applyRuntimeResidencyPlan, type RuntimeResidency } from '@goldlight/gpu';
 import type { SceneIr } from '@goldlight/ir';
 import { createFrameState, type FrameState, type FrameStateInit } from '@goldlight/renderer';

@@ -2,7 +2,7 @@
 
 ## Screen-To-World Ray Utility
 
-`@goldlight/core` exposes `createScreenWorldRay()` for pointer-driven scene queries that need a
+`@goldlight/spatial` exposes `createScreenWorldRay()` for pointer-driven scene queries that need a
 world-space ray from the current evaluated camera.
 
 ## Contract

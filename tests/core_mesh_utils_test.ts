@@ -2,9 +2,9 @@ import { assertAlmostEquals, assertEquals, assertThrows } from 'jsr:@std/assert@
 import {
   createMeshNormalsAttribute,
   createMeshTangentsAttribute,
-  createQuaternionFromEulerDegrees,
   getMeshBounds,
-} from '@goldlight/core';
+} from '@goldlight/geometry';
+import { createQuaternionFromEulerDegrees } from '@goldlight/math';
 import type { MeshPrimitive } from '@goldlight/ir';
 
 const createMesh = (mesh: Partial<MeshPrimitive> & Pick<MeshPrimitive, 'id'>): MeshPrimitive => ({

@@ -1,4 +1,4 @@
-import type { EvaluatedCamera, EvaluatedScene } from '@goldlight/core';
+import type { EvaluatedCamera, EvaluatedScene } from './scene_evaluation.ts';
 import type { Material } from '@goldlight/ir';
 import { buildBvh, type BvhNode, type RaytraceTriangle } from '@goldlight/raytrace';
 import {

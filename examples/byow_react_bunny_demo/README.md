@@ -13,8 +13,8 @@ This demo exercises:
   failures through the flush helper path used by tests/deterministic integrations
 - react-package frame-driver wiring that applies targeted residency invalidation and uses the
   transform-only reevaluation fast path whenever the rotating bunny only changes node transforms
-- reusable `@goldlight/core` helpers for generated normals, mesh bounds, and Euler-authored light
-  rotation
+- reusable `@goldlight/geometry` and `@goldlight/math` helpers for generated normals, mesh bounds,
+  and Euler-authored light rotation
 - built-in forward lit shading with a directional light in a native desktop window
 
 Run with:

@@ -1,1 +1,1 @@
-// Spatial query and indexing helpers will live here as they are introduced.
+export * from './src/screen_world_ray.ts';

@@ -27,12 +27,10 @@ The runtime is split into explicit data and execution stages:
   functions.
 - `packages/geometry`: shape definitions, mesh primitive generation, triangulation, and local
   SDF-to-mesh extraction helpers.
-- `packages/spatial`: spatial indexing and broad-phase query helpers.
-- `packages/core`: pure functions that evaluate IR into renderable CPU state.
-- `packages/core` also owns evaluated-camera math helpers such as screen-to-world ray generation for
-  interaction foundations.
-- `packages/core` also owns reusable CPU-side transform and mesh helpers such as quaternion
-  construction, mesh bounds, and generated mesh normals.
+- `packages/spatial`: spatial indexing, broad-phase query helpers, and screen-to-world ray helpers.
+- `packages/renderer`: pure functions that evaluate IR into renderable CPU state.
+- `packages/math`: reusable CPU-side quaternion and other math helpers beyond deterministic noise.
+- `packages/geometry`: mesh bounds plus generated mesh normals/tangents alongside shape helpers.
 - `packages/gpu`: explicit WebGPU context and residency management helpers.
 - `packages/renderer`: pass contracts, renderer descriptors, and frame planning.
 - `packages/renderer` also owns renderer-side id-buffer picking for mesh-node selection and
@@ -45,7 +43,7 @@ The runtime is split into explicit data and execution stages:
   generation helpers.
 - `packages/raytrace`: tracing acceleration and traversal helpers for ray or path-traced execution.
 - `packages/importers`: format parsers that normalize input into Scene IR.
-- `packages/react`: declarative scene authoring that feeds the same IR/core pipeline.
+- `packages/react`: declarative scene authoring that feeds the same IR/renderer pipeline.
 - `packages/exporters`: output encoders that serialize renderer results such as PNG.
 - device-loss recovery remains a caller-visible workflow rather than an implicit runtime reset. See
   [`device-loss-recovery.md`](./device-loss-recovery.md).

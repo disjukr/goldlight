@@ -13,7 +13,7 @@ import {
   type RuntimeResidency,
   type TextureResidency,
 } from '@goldlight/gpu';
-import { evaluateScene } from '@goldlight/core';
+import { evaluateScene } from '@goldlight/renderer';
 import {
   createDrawingContextFromGpuContext,
   type DrawingContext,

@@ -1,5 +1,5 @@
 import { assertEquals, assertStrictEquals } from 'jsr:@std/assert@^1.0.14';
-import { evaluateScene } from '@goldlight/core';
+import { evaluateScene } from '@goldlight/renderer';
 import {
   createMeshUploadPlan,
   createRuntimeResidency,

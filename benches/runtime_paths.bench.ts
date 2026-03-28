@@ -1,4 +1,4 @@
-import { evaluateScene } from '@goldlight/core';
+import { evaluateScene } from '@goldlight/renderer';
 import {
   createMaterialUploadPlan,
   createOffscreenBinding,

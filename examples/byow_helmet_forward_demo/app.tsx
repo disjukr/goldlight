@@ -4,7 +4,8 @@
 /// <reference lib="dom" />
 
 import React from 'npm:react@19.2.0';
-import { createQuaternionFromEulerDegrees, getMeshBounds } from '@goldlight/core';
+import { getMeshBounds } from '@goldlight/geometry';
+import { createQuaternionFromEulerDegrees } from '@goldlight/math';
 import type { DesktopModuleCleanup, DesktopModuleContext } from '@goldlight/desktop';
 import {
   createRuntimeResidency,

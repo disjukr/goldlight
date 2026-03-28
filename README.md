@@ -5,10 +5,10 @@
 The repository is organized as a Deno workspace with packages for:
 
 - `@goldlight/ir`: BDL-backed scene IR definitions
-- `@goldlight/core`: scene evaluation and animation helpers
+- `@goldlight/renderer`: scene evaluation and animation helpers
 - `@goldlight/math`: low-level deterministic sampling and reusable math helpers
 - `@goldlight/geometry`: shape definition, mesh primitive generation, and local SDF-to-mesh helpers
-- `@goldlight/spatial`: spatial indexing and broad-phase query helpers
+- `@goldlight/spatial`: spatial indexing, broad-phase query helpers, and screen/world ray helpers
 - `@goldlight/procedural`: deterministic procedural texture and volume generators
 - `@goldlight/raytrace`: tracing acceleration and traversal helpers
 - `@goldlight/gpu`: WebGPU context and runtime residency helpers
@@ -64,8 +64,8 @@ Implemented today:
 - BDL-driven `SceneIr` generation with drift checks in CI
 - camera declarations in Scene IR plus evaluated active-camera view/projection support
 - screen-to-world mouse ray generation from evaluated camera state for interaction foundations
-- reusable core helpers for quaternion-from-Euler rotation authoring, mesh bounds, and generated
-  mesh normals
+- reusable math and geometry helpers for quaternion-from-Euler rotation authoring, mesh bounds, and
+  generated mesh normals
 - mesh and texture residency upload paths
 - forward rendering, minimal deferred mesh execution with built-in unlit/lit plus custom WGSL
   G-buffer paths, deferred directional-light resolve support, optional scene-color post-process blit

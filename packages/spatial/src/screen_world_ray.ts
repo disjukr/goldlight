@@ -1,4 +1,4 @@
-import type { EvaluatedCamera } from './evaluate_scene.ts';
+import type { EvaluatedCamera } from '@goldlight/renderer';
 
 export type ScreenRay = Readonly<{
   origin: Readonly<{ x: number; y: number; z: number }>;

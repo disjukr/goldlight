@@ -1,5 +1,6 @@
 import { assertAlmostEquals, assertEquals, assertThrows } from 'jsr:@std/assert@^1.0.14';
-import { createScreenWorldRay, evaluateScene, reevaluateSceneTransforms } from '@goldlight/core';
+import { createScreenWorldRay } from '@goldlight/spatial';
+import { evaluateScene, reevaluateSceneTransforms } from '@goldlight/renderer';
 import {
   appendAnimationClip,
   appendCamera,

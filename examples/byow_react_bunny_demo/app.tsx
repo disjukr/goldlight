@@ -4,11 +4,8 @@
 /// <reference lib="dom" />
 
 import React from 'npm:react@19.2.0';
-import {
-  createMeshNormalsAttribute,
-  createQuaternionFromEulerDegrees,
-  getMeshBounds,
-} from '@goldlight/core';
+import { createMeshNormalsAttribute, getMeshBounds } from '@goldlight/geometry';
+import { createQuaternionFromEulerDegrees } from '@goldlight/math';
 import { initializeWindow } from '@goldlight/desktop';
 import type { MeshPrimitive } from '@goldlight/ir';
 import { importPlyFromText } from '@goldlight/importers';

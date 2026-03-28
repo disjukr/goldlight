@@ -4,7 +4,7 @@ import {
   assertStrictEquals,
   assertThrows,
 } from 'jsr:@std/assert@^1.0.14';
-import { evaluateScene } from '@goldlight/core';
+import { evaluateScene } from '@goldlight/renderer';
 import { createOffscreenBinding, createRuntimeResidency } from '@goldlight/gpu';
 import { appendMaterial, appendMesh, appendNode, createNode, createSceneIr } from '@goldlight/ir';
 import {

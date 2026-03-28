@@ -1,6 +1,8 @@
 /// <reference lib="deno.unstable" />
 
-import { createQuaternionFromEulerDegrees, evaluateScene, getMeshBounds } from '@goldlight/core';
+import { getMeshBounds } from '@goldlight/geometry';
+import { createQuaternionFromEulerDegrees } from '@goldlight/math';
+import { evaluateScene } from '@goldlight/renderer';
 import type { DesktopModuleContext } from '@goldlight/desktop';
 import { createBoxMesh } from '@goldlight/geometry';
 import {

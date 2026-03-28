@@ -44,6 +44,7 @@ import {
   concatDrawingRecorderTransform,
   recordClear,
   recordDrawPath,
+  recordDrawShape,
   restoreDrawingRecorder,
   saveDrawingRecorder,
 } from '@goldlight/drawing';
@@ -57,12 +58,7 @@ import {
   upsertG3dSceneDocumentNode,
   upsertG3dSceneDocumentResource,
 } from './scene_document.ts';
-import {
-  createCircle,
-  createCirclePath2d,
-  createRect,
-  createRectPath2d,
-} from '@goldlight/geometry';
+import { createCircle, createCirclePath2d, createRect } from '@goldlight/geometry';
 
 type ResourceIntrinsicType =
   | 'asset'
@@ -616,11 +612,12 @@ const render2dChild = (
       if (child.children.length > 0) {
         throw new Error('<g2d-rect> does not support children');
       }
-      recordDrawPath(
+      recordDrawShape(
         recorder,
-        createRectPath2d(
-          createRect(child.props.x, child.props.y, child.props.width, child.props.height),
-        ),
+        {
+          kind: 'rect',
+          rect: createRect(child.props.x, child.props.y, child.props.width, child.props.height),
+        },
         create2dPaint(child.props),
       );
       return;

@@ -12,6 +12,8 @@ export type DrawingPathRendererStrategy =
   | 'cpu-sparse-strips-msaa8';
 
 export type DrawingRendererKind =
+  | 'analytic-rrect'
+  | 'per-edge-aa-quad'
   | 'convex-tessellated-wedges'
   | 'stencil-tessellated-wedges'
   | 'stencil-tessellated-curves'
@@ -28,11 +30,14 @@ export type DrawingRenderer = Readonly<{
   fillRule?: PathFillRule2d;
   requiresStencil: boolean;
   usesDepth: boolean;
+  requiresMSAA: boolean;
 }>;
 
 export type DrawingRendererProvider = Readonly<{
   pathRendererStrategy: DrawingPathRendererStrategy;
   renderers: readonly DrawingRenderer[];
+  analyticRRect: () => DrawingRenderer;
+  perEdgeAAQuad: () => DrawingRenderer;
   convexTessellatedWedges: () => DrawingRenderer;
   stencilTessellatedWedges: (fillRule: PathFillRule2d) => DrawingRenderer;
   stencilTessellatedCurves: (fillRule: PathFillRule2d) => DrawingRenderer;
@@ -94,6 +99,7 @@ export const createDrawingRendererProvider = (
     patchMode: 'wedge',
     requiresStencil: false,
     usesDepth: true,
+    requiresMSAA: true,
   });
   const stencilWedges = Object.freeze({
     nonzero: createRenderer({
@@ -103,6 +109,7 @@ export const createDrawingRendererProvider = (
       fillRule: 'nonzero',
       requiresStencil: true,
       usesDepth: false,
+      requiresMSAA: true,
     }),
     evenodd: createRenderer({
       name: 'StencilTessellatedWedges[evenodd]',
@@ -111,6 +118,7 @@ export const createDrawingRendererProvider = (
       fillRule: 'evenodd',
       requiresStencil: true,
       usesDepth: false,
+      requiresMSAA: true,
     }),
   });
   const stencilCurves = Object.freeze({
@@ -121,6 +129,7 @@ export const createDrawingRendererProvider = (
       fillRule: 'nonzero',
       requiresStencil: true,
       usesDepth: false,
+      requiresMSAA: true,
     }),
     evenodd: createRenderer({
       name: 'StencilTessellatedCurvesAndTris[evenodd]',
@@ -129,6 +138,7 @@ export const createDrawingRendererProvider = (
       fillRule: 'evenodd',
       requiresStencil: true,
       usesDepth: false,
+      requiresMSAA: true,
     }),
   });
   const tessellatedStrokes = createRenderer({
@@ -137,9 +147,28 @@ export const createDrawingRendererProvider = (
     patchMode: 'stroke',
     requiresStencil: false,
     usesDepth: true,
+    requiresMSAA: true,
+  });
+  const analyticRRect = createRenderer({
+    name: 'AnalyticRRect',
+    kind: 'analytic-rrect',
+    patchMode: 'none',
+    requiresStencil: false,
+    usesDepth: true,
+    requiresMSAA: false,
+  });
+  const perEdgeAAQuad = createRenderer({
+    name: 'PerEdgeAAQuad',
+    kind: 'per-edge-aa-quad',
+    patchMode: 'none',
+    requiresStencil: false,
+    usesDepth: true,
+    requiresMSAA: false,
   });
 
   const renderers = Object.freeze([
+    analyticRRect,
+    perEdgeAAQuad,
     convexWedges,
     stencilWedges.nonzero,
     stencilWedges.evenodd,
@@ -159,6 +188,8 @@ export const createDrawingRendererProvider = (
   return {
     pathRendererStrategy,
     renderers,
+    analyticRRect: () => analyticRRect,
+    perEdgeAAQuad: () => perEdgeAAQuad,
     convexTessellatedWedges: () => convexWedges,
     stencilTessellatedWedges: (fillRule) => selectFillRuleRenderer(stencilWedges, fillRule),
     stencilTessellatedCurves: (fillRule) => selectFillRuleRenderer(stencilCurves, fillRule),

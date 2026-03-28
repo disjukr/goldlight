@@ -54,7 +54,7 @@ export type DawnResourceProvider = Readonly<{
   ) => DrawingGraphicsPipelineHandle;
   resolveGraphicsPipelineHandle: (handle: DrawingGraphicsPipelineHandle) => GPURenderPipeline;
   findOrCreateGraphicsPipeline: (descriptor: DrawingGraphicsPipelineDesc) => GPURenderPipeline;
-  getStencilAttachmentView: () => GPUTextureView;
+  getStencilAttachmentView: (sampleCount?: 1 | 4) => GPUTextureView;
 }>;
 
 const renderAttachmentUsage = 0x10;
@@ -163,6 +163,49 @@ const commonBlendShaderSource = `
 @group(3) @binding(2) var dstColorSampler: sampler;
 @group(3) @binding(3) var dstColorTexture: texture_2d<f32>;
 
+fn analytic_edge_coverage(distanceToEdge: f32, enabled: f32) -> f32 {
+  let aaWidth = max(fwidth(distanceToEdge), 1e-4);
+  let coverage = saturate01(distanceToEdge / aaWidth);
+  return select(1.0, coverage, enabled > 0.5);
+}
+
+fn analytic_signed_distance_to_edge(
+  edgeStart: vec2<f32>,
+  edgeEnd: vec2<f32>,
+  point: vec2<f32>,
+  winding: f32,
+) -> f32 {
+  let edge = edgeEnd - edgeStart;
+  let edgeLength = max(length(edge), 1e-4);
+  return winding * (((edge.x * (point.y - edgeStart.y)) - (edge.y * (point.x - edgeStart.x))) / edgeLength);
+}
+
+fn analytic_pick_radii(xRadii: vec4<f32>, yRadii: vec4<f32>, local: vec2<f32>, size: vec2<f32>) -> vec2<f32> {
+  let top = select(0, 1, local.x > size.x * 0.5);
+  let bottom = select(0, 2, local.y > size.y * 0.5);
+  let index = top + bottom;
+  if (index == 0) { return vec2<f32>(xRadii.x, yRadii.x); }
+  if (index == 1) { return vec2<f32>(xRadii.y, yRadii.y); }
+  if (index == 2) { return vec2<f32>(xRadii.w, yRadii.w); }
+  return vec2<f32>(xRadii.z, yRadii.z);
+}
+
+fn analytic_signed_distance_to_rrect(
+  local: vec2<f32>,
+  size: vec2<f32>,
+  xRadii: vec4<f32>,
+  yRadii: vec4<f32>,
+) -> f32 {
+  let cornerRadii = analytic_pick_radii(xRadii, yRadii, local, size);
+  let center = size * 0.5;
+  let halfSize = center;
+  let effectiveHalf = max(halfSize - cornerRadii, vec2<f32>(0.0));
+  let q = abs(local - center) - effectiveHalf;
+  let outside = length(max(q, vec2<f32>(0.0)));
+  let inside = min(max(q.x, q.y), 0.0);
+  return outside + inside - min(cornerRadii.x, cornerRadii.y);
+}
+
 fn clip_coverage(devicePosition: vec2<f32>) -> f32 {
   var coverage = 1.0;
   if (step.params.y > 0.5) {
@@ -170,10 +213,22 @@ fn clip_coverage(devicePosition: vec2<f32>) -> f32 {
     coverage *= textureSample(clipMaskTexture, clipMaskSampler, uv).a;
   }
   if (step.params.z > 0.5) {
-    let local = devicePosition - step.clipAnalytic.xy;
-    let inside = local.x >= 0.0 && local.y >= 0.0 &&
-      local.x <= step.clipAnalytic.z && local.y <= step.clipAnalytic.w;
-    coverage *= select(0.0, 1.0, inside);
+    let clipKind = i32(round(step.clipAnalytic0.x));
+    if (clipKind == 1) {
+      let local = devicePosition - step.clipAnalytic0.yz;
+      let size = vec2<f32>(step.clipAnalytic0.w, step.clipAnalytic1.x);
+      let signedDistance = max(max(-local.x, -local.y), max(local.x - size.x, local.y - size.y));
+      let aaWidth = max(fwidth(signedDistance), 1e-4);
+      coverage *= saturate01(0.5 - signedDistance / aaWidth);
+    } else if (clipKind == 2) {
+      let local = devicePosition - step.clipAnalytic0.yz;
+      let size = vec2<f32>(step.clipAnalytic0.w, step.clipAnalytic1.x);
+      let xRadii = vec4<f32>(step.clipAnalytic1.y, step.clipAnalytic1.z, step.clipAnalytic1.w, step.clipAnalytic2.x);
+      let yRadii = vec4<f32>(step.clipAnalytic2.y, step.clipAnalytic2.z, step.clipAnalytic2.w, step.clipAnalytic3.x);
+      let signedDistance = analytic_signed_distance_to_rrect(local, size, xRadii, yRadii);
+      let aaWidth = max(fwidth(signedDistance), 1e-4);
+      coverage *= saturate01(0.5 - signedDistance / aaWidth);
+    }
   }
   return coverage;
 }
@@ -378,7 +433,10 @@ struct StepUniform {
   color: vec4<f32>,
   params: vec4<f32>,
   clipAtlas: vec4<f32>,
-  clipAnalytic: vec4<f32>,
+  clipAnalytic0: vec4<f32>,
+  clipAnalytic1: vec4<f32>,
+  clipAnalytic2: vec4<f32>,
+  clipAnalytic3: vec4<f32>,
   clipShader: vec4<f32>,
   dst: vec4<f32>,
   blender: vec4<f32>,
@@ -891,6 +949,388 @@ fn vs_main(
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
   let coverage = in.color.a;
+  let clipCoverage = clip_coverage(in.devicePosition);
+  var color = apply_clip_shader(paint_shader_color(in.devicePosition));
+  color.a *= coverage * clipCoverage;
+  return blend_with_dst(color, in.devicePosition);
+}
+`;
+
+const analyticRRectShaderSource = `
+struct ViewportUniform {
+  scale: vec2<f32>,
+  translate: vec2<f32>,
+};
+
+@group(0) @binding(0) var<uniform> viewport: ViewportUniform;
+
+${commonStepUniformSource}
+
+@group(1) @binding(0) var<uniform> step: StepUniform;
+${commonBlendShaderSource}
+${commonPaintShaderSource}
+
+struct VertexOut {
+  @builtin(position) position: vec4<f32>,
+  @location(0) devicePosition: vec2<f32>,
+  @location(1) localPosition: vec2<f32>,
+  @location(2) xRadiiOrFlags: vec4<f32>,
+  @location(3) radiiOrQuadXs: vec4<f32>,
+  @location(4) ltrbOrQuadYs: vec4<f32>,
+};
+
+fn local_to_device(position: vec2<f32>) -> vec2<f32> {
+  return vec2<f32>(
+    (step.matrix0.x * position.x) + (step.matrix0.z * position.y) + step.matrix1.x,
+    (step.matrix0.y * position.x) + (step.matrix0.w * position.y) + step.matrix1.y,
+  );
+}
+
+fn device_to_ndc(position: vec2<f32>) -> vec4<f32> {
+  return vec4<f32>((position * viewport.scale) + viewport.translate, step.matrix1.w, 1.0);
+}
+
+fn pick_component(values: vec4<f32>, index: i32) -> f32 {
+  if (index == 0) { return values.x; }
+  if (index == 1) { return values.y; }
+  if (index == 2) { return values.z; }
+  return values.w;
+}
+
+fn analytic_is_line(xRadiiOrFlags: vec4<f32>) -> bool {
+  return xRadiiOrFlags.x < -1.5 && xRadiiOrFlags.y > 0.5;
+}
+
+fn analytic_is_stroke_shape(xRadiiOrFlags: vec4<f32>) -> bool {
+  return xRadiiOrFlags.x < -1.5 && abs(xRadiiOrFlags.y) <= 0.5;
+}
+
+fn analytic_is_filled_rrect(xRadiiOrFlags: vec4<f32>) -> bool {
+  return any(xRadiiOrFlags > vec4<f32>(0.0));
+}
+
+fn analytic_fill_ltrb(
+  xRadiiOrFlags: vec4<f32>,
+  radiiOrQuadXs: vec4<f32>,
+  ltrbOrQuadYs: vec4<f32>,
+) -> vec4<f32> {
+  if (analytic_is_filled_rrect(xRadiiOrFlags)) {
+    return ltrbOrQuadYs;
+  }
+  return vec4<f32>(radiiOrQuadXs.x, ltrbOrQuadYs.x, radiiOrQuadXs.y, ltrbOrQuadYs.z);
+}
+
+fn analytic_fill_x_radii(xRadiiOrFlags: vec4<f32>) -> vec4<f32> {
+  return select(vec4<f32>(0.0), xRadiiOrFlags, analytic_is_filled_rrect(xRadiiOrFlags));
+}
+
+fn analytic_fill_y_radii(
+  xRadiiOrFlags: vec4<f32>,
+  radiiOrQuadXs: vec4<f32>,
+) -> vec4<f32> {
+  return select(vec4<f32>(0.0), radiiOrQuadXs, analytic_is_filled_rrect(xRadiiOrFlags));
+}
+
+fn line_direction(start: vec2<f32>, end: vec2<f32>) -> vec2<f32> {
+  let delta = end - start;
+  let len = length(delta);
+  return select(vec2<f32>(1.0, 0.0), delta / len, len > 1e-4);
+}
+
+fn rect_signed_distance(localPosition: vec2<f32>, ltrb: vec4<f32>) -> f32 {
+  let center = (ltrb.xy + ltrb.zw) * 0.5;
+  let halfSize = max((ltrb.zw - ltrb.xy) * 0.5, vec2<f32>(0.0));
+  let d = abs(localPosition - center) - halfSize;
+  return length(max(d, vec2<f32>(0.0))) + min(max(d.x, d.y), 0.0);
+}
+
+fn corner_radius(localPosition: vec2<f32>, ltrb: vec4<f32>, xRadii: vec4<f32>, yRadii: vec4<f32>) -> vec2<f32> {
+  let center = (ltrb.xy + ltrb.zw) * 0.5;
+  let useRight = localPosition.x >= center.x;
+  let useBottom = localPosition.y >= center.y;
+  let index = select(
+    select(0, 1, useRight),
+    select(3, 2, useRight),
+    useBottom,
+  );
+  return vec2<f32>(pick_component(xRadii, index), pick_component(yRadii, index));
+}
+
+fn rounded_rect_signed_distance(
+  localPosition: vec2<f32>,
+  ltrb: vec4<f32>,
+  xRadii: vec4<f32>,
+  yRadii: vec4<f32>,
+) -> f32 {
+  let radius = corner_radius(localPosition, ltrb, xRadii, yRadii);
+  if (radius.x <= 1e-4 && radius.y <= 1e-4) {
+    return rect_signed_distance(localPosition, ltrb);
+  }
+  let center = (ltrb.xy + ltrb.zw) * 0.5;
+  let halfSize = max((ltrb.zw - ltrb.xy) * 0.5, vec2<f32>(0.0));
+  let innerHalf = max(halfSize - radius, vec2<f32>(0.0));
+  let q = abs(localPosition - center) - innerHalf;
+  let outside = max(q, vec2<f32>(0.0));
+  let safeRadius = max(radius, vec2<f32>(1e-4));
+  let ellipseDistance = (length(outside / safeRadius) - 1.0) * min(safeRadius.x, safeRadius.y);
+  let edgeDistance = min(max(q.x, q.y), 0.0);
+  return select(edgeDistance, ellipseDistance, outside.x > 0.0 || outside.y > 0.0);
+}
+
+@vertex
+fn vs_main(
+  @builtin(vertex_index) vertexIndex: u32,
+  @location(0) xRadiiOrFlags: vec4<f32>,
+  @location(1) radiiOrQuadXs: vec4<f32>,
+  @location(2) ltrbOrQuadYs: vec4<f32>,
+) -> VertexOut {
+  var localPosition: vec2<f32>;
+  if (analytic_is_line(xRadiiOrFlags)) {
+    let start = ltrbOrQuadYs.xy;
+    let end = ltrbOrQuadYs.zw;
+    let strokeRadius = max(xRadiiOrFlags.z, 1e-4);
+    let capCode = xRadiiOrFlags.w;
+    let dir = line_direction(start, end);
+    let normal = vec2<f32>(-dir.y, dir.x);
+    let capInset = select(0.0, strokeRadius, capCode > 1.5);
+    let startPoint = start - dir * capInset;
+    let endPoint = end + dir * capInset;
+    if (vertexIndex == 0u) {
+      localPosition = startPoint + normal * strokeRadius;
+    } else if (vertexIndex == 1u) {
+      localPosition = endPoint + normal * strokeRadius;
+    } else if (vertexIndex == 2u) {
+      localPosition = startPoint - normal * strokeRadius;
+    } else {
+      localPosition = endPoint - normal * strokeRadius;
+    }
+  } else {
+    let ltrb = select(
+      analytic_fill_ltrb(xRadiiOrFlags, radiiOrQuadXs, ltrbOrQuadYs),
+      ltrbOrQuadYs,
+      analytic_is_stroke_shape(xRadiiOrFlags),
+    );
+    let corner = vec2<f32>(f32(vertexIndex & 1u), f32((vertexIndex >> 1u) & 1u));
+    localPosition = mix(ltrb.xy, ltrb.zw, corner);
+  }
+  let devicePosition = local_to_device(localPosition);
+  var out: VertexOut;
+  out.position = device_to_ndc(devicePosition);
+  out.devicePosition = devicePosition;
+  out.localPosition = localPosition;
+  out.xRadiiOrFlags = xRadiiOrFlags;
+  out.radiiOrQuadXs = radiiOrQuadXs;
+  out.ltrbOrQuadYs = ltrbOrQuadYs;
+  return out;
+}
+
+fn signed_distance_to_segment_capsule(
+  point: vec2<f32>,
+  start: vec2<f32>,
+  end: vec2<f32>,
+  radius: f32,
+) -> f32 {
+  let delta = end - start;
+  let denom = max(dot(delta, delta), 1e-4);
+  let t = saturate01(dot(point - start, delta) / denom);
+  let closest = mix(start, end, t);
+  return length(point - closest) - radius;
+}
+
+fn signed_distance_to_butt_line(
+  point: vec2<f32>,
+  start: vec2<f32>,
+  end: vec2<f32>,
+  radius: f32,
+) -> f32 {
+  let dir = line_direction(start, end);
+  let normal = vec2<f32>(-dir.y, dir.x);
+  let lengthAlong = length(end - start);
+  let centered = vec2<f32>(
+    dot(point - start, dir) - (0.5 * lengthAlong),
+    dot(point - start, normal),
+  );
+  let q = abs(centered) - vec2<f32>(0.5 * lengthAlong, radius);
+  return length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0);
+}
+
+fn line_signed_distance(
+  point: vec2<f32>,
+  start: vec2<f32>,
+  end: vec2<f32>,
+  radius: f32,
+  capCode: f32,
+) -> f32 {
+  if (capCode > 1.5) {
+    let dir = line_direction(start, end);
+    return signed_distance_to_butt_line(point, start - dir * radius, end + dir * radius, radius);
+  }
+  if (capCode > 0.5) {
+    return signed_distance_to_segment_capsule(point, start, end, radius);
+  }
+  return signed_distance_to_butt_line(point, start, end, radius);
+}
+
+@fragment
+fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
+  var signedDistance = 1.0;
+  if (analytic_is_line(in.xRadiiOrFlags)) {
+    signedDistance = line_signed_distance(
+      in.localPosition,
+      in.ltrbOrQuadYs.xy,
+      in.ltrbOrQuadYs.zw,
+      max(in.xRadiiOrFlags.z, 1e-4),
+      in.xRadiiOrFlags.w,
+    );
+  } else if (analytic_is_stroke_shape(in.xRadiiOrFlags)) {
+    let ltrb = in.ltrbOrQuadYs;
+    let strokeRadius = max(in.xRadiiOrFlags.z, 1e-4);
+    let xRadii = in.radiiOrQuadXs;
+    let yRadii = in.radiiOrQuadXs;
+    let outerDistance = rounded_rect_signed_distance(in.localPosition, ltrb, xRadii, yRadii);
+    let outerAA = max(fwidth(outerDistance), 1e-4);
+    let outerCoverage = saturate01(0.5 - outerDistance / outerAA);
+    var innerCoverage = 0.0;
+    let innerLTRB = vec4<f32>(
+      ltrb.x + strokeRadius,
+      ltrb.y + strokeRadius,
+      ltrb.z - strokeRadius,
+      ltrb.w - strokeRadius,
+    );
+    if (innerLTRB.z > innerLTRB.x && innerLTRB.w > innerLTRB.y) {
+      let innerXRadii = max(xRadii - vec4<f32>(strokeRadius), vec4<f32>(0.0));
+      let innerYRadii = max(yRadii - vec4<f32>(strokeRadius), vec4<f32>(0.0));
+      let innerDistance = rounded_rect_signed_distance(
+        in.localPosition,
+        innerLTRB,
+        innerXRadii,
+        innerYRadii,
+      );
+      let innerAA = max(fwidth(innerDistance), 1e-4);
+      innerCoverage = saturate01(0.5 - innerDistance / innerAA);
+    }
+    let coverage = outerCoverage * (1.0 - innerCoverage);
+    let clipCoverage = clip_coverage(in.devicePosition);
+    var color = apply_clip_shader(paint_shader_color(in.devicePosition));
+    color.a *= coverage * clipCoverage;
+    return blend_with_dst(color, in.devicePosition);
+  } else {
+    let ltrb = analytic_fill_ltrb(
+      in.xRadiiOrFlags,
+      in.radiiOrQuadXs,
+      in.ltrbOrQuadYs,
+    );
+    signedDistance = rounded_rect_signed_distance(
+      in.localPosition,
+      ltrb,
+      analytic_fill_x_radii(in.xRadiiOrFlags),
+      analytic_fill_y_radii(in.xRadiiOrFlags, in.radiiOrQuadXs),
+    );
+  }
+  let aaWidth = max(fwidth(signedDistance), 1e-4);
+  let coverage = saturate01(0.5 - signedDistance / aaWidth);
+  let clipCoverage = clip_coverage(in.devicePosition);
+  var color = apply_clip_shader(paint_shader_color(in.devicePosition));
+  color.a *= coverage * clipCoverage;
+  return blend_with_dst(color, in.devicePosition);
+}
+`;
+
+const perEdgeAAQuadShaderSource = `
+struct ViewportUniform {
+  scale: vec2<f32>,
+  translate: vec2<f32>,
+};
+
+@group(0) @binding(0) var<uniform> viewport: ViewportUniform;
+
+${commonStepUniformSource}
+
+@group(1) @binding(0) var<uniform> step: StepUniform;
+${commonBlendShaderSource}
+${commonPaintShaderSource}
+
+struct VertexOut {
+  @builtin(position) position: vec4<f32>,
+  @location(0) devicePosition: vec2<f32>,
+  @location(1) quadP0: vec2<f32>,
+  @location(2) quadP1: vec2<f32>,
+  @location(3) quadP2: vec2<f32>,
+  @location(4) quadP3: vec2<f32>,
+  @location(5) edgeFlags: vec4<f32>,
+};
+
+fn local_to_device(position: vec2<f32>) -> vec2<f32> {
+  return vec2<f32>(
+    (step.matrix0.x * position.x) + (step.matrix0.z * position.y) + step.matrix1.x,
+    (step.matrix0.y * position.x) + (step.matrix0.w * position.y) + step.matrix1.y,
+  );
+}
+
+fn device_to_ndc(position: vec2<f32>) -> vec4<f32> {
+  return vec4<f32>((position * viewport.scale) + viewport.translate, step.matrix1.w, 1.0);
+}
+
+fn edge_coverage(distanceToEdge: f32, enabled: f32) -> f32 {
+  let aaWidth = max(fwidth(distanceToEdge), 1e-4);
+  let coverage = saturate01(distanceToEdge / aaWidth);
+  return select(1.0, coverage, enabled > 0.5);
+}
+
+fn signed_distance_to_edge(
+  edgeStart: vec2<f32>,
+  edgeEnd: vec2<f32>,
+  point: vec2<f32>,
+  winding: f32,
+) -> f32 {
+  let edge = edgeEnd - edgeStart;
+  let edgeLength = max(length(edge), 1e-4);
+  return winding * (((edge.x * (point.y - edgeStart.y)) - (edge.y * (point.x - edgeStart.x))) / edgeLength);
+}
+
+@vertex
+fn vs_main(
+  @builtin(vertex_index) vertexIndex: u32,
+  @location(0) p0: vec2<f32>,
+  @location(1) p1: vec2<f32>,
+  @location(2) p2: vec2<f32>,
+  @location(3) p3: vec2<f32>,
+  @location(4) edgeFlags: vec4<f32>,
+) -> VertexOut {
+  var localPosition = p0;
+  if (vertexIndex == 1u) {
+    localPosition = p1;
+  } else if (vertexIndex == 2u) {
+    localPosition = p3;
+  } else if (vertexIndex >= 3u) {
+    localPosition = p2;
+  }
+  let devicePosition = local_to_device(localPosition);
+  var out: VertexOut;
+  out.position = device_to_ndc(devicePosition);
+  out.devicePosition = devicePosition;
+  out.quadP0 = local_to_device(p0);
+  out.quadP1 = local_to_device(p1);
+  out.quadP2 = local_to_device(p2);
+  out.quadP3 = local_to_device(p3);
+  out.edgeFlags = edgeFlags;
+  return out;
+}
+
+@fragment
+fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
+  let winding = sign(
+    ((in.quadP1.x - in.quadP0.x) * (in.quadP2.y - in.quadP1.y)) -
+    ((in.quadP1.y - in.quadP0.y) * (in.quadP2.x - in.quadP1.x))
+  );
+  let distanceLeft = signed_distance_to_edge(in.quadP0, in.quadP1, in.devicePosition, winding);
+  let distanceTop = signed_distance_to_edge(in.quadP1, in.quadP2, in.devicePosition, winding);
+  let distanceRight = signed_distance_to_edge(in.quadP2, in.quadP3, in.devicePosition, winding);
+  let distanceBottom = signed_distance_to_edge(in.quadP3, in.quadP0, in.devicePosition, winding);
+  let coverage = min(
+    min(edge_coverage(distanceLeft, in.edgeFlags.x), edge_coverage(distanceTop, in.edgeFlags.y)),
+    min(edge_coverage(distanceRight, in.edgeFlags.z), edge_coverage(distanceBottom, in.edgeFlags.w)),
+  );
   let clipCoverage = clip_coverage(in.devicePosition);
   var color = apply_clip_shader(paint_shader_color(in.devicePosition));
   color.a *= coverage * clipCoverage;
@@ -2060,6 +2500,18 @@ const createPathShaderModule = (backend: DawnBackendContext): GPUShaderModule =>
     code: fillPathShaderSource,
   });
 
+const createAnalyticRRectShaderModule = (backend: DawnBackendContext): GPUShaderModule =>
+  backend.device.createShaderModule({
+    label: 'drawing-analytic-rrect-shader',
+    code: analyticRRectShaderSource,
+  });
+
+const createPerEdgeAAQuadShaderModule = (backend: DawnBackendContext): GPUShaderModule =>
+  backend.device.createShaderModule({
+    label: 'drawing-per-edge-aa-quad-shader',
+    code: perEdgeAAQuadShaderSource,
+  });
+
 const createWedgePatchShaderModule = (backend: DawnBackendContext): GPUShaderModule =>
   backend.device.createShaderModule({
     label: 'drawing-wedge-patch-shader',
@@ -2127,15 +2579,16 @@ export const createDawnResourceProvider = (
   let gradientBindGroupLayout: GPUBindGroupLayout | null = null;
   let clipTextureBindGroupLayout: GPUBindGroupLayout | null = null;
   let drawingPipelineLayout: GPUPipelineLayout | null = null;
-  let stencilAttachment:
-    | Readonly<{
+  const stencilAttachmentCache = new Map<
+    number,
+    Readonly<{
       width: number;
       height: number;
       sampleCount: number;
       texture: GPUTexture;
       view: GPUTextureView;
     }>
-    | null = null;
+  >();
   const samplerCache = new Map<string, GPUSampler>();
   const shaderModuleCache = new Map<string, GPUShaderModule>();
   const graphicsPipelineCache = new Map<string, GPURenderPipeline>();
@@ -2215,12 +2668,42 @@ export const createDawnResourceProvider = (
     ],
   });
 
-  const sampleCount = caps?.supportsSampleCount(
+  const createAnalyticRRectInstanceLayout = (): GPUVertexBufferLayout => ({
+    arrayStride: floatBytes * 12,
+    stepMode: 'instance',
+    attributes: [
+      { shaderLocation: 0, offset: floatBytes * 0, format: 'float32x4' },
+      { shaderLocation: 1, offset: floatBytes * 4, format: 'float32x4' },
+      { shaderLocation: 2, offset: floatBytes * 8, format: 'float32x4' },
+    ],
+  });
+
+  const createPerEdgeAAQuadInstanceLayout = (): GPUVertexBufferLayout => ({
+    arrayStride: floatBytes * 12,
+    stepMode: 'instance',
+    attributes: [
+      { shaderLocation: 0, offset: floatBytes * 0, format: 'float32x2' },
+      { shaderLocation: 1, offset: floatBytes * 2, format: 'float32x2' },
+      { shaderLocation: 2, offset: floatBytes * 4, format: 'float32x2' },
+      { shaderLocation: 3, offset: floatBytes * 6, format: 'float32x2' },
+      { shaderLocation: 4, offset: floatBytes * 8, format: 'float32x4' },
+    ],
+  });
+
+  const defaultSampleCount = caps?.supportsSampleCount(
       backend.target.kind === 'offscreen' ? backend.target.msaaSampleCount : 1,
       backend.target.format,
     )
     ? backend.target.kind === 'offscreen' ? backend.target.msaaSampleCount : 1
     : caps?.defaultSampleCount ?? 1;
+
+  const normalizeSampleCount = (
+    requestedSampleCount: number | undefined,
+    format: GPUTextureFormat,
+  ): 1 | 4 => {
+    const candidate = requestedSampleCount ?? defaultSampleCount;
+    return caps?.supportsSampleCount(candidate, format) === false ? 1 : candidate as 1 | 4;
+  };
 
   const getViewportBindGroupLayout = (): GPUBindGroupLayout => {
     if (viewportBindGroupLayout) {
@@ -2424,7 +2907,11 @@ export const createDawnResourceProvider = (
       return existing;
     }
 
-    const shaderModule = descriptor.shader === 'path'
+    const shaderModule = descriptor.shader === 'analytic-rrect'
+      ? createAnalyticRRectShaderModule(backend)
+      : descriptor.shader === 'per-edge-aa-quad'
+      ? createPerEdgeAAQuadShaderModule(backend)
+      : descriptor.shader === 'path'
       ? createPathShaderModule(backend)
       : descriptor.shader === 'wedge-patch'
       ? createWedgePatchShaderModule(backend)
@@ -2442,7 +2929,11 @@ export const createDawnResourceProvider = (
   const getVertexLayout = (
     descriptor: DrawingGraphicsPipelineDesc,
   ): readonly GPUVertexBufferLayout[] =>
-    descriptor.vertexLayout === 'device-vertex'
+    descriptor.vertexLayout === 'analytic-rrect-instance'
+      ? [createAnalyticRRectInstanceLayout()]
+      : descriptor.vertexLayout === 'per-edge-aa-quad-instance'
+      ? [createPerEdgeAAQuadInstanceLayout()]
+      : descriptor.vertexLayout === 'device-vertex'
       ? [createVertexLayout()]
       : descriptor.vertexLayout === 'wedge-patch-instance'
       ? [createPatchResolveVertexLayout(), createWedgePatchInstanceLayout()]
@@ -2521,7 +3012,7 @@ export const createDawnResourceProvider = (
       descriptor.topology,
       descriptor.colorWriteDisabled ? '1' : '0',
       backend.target.format,
-      sampleCount,
+      descriptor.sampleCount ?? defaultSampleCount,
     ].join('|');
 
   const createGraphicsPipelineDescriptor = (
@@ -2549,7 +3040,7 @@ export const createDawnResourceProvider = (
       frontFace: 'ccw',
     },
     multisample: {
-      count: sampleCount,
+      count: normalizeSampleCount(descriptor.sampleCount, backend.target.format),
     },
     depthStencil: getDepthStencil(descriptor),
   });
@@ -2559,10 +3050,9 @@ export const createDawnResourceProvider = (
     resourceBudget: options.resourceBudget ?? Number.POSITIVE_INFINITY,
     createBuffer: (descriptor) => backend.device.createBuffer(descriptor),
     createTexture: (descriptor) => {
-      const normalizedSampleCount = descriptor.sampleCount &&
-          caps?.supportsSampleCount(descriptor.sampleCount, descriptor.format) === false
-        ? 1
-        : descriptor.sampleCount;
+      const normalizedSampleCount = descriptor.sampleCount
+        ? normalizeSampleCount(descriptor.sampleCount, descriptor.format)
+        : undefined;
       const supportedUsage = caps?.getSupportedTextureUsages(descriptor.format);
       const needsTextureBinding = (descriptor.usage & textureBindingUsage) !== 0;
       const needsRenderAttachment = (descriptor.usage & renderAttachmentUsage) !== 0;
@@ -2696,20 +3186,15 @@ export const createDawnResourceProvider = (
         provider.createGraphicsPipelineHandle(descriptor),
       );
     },
-    getStencilAttachmentView: () => {
-      const sampleCount = caps?.supportsSampleCount(
-          backend.target.kind === 'offscreen' ? backend.target.msaaSampleCount : 1,
-          stencilFormat,
-        )
-        ? backend.target.kind === 'offscreen' ? backend.target.msaaSampleCount : 1
-        : 1;
+    getStencilAttachmentView: (requestedSampleCount: 1 | 4 = defaultSampleCount as 1 | 4) => {
+      const sampleCount = normalizeSampleCount(requestedSampleCount, stencilFormat);
+      const existing = stencilAttachmentCache.get(sampleCount);
       if (
-        stencilAttachment &&
-        stencilAttachment.width === backend.target.width &&
-        stencilAttachment.height === backend.target.height &&
-        stencilAttachment.sampleCount === sampleCount
+        existing &&
+        existing.width === backend.target.width &&
+        existing.height === backend.target.height
       ) {
-        return stencilAttachment.view;
+        return existing.view;
       }
 
       const texture = backend.device.createTexture({
@@ -2724,13 +3209,13 @@ export const createDawnResourceProvider = (
         usage: renderAttachmentUsage,
       });
       const view = texture.createView();
-      stencilAttachment = {
+      stencilAttachmentCache.set(sampleCount, {
         width: backend.target.width,
         height: backend.target.height,
         sampleCount,
         texture,
         view,
-      };
+      });
       return view;
     },
   };

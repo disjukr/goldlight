@@ -1,6 +1,7 @@
 import type { DrawingPreparedClipElement } from './clip_stack.ts';
 import { identityMatrix2d, type Point2d } from '@goldlight/geometry';
 import {
+  type DrawingGraphicsPipelineDesc,
   type DrawingPreparedClipDraw,
   type DrawingPreparedRecording,
   type DrawingPreparedRenderStep,
@@ -8,7 +9,9 @@ import {
 } from './draw_pass.ts';
 import type { DrawingRecording } from './recording.ts';
 import type {
+  DrawingPreparedAnalyticRRect,
   DrawingPreparedPatch,
+  DrawingPreparedPerEdgeAAQuad,
   DrawingPreparedShader,
   DrawingPreparedStrokePatch,
   DrawingPreparedVertex,
@@ -48,6 +51,7 @@ export type DrawingPreparedClipDrawResources = Readonly<{
 }>;
 
 export type DrawingPreparedPassResources = Readonly<{
+  sampleCount: 1 | 4;
   pipelineHandles: readonly DrawingGraphicsPipelineHandle[];
   resolvedPipelines: readonly GPURenderPipeline[];
   clipDraws: readonly DrawingPreparedClipDrawResources[];
@@ -87,7 +91,7 @@ const vertexBufferUsage = 0x0020;
 const uniformBufferUsage = 0x0040;
 const storageBufferUsage = 0x0080;
 const floatsPerVertex = 6;
-const stepPayloadFloats = 104;
+const stepPayloadFloats = 116;
 const wedgePatchFloats = 14;
 const curvePatchFloats = 12;
 const strokePatchFloats = 14;
@@ -247,6 +251,33 @@ const createVertexBuffer = (
 
 const textInstanceFloats = 9;
 
+const getRenderPassSampleCount = (
+  sharedContext: DawnSharedContext,
+  requiresMSAA: boolean,
+): 1 | 4 => {
+  if (!requiresMSAA) {
+    const targetSampleCount = (sharedContext.backend.target.kind === 'offscreen'
+      ? sharedContext.backend.target.msaaSampleCount
+      : 1) as 1 | 4;
+    return sharedContext.caps.supportsSampleCount(
+        targetSampleCount,
+        sharedContext.backend.target.format,
+      )
+      ? targetSampleCount
+      : 1;
+  }
+
+  return sharedContext.caps.supportsSampleCount(4, sharedContext.backend.target.format) ? 4 : 1;
+};
+
+const withPipelineSampleCount = (
+  descriptor: DrawingGraphicsPipelineDesc,
+  sampleCount: 1 | 4,
+): DrawingGraphicsPipelineDesc => ({
+  ...descriptor,
+  sampleCount,
+});
+
 const createTextInstanceData = (
   glyphs: readonly Readonly<{
     size: readonly [number, number];
@@ -274,6 +305,46 @@ const createTextInstanceData = (
     data[offset++] = glyph.strikeToSourceScale;
   }
   return data;
+};
+
+const createAnalyticRRectInstanceData = (
+  draw: DrawingPreparedAnalyticRRect,
+): Float32Array => {
+  const { xRadiiOrFlags, radiiOrQuadXs, ltrbOrQuadYs } = draw.instance;
+  return new Float32Array([
+    xRadiiOrFlags[0],
+    xRadiiOrFlags[1],
+    xRadiiOrFlags[2],
+    xRadiiOrFlags[3],
+    radiiOrQuadXs[0],
+    radiiOrQuadXs[1],
+    radiiOrQuadXs[2],
+    radiiOrQuadXs[3],
+    ltrbOrQuadYs[0],
+    ltrbOrQuadYs[1],
+    ltrbOrQuadYs[2],
+    ltrbOrQuadYs[3],
+  ]);
+};
+
+const createPerEdgeAAQuadInstanceData = (
+  draw: DrawingPreparedPerEdgeAAQuad,
+): Float32Array => {
+  const { points, edgeFlags } = draw.instance;
+  return new Float32Array([
+    points[0][0],
+    points[0][1],
+    points[1][0],
+    points[1][1],
+    points[2][0],
+    points[2][1],
+    points[3][0],
+    points[3][1],
+    edgeFlags[0],
+    edgeFlags[1],
+    edgeFlags[2],
+    edgeFlags[3],
+  ]);
 };
 
 const createPatchTemplateBuffer = (
@@ -336,9 +407,11 @@ const createStepPayloadBuffer = (
     hasAtlas: boolean;
     atlasOrigin: Point2d;
     atlasInvSize: Point2d;
-    hasAnalyticRect: boolean;
-    analyticOrigin: Point2d;
-    analyticSize: Point2d;
+    hasAnalyticClip: boolean;
+    analyticData0: readonly [number, number, number, number];
+    analyticData1: readonly [number, number, number, number];
+    analyticData2: readonly [number, number, number, number];
+    analyticData3: readonly [number, number, number, number];
     hasShader: boolean;
     shaderColor: readonly [number, number, number, number];
   }>,
@@ -407,16 +480,28 @@ const createStepPayloadBuffer = (
     color[3],
     strokeStyle?.halfWidth ?? 0,
     clip.hasAtlas ? 1 : 0,
-    clip.hasAnalyticRect ? 1 : 0,
+    clip.hasAnalyticClip ? 1 : 0,
     clip.hasShader ? 1 : 0,
     clip.atlasOrigin[0],
     clip.atlasOrigin[1],
     clip.atlasInvSize[0],
     clip.atlasInvSize[1],
-    clip.analyticOrigin[0],
-    clip.analyticOrigin[1],
-    clip.analyticSize[0],
-    clip.analyticSize[1],
+    clip.analyticData0[0],
+    clip.analyticData0[1],
+    clip.analyticData0[2],
+    clip.analyticData0[3],
+    clip.analyticData1[0],
+    clip.analyticData1[1],
+    clip.analyticData1[2],
+    clip.analyticData1[3],
+    clip.analyticData2[0],
+    clip.analyticData2[1],
+    clip.analyticData2[2],
+    clip.analyticData2[3],
+    clip.analyticData3[0],
+    clip.analyticData3[1],
+    clip.analyticData3[2],
+    clip.analyticData3[3],
     clip.shaderColor[0],
     clip.shaderColor[1],
     clip.shaderColor[2],
@@ -1539,11 +1624,12 @@ const usesDeviceSpaceVertices = (step: DrawingPreparedRenderStep): boolean =>
 const prepareClipDrawResources = (
   sharedContext: DawnSharedContext,
   clipDraw: DrawingPreparedClipDraw,
+  sampleCount: 1 | 4,
 ): DrawingPreparedClipDrawResources | null => {
   const clipVertices = createVertexModulationData(clipDraw.triangles, [0, 0, 0, 0]);
   const clipVertexBuffer = createVertexBuffer(sharedContext, clipVertices);
   const pipelineHandle = sharedContext.resourceProvider.createGraphicsPipelineHandle(
-    clipDraw.pipelineDesc,
+    withPipelineSampleCount(clipDraw.pipelineDesc, sampleCount),
   );
   const pipeline = sharedContext.resourceProvider.resolveGraphicsPipelineHandle(pipelineHandle);
   return {
@@ -1564,6 +1650,7 @@ const prepareClipDrawResources = (
 const prepareStepResources = (
   sharedContext: DawnSharedContext,
   step: DrawingPreparedRenderStep,
+  sampleCount: 1 | 4,
   patchTemplates: Readonly<{
     wedgeVertexBuffer: GPUBuffer;
     curveVertexBuffer: GPUBuffer;
@@ -1571,12 +1658,60 @@ const prepareStepResources = (
   gradientBuilder: DrawingGradientBufferBuilder,
 ): DrawingPreparedStepResources => {
   const pipelineHandle = sharedContext.resourceProvider.createGraphicsPipelineHandle(
-    step.pipelineDesc,
+    withPipelineSampleCount(step.pipelineDesc, sampleCount),
   );
   const pipeline = sharedContext.resourceProvider.resolveGraphicsPipelineHandle(pipelineHandle);
   const clipAtlasView = sharedContext.atlasProvider.getClipAtlasManager().findOrCreateEntry(
     step.draw.clip?.atlasClip,
   );
+  const analyticClip = step.draw.clip?.analyticClip;
+  const analyticClipData = analyticClip
+    ? analyticClip.kind === 'rect'
+      ? {
+        data0: [
+          1,
+          analyticClip.rect.origin[0],
+          analyticClip.rect.origin[1],
+          analyticClip.rect.size.width,
+        ] as const,
+        data1: [analyticClip.rect.size.height, 0, 0, 0] as const,
+        data2: [0, 0, 0, 0] as const,
+        data3: [0, 0, 0, 0] as const,
+      }
+      : analyticClip.kind === 'rrect'
+      ? {
+        data0: [
+          2,
+          analyticClip.rect.origin[0],
+          analyticClip.rect.origin[1],
+          analyticClip.rect.size.width,
+        ] as const,
+        data1: [
+          analyticClip.rect.size.height,
+          analyticClip.xRadii[0],
+          analyticClip.xRadii[1],
+          analyticClip.xRadii[2],
+        ] as const,
+        data2: [
+          analyticClip.xRadii[3],
+          analyticClip.yRadii[0],
+          analyticClip.yRadii[1],
+          analyticClip.yRadii[2],
+        ] as const,
+        data3: [analyticClip.yRadii[3], 0, 0, 0] as const,
+      }
+      : {
+        data0: [0, 0, 0, 0] as const,
+        data1: [0, 0, 0, 0] as const,
+        data2: [0, 0, 0, 0] as const,
+        data3: [0, 0, 0, 0] as const,
+      }
+    : {
+      data0: [0, 0, 0, 0] as const,
+      data1: [0, 0, 0, 0] as const,
+      data2: [0, 0, 0, 0] as const,
+      data3: [0, 0, 0, 0] as const,
+    };
   const clipPayload = {
     hasAtlas: Boolean(step.draw.clip?.atlasClip),
     atlasOrigin: step.draw.clip?.atlasClip?.bounds.origin ?? [0, 0],
@@ -1586,14 +1721,11 @@ const prepareStepResources = (
         1 / Math.max(step.draw.clip.atlasClip.bounds.size.height, 1),
       ] as readonly [number, number]
       : [0, 0] as const,
-    hasAnalyticRect: Boolean(step.draw.clip?.analyticClip),
-    analyticOrigin: step.draw.clip?.analyticClip?.rect.origin ?? [0, 0],
-    analyticSize: step.draw.clip?.analyticClip
-      ? [
-        step.draw.clip.analyticClip.rect.size.width,
-        step.draw.clip.analyticClip.rect.size.height,
-      ] as readonly [number, number]
-      : [0, 0] as const,
+    hasAnalyticClip: Boolean(analyticClip),
+    analyticData0: analyticClipData.data0,
+    analyticData1: analyticClipData.data1,
+    analyticData2: analyticClipData.data2,
+    analyticData3: analyticClipData.data3,
     hasShader: Boolean(step.draw.clip?.shader),
     shaderColor: step.draw.clip?.shader?.color ?? [1, 1, 1, 1] as const,
   };
@@ -1700,6 +1832,48 @@ const prepareStepResources = (
       instanceBuffer,
       vertexCount: 4,
       instanceCount: step.draw.glyphs.length,
+    };
+  }
+
+  if (step.draw.kind === 'analyticRRect') {
+    const instanceBuffer = createVertexBuffer(
+      sharedContext,
+      createAnalyticRRectInstanceData(step.draw),
+    );
+    return {
+      pipelineHandle,
+      pipeline,
+      stepPayloadBuffer,
+      stepBindGroup,
+      clipTextureView: clipAtlasView,
+      sampledTextureView,
+      sampledTextureFilter: 'nearest',
+      clipDrawKey: getClipDrawKey(step),
+      vertexBuffer: null,
+      instanceBuffer,
+      vertexCount: 4,
+      instanceCount: 1,
+    };
+  }
+
+  if (step.draw.kind === 'perEdgeAAQuad') {
+    const instanceBuffer = createVertexBuffer(
+      sharedContext,
+      createPerEdgeAAQuadInstanceData(step.draw),
+    );
+    return {
+      pipelineHandle,
+      pipeline,
+      stepPayloadBuffer,
+      stepBindGroup,
+      clipTextureView: clipAtlasView,
+      sampledTextureView,
+      sampledTextureFilter: 'nearest',
+      clipDrawKey: getClipDrawKey(step),
+      vertexBuffer: null,
+      instanceBuffer,
+      vertexCount: 4,
+      instanceCount: 1,
     };
   }
 
@@ -1827,14 +2001,16 @@ const preparePassResources = (
   }>,
   gradientBuilder: DrawingGradientBufferBuilder,
 ): DrawingPreparedPassResources => {
+  const sampleCount = getRenderPassSampleCount(sharedContext, passInfo.requiresMSAA);
   const steps = passInfo.renderSteps.map((step) =>
-    prepareStepResources(sharedContext, step, patchTemplates, gradientBuilder)
+    prepareStepResources(sharedContext, step, sampleCount, patchTemplates, gradientBuilder)
   );
   const pipelineHandles = steps.map((step) => step.pipelineHandle);
   const clipDraws = passInfo.clipDraws
-    .map((clipDraw) => prepareClipDrawResources(sharedContext, clipDraw))
+    .map((clipDraw) => prepareClipDrawResources(sharedContext, clipDraw, sampleCount))
     .filter((clipDraw): clipDraw is DrawingPreparedClipDrawResources => clipDraw !== null);
   return {
+    sampleCount,
     pipelineHandles: Object.freeze(pipelineHandles),
     resolvedPipelines: Object.freeze(steps.map((step) => step.pipeline)),
     clipDraws: Object.freeze(clipDraws),
@@ -1918,9 +2094,11 @@ export const prepareDawnResources = (
       hasAtlas: false,
       atlasOrigin: [0, 0],
       atlasInvSize: [0, 0],
-      hasAnalyticRect: false,
-      analyticOrigin: [0, 0],
-      analyticSize: [0, 0],
+      hasAnalyticClip: false,
+      analyticData0: [0, 0, 0, 0],
+      analyticData1: [0, 0, 0, 0],
+      analyticData2: [0, 0, 0, 0],
+      analyticData3: [0, 0, 0, 0],
       hasShader: false,
       shaderColor: [1, 1, 1, 1],
     },

@@ -33,10 +33,17 @@ export type DrawingPreparedClipDrawElement = Readonly<{
   rawElement: DrawingClipStackRawElement;
 }>;
 
-export type DrawingPreparedAnalyticClip = Readonly<{
-  kind: 'rect';
-  rect: DrawingClipRect;
-}>;
+export type DrawingPreparedAnalyticClip =
+  | Readonly<{
+    kind: 'rect';
+    rect: DrawingClipRect;
+  }>
+  | Readonly<{
+    kind: 'rrect';
+    rect: DrawingClipRect;
+    xRadii: readonly [number, number, number, number];
+    yRadii: readonly [number, number, number, number];
+  }>;
 
 export type DrawingPreparedAtlasClip = Readonly<{
   bounds: Rect;
@@ -273,6 +280,413 @@ const createRectClipPolygon = (
     transformPoint2d([x1, y1], transform),
     transformPoint2d([x0, y1], transform),
   ]);
+};
+
+const clipEpsilon = 1e-4;
+const clipRadiusMin = 0.5;
+
+const clipPointsEqual = (left: Point2d, right: Point2d): boolean =>
+  Math.abs(left[0] - right[0]) <= clipEpsilon && Math.abs(left[1] - right[1]) <= clipEpsilon;
+
+const isAxisAlignedMatrix = (transform: DrawingMatrix2d): boolean =>
+  Math.abs(transform[1]) <= clipEpsilon && Math.abs(transform[2]) <= clipEpsilon;
+
+const normalizeRect = (
+  originX: number,
+  originY: number,
+  width: number,
+  height: number,
+): DrawingClipRect => {
+  const x1 = originX + width;
+  const y1 = originY + height;
+  const left = Math.min(originX, x1);
+  const top = Math.min(originY, y1);
+  const right = Math.max(originX, x1);
+  const bottom = Math.max(originY, y1);
+  return {
+    origin: [left, top],
+    size: {
+      width: right - left,
+      height: bottom - top,
+    },
+  };
+};
+
+const createAxisAlignedDeviceRect = (
+  rect: DrawingClipRect,
+  transform: DrawingMatrix2d,
+): DrawingClipRect =>
+  normalizeRect(
+    (transform[0] * rect.origin[0]) + transform[4],
+    (transform[3] * rect.origin[1]) + transform[5],
+    transform[0] * rect.size.width,
+    transform[3] * rect.size.height,
+  );
+
+const matchesRectPath = (
+  path: DrawingPath2d,
+): DrawingClipRect | null => {
+  const verbs = path.verbs;
+  if (verbs.length !== 5) {
+    return null;
+  }
+  const [moveTo, line1, line2, line3, close] = verbs;
+  if (
+    moveTo.kind !== 'moveTo' ||
+    line1.kind !== 'lineTo' ||
+    line2.kind !== 'lineTo' ||
+    line3.kind !== 'lineTo' ||
+    close.kind !== 'close'
+  ) {
+    return null;
+  }
+  const x0 = moveTo.to[0];
+  const y0 = moveTo.to[1];
+  const x1 = line2.to[0];
+  const y1 = line2.to[1];
+  if (
+    !clipPointsEqual(line1.to, [x1, y0]) ||
+    !clipPointsEqual(line3.to, [x0, y1])
+  ) {
+    return null;
+  }
+  return normalizeRect(x0, y0, x1 - x0, y1 - y0);
+};
+
+const matchesRRectPath = (
+  path: DrawingPath2d,
+):
+  | Readonly<{
+    rect: DrawingClipRect;
+    xRadii: readonly [number, number, number, number];
+    yRadii: readonly [number, number, number, number];
+  }>
+  | null => {
+  const verbs = path.verbs;
+  if (verbs.length !== 10) {
+    return null;
+  }
+  const [moveTo, line1, quad1, line2, quad2, line3, quad3, line4, quad4, close] = verbs;
+  if (
+    moveTo.kind !== 'moveTo' ||
+    line1.kind !== 'lineTo' ||
+    quad1.kind !== 'quadTo' ||
+    line2.kind !== 'lineTo' ||
+    quad2.kind !== 'quadTo' ||
+    line3.kind !== 'lineTo' ||
+    quad3.kind !== 'quadTo' ||
+    line4.kind !== 'lineTo' ||
+    quad4.kind !== 'quadTo' ||
+    close.kind !== 'close'
+  ) {
+    return null;
+  }
+  const x = quad4.control[0];
+  const y = quad4.control[1];
+  const width = quad1.control[0] - x;
+  const height = quad2.control[1] - y;
+  if (width <= clipEpsilon || height <= clipEpsilon) {
+    return null;
+  }
+  const topLeft = [moveTo.to[0] - x, line4.to[1] - y] as const;
+  const topRight = [x + width - line1.to[0], quad1.to[1] - y] as const;
+  const bottomRight = [x + width - quad2.to[0], y + height - line2.to[1]] as const;
+  const bottomLeft = [line3.to[0] - x, y + height - quad3.to[1]] as const;
+  if (
+    Math.abs(moveTo.to[1] - y) > clipEpsilon ||
+    !clipPointsEqual(line1.to, [x + width - topRight[0], y]) ||
+    !clipPointsEqual(quad1.control, [x + width, y]) ||
+    !clipPointsEqual(quad1.to, [x + width, y + topRight[1]]) ||
+    !clipPointsEqual(line2.to, [x + width, y + height - bottomRight[1]]) ||
+    !clipPointsEqual(quad2.control, [x + width, y + height]) ||
+    !clipPointsEqual(quad2.to, [x + width - bottomRight[0], y + height]) ||
+    !clipPointsEqual(line3.to, [x + bottomLeft[0], y + height]) ||
+    !clipPointsEqual(quad3.control, [x, y + height]) ||
+    !clipPointsEqual(quad3.to, [x, y + height - bottomLeft[1]]) ||
+    !clipPointsEqual(line4.to, [x, y + topLeft[1]]) ||
+    !clipPointsEqual(quad4.control, [x, y]) ||
+    !clipPointsEqual(quad4.to, [x + topLeft[0], y]) ||
+    !clipPointsEqual(quad4.to, moveTo.to)
+  ) {
+    return null;
+  }
+  return {
+    rect: {
+      origin: [x, y],
+      size: { width, height },
+    },
+    xRadii: [topLeft[0], topRight[0], bottomRight[0], bottomLeft[0]],
+    yRadii: [topLeft[1], topRight[1], bottomRight[1], bottomLeft[1]],
+  };
+};
+
+const intersectRect = (left: DrawingClipRect, right: DrawingClipRect): DrawingClipRect => {
+  const x0 = Math.max(left.origin[0], right.origin[0]);
+  const y0 = Math.max(left.origin[1], right.origin[1]);
+  const x1 = Math.min(left.origin[0] + left.size.width, right.origin[0] + right.size.width);
+  const y1 = Math.min(left.origin[1] + left.size.height, right.origin[1] + right.size.height);
+  return {
+    origin: [x0, y0],
+    size: {
+      width: Math.max(0, x1 - x0),
+      height: Math.max(0, y1 - y0),
+    },
+  };
+};
+
+const rrectCornerCenters = (
+  clip: Readonly<{
+    rect: DrawingClipRect;
+    xRadii: readonly [number, number, number, number];
+    yRadii: readonly [number, number, number, number];
+  }>,
+): readonly [Point2d, Point2d, Point2d, Point2d] => {
+  const x0 = clip.rect.origin[0];
+  const y0 = clip.rect.origin[1];
+  const x1 = x0 + clip.rect.size.width;
+  const y1 = y0 + clip.rect.size.height;
+  return [
+    [x0 + clip.xRadii[0], y0 + clip.yRadii[0]],
+    [x1 - clip.xRadii[1], y0 + clip.yRadii[1]],
+    [x1 - clip.xRadii[2], y1 - clip.yRadii[2]],
+    [x0 + clip.xRadii[3], y1 - clip.yRadii[3]],
+  ] as const;
+};
+
+const isRelativelyCircular = (xRadius: number, yRadius: number): boolean =>
+  Math.abs(xRadius - yRadius) <= Math.max(clipEpsilon, Math.max(xRadius, yRadius) * 0.01);
+
+const isSupportedAnalyticRRect = (
+  xRadii: readonly [number, number, number, number],
+  yRadii: readonly [number, number, number, number],
+): boolean => {
+  const circularFlags = [false, false, false, false];
+  let circularRadius = 0;
+  let circularCount = 0;
+  for (let index = 0; index < 4; index += 1) {
+    const xRadius = xRadii[index]!;
+    const yRadius = yRadii[index]!;
+    if (!isRelativelyCircular(xRadius, yRadius)) {
+      return false;
+    }
+    if (xRadius < clipRadiusMin || yRadius < clipRadiusMin) {
+      continue;
+    }
+    if (circularCount === 0) {
+      circularRadius = xRadius;
+    } else if (!isRelativelyCircular(xRadius, circularRadius)) {
+      return false;
+    }
+    circularFlags[index] = true;
+    circularCount += 1;
+  }
+
+  if (circularCount <= 1 || circularCount === 4) {
+    return true;
+  }
+  if (circularCount === 2) {
+    for (let index = 0; index < 4; index += 1) {
+      if (circularFlags[index] && circularFlags[(index + 1) % 4]) {
+        return true;
+      }
+    }
+    return false;
+  }
+  return false;
+};
+
+const pointInAnalyticRRect = (
+  clip: Readonly<{
+    rect: DrawingClipRect;
+    xRadii: readonly [number, number, number, number];
+    yRadii: readonly [number, number, number, number];
+  }>,
+  point: Point2d,
+): boolean => {
+  const x0 = clip.rect.origin[0];
+  const y0 = clip.rect.origin[1];
+  const x1 = x0 + clip.rect.size.width;
+  const y1 = y0 + clip.rect.size.height;
+  const [px, py] = point;
+  if (
+    px < x0 - clipEpsilon || px > x1 + clipEpsilon || py < y0 - clipEpsilon || py > y1 + clipEpsilon
+  ) {
+    return false;
+  }
+
+  const centers = rrectCornerCenters(clip);
+  const cornerIndex = py <= centers[0]![1]
+    ? (px <= centers[0]![0] ? 0 : px >= centers[1]![0] ? 1 : -1)
+    : py >= centers[3]![1]
+    ? (px >= centers[2]![0] ? 2 : px <= centers[3]![0] ? 3 : -1)
+    : -1;
+
+  if (cornerIndex < 0) {
+    return true;
+  }
+
+  const rx = cornerIndex === 0
+    ? clip.xRadii[0]
+    : cornerIndex === 1
+    ? clip.xRadii[1]
+    : cornerIndex === 2
+    ? clip.xRadii[2]
+    : clip.xRadii[3];
+  const ry = cornerIndex === 0
+    ? clip.yRadii[0]
+    : cornerIndex === 1
+    ? clip.yRadii[1]
+    : cornerIndex === 2
+    ? clip.yRadii[2]
+    : clip.yRadii[3];
+  if (rx < clipEpsilon || ry < clipEpsilon) {
+    return true;
+  }
+  const center = cornerIndex === 0
+    ? centers[0]
+    : cornerIndex === 1
+    ? centers[1]
+    : cornerIndex === 2
+    ? centers[2]
+    : centers[3];
+  const dx = (px - center[0]) / rx;
+  const dy = (py - center[1]) / ry;
+  return (dx * dx) + (dy * dy) <= 1 + clipEpsilon;
+};
+
+const analyticClipContainsClip = (
+  outer: DrawingPreparedAnalyticClip,
+  inner: DrawingPreparedAnalyticClip,
+): boolean => {
+  if (outer.kind === 'rect') {
+    return rectContains(outer.rect, inner.rect);
+  }
+  const x0 = inner.rect.origin[0];
+  const y0 = inner.rect.origin[1];
+  const x1 = x0 + inner.rect.size.width;
+  const y1 = y0 + inner.rect.size.height;
+  return pointInAnalyticRRect(outer, [x0, y0]) &&
+    pointInAnalyticRRect(outer, [x1, y0]) &&
+    pointInAnalyticRRect(outer, [x1, y1]) &&
+    pointInAnalyticRRect(outer, [x0, y1]);
+};
+
+const combineAnalyticClips = (
+  left: DrawingPreparedAnalyticClip,
+  right: DrawingPreparedAnalyticClip,
+): DrawingPreparedAnalyticClip | undefined => {
+  if (left.kind === 'rect' && right.kind === 'rect') {
+    return {
+      kind: 'rect',
+      rect: intersectRect(left.rect, right.rect),
+    };
+  }
+  if (analyticClipContainsClip(left, right)) {
+    return right;
+  }
+  if (analyticClipContainsClip(right, left)) {
+    return left;
+  }
+  return undefined;
+};
+
+const analyticClipsEqual = (
+  left: DrawingPreparedAnalyticClip,
+  right: DrawingPreparedAnalyticClip,
+): boolean => {
+  if (left.kind !== right.kind) {
+    return false;
+  }
+  if (
+    left.rect.origin[0] !== right.rect.origin[0] ||
+    left.rect.origin[1] !== right.rect.origin[1] ||
+    left.rect.size.width !== right.rect.size.width ||
+    left.rect.size.height !== right.rect.size.height
+  ) {
+    return false;
+  }
+  if (left.kind === 'rect') {
+    return true;
+  }
+  if (right.kind !== 'rrect') {
+    return false;
+  }
+  return left.xRadii.every((value, index) => value === right.xRadii[index]) &&
+    left.yRadii.every((value, index) => value === right.yRadii[index]);
+};
+
+const createAnalyticClipForClip = (clip: DrawingClip): DrawingPreparedAnalyticClip | undefined => {
+  if (clip.op !== 'intersect') {
+    return undefined;
+  }
+  if (clip.kind === 'rect') {
+    if (!isAxisAlignedMatrix(clip.transform)) {
+      return undefined;
+    }
+    return {
+      kind: 'rect',
+      rect: createAxisAlignedDeviceRect(clip.rect, clip.transform),
+    };
+  }
+
+  const rect = matchesRectPath(clip.path);
+  if (rect) {
+    if (!isAxisAlignedMatrix(clip.transform)) {
+      return undefined;
+    }
+    return {
+      kind: 'rect',
+      rect: createAxisAlignedDeviceRect(rect, clip.transform),
+    };
+  }
+
+  const rrect = matchesRRectPath(clip.path);
+  if (rrect && isAxisAlignedMatrix(clip.transform)) {
+    const scaledXRadii = [
+      Math.abs(clip.transform[0]) * rrect.xRadii[0],
+      Math.abs(clip.transform[0]) * rrect.xRadii[1],
+      Math.abs(clip.transform[0]) * rrect.xRadii[2],
+      Math.abs(clip.transform[0]) * rrect.xRadii[3],
+    ] as const;
+    const scaledYRadii = [
+      Math.abs(clip.transform[3]) * rrect.yRadii[0],
+      Math.abs(clip.transform[3]) * rrect.yRadii[1],
+      Math.abs(clip.transform[3]) * rrect.yRadii[2],
+      Math.abs(clip.transform[3]) * rrect.yRadii[3],
+    ] as const;
+    if (!isSupportedAnalyticRRect(scaledXRadii, scaledYRadii)) {
+      return undefined;
+    }
+    return {
+      kind: 'rrect',
+      rect: createAxisAlignedDeviceRect(rrect.rect, clip.transform),
+      xRadii: scaledXRadii,
+      yRadii: scaledYRadii,
+    };
+  }
+  return undefined;
+};
+
+const createAnalyticClipForActiveElements = (
+  activeElements: readonly DrawingClipStackElement[],
+): DrawingPreparedAnalyticClip | undefined => {
+  if (activeElements.length === 0) {
+    return undefined;
+  }
+  const analyticClips = activeElements.map((element) => createAnalyticClipForClip(element.clip));
+  if (analyticClips.some((clip) => clip === undefined)) {
+    return undefined;
+  }
+  const resolved = analyticClips as readonly DrawingPreparedAnalyticClip[];
+  let combined = resolved[0]!;
+  for (let index = 1; index < resolved.length; index += 1) {
+    const next = combineAnalyticClips(combined, resolved[index]!);
+    if (!next) {
+      return undefined;
+    }
+    combined = next;
+  }
+  return combined;
 };
 
 const rectContains = (outer: DrawingClipRect, inner: DrawingClipRect): boolean => {
@@ -537,6 +951,29 @@ const simplifyClipStackElements = (
       };
     }
 
+    if (clip.op === 'intersect' && element.clip.op === 'intersect') {
+      const currentAnalytic = createAnalyticClipForClip(element.clip);
+      const nextAnalytic = createAnalyticClipForClip(clip);
+      if (currentAnalytic && nextAnalytic) {
+        if (analyticClipsEqual(currentAnalytic, nextAnalytic)) {
+          return {
+            append: false,
+            invalidatedIndices: Object.freeze(invalidatedIndices),
+          };
+        }
+        if (analyticClipContainsClip(nextAnalytic, currentAnalytic)) {
+          return {
+            append: false,
+            invalidatedIndices: Object.freeze(invalidatedIndices),
+          };
+        }
+        if (analyticClipContainsClip(currentAnalytic, nextAnalytic)) {
+          invalidatedIndices.push(activeElement.index);
+          continue;
+        }
+      }
+    }
+
     if (
       clip.kind === 'rect' &&
       element.clip.kind === 'rect' &&
@@ -727,14 +1164,7 @@ export const visitDrawingClipStackForDraw = (
     });
   }
 
-  const analyticClip = activeElements.length === 1 &&
-      activeElements[0]!.clip.kind === 'rect' &&
-      activeElements[0]!.clip.op === 'intersect'
-    ? {
-      kind: 'rect' as const,
-      rect: cloneBounds(activeElements[0]!.clip.rect)!,
-    }
-    : undefined;
+  const analyticClip = createAnalyticClipForActiveElements(activeElements);
   const atlasClip = !analyticClip &&
       stencilElements.length > 1 &&
       activeElements.some((element) => element.clip.kind === 'path')

@@ -155,6 +155,27 @@ const createRenderPassDescriptor = (
     : undefined,
 });
 
+const getBindingSampleCount = (
+  binding: RenderContextBinding,
+): 1 | 4 => (binding.kind === 'offscreen' ? binding.target.msaaSampleCount : 1) as 1 | 4;
+
+const createTransientMsaaColorAttachment = (
+  sharedContext: DawnSharedContext,
+  binding: RenderContextBinding,
+  sampleCount: 1 | 4,
+): GPUTexture =>
+  sharedContext.resourceProvider.createTexture({
+    label: 'drawing-pass-msaa-color',
+    size: {
+      width: binding.target.width,
+      height: binding.target.height,
+      depthOrArrayLayers: 1,
+    },
+    format: binding.target.format,
+    usage: 0x10,
+    sampleCount,
+  });
+
 const textureBindingUsage = 0x04;
 const textureCopyDstUsage = 0x02;
 
@@ -303,9 +324,9 @@ export const encodePreparedDawnCommandBuffer = (
   );
   const colorView = colorTexture.createView();
   const resolveView = acquireColorResolveView(binding);
+  const ownedTextures: GPUTexture[] = [...preparedWork.resources.ownedTextures];
   const unsupportedCommands: DrawingCommand[] = [...preparedWork.prepared.unsupportedCommands];
   let passCount = 0;
-  const stencilView = sharedContext.resourceProvider.getStencilAttachmentView();
 
   for (let taskIndex = 0; taskIndex < preparedWork.tasks.tasks.length; taskIndex += 1) {
     const task = preparedWork.tasks.tasks[taskIndex]!;
@@ -314,11 +335,19 @@ export const encodePreparedDawnCommandBuffer = (
       const passInfo = task.drawPasses[passIndex]!;
       const passResources = taskResources.passes[passIndex]!;
       if (passInfo.renderSteps.length === 0) {
+        const passSampleCount = passResources.sampleCount;
+        const bindingSampleCount = getBindingSampleCount(binding);
+        const msaaColorTexture = passSampleCount > bindingSampleCount
+          ? createTransientMsaaColorAttachment(sharedContext, binding, passSampleCount)
+          : null;
+        if (msaaColorTexture) {
+          ownedTextures.push(msaaColorTexture);
+        }
         const pass = encoder.beginRenderPass({
           colorAttachments: [
             {
-              view: colorView,
-              resolveTarget: resolveView,
+              view: msaaColorTexture?.createView() ?? colorView,
+              resolveTarget: msaaColorTexture ? colorView : resolveView,
               clearValue: toGpuColor(passInfo.clearColor),
               loadOp: passInfo.loadOp,
               storeOp: 'store',
@@ -335,13 +364,23 @@ export const encodePreparedDawnCommandBuffer = (
       let stepIndex = 0;
       while (stepIndex < passInfo.renderSteps.length) {
         const step = passInfo.renderSteps[stepIndex]!;
+        const passSampleCount = passResources.sampleCount;
+        const bindingSampleCount = getBindingSampleCount(binding);
+        const msaaColorTexture = passSampleCount > bindingSampleCount
+          ? createTransientMsaaColorAttachment(sharedContext, binding, passSampleCount)
+          : null;
+        if (msaaColorTexture) {
+          ownedTextures.push(msaaColorTexture);
+        }
+        const passColorView = msaaColorTexture?.createView() ?? colorView;
+        const passResolveView = msaaColorTexture ? colorView : resolveView;
         if (stepRequiresDstRead(step)) {
           const clipStencilCache: ClipStencilCache = { key: null, reference: 0 };
           if (colorLoadOp === 'clear') {
             const clearPass = encoder.beginRenderPass(
               createRenderPassDescriptor(
-                colorView,
-                resolveView,
+                passColorView,
+                passResolveView,
                 passInfo.clearColor,
                 colorLoadOp,
                 undefined,
@@ -365,11 +404,13 @@ export const encodePreparedDawnCommandBuffer = (
           );
           const pass = encoder.beginRenderPass(
             createRenderPassDescriptor(
-              colorView,
-              resolveView,
+              passColorView,
+              passResolveView,
               passInfo.clearColor,
               colorLoadOp,
-              stepNeedsDepthStencilAttachment(step) ? stencilView : undefined,
+              stepNeedsDepthStencilAttachment(step)
+                ? sharedContext.resourceProvider.getStencilAttachmentView(passSampleCount)
+                : undefined,
             ),
           );
           const drawStepIndex = step.stepIndex;
@@ -411,11 +452,13 @@ export const encodePreparedDawnCommandBuffer = (
         }
         const pass = encoder.beginRenderPass(
           createRenderPassDescriptor(
-            colorView,
-            resolveView,
+            passColorView,
+            passResolveView,
             passInfo.clearColor,
             colorLoadOp,
-            batchUsesDepth ? stencilView : undefined,
+            batchUsesDepth
+              ? sharedContext.resourceProvider.getStencilAttachmentView(passSampleCount)
+              : undefined,
           ),
         );
         const clipStencilCache: ClipStencilCache = { key: null, reference: 0 };
@@ -458,7 +501,7 @@ export const encodePreparedDawnCommandBuffer = (
     passCount,
     unsupportedCommands: Object.freeze(unsupportedCommands),
     ownedBuffers: preparedWork.resources.ownedBuffers,
-    ownedTextures: preparedWork.resources.ownedTextures,
+    ownedTextures: Object.freeze(ownedTextures),
   };
 };
 

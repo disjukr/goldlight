@@ -35,6 +35,8 @@ export type DrawingDrawCommand =
   | DrawSdfTextCommand;
 
 export type DrawingShaderKey =
+  | 'analytic-rrect'
+  | 'per-edge-aa-quad'
   | 'path'
   | 'wedge-patch'
   | 'curve-patch'
@@ -43,6 +45,8 @@ export type DrawingShaderKey =
   | 'sdf-text';
 
 export type DrawingVertexLayoutKey =
+  | 'analytic-rrect-instance'
+  | 'per-edge-aa-quad-instance'
   | 'device-vertex'
   | 'wedge-patch-instance'
   | 'curve-patch-instance'
@@ -72,6 +76,7 @@ export type DrawingGraphicsPipelineDesc = Readonly<{
   colorWriteDisabled: boolean;
   depthStencil: DrawingDepthStencilKey;
   topology: DrawingPrimitiveTopology;
+  sampleCount?: 1 | 4;
 }>;
 
 export type DrawingPreparedStep = Readonly<{
@@ -92,9 +97,12 @@ export type DrawingPreparedStep = Readonly<{
   usesStencil: boolean;
   usesFillStencil: boolean;
   usesDepth: boolean;
+  requiresMSAA: boolean;
 }>;
 
 export type DrawingPreparedRenderStepKind =
+  | 'per-edge-aa-quad-main'
+  | 'analytic-main'
   | 'fill-inner'
   | 'fill-main'
   | 'fill-stencil-fan'
@@ -126,6 +134,7 @@ export type DrawingPreparedRenderStep = Readonly<{
   usesStencil: boolean;
   usesFillStencil: boolean;
   usesDepth: boolean;
+  requiresMSAA: boolean;
 }>;
 
 export type DrawingPreparedClipDraw = Readonly<{
@@ -169,6 +178,7 @@ export type DrawingDrawPass = Readonly<{
   steps: readonly DrawingPreparedStep[];
   renderSteps: readonly DrawingPreparedRenderStep[];
   unsupportedDraws: readonly DrawingDrawCommand[];
+  requiresMSAA: boolean;
 }>;
 
 export type DrawingPreparedRecording = Readonly<{
@@ -460,10 +470,27 @@ const expandRenderSteps = (
       usesStencil: step.usesStencil,
       usesFillStencil,
       usesDepth,
+      requiresMSAA: step.requiresMSAA,
     });
   };
 
-  if (step.draw.kind === 'pathFill') {
+  if (step.draw.kind === 'analyticRRect') {
+    pushRenderStep(
+      'analytic-main',
+      step.pipelineDescs[0]!,
+      0,
+      false,
+      step.usesDepth,
+    );
+  } else if (step.draw.kind === 'perEdgeAAQuad') {
+    pushRenderStep(
+      'per-edge-aa-quad-main',
+      step.pipelineDescs[0]!,
+      0,
+      false,
+      step.usesDepth,
+    );
+  } else if (step.draw.kind === 'pathFill') {
     if (step.draw.innerFillBounds) {
       pushRenderStep(
         'fill-inner',
@@ -1149,6 +1176,46 @@ const getPipelineDescsForDraw = (
   const usesStencilClip = Boolean(draw.clip?.elements?.length);
   const pipelineBlendMode = getPipelineBlendMode(draw);
   switch (draw.kind) {
+    case 'analyticRRect':
+      return usesStencilClip
+        ? [createPipelineDesc(
+          'drawing-analytic-rrect-clip-cover',
+          'analytic-rrect',
+          'analytic-rrect-instance',
+          pipelineBlendMode,
+          'clip-cover-depth-less',
+          false,
+          'triangle-strip',
+        )]
+        : [createPipelineDesc(
+          'drawing-analytic-rrect-cover',
+          'analytic-rrect',
+          'analytic-rrect-instance',
+          pipelineBlendMode,
+          'direct-depth-less',
+          false,
+          'triangle-strip',
+        )];
+    case 'perEdgeAAQuad':
+      return usesStencilClip
+        ? [createPipelineDesc(
+          'drawing-per-edge-aa-quad-clip-cover',
+          'per-edge-aa-quad',
+          'per-edge-aa-quad-instance',
+          pipelineBlendMode,
+          'clip-cover-depth-less',
+          false,
+          'triangle-strip',
+        )]
+        : [createPipelineDesc(
+          'drawing-per-edge-aa-quad-cover',
+          'per-edge-aa-quad',
+          'per-edge-aa-quad-instance',
+          pipelineBlendMode,
+          'direct-depth-less',
+          false,
+          'triangle-strip',
+        )];
     case 'pathFill': {
       const rendererFillRule = draw.renderer.fillRule ?? draw.fillRule;
       const fillStencilCurveDesc = rendererFillRule === 'evenodd'
@@ -1437,6 +1504,7 @@ export const prepareDrawingRecording = (
       steps: Object.freeze([...currentSteps]),
       renderSteps: Object.freeze([]),
       unsupportedDraws: Object.freeze([...currentUnsupportedDraws]),
+      requiresMSAA: currentSteps.some((step) => step.requiresMSAA),
     });
     passes.push(pass);
     resetOrderingDevice(orderingDevice);
@@ -1483,15 +1551,25 @@ export const prepareDrawingRecording = (
           usesFillStencil: prepared.draw.kind === 'pathFill' &&
             isDrawingStencilFillRenderer(prepared.draw.renderer) &&
             !prepared.draw.clip?.elements?.length,
-          usesDepth: (prepared.draw.kind === 'pathFill' || prepared.draw.kind === 'pathStroke') &&
+          usesDepth: (
+            prepared.draw.kind === 'analyticRRect' ||
+            prepared.draw.kind === 'perEdgeAAQuad' ||
+            prepared.draw.kind === 'pathFill' ||
+            prepared.draw.kind === 'pathStroke'
+          ) &&
             prepared.draw.renderer.usesDepth &&
             (
+              prepared.draw.kind === 'analyticRRect' ||
+              prepared.draw.kind === 'perEdgeAAQuad' ||
               (prepared.draw.kind === 'pathStroke' &&
                 prepared.draw.usesTessellatedStrokePatches &&
                 prepared.draw.patches.length > 0) ||
               (prepared.draw.kind === 'pathFill' &&
                 prepared.draw.patches.length > 0)
             ),
+          requiresMSAA:
+            (prepared.draw.kind === 'pathFill' || prepared.draw.kind === 'pathStroke') &&
+            prepared.draw.renderer.requiresMSAA,
         });
       } else {
         currentUnsupportedDraws.push(command);

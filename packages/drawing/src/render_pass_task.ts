@@ -10,6 +10,7 @@ export type DrawingRenderPassTask = Readonly<{
   }>;
   loadOp: DrawingLoadOp;
   clearColor: readonly [number, number, number, number];
+  requiresMSAA: boolean;
   drawPasses: readonly DrawingDrawPass[];
 }>;
 
@@ -21,5 +22,6 @@ export const createDrawingRenderPassTask = (
   target: { kind: 'offscreen' },
   loadOp: pass.loadOp,
   clearColor: pass.clearColor,
+  requiresMSAA: pass.requiresMSAA,
   drawPasses: Object.freeze([pass]),
 });

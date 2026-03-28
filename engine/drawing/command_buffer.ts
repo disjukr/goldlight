@@ -308,7 +308,12 @@ const encodePreparedStep = (
     if (resources.instanceBuffer) {
       pass.setVertexBuffer(resources.vertexBuffer ? 1 : 0, resources.instanceBuffer);
     }
-    pass.draw(resources.vertexCount, resources.instanceCount);
+    if (resources.indexBuffer && resources.indexCount > 0) {
+      pass.setIndexBuffer(resources.indexBuffer, 'uint16');
+      pass.drawIndexed(resources.indexCount, resources.instanceCount);
+    } else {
+      pass.draw(resources.vertexCount, resources.instanceCount);
+    }
   }
 };
 

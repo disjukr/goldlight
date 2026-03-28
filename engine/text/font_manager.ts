@@ -34,8 +34,13 @@ export class TextFontManager {
     return this.#host.getGlyphPath(typeface, glyphID, size);
   }
 
-  getGlyphMask(typeface: TypefaceHandle, glyphID: number, size: number) {
-    return this.#host.getGlyphMask(typeface, glyphID, size);
+  getGlyphMask(
+    typeface: TypefaceHandle,
+    glyphID: number,
+    size: number,
+    subpixelOffset?: { x: number; y: number },
+  ) {
+    return this.#host.getGlyphMask(typeface, glyphID, size, subpixelOffset);
   }
 
   getGlyphSdf(

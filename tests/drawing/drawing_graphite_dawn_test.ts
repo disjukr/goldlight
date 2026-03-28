@@ -10,6 +10,7 @@ import {
   identityMatrix2d,
   withPath2dFillRule,
 } from '@disjukr/goldlight/geometry';
+import { buildDirectMaskSubRun } from '@disjukr/goldlight/text';
 import {
   addCommandBufferToDawnQueueManager,
   addFinishedCallbackToDawnQueueManager,
@@ -186,6 +187,7 @@ const createMockGpuContext = () => {
               return {
                 setPipeline: () => undefined,
                 setVertexBuffer: () => undefined,
+                setIndexBuffer: () => undefined,
                 setScissorRect: (x: number, y: number, width: number, height: number) => {
                   scissorCalls.push([x, y, width, height]);
                 },
@@ -197,6 +199,9 @@ const createMockGpuContext = () => {
                 },
                 draw: (vertexCount: number) => {
                   drawCalls.push(vertexCount);
+                },
+                drawIndexed: (indexCount: number) => {
+                  drawCalls.push(indexCount);
                 },
                 end: () => undefined,
               } as unknown as GPURenderPassEncoder;
@@ -4145,7 +4150,7 @@ Deno.test('dawn command buffer encodes fill draws with stencil and cover pipelin
   assertEquals(mock.created.bindGroupCalls.length > 0, true);
   assertEquals(mock.created.drawCalls.length, 2);
   assertEquals(mock.created.renderPasses[0]?.depthStencilAttachment !== undefined, true);
-  assertEquals(mock.created.scissorCalls[0], [4, 6, 36, 34]);
+  assertEquals(mock.created.scissorCalls[0], [4, 6, 37, 35]);
   assertEquals(
     mock.created.renderPasses[0]?.colorAttachments[0]?.clearValue,
     { r: 0.25, g: 0.5, b: 0.75, a: 1 },
@@ -5266,4 +5271,60 @@ Deno.test('submitDrawingRecorder exposes draw commands without mutating backend 
   assertEquals(submission.backend, 'graphite-dawn');
   assertEquals(submission.commands.length, 1);
   assertEquals(submission.commands[0]?.kind, 'drawPath');
+});
+
+Deno.test('direct mask text snaps glyph origins in device space like Skia direct mask drawing', () => {
+  const subRun = buildDirectMaskSubRun({
+    listFamilies: () => [],
+    matchTypeface: () => 1n,
+    getFontMetrics: () => ({
+      unitsPerEm: 1000,
+      ascent: -10,
+      descent: 4,
+      lineGap: 2,
+      xHeight: 5,
+      capHeight: 7,
+      underlinePosition: 0,
+      underlineThickness: 0,
+      strikeoutPosition: 0,
+      strikeoutThickness: 0,
+    }),
+    shapeText: () => {
+      throw new Error('unused');
+    },
+    getGlyphPath: () => null,
+    getGlyphMask: (_typeface, _glyphID, _size, subpixelOffset) => ({
+      cacheKey: `mask:${subpixelOffset?.x ?? 0}:${subpixelOffset?.y ?? 0}`,
+      width: 8,
+      height: 10,
+      stride: 8,
+      format: 'a8',
+      offsetX: -1,
+      offsetY: -2,
+      pixels: new Uint8Array(80),
+    }),
+    getGlyphSdf: () => null,
+    close: () => undefined,
+  }, {
+    typeface: 1n,
+    text: 'A',
+    size: 16,
+    direction: 'ltr',
+    bidiLevel: 0,
+    scriptTag: 'Latn',
+    language: 'en',
+    glyphIDs: new Uint32Array([1]),
+    positions: new Float32Array([1.2, 2.4, 9.2, 2.4]),
+    offsets: new Float32Array([0, 0]),
+    clusterIndices: new Uint32Array([0]),
+    advanceX: 8,
+    advanceY: 0,
+    utf8RangeStart: 0,
+    utf8RangeEnd: 1,
+  }, createTranslationMatrix2d(10.25, 20.75));
+
+  const glyph = subRun.glyphs[0]!;
+  assertEquals(glyph.mask?.cacheKey, 'mask:0.5:0.25');
+  assertAlmostEquals(glyph.x, -0.25, 1e-6);
+  assertAlmostEquals(glyph.y, 0.25, 1e-6);
 });

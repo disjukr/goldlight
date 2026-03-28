@@ -7,6 +7,7 @@ import type {
   FontMetrics,
   FontQuery,
   GlyphMask,
+  GlyphSubpixelOffset,
   ShapedRun,
   ShapeTextInput,
   TextDirection,
@@ -59,11 +60,11 @@ type TextHostLibrary = Deno.DynamicLibrary<{
     result: 'usize';
   };
   text_host_get_glyph_mask_info: {
-    parameters: ['u64', 'u32', 'f32', 'buffer'];
+    parameters: ['u64', 'u32', 'f32', 'f32', 'f32', 'buffer'];
     result: 'u8';
   };
   text_host_copy_glyph_mask_pixels: {
-    parameters: ['u64', 'u32', 'f32', 'buffer', 'usize'];
+    parameters: ['u64', 'u32', 'f32', 'f32', 'f32', 'buffer', 'usize'];
     result: 'usize';
   };
   text_host_get_glyph_sdf_info: {
@@ -221,6 +222,22 @@ const encodeScriptTag = (scriptTag: string | undefined): number => {
   ) >>> 0;
 };
 
+const quantizeDirectMaskSubpixelOffset = (
+  subpixelOffset: GlyphSubpixelOffset | undefined,
+): readonly [number, number] => {
+  if (!subpixelOffset) {
+    return [0, 0] as const;
+  }
+  const quantizeAxis = (value: number): number => {
+    if (!Number.isFinite(value)) {
+      return 0;
+    }
+    const wrapped = ((value % 1) + 1) % 1;
+    return Math.floor((wrapped * 4) + 1e-6) & 0x3;
+  };
+  return [quantizeAxis(subpixelOffset.x), quantizeAxis(subpixelOffset.y)] as const;
+};
+
 const parseSvgOutlinePath = (pathData: string) => {
   const tokens = pathData.match(/[MLQCZ]|-?\d*\.?\d+(?:e[-+]?\d+)?/gi) ?? [];
   const verbs: PathVerb2d[] = [];
@@ -328,11 +345,11 @@ const acquireSharedTextHostState = (libraryPath: string): SharedTextHostState =>
       result: 'usize',
     },
     text_host_get_glyph_mask_info: {
-      parameters: ['u64', 'u32', 'f32', 'buffer'],
+      parameters: ['u64', 'u32', 'f32', 'f32', 'f32', 'buffer'],
       result: 'u8',
     },
     text_host_copy_glyph_mask_pixels: {
-      parameters: ['u64', 'u32', 'f32', 'buffer', 'usize'],
+      parameters: ['u64', 'u32', 'f32', 'f32', 'f32', 'buffer', 'usize'],
       result: 'usize',
     },
     text_host_get_glyph_sdf_info: {
@@ -504,15 +521,26 @@ export const createTextHost = (options: TextHostOptions = {}): TextHost => {
     typeface: TypefaceHandle,
     glyphID: number,
     size: number,
+    subpixelOffset?: GlyphSubpixelOffset,
   ): GlyphMask | null => {
-    const cacheKey = `${typeface.toString()}:${glyphID >>> 0}:${size}`;
+    const [phaseX, phaseY] = quantizeDirectMaskSubpixelOffset(subpixelOffset);
+    const cacheKey = `${typeface.toString()}:${glyphID >>> 0}:${size}:${phaseX}:${phaseY}`;
     const cached = shared.glyphMaskCache.get(cacheKey);
     if (cached !== undefined) {
       return cached;
     }
+    const subpixelX = phaseX / 4;
+    const subpixelY = phaseY / 4;
     const infoBuffer = new Uint8Array(ffiGlyphMaskInfoBufferSize);
     if (
-      library.symbols.text_host_get_glyph_mask_info(typeface, glyphID >>> 0, size, infoBuffer) !==
+      library.symbols.text_host_get_glyph_mask_info(
+        typeface,
+        glyphID >>> 0,
+        size,
+        subpixelX,
+        subpixelY,
+        infoBuffer,
+      ) !==
         textHostMetricsResultOk
     ) {
       shared.glyphMaskCache.set(cacheKey, null);
@@ -532,6 +560,8 @@ export const createTextHost = (options: TextHostOptions = {}): TextHost => {
           typeface,
           glyphID >>> 0,
           size,
+          subpixelX,
+          subpixelY,
           pixels,
           BigInt(pixels.byteLength),
         ),

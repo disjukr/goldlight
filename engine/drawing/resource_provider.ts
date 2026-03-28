@@ -974,265 +974,356 @@ ${commonPaintShaderSource}
 struct VertexOut {
   @builtin(position) position: vec4<f32>,
   @location(0) devicePosition: vec2<f32>,
-  @location(1) localPosition: vec2<f32>,
-  @location(2) xRadiiOrFlags: vec4<f32>,
-  @location(3) radiiOrQuadXs: vec4<f32>,
-  @location(4) ltrbOrQuadYs: vec4<f32>,
+  @location(1) coords: vec4<f32>,
+  @location(2) jacobian: vec4<f32>,
+  @location(3) edgeDistances: vec4<f32>,
+  @location(4) xRadii: vec4<f32>,
+  @location(5) yRadii: vec4<f32>,
+  @location(6) strokeParams: vec2<f32>,
+  @location(7) perPixelControl: vec2<f32>,
 };
 
-fn local_to_device(position: vec2<f32>) -> vec2<f32> {
-  return vec2<f32>(
-    (step.matrix0.x * position.x) + (step.matrix0.z * position.y) + step.matrix1.x,
-    (step.matrix0.y * position.x) + (step.matrix0.w * position.y) + step.matrix1.y,
+fn coverage_bias(scale: f32) -> f32 {
+  return 1.0 - (0.5 * scale);
+}
+
+fn perp(v: vec2<f32>) -> vec2<f32> {
+  return vec2<f32>(-v.y, v.x);
+}
+
+fn cross_length_2d(a: vec2<f32>, b: vec2<f32>) -> f32 {
+  return (a.x * b.y) - (a.y * b.x);
+}
+
+fn inverse_grad_len(localGrad: vec2<f32>, jacobian: mat2x2<f32>) -> f32 {
+  let devGrad = localGrad * jacobian;
+  return inverseSqrt(max(dot(devGrad, devGrad), 1e-8));
+}
+
+fn local_to_device_matrix() -> mat3x3<f32> {
+  return mat3x3<f32>(
+    vec3<f32>(step.matrix0.x, step.matrix0.y, 0.0),
+    vec3<f32>(step.matrix0.z, step.matrix0.w, 0.0),
+    vec3<f32>(step.matrix1.x, step.matrix1.y, 1.0),
   );
 }
 
-fn device_to_ndc(position: vec2<f32>) -> vec4<f32> {
-  return vec4<f32>((position * viewport.scale) + viewport.translate, step.matrix1.w, 1.0);
+fn inverse_affine_2x2(m: mat2x2<f32>) -> mat2x2<f32> {
+  let det = (m[0].x * m[1].y) - (m[0].y * m[1].x);
+  let invDet = select(0.0, 1.0 / det, abs(det) > 1e-8);
+  return mat2x2<f32>(
+    vec2<f32>( m[1].y * invDet, -m[0].y * invDet),
+    vec2<f32>(-m[1].x * invDet,  m[0].x * invDet),
+  );
 }
 
-fn pick_component(values: vec4<f32>, index: i32) -> f32 {
-  if (index == 0) { return values.x; }
-  if (index == 1) { return values.y; }
-  if (index == 2) { return values.z; }
-  return values.w;
-}
-
-fn analytic_is_line(xRadiiOrFlags: vec4<f32>) -> bool {
-  return xRadiiOrFlags.x < -1.5 && xRadiiOrFlags.y > 0.5;
-}
-
-fn analytic_is_stroke_shape(xRadiiOrFlags: vec4<f32>) -> bool {
-  return xRadiiOrFlags.x < -1.5 && abs(xRadiiOrFlags.y) <= 0.5;
-}
-
-fn analytic_is_filled_rrect(xRadiiOrFlags: vec4<f32>) -> bool {
-  return any(xRadiiOrFlags > vec4<f32>(0.0));
-}
-
-fn analytic_fill_ltrb(
-  xRadiiOrFlags: vec4<f32>,
-  radiiOrQuadXs: vec4<f32>,
-  ltrbOrQuadYs: vec4<f32>,
-) -> vec4<f32> {
-  if (analytic_is_filled_rrect(xRadiiOrFlags)) {
-    return ltrbOrQuadYs;
+fn corner_distance(
+  dist: ptr<function, vec2<f32>>,
+  jacobian: mat2x2<f32>,
+  strokeParams: vec2<f32>,
+  cornerEdgeDist: vec2<f32>,
+  xyFlip: vec2<f32>,
+  radii: vec2<f32>,
+) {
+  let uv = radii - cornerEdgeDist;
+  if (all(uv > vec2<f32>(0.0))) {
+    if (all(radii > vec2<f32>(0.0)) || (strokeParams.x > 0.0 && strokeParams.y < 0.0)) {
+      let invR2 = 1.0 / (radii * radii + strokeParams.x * strokeParams.x);
+      let normUV = invR2 * (uv * xyFlip);
+      let invGradLength = inverse_grad_len(normUV, jacobian);
+      let f = 0.5 * invGradLength * (dot(uv * xyFlip, normUV) - 1.0);
+      let width = radii.x * strokeParams.x * invR2.x * invGradLength;
+      let outerInner = vec2<f32>(width - f, width + f);
+      let inner = select(-outerInner.y, 1.0, radii.x - strokeParams.x <= 0.0);
+      (*dist) = min((*dist), vec2<f32>(outerInner.x, inner));
+    } else if (strokeParams.y == 0.0) {
+      let bevelDist = (strokeParams.x - uv.x - uv.y) * inverse_grad_len(xyFlip, jacobian);
+      (*dist).x = min((*dist).x, bevelDist);
+    }
   }
-  return vec4<f32>(radiiOrQuadXs.x, ltrbOrQuadYs.x, radiiOrQuadXs.y, ltrbOrQuadYs.z);
 }
 
-fn analytic_fill_x_radii(xRadiiOrFlags: vec4<f32>) -> vec4<f32> {
-  return select(vec4<f32>(0.0), xRadiiOrFlags, analytic_is_filled_rrect(xRadiiOrFlags));
-}
-
-fn analytic_fill_y_radii(
-  xRadiiOrFlags: vec4<f32>,
-  radiiOrQuadXs: vec4<f32>,
-) -> vec4<f32> {
-  return select(vec4<f32>(0.0), radiiOrQuadXs, analytic_is_filled_rrect(xRadiiOrFlags));
-}
-
-fn line_direction(start: vec2<f32>, end: vec2<f32>) -> vec2<f32> {
-  let delta = end - start;
-  let len = length(delta);
-  return select(vec2<f32>(1.0, 0.0), delta / len, len > 1e-4);
-}
-
-fn rect_signed_distance(localPosition: vec2<f32>, ltrb: vec4<f32>) -> f32 {
-  let center = (ltrb.xy + ltrb.zw) * 0.5;
-  let halfSize = max((ltrb.zw - ltrb.xy) * 0.5, vec2<f32>(0.0));
-  let d = abs(localPosition - center) - halfSize;
-  return length(max(d, vec2<f32>(0.0))) + min(max(d.x, d.y), 0.0);
-}
-
-fn corner_radius(localPosition: vec2<f32>, ltrb: vec4<f32>, xRadii: vec4<f32>, yRadii: vec4<f32>) -> vec2<f32> {
-  let center = (ltrb.xy + ltrb.zw) * 0.5;
-  let useRight = localPosition.x >= center.x;
-  let useBottom = localPosition.y >= center.y;
-  let index = select(
-    select(0, 1, useRight),
-    select(3, 2, useRight),
-    useBottom,
-  );
-  return vec2<f32>(pick_component(xRadii, index), pick_component(yRadii, index));
-}
-
-fn rounded_rect_signed_distance(
-  localPosition: vec2<f32>,
-  ltrb: vec4<f32>,
+fn corner_distances(
+  dist: ptr<function, vec2<f32>>,
+  jacobian: mat2x2<f32>,
+  strokeParams: vec2<f32>,
+  edgeDists: vec4<f32>,
   xRadii: vec4<f32>,
   yRadii: vec4<f32>,
-) -> f32 {
-  let radius = corner_radius(localPosition, ltrb, xRadii, yRadii);
-  if (radius.x <= 1e-4 && radius.y <= 1e-4) {
-    return rect_signed_distance(localPosition, ltrb);
-  }
-  let center = (ltrb.xy + ltrb.zw) * 0.5;
-  let halfSize = max((ltrb.zw - ltrb.xy) * 0.5, vec2<f32>(0.0));
-  let innerHalf = max(halfSize - radius, vec2<f32>(0.0));
-  let q = abs(localPosition - center) - innerHalf;
-  let outside = max(q, vec2<f32>(0.0));
-  let safeRadius = max(radius, vec2<f32>(1e-4));
-  let ellipseDistance = (length(outside / safeRadius) - 1.0) * min(safeRadius.x, safeRadius.y);
-  let edgeDistance = min(max(q.x, q.y), 0.0);
-  return select(edgeDistance, ellipseDistance, outside.x > 0.0 || outside.y > 0.0);
+) {
+  corner_distance(dist, jacobian, strokeParams, edgeDists.xy, vec2<f32>(-1.0, -1.0), vec2<f32>(xRadii.x, yRadii.x));
+  corner_distance(dist, jacobian, strokeParams, edgeDists.zy, vec2<f32>( 1.0, -1.0), vec2<f32>(xRadii.y, yRadii.y));
+  corner_distance(dist, jacobian, strokeParams, edgeDists.zw, vec2<f32>( 1.0,  1.0), vec2<f32>(xRadii.z, yRadii.z));
+  corner_distance(dist, jacobian, strokeParams, edgeDists.xw, vec2<f32>(-1.0,  1.0), vec2<f32>(xRadii.w, yRadii.w));
 }
 
 @vertex
 fn vs_main(
-  @builtin(vertex_index) vertexIndex: u32,
-  @location(0) xRadiiOrFlags: vec4<f32>,
-  @location(1) radiiOrQuadXs: vec4<f32>,
-  @location(2) ltrbOrQuadYs: vec4<f32>,
+  @location(0) cornerID: u32,
+  @location(1) position: vec2<f32>,
+  @location(2) normal: vec2<f32>,
+  @location(3) normalScale: f32,
+  @location(4) vertexCenterWeight: f32,
+  @location(5) xRadiiOrFlags: vec4<f32>,
+  @location(6) radiiOrQuadXs: vec4<f32>,
+  @location(7) ltrbOrQuadYs: vec4<f32>,
+  @location(8) center: vec4<f32>,
 ) -> VertexOut {
-  var localPosition: vec2<f32>;
-  if (analytic_is_line(xRadiiOrFlags)) {
-    let start = ltrbOrQuadYs.xy;
-    let end = ltrbOrQuadYs.zw;
-    let strokeRadius = max(xRadiiOrFlags.z, 1e-4);
-    let capCode = xRadiiOrFlags.w;
-    let dir = line_direction(start, end);
-    let normal = vec2<f32>(-dir.y, dir.x);
-    let capInset = select(0.0, strokeRadius, capCode > 1.5);
-    let startPoint = start - dir * capInset;
-    let endPoint = end + dir * capInset;
-    if (vertexIndex == 0u) {
-      localPosition = startPoint + normal * strokeRadius;
-    } else if (vertexIndex == 1u) {
-      localPosition = endPoint + normal * strokeRadius;
-    } else if (vertexIndex == 2u) {
-      localPosition = startPoint - normal * strokeRadius;
+  let kMiterScale = 1.0;
+  let kBevelScale = 0.0;
+  let kRoundScale = 0.41421356237;
+  let kEpsilon = 0.00024;
+
+  let nextID = (cornerID + 1u) % 4u;
+  var joinScale = kMiterScale;
+  let bidirectionalCoverage = center.z <= 0.0;
+  var deviceSpaceDistances = false;
+  var xs: vec4<f32>;
+  var ys: vec4<f32>;
+  var edgeAA = vec4<f32>(1.0);
+  var strokedLine = false;
+  var xRadii: vec4<f32>;
+  var yRadii: vec4<f32>;
+  var strokeParams: vec2<f32>;
+
+  if (xRadiiOrFlags.x < -1.0) {
+    strokedLine = xRadiiOrFlags.y > 0.0;
+    xs = select(ltrbOrQuadYs.xzxz, vec4<f32>(ltrbOrQuadYs.x, ltrbOrQuadYs.z, ltrbOrQuadYs.z, ltrbOrQuadYs.x), !strokedLine);
+    ys = vec4<f32>(ltrbOrQuadYs.y, ltrbOrQuadYs.y, ltrbOrQuadYs.w, ltrbOrQuadYs.w);
+    if (xRadiiOrFlags.y < 0.0) {
+      xRadii = -xRadiiOrFlags - 2.0;
+      yRadii = radiiOrQuadXs;
+      strokeParams = vec2<f32>(0.0, 1.0);
     } else {
-      localPosition = endPoint - normal * strokeRadius;
+      xRadii = radiiOrQuadXs;
+      yRadii = xRadii;
+      strokeParams = xRadiiOrFlags.zw;
+      joinScale = select(sign(strokeParams.y), kRoundScale, strokeParams.y < 0.0);
+    }
+  } else if (any(xRadiiOrFlags > vec4<f32>(0.0))) {
+    xs = vec4<f32>(ltrbOrQuadYs.x, ltrbOrQuadYs.z, ltrbOrQuadYs.z, ltrbOrQuadYs.x);
+    ys = vec4<f32>(ltrbOrQuadYs.y, ltrbOrQuadYs.y, ltrbOrQuadYs.w, ltrbOrQuadYs.w);
+    xRadii = xRadiiOrFlags;
+    yRadii = radiiOrQuadXs;
+    strokeParams = vec2<f32>(0.0, -1.0);
+  } else {
+    xs = radiiOrQuadXs;
+    ys = ltrbOrQuadYs;
+    edgeAA = -xRadiiOrFlags;
+    xRadii = vec4<f32>(0.0);
+    yRadii = vec4<f32>(0.0);
+    strokeParams = vec2<f32>(0.0, 1.0);
+    deviceSpaceDistances = true;
+  }
+
+  var cornerRadii = vec2<f32>(xRadii[cornerID], yRadii[cornerID]);
+  if ((cornerID & 1u) != 0u) {
+    cornerRadii = cornerRadii.yx;
+  }
+  var cornerAspectRatio = vec2<f32>(1.0);
+  if (all(cornerRadii > vec2<f32>(0.0))) {
+    joinScale = kRoundScale;
+    cornerAspectRatio = cornerRadii.yx;
+  }
+
+  var dx = xs - xs.wxyz;
+  var dy = ys - ys.wxyz;
+  let invMag = 1.0 / max(abs(dx), max(abs(dy), vec4<f32>(1.0)));
+  dx *= invMag;
+  dy *= invMag;
+  var edgeSquaredLen = dx * dx + dy * dy;
+  let edgeMask = sign(edgeSquaredLen);
+  var edgeBias = vec4<f32>(0.0);
+  var strokeRadius = vec2<f32>(strokeParams.x);
+
+  if (any(edgeMask == vec4<f32>(0.0))) {
+    if (all(edgeMask == vec4<f32>(0.0))) {
+      dx = vec4<f32>(0.0, 1.0, 0.0, -1.0);
+      dy = vec4<f32>(-1.0, 0.0, 1.0, 0.0);
+      edgeSquaredLen = vec4<f32>(1.0);
+    } else {
+      let triangle = (edgeMask.x + edgeMask.y + edgeMask.z + edgeMask.w) > 2.5;
+      let edgeX = select(dy.yzwx, dx.yzwx, triangle);
+      let edgeY = select(-dx.yzwx, dy.yzwx, triangle);
+      dx = mix(edgeX, dx, edgeMask);
+      dy = mix(edgeY, dy, edgeMask);
+      edgeSquaredLen = mix(edgeSquaredLen.yzwx, edgeSquaredLen, edgeMask);
+      edgeAA = mix(edgeAA.yzwx, edgeAA, edgeMask);
+      if (!triangle && joinScale == kBevelScale) {
+        strokeRadius *= vec2<f32>(edgeMask[cornerID], edgeMask[nextID]);
+        edgeBias = (edgeMask - 1.0) * strokeParams.x;
+        strokeParams.y = 1.0;
+        joinScale = kMiterScale;
+      }
+    }
+  }
+
+  let inverseEdgeLen = inverseSqrt(edgeSquaredLen);
+  dx *= inverseEdgeLen;
+  dy *= inverseEdgeLen;
+
+  let xAxis = -vec2<f32>(dx[nextID], dy[nextID]);
+  let yAxis =  vec2<f32>(dx[cornerID], dy[cornerID]);
+  var localPos = vec2<f32>(0.0);
+  var snapToCenter = false;
+  if (normalScale < 0.0) {
+    if (center.w < 0.0 || center.z * vertexCenterWeight != 0.0) {
+      snapToCenter = true;
+    } else {
+      let localAARadius = center.w;
+      let insetRadii = cornerRadii + select(strokeRadius, -strokeRadius, bidirectionalCoverage);
+      if (joinScale == kMiterScale || any(insetRadii <= vec2<f32>(localAARadius))) {
+        localPos = insetRadii - localAARadius;
+      } else {
+        localPos = insetRadii * position - localAARadius * normal;
+      }
     }
   } else {
-    let ltrb = select(
-      analytic_fill_ltrb(xRadiiOrFlags, radiiOrQuadXs, ltrbOrQuadYs),
-      ltrbOrQuadYs,
-      analytic_is_stroke_shape(xRadiiOrFlags),
-    );
-    let corner = vec2<f32>(f32(vertexIndex & 1u), f32((vertexIndex >> 1u) & 1u));
-    localPosition = mix(ltrb.xy, ltrb.zw, corner);
+    localPos = (cornerRadii + strokeRadius) * (position + joinScale * position.yx);
   }
-  let devicePosition = local_to_device(localPosition);
+
+  if (snapToCenter) {
+    localPos = center.xy;
+  } else {
+    localPos -= cornerRadii;
+    localPos = vec2<f32>(xs[cornerID], ys[cornerID]) + xAxis * localPos.x + yAxis * localPos.y;
+  }
+
+  var edgeDistances = dy * (xs - localPos.x) - dx * (ys - localPos.y) + edgeBias;
+  let localToDevice = local_to_device_matrix();
+  let linearDeviceToLocal = inverse_affine_2x2(mat2x2<f32>(
+    vec2<f32>(step.matrix0.x, step.matrix0.y),
+    vec2<f32>(step.matrix0.z, step.matrix0.w),
+  ));
+  var devPos = localToDevice * vec3<f32>(localPos, 1.0);
+  var jacobian = vec4<f32>(linearDeviceToLocal[0], linearDeviceToLocal[1]);
+  var perPixelControlY = 0.0;
+
+  if (deviceSpaceDistances) {
+    let gx = -dy * linearDeviceToLocal[0].x + dx * linearDeviceToLocal[0].y;
+    let gy = -dy * linearDeviceToLocal[1].x + dx * linearDeviceToLocal[1].y;
+    edgeDistances *= inverseSqrt(max(gx * gx + gy * gy, vec4<f32>(1e-8)));
+    edgeDistances += (1.0 - edgeAA) * abs(devPos.z);
+    let subpixelCoverage = all(edgeAA == vec4<f32>(1.0)) &&
+      dot(abs(dx * dx.yzwx + dy * dy.yzwx), vec4<f32>(1.0)) < kEpsilon;
+    if (subpixelCoverage) {
+      let dim = edgeDistances.xy + edgeDistances.zw;
+      perPixelControlY = 1.0 + min(min(dim.x, dim.y), abs(devPos.z));
+    } else {
+      perPixelControlY = 1.0 + abs(devPos.z);
+    }
+  }
+
+  if (normalScale > 0.0 && devPos.z > 0.0) {
+    var J = mat2x2<f32>(jacobian.xy, jacobian.zw);
+    let edgeAANormal = vec2<f32>(edgeAA[cornerID], edgeAA[nextID]) * normal;
+    var nx = cornerAspectRatio.x * edgeAANormal.x * (perp(-yAxis) * J);
+    var ny = cornerAspectRatio.y * edgeAANormal.y * (perp( xAxis) * J);
+    let isMidVertex = all(edgeAANormal != vec2<f32>(0.0));
+    if (joinScale == kMiterScale && isMidVertex) {
+      nx = normalize(nx);
+      ny = normalize(ny);
+      if (dot(nx, ny) < -0.8) {
+        let s = sign(cross_length_2d(nx, ny));
+        nx = s * perp(nx);
+        ny = -s * perp(ny);
+      }
+    }
+    devPos = vec3<f32>(devPos.xy + (devPos.z * normalize(nx + ny)), devPos.z);
+    if (deviceSpaceDistances) {
+      edgeDistances -= devPos.z;
+    }
+    else {
+      perPixelControlY = -devPos.z;
+    }
+  }
+  else if (!deviceSpaceDistances) {
+    perPixelControlY = 0.0;
+  }
+
+  if (strokedLine) {
+    let lineJacobian = mat2x2<f32>(
+      vec2<f32>(dy.x, -dy.y),
+      vec2<f32>(-dx.x, dx.y),
+    ) * mat2x2<f32>(jacobian.xy, jacobian.zw);
+    jacobian = vec4<f32>(lineJacobian[0], lineJacobian[1]);
+  }
+
   var out: VertexOut;
-  out.position = device_to_ndc(devicePosition);
-  out.devicePosition = devicePosition;
-  out.localPosition = localPosition;
-  out.xRadiiOrFlags = xRadiiOrFlags;
-  out.radiiOrQuadXs = radiiOrQuadXs;
-  out.ltrbOrQuadYs = ltrbOrQuadYs;
-  return out;
-}
-
-fn signed_distance_to_segment_capsule(
-  point: vec2<f32>,
-  start: vec2<f32>,
-  end: vec2<f32>,
-  radius: f32,
-) -> f32 {
-  let delta = end - start;
-  let denom = max(dot(delta, delta), 1e-4);
-  let t = saturate01(dot(point - start, delta) / denom);
-  let closest = mix(start, end, t);
-  return length(point - closest) - radius;
-}
-
-fn signed_distance_to_butt_line(
-  point: vec2<f32>,
-  start: vec2<f32>,
-  end: vec2<f32>,
-  radius: f32,
-) -> f32 {
-  let dir = line_direction(start, end);
-  let normal = vec2<f32>(-dir.y, dir.x);
-  let lengthAlong = length(end - start);
-  let centered = vec2<f32>(
-    dot(point - start, dir) - (0.5 * lengthAlong),
-    dot(point - start, normal),
+  out.position = vec4<f32>(
+    (devPos.xy * viewport.scale) + viewport.translate,
+    devPos.z * step.matrix1.w,
+    devPos.z,
   );
-  let q = abs(centered) - vec2<f32>(0.5 * lengthAlong, radius);
-  return length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0);
-}
-
-fn line_signed_distance(
-  point: vec2<f32>,
-  start: vec2<f32>,
-  end: vec2<f32>,
-  radius: f32,
-  capCode: f32,
-) -> f32 {
-  if (capCode > 1.5) {
-    let dir = line_direction(start, end);
-    return signed_distance_to_butt_line(point, start - dir * radius, end + dir * radius, radius);
-  }
-  if (capCode > 0.5) {
-    return signed_distance_to_segment_capsule(point, start, end, radius);
-  }
-  return signed_distance_to_butt_line(point, start, end, radius);
+  out.devicePosition = devPos.xy;
+  let invDevW = select(0.0, 1.0 / devPos.z, abs(devPos.z) > 1e-8);
+  out.coords = vec4<f32>(devPos.xy, devPos.z * step.matrix1.w, invDevW);
+  out.jacobian = jacobian;
+  out.edgeDistances = edgeDistances;
+  out.xRadii = xRadii;
+  out.yRadii = yRadii;
+  out.strokeParams = strokeParams;
+  out.perPixelControl = vec2<f32>(
+    select(select(0.0, -1.0, bidirectionalCoverage), 1.0, vertexCenterWeight != 0.0),
+    perPixelControlY,
+  );
+  return out;
 }
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
-  var signedDistance = 1.0;
-  if (analytic_is_line(in.xRadiiOrFlags)) {
-    signedDistance = line_signed_distance(
-      in.localPosition,
-      in.ltrbOrQuadYs.xy,
-      in.ltrbOrQuadYs.zw,
-      max(in.xRadiiOrFlags.z, 1e-4),
-      in.xRadiiOrFlags.w,
-    );
-  } else if (analytic_is_stroke_shape(in.xRadiiOrFlags)) {
-    let ltrb = in.ltrbOrQuadYs;
-    let strokeRadius = max(in.xRadiiOrFlags.z, 1e-4);
-    let xRadii = in.radiiOrQuadXs;
-    let yRadii = in.radiiOrQuadXs;
-    let outerDistance = rounded_rect_signed_distance(in.localPosition, ltrb, xRadii, yRadii);
-    let outerAA = max(fwidth(outerDistance), 1e-4);
-    let outerCoverage = saturate01(0.5 - outerDistance / outerAA);
-    var innerCoverage = 0.0;
-    let innerLTRB = vec4<f32>(
-      ltrb.x + strokeRadius,
-      ltrb.y + strokeRadius,
-      ltrb.z - strokeRadius,
-      ltrb.w - strokeRadius,
-    );
-    if (innerLTRB.z > innerLTRB.x && innerLTRB.w > innerLTRB.y) {
-      let innerXRadii = max(xRadii - vec4<f32>(strokeRadius), vec4<f32>(0.0));
-      let innerYRadii = max(yRadii - vec4<f32>(strokeRadius), vec4<f32>(0.0));
-      let innerDistance = rounded_rect_signed_distance(
-        in.localPosition,
-        innerLTRB,
-        innerXRadii,
-        innerYRadii,
-      );
-      let innerAA = max(fwidth(innerDistance), 1e-4);
-      innerCoverage = saturate01(0.5 - innerDistance / innerAA);
-    }
-    let coverage = outerCoverage * (1.0 - innerCoverage);
+  if (in.perPixelControl.x > 0.0) {
     let clipCoverage = clip_coverage(in.devicePosition);
     var color = apply_clip_shader(paint_shader_color(in.devicePosition));
-    color.a *= coverage * clipCoverage;
+    color.a *= clipCoverage;
     return blend_with_dst(color, in.devicePosition);
-  } else {
-    let ltrb = analytic_fill_ltrb(
-      in.xRadiiOrFlags,
-      in.radiiOrQuadXs,
-      in.ltrbOrQuadYs,
-    );
-    signedDistance = rounded_rect_signed_distance(
-      in.localPosition,
-      ltrb,
-      analytic_fill_x_radii(in.xRadiiOrFlags),
-      analytic_fill_y_radii(in.xRadiiOrFlags, in.radiiOrQuadXs),
-    );
   }
-  let aaWidth = max(fwidth(signedDistance), 1e-4);
-  let coverage = saturate01(0.5 - signedDistance / aaWidth);
+
+  if (in.perPixelControl.y > 1.0) {
+    let outerDist = min(in.edgeDistances.xy, in.edgeDistances.zw);
+    let c = min(outerDist.x, outerDist.y) * in.coords.w;
+    let scale = (in.perPixelControl.y - 1.0) * in.coords.w;
+    let bias = coverage_bias(scale);
+    let clipCoverage = clip_coverage(in.devicePosition);
+    var color = apply_clip_shader(paint_shader_color(in.devicePosition));
+    color.a *= saturate01(scale * (c + bias)) * clipCoverage;
+    return blend_with_dst(color, in.devicePosition);
+  }
+
+  let invW = 1.0 / in.coords.w;
+  let Jbase = mat2x2<f32>(in.jacobian.xy, in.jacobian.zw);
+  let J = mat2x2<f32>(Jbase[0] * invW, Jbase[1] * invW);
+  let invGradLen = vec2<f32>(
+    inverse_grad_len(vec2<f32>(1.0, 0.0), J),
+    inverse_grad_len(vec2<f32>(0.0, 1.0), J),
+  );
+  let outerDist = invGradLen * (in.strokeParams.x + min(in.edgeDistances.xy, in.edgeDistances.zw));
+  var d = vec2<f32>(min(outerDist.x, outerDist.y), -1.0);
+  var scale = 1.0;
+  var bias = 1.0;
+
+  if (in.perPixelControl.x > -0.95) {
+    let dim = invGradLen * (in.edgeDistances.xy + in.edgeDistances.zw + 2.0 * in.strokeParams.xx);
+    scale = min(min(dim.x, dim.y), 1.0);
+    bias = coverage_bias(scale);
+  } else {
+    let strokeWidth = 2.0 * in.strokeParams.x * invGradLen;
+    let innerDist = strokeWidth - outerDist;
+    d.y = -max(innerDist.x, innerDist.y);
+    if (in.strokeParams.x > 0.0) {
+      let narrowStroke = min(strokeWidth.x, strokeWidth.y);
+      let strokeDim = select(vec2<f32>(narrowStroke), strokeWidth, innerDist >= vec2<f32>(-0.5));
+      scale = saturate01(max(strokeDim.x, strokeDim.y));
+      bias = coverage_bias(scale);
+    }
+  }
+
+  corner_distances(&d, J, in.strokeParams, in.edgeDistances, in.xRadii, in.yRadii);
+  let outsetDist = min(in.perPixelControl.y, 0.0) * in.coords.w;
+  let finalCoverage = scale * (min(d.x + outsetDist, -d.y) + bias);
   let clipCoverage = clip_coverage(in.devicePosition);
   var color = apply_clip_shader(paint_shader_color(in.devicePosition));
-  color.a *= coverage * clipCoverage;
+  color.a *= saturate01(finalCoverage) * clipCoverage;
   return blend_with_dst(color, in.devicePosition);
 }
 `;
@@ -2754,13 +2845,38 @@ export const createDawnResourceProvider = (
     ],
   });
 
+  const createAnalyticRRectStaticVertexLayout = (): GPUVertexBufferLayout => ({
+    arrayStride: Uint32Array.BYTES_PER_ELEMENT + (floatBytes * 6),
+    stepMode: 'vertex',
+    attributes: [
+      { shaderLocation: 0, offset: 0, format: 'uint32' },
+      { shaderLocation: 1, offset: Uint32Array.BYTES_PER_ELEMENT, format: 'float32x2' },
+      {
+        shaderLocation: 2,
+        offset: Uint32Array.BYTES_PER_ELEMENT + (floatBytes * 2),
+        format: 'float32x2',
+      },
+      {
+        shaderLocation: 3,
+        offset: Uint32Array.BYTES_PER_ELEMENT + (floatBytes * 4),
+        format: 'float32',
+      },
+      {
+        shaderLocation: 4,
+        offset: Uint32Array.BYTES_PER_ELEMENT + (floatBytes * 5),
+        format: 'float32',
+      },
+    ],
+  });
+
   const createAnalyticRRectInstanceLayout = (): GPUVertexBufferLayout => ({
-    arrayStride: floatBytes * 12,
+    arrayStride: floatBytes * 16,
     stepMode: 'instance',
     attributes: [
-      { shaderLocation: 0, offset: floatBytes * 0, format: 'float32x4' },
-      { shaderLocation: 1, offset: floatBytes * 4, format: 'float32x4' },
-      { shaderLocation: 2, offset: floatBytes * 8, format: 'float32x4' },
+      { shaderLocation: 5, offset: floatBytes * 0, format: 'float32x4' },
+      { shaderLocation: 6, offset: floatBytes * 4, format: 'float32x4' },
+      { shaderLocation: 7, offset: floatBytes * 8, format: 'float32x4' },
+      { shaderLocation: 8, offset: floatBytes * 12, format: 'float32x4' },
     ],
   });
 
@@ -3059,7 +3175,7 @@ export const createDawnResourceProvider = (
     descriptor: DrawingGraphicsPipelineDesc,
   ): readonly GPUVertexBufferLayout[] =>
     descriptor.vertexLayout === 'analytic-rrect-instance'
-      ? [createAnalyticRRectInstanceLayout()]
+      ? [createAnalyticRRectStaticVertexLayout(), createAnalyticRRectInstanceLayout()]
       : descriptor.vertexLayout === 'per-edge-aa-quad-instance'
       ? [createPerEdgeAAQuadInstanceLayout()]
       : descriptor.vertexLayout === 'device-vertex'
@@ -3165,6 +3281,10 @@ export const createDawnResourceProvider = (
     },
     primitive: {
       topology: descriptor.topology,
+      stripIndexFormat: descriptor.topology === 'triangle-strip' &&
+          descriptor.vertexLayout === 'analytic-rrect-instance'
+        ? 'uint16'
+        : undefined,
       cullMode: 'none',
       frontFace: 'ccw',
     },

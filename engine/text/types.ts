@@ -46,6 +46,11 @@ export type GlyphMask = Readonly<{
   pixels: Uint8Array;
 }>;
 
+export type GlyphSubpixelOffset = Readonly<{
+  x: number;
+  y: number;
+}>;
+
 export type ShapedRun = Readonly<{
   typeface: TypefaceHandle;
   text: string;
@@ -125,7 +130,12 @@ export type TextHost = Readonly<{
   getFontMetrics: (typeface: TypefaceHandle, size: number) => FontMetrics;
   shapeText: (input: ShapeTextInput) => ShapedRun;
   getGlyphPath: (typeface: TypefaceHandle, glyphID: number, size: number) => Path2d | null;
-  getGlyphMask: (typeface: TypefaceHandle, glyphID: number, size: number) => GlyphMask | null;
+  getGlyphMask: (
+    typeface: TypefaceHandle,
+    glyphID: number,
+    size: number,
+    subpixelOffset?: GlyphSubpixelOffset,
+  ) => GlyphMask | null;
   getGlyphSdf: (
     typeface: TypefaceHandle,
     glyphID: number,

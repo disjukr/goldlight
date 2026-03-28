@@ -324,6 +324,7 @@ export type DrawingPreparedAnalyticRRectInstance = Readonly<{
   xRadiiOrFlags: readonly [number, number, number, number];
   radiiOrQuadXs: readonly [number, number, number, number];
   ltrbOrQuadYs: readonly [number, number, number, number];
+  center: readonly [number, number, number, number];
   boundsRect: Rect;
 }>;
 
@@ -699,12 +700,23 @@ const clampCornerRadius = (
   y: Math.max(0, Math.min(radius?.y ?? 0, halfHeight)),
 });
 
-const maxScaleFromTransform = (
+const computeAffineScaleFactors = (
   transform: readonly [number, number, number, number, number, number],
-): number => {
-  const scaleX = Math.hypot(transform[0], transform[1]);
-  const scaleY = Math.hypot(transform[2], transform[3]);
-  return Math.max(scaleX, scaleY, epsilon);
+): readonly [number, number] => {
+  // The local-to-device matrix is:
+  // [ m00 m01 ] == [ transform[0] transform[2] ]
+  // [ m10 m11 ]    [ transform[1] transform[3] ]
+  const m00 = transform[0];
+  const m01 = transform[2];
+  const m10 = transform[1];
+  const m11 = transform[3];
+  const s1 = (m00 * m00) + (m01 * m01) + (m10 * m10) + (m11 * m11);
+  const e = (m00 * m00) + (m01 * m01) - (m10 * m10) - (m11 * m11);
+  const f = (m00 * m10) + (m01 * m11);
+  const s2 = Math.sqrt(Math.max(0, (e * e) + (4 * f * f)));
+  const minScale = Math.sqrt(Math.max(0, 0.5 * (s1 - s2)));
+  const maxScale = Math.sqrt(Math.max(0, 0.5 * (s1 + s2)));
+  return [Math.max(minScale, epsilon), Math.max(maxScale, epsilon)];
 };
 
 const resolveAnalyticStrokeHalfWidth = (
@@ -712,12 +724,52 @@ const resolveAnalyticStrokeHalfWidth = (
   transform: readonly [number, number, number, number, number, number],
 ): number =>
   strokeStyle.halfWidth <= 0.5
-    ? Math.max(0.5 / maxScaleFromTransform(transform), epsilon)
+    ? Math.max(0.5 / computeAffineScaleFactors(transform)[0], epsilon)
     : strokeStyle.halfWidth;
+
+const getAnalyticAARadius = (
+  transform: readonly [number, number, number, number, number, number],
+): number => Math.max(1 / computeAffineScaleFactors(transform)[0], epsilon);
+
+const outsetAnalyticRect = (rect: Rect, outset: number): Rect => ({
+  origin: [rect.origin[0] - outset, rect.origin[1] - outset],
+  size: {
+    width: rect.size.width + (2 * outset),
+    height: rect.size.height + (2 * outset),
+  },
+});
+
+const oppositeInsetsIntersectRect = (
+  rect: Rect,
+  strokeRadius: number,
+  aaRadius: number,
+): boolean =>
+  rect.size.width <= 2 * (strokeRadius + aaRadius) ||
+  rect.size.height <= 2 * (strokeRadius + aaRadius);
+
+const oppositeInsetsIntersectRRect = (
+  rect: Rect,
+  xRadii: readonly [number, number, number, number],
+  yRadii: readonly [number, number, number, number],
+  strokeRadius: number,
+  aaRadius: number,
+): boolean => {
+  const maxInset = strokeRadius + (2 * aaRadius);
+  return maxInset >= rect.size.width - xRadii[3] ||
+    maxInset >= rect.size.width - xRadii[2] ||
+    maxInset >= rect.size.width - xRadii[0] ||
+    maxInset >= rect.size.width - xRadii[1] ||
+    maxInset >= rect.size.height - yRadii[3] ||
+    maxInset >= rect.size.height - yRadii[2] ||
+    maxInset >= rect.size.height - yRadii[0] ||
+    maxInset >= rect.size.height - yRadii[1];
+};
 
 const getPackedFilledShapeInstance = (
   shape: Extract<DrawShapeCommand['shape'], Readonly<{ kind: 'rect' | 'rrect' }>>,
+  transform: readonly [number, number, number, number, number, number],
 ): DrawingPreparedAnalyticRRectInstance => {
+  const aaRadius = getAnalyticAARadius(transform);
   if (shape.kind === 'rect') {
     const rect = shape.rect;
     const left = rect.origin[0];
@@ -728,7 +780,8 @@ const getPackedFilledShapeInstance = (
       xRadiiOrFlags: [-1, -1, -1, -1],
       radiiOrQuadXs: [left, right, right, left],
       ltrbOrQuadYs: [top, top, bottom, bottom],
-      boundsRect: rect,
+      center: [left + rect.size.width * 0.5, top + rect.size.height * 0.5, 1, aaRadius],
+      boundsRect: outsetAnalyticRect(rect, aaRadius),
     };
   }
   const rect = shape.rrect.rect;
@@ -747,7 +800,13 @@ const getPackedFilledShapeInstance = (
       rect.origin[0] + rect.size.width,
       rect.origin[1] + rect.size.height,
     ],
-    boundsRect: rect,
+    center: [
+      rect.origin[0] + rect.size.width * 0.5,
+      rect.origin[1] + rect.size.height * 0.5,
+      1,
+      aaRadius,
+    ],
+    boundsRect: outsetAnalyticRect(rect, aaRadius),
   };
 };
 
@@ -757,8 +816,19 @@ const getPackedStrokeShapeInstance = (
   transform: readonly [number, number, number, number, number, number],
 ): DrawingPreparedAnalyticRRectInstance => {
   const halfWidth = resolveAnalyticStrokeHalfWidth(strokeStyle, transform);
+  const aaRadius = getAnalyticAARadius(transform);
+  const centerWeight = 0;
   if (shape.kind === 'rect') {
     const rect = shape.rect;
+    let packedCenter: readonly [number, number, number, number] = [
+      rect.origin[0] + rect.size.width * 0.5,
+      rect.origin[1] + rect.size.height * 0.5,
+      centerWeight,
+      aaRadius,
+    ];
+    if (oppositeInsetsIntersectRect(rect, halfWidth, aaRadius)) {
+      packedCenter = [packedCenter[0], packedCenter[1], -1, -1];
+    }
     return {
       xRadiiOrFlags: [-2, 0, halfWidth, strokeStyle.joinLimit],
       radiiOrQuadXs: [0, 0, 0, 0],
@@ -768,13 +838,8 @@ const getPackedStrokeShapeInstance = (
         rect.origin[0] + rect.size.width,
         rect.origin[1] + rect.size.height,
       ],
-      boundsRect: {
-        origin: [rect.origin[0] - halfWidth, rect.origin[1] - halfWidth],
-        size: {
-          width: rect.size.width + (2 * halfWidth),
-          height: rect.size.height + (2 * halfWidth),
-        },
-      },
+      center: packedCenter,
+      boundsRect: outsetAnalyticRect(rect, halfWidth + aaRadius),
     };
   }
   const rect = shape.rrect.rect;
@@ -784,6 +849,23 @@ const getPackedStrokeShapeInstance = (
   const topRight = clampCornerRadius(shape.rrect.topRight, cornerLimitX, cornerLimitY);
   const bottomRight = clampCornerRadius(shape.rrect.bottomRight, cornerLimitX, cornerLimitY);
   const bottomLeft = clampCornerRadius(shape.rrect.bottomLeft, cornerLimitX, cornerLimitY);
+  let packedCenter: readonly [number, number, number, number] = [
+    rect.origin[0] + rect.size.width * 0.5,
+    rect.origin[1] + rect.size.height * 0.5,
+    centerWeight,
+    aaRadius,
+  ];
+  if (
+    oppositeInsetsIntersectRRect(
+      rect,
+      [topLeft.x, topRight.x, bottomRight.x, bottomLeft.x],
+      [topLeft.y, topRight.y, bottomRight.y, bottomLeft.y],
+      halfWidth,
+      aaRadius,
+    )
+  ) {
+    packedCenter = [packedCenter[0], packedCenter[1], -1, -1];
+  }
   return {
     xRadiiOrFlags: [-2, 0, halfWidth, strokeStyle.joinLimit],
     radiiOrQuadXs: [topLeft.x, topRight.x, bottomRight.x, bottomLeft.x],
@@ -793,23 +875,19 @@ const getPackedStrokeShapeInstance = (
       rect.origin[0] + rect.size.width,
       rect.origin[1] + rect.size.height,
     ],
-    boundsRect: {
-      origin: [rect.origin[0] - halfWidth, rect.origin[1] - halfWidth],
-      size: {
-        width: rect.size.width + (2 * halfWidth),
-        height: rect.size.height + (2 * halfWidth),
-      },
-    },
+    center: packedCenter,
+    boundsRect: outsetAnalyticRect(rect, halfWidth + aaRadius),
   };
 };
 
 const getAnalyticFillInstance = (
   shape: DrawShapeCommand['shape'],
+  transform: readonly [number, number, number, number, number, number],
 ): DrawingPreparedAnalyticRRectInstance | null => {
   if (shape.kind !== 'rect' && shape.kind !== 'rrect') {
     return null;
   }
-  return getPackedFilledShapeInstance(shape);
+  return getPackedFilledShapeInstance(shape, transform);
 };
 
 const getPerEdgeAAQuadInstance = (
@@ -5434,7 +5512,7 @@ const prepareAnalyticShape = (
     };
   }
   const instance = style === 'fill'
-    ? getAnalyticFillInstance(command.shape)
+    ? getAnalyticFillInstance(command.shape, command.transform)
     : command.shape.kind === 'rect' || command.shape.kind === 'rrect'
     ? getPackedStrokeShapeInstance(
       command.shape,
@@ -5573,7 +5651,7 @@ const prepareAnalyticPath = (
   }
 
   const instance = style === 'fill'
-    ? getAnalyticFillInstance(shape)
+    ? getAnalyticFillInstance(shape, command.transform)
     : shape.kind === 'rect' || shape.kind === 'rrect'
     ? getPackedStrokeShapeInstance(shape, strokeStyle!, command.transform)
     : null;
@@ -5655,7 +5733,7 @@ export const prepareDrawingTextCommand = (
       )
       .map((glyph) => {
         const localBounds: Rect = {
-          origin: [glyph.x + glyph.mask.offsetX, glyph.y + glyph.mask.offsetY],
+          origin: [glyph.x, glyph.y],
           size: {
             width: glyph.mask.width,
             height: glyph.mask.height,

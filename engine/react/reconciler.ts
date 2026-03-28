@@ -348,6 +348,7 @@ type GlyphRenderCacheState = {
   shapedRun?: ShapedRun;
   translatedRun?: TranslatedShapedRun;
   directMaskSubRun?: DirectMaskSubRun;
+  directMaskTransformKey?: string;
   transformedMaskSubRun?: TransformedMaskSubRun;
   transformedMaskScale?: number;
   sdfSubRun?: SdfSubRun;
@@ -360,6 +361,10 @@ const glyphRenderCaches = new WeakMap<Glyph2dHostInstance, GlyphRenderCacheState
 const mixHash = (hash: number, byte: number): number => {
   return Math.imul(hash ^ byte, HASH_PRIME) >>> 0;
 };
+
+const serializeMatrix2d = (
+  matrix: readonly [number, number, number, number, number, number],
+): string => `${matrix[0]},${matrix[1]},${matrix[2]},${matrix[3]},${matrix[4]},${matrix[5]}`;
 
 const hashString = (hash: number, value: string): number => {
   let nextHash = hash;
@@ -638,6 +643,7 @@ const render2dGlyph = (
     cache.shapedRun = run;
     cache.translatedRun = undefined;
     cache.directMaskSubRun = undefined;
+    cache.directMaskTransformKey = undefined;
     cache.transformedMaskSubRun = undefined;
     cache.transformedMaskScale = undefined;
     cache.sdfSubRun = undefined;
@@ -685,8 +691,10 @@ const render2dGlyph = (
     );
     return;
   }
-  if (!cache.directMaskSubRun) {
-    cache.directMaskSubRun = buildDirectMaskSubRun(host, translatedRun);
+  const directMaskTransformKey = serializeMatrix2d(recorder.state.transform);
+  if (!cache.directMaskSubRun || cache.directMaskTransformKey !== directMaskTransformKey) {
+    cache.directMaskSubRun = buildDirectMaskSubRun(host, translatedRun, recorder.state.transform);
+    cache.directMaskTransformKey = directMaskTransformKey;
   }
   recordDirectMaskSubRun(recorder, cache.directMaskSubRun, paint);
 };

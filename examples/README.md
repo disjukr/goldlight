@@ -26,6 +26,9 @@ Runnable examples live here. Each example should document how to build, serve, o
   PLY mesh
 - [`byow/react_glyphs_demo/README.md`](./byow/react_glyphs_demo/README.md): Windows-native BYOW demo
   showing root-`g2d-scene` presentation with `g2d-glyphs` in A8 atlas, SDF, and path fallback modes
+- [`byow/layout_demo/README.md`](./byow/layout_demo/README.md): Windows-native BYOW demo showing the
+  first `@disjukr/goldlight/layout` box tree and paragraph APIs painted through
+  `@disjukr/goldlight/drawing`
 - [`byow/react_surface_2d_in_3d_demo/README.md`](./byow/react_surface_2d_in_3d_demo/README.md):
   Windows-native BYOW demo showing vector-drawn `g2d-scene` composition inside `g3d-scene`, scene
   texture caching, and app-controlled frame driving through `useSetTimeMs()`
@@ -62,6 +65,8 @@ Runnable examples live here. Each example should document how to build, serve, o
 - Type-check the BYOW React Bunny demo: `deno task example:byow:react-bunny:check`
 - Run the BYOW React glyphs demo: `deno task example:byow:react-glyphs:run`
 - Type-check the BYOW React glyphs demo: `deno task example:byow:react-glyphs:check`
+- Run the BYOW layout demo: `deno task example:byow:layout:run`
+- Type-check the BYOW layout demo: `deno task example:byow:layout:check`
 - Run the BYOW React 2D surface demo:
   `deno run -A --unstable-ffi --unstable-webgpu --unstable-raw-imports examples/byow/react_surface_2d_in_3d_demo/main.ts`
 - Type-check the BYOW React 2D surface demo:
@@ -107,6 +112,8 @@ For React integrations, read the examples in this order:
   `@disjukr/goldlight/react/reconciler` live host
 - [`byow/react_glyphs_demo/README.md`](./byow/react_glyphs_demo/README.md) for root-`g2d-scene`
   presentation and `g2d-glyphs` authoring
+- [`byow/layout_demo/README.md`](./byow/layout_demo/README.md) for the first headless
+  Taffy/Pretext-inspired layout tree rendered directly through drawing
 - [`byow/react_surface_2d_in_3d_demo/README.md`](./byow/react_surface_2d_in_3d_demo/README.md) for
   the current `g2d-scene` vector-drawing-in-`g3d-scene` path, scene output caching, and
   app-controlled frame driving

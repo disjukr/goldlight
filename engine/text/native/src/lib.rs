@@ -120,6 +120,8 @@ struct GlyphBitmapCacheKey {
     typeface_handle: u64,
     glyph_id: u32,
     size_bits: u32,
+    subpixel_x_bits: u32,
+    subpixel_y_bits: u32,
 }
 
 #[derive(Clone, Copy, Hash, PartialEq, Eq)]
@@ -244,11 +246,19 @@ fn glyph_outline_cache_key(typeface_handle: u64, glyph_id: u32, size: f32) -> Gl
     }
 }
 
-fn glyph_bitmap_cache_key(typeface_handle: u64, glyph_id: u32, size: f32) -> GlyphBitmapCacheKey {
+fn glyph_bitmap_cache_key_with_subpixel(
+    typeface_handle: u64,
+    glyph_id: u32,
+    size: f32,
+    subpixel_x: f32,
+    subpixel_y: f32,
+) -> GlyphBitmapCacheKey {
     GlyphBitmapCacheKey {
         typeface_handle,
         glyph_id,
         size_bits: size.to_bits(),
+        subpixel_x_bits: subpixel_x.to_bits(),
+        subpixel_y_bits: subpixel_y.to_bits(),
     }
 }
 
@@ -272,13 +282,26 @@ fn rasterize_glyph_mask(
     typeface: &TypefaceState,
     glyph_id: u32,
     size: f32,
+    subpixel_x: f32,
+    subpixel_y: f32,
 ) -> Option<GlyphBitmap> {
+    let subpixel_x = if subpixel_x.is_finite() {
+        subpixel_x.rem_euclid(1.0)
+    } else {
+        0.0
+    };
+    let subpixel_y = if subpixel_y.is_finite() {
+        subpixel_y.rem_euclid(1.0)
+    } else {
+        0.0
+    };
+    let subpixel_translation = Transform2F::from_translation(Vector2F::new(subpixel_x, subpixel_y));
     let bounds = typeface
         .font
         .raster_bounds(
             glyph_id,
             size,
-            Transform2F::default(),
+            subpixel_translation,
             HintingOptions::None,
             RasterizationOptions::GrayscaleAa,
         )
@@ -304,8 +327,10 @@ fn rasterize_glyph_mask(
     }
 
     let mut canvas = Canvas::new(Vector2I::new(width as i32, height as i32), Format::A8);
-    let translation =
-        Transform2F::from_translation(Vector2F::new(-offset_x as f32, -offset_y as f32));
+    let translation = Transform2F::from_translation(Vector2F::new(
+        subpixel_x - offset_x as f32,
+        subpixel_y - offset_y as f32,
+    ));
     typeface
         .font
         .rasterize_glyph(
@@ -704,7 +729,7 @@ fn create_glyph_sdf(
     inset: u32,
     radius: f32,
 ) -> Option<GlyphBitmap> {
-    let bitmap = rasterize_glyph_mask(typeface, glyph_id, size)?;
+    let bitmap = rasterize_glyph_mask(typeface, glyph_id, size, 0.0, 0.0)?;
     Some(create_sdf_from_mask(&bitmap, inset, radius))
 }
 
@@ -1130,6 +1155,8 @@ pub extern "C" fn text_host_get_glyph_mask_info(
     typeface_handle: u64,
     glyph_id: u32,
     size: f32,
+    subpixel_x: f32,
+    subpixel_y: f32,
     out_info: *mut TextGlyphMaskInfo,
 ) -> u8 {
     if out_info.is_null() {
@@ -1137,7 +1164,8 @@ pub extern "C" fn text_host_get_glyph_mask_info(
     }
 
     with_state_mut(|state| {
-        let cache_key = glyph_bitmap_cache_key(typeface_handle, glyph_id, size);
+        let cache_key =
+            glyph_bitmap_cache_key_with_subpixel(typeface_handle, glyph_id, size, subpixel_x, subpixel_y);
         if let Some(bitmap) = state.glyph_mask_cache.get(&cache_key) {
             unsafe {
                 *out_info = bitmap.info;
@@ -1147,7 +1175,7 @@ pub extern "C" fn text_host_get_glyph_mask_info(
         let Some(typeface) = state.typefaces.get(&typeface_handle) else {
             return 0;
         };
-        let Some(bitmap) = rasterize_glyph_mask(typeface, glyph_id, size) else {
+        let Some(bitmap) = rasterize_glyph_mask(typeface, glyph_id, size, subpixel_x, subpixel_y) else {
             return 0;
         };
 
@@ -1165,16 +1193,19 @@ pub extern "C" fn text_host_copy_glyph_mask_pixels(
     typeface_handle: u64,
     glyph_id: u32,
     size: f32,
+    subpixel_x: f32,
+    subpixel_y: f32,
     out_buffer: *mut c_void,
     out_buffer_len: usize,
 ) -> usize {
     with_state_mut(|state| {
-        let cache_key = glyph_bitmap_cache_key(typeface_handle, glyph_id, size);
+        let cache_key =
+            glyph_bitmap_cache_key_with_subpixel(typeface_handle, glyph_id, size, subpixel_x, subpixel_y);
         if !state.glyph_mask_cache.contains_key(&cache_key) {
             let Some(typeface) = state.typefaces.get(&typeface_handle) else {
                 return 0;
             };
-            let Some(bitmap) = rasterize_glyph_mask(typeface, glyph_id, size) else {
+            let Some(bitmap) = rasterize_glyph_mask(typeface, glyph_id, size, subpixel_x, subpixel_y) else {
                 return 0;
             };
             state.glyph_mask_cache.insert(cache_key, bitmap);

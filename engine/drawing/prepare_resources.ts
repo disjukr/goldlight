@@ -35,8 +35,10 @@ export type DrawingPreparedStepResources = Readonly<{
   clipDrawKey: string | null;
   vertexBuffer: GPUBuffer | null;
   instanceBuffer: GPUBuffer | null;
+  indexBuffer: GPUBuffer | null;
   sampledTexture?: GPUTexture;
   vertexCount: number;
+  indexCount: number;
   instanceCount: number;
 }>;
 
@@ -89,6 +91,7 @@ export type DawnPreparedWork = Readonly<{
 }>;
 
 const vertexBufferUsage = 0x0020;
+const indexBufferUsage = 0x0010;
 const uniformBufferUsage = 0x0040;
 const storageBufferUsage = 0x0080;
 const floatsPerVertex = 6;
@@ -313,7 +316,7 @@ const createTextInstanceData = (
 const createAnalyticRRectInstanceData = (
   draw: DrawingPreparedAnalyticRRect,
 ): Float32Array => {
-  const { xRadiiOrFlags, radiiOrQuadXs, ltrbOrQuadYs } = draw.instance;
+  const { xRadiiOrFlags, radiiOrQuadXs, ltrbOrQuadYs, center } = draw.instance;
   return new Float32Array([
     xRadiiOrFlags[0],
     xRadiiOrFlags[1],
@@ -327,6 +330,10 @@ const createAnalyticRRectInstanceData = (
     ltrbOrQuadYs[1],
     ltrbOrQuadYs[2],
     ltrbOrQuadYs[3],
+    center[0],
+    center[1],
+    center[2],
+    center[3],
   ]);
 };
 
@@ -361,6 +368,145 @@ const createPatchTemplateBuffer = (
     mappedAtCreation: true,
   });
   new Float32Array(buffer.getMappedRange()).set(vertices);
+  buffer.unmap();
+  return buffer;
+};
+
+const analyticRRectStaticVertexStride = Uint32Array.BYTES_PER_ELEMENT +
+  (Float32Array.BYTES_PER_ELEMENT * 6);
+const analyticRRectTemplateVertexCount = 36;
+const analyticRRectStaticVertexCount = analyticRRectTemplateVertexCount;
+const analyticRRectIndexCount = 69;
+
+const createAnalyticRRectStaticVertexData = (): ArrayBuffer => {
+  const hr2 = 0.5 * Math.SQRT2;
+  const perCornerTemplate = [
+    [1, 0, 1, 0, 1, 0],
+    [1, 0, hr2, hr2, 1, 0],
+    [0, 1, hr2, hr2, 1, 0],
+    [0, 1, 0, 1, 1, 0],
+    [1, 0, hr2, hr2, 0, 0],
+    [0, 1, hr2, hr2, 0, 0],
+    [1, 0, 1, 0, -1, 0],
+    [0, 1, 0, 1, -1, 0],
+    [1, 0, 1, 0, -1, 1],
+  ] as const;
+  const templateBuffer = new ArrayBuffer(
+    analyticRRectStaticVertexStride * analyticRRectTemplateVertexCount,
+  );
+  const templateView = new DataView(templateBuffer);
+  let offset = 0;
+  for (let cornerID = 0; cornerID < 4; cornerID += 1) {
+    for (const vertex of perCornerTemplate) {
+      templateView.setUint32(offset, cornerID, true);
+      offset += Uint32Array.BYTES_PER_ELEMENT;
+      for (const value of vertex) {
+        templateView.setFloat32(offset, value, true);
+        offset += Float32Array.BYTES_PER_ELEMENT;
+      }
+    }
+  }
+  return templateBuffer;
+};
+
+const analyticRRectIndexTemplate = new Uint16Array([
+  0,
+  4,
+  1,
+  5,
+  2,
+  3,
+  5,
+  9,
+  13,
+  10,
+  14,
+  11,
+  12,
+  14,
+  18,
+  22,
+  19,
+  23,
+  20,
+  21,
+  23,
+  27,
+  31,
+  28,
+  32,
+  29,
+  30,
+  32,
+  0,
+  4,
+  4,
+  6,
+  5,
+  7,
+  13,
+  15,
+  14,
+  16,
+  22,
+  24,
+  23,
+  25,
+  31,
+  33,
+  32,
+  34,
+  4,
+  6,
+  6,
+  8,
+  7,
+  7,
+  17,
+  15,
+  17,
+  16,
+  16,
+  26,
+  24,
+  26,
+  25,
+  25,
+  35,
+  33,
+  35,
+  34,
+  34,
+  8,
+  6,
+]);
+
+const createAnalyticRRectStaticVertexBuffer = (
+  sharedContext: DawnSharedContext,
+): GPUBuffer => {
+  const data = createAnalyticRRectStaticVertexData();
+  const buffer = sharedContext.resourceProvider.createBuffer({
+    label: 'drawing-analytic-rrect-static-vertices',
+    size: data.byteLength,
+    usage: vertexBufferUsage,
+    mappedAtCreation: true,
+  });
+  new Uint8Array(buffer.getMappedRange()).set(new Uint8Array(data));
+  buffer.unmap();
+  return buffer;
+};
+
+const createAnalyticRRectIndexBuffer = (
+  sharedContext: DawnSharedContext,
+): GPUBuffer => {
+  const alignedSize = (analyticRRectIndexTemplate.byteLength + 3) & ~3;
+  const buffer = sharedContext.resourceProvider.createBuffer({
+    label: 'drawing-analytic-rrect-indices',
+    size: alignedSize,
+    usage: indexBufferUsage,
+    mappedAtCreation: true,
+  });
+  new Uint16Array(buffer.getMappedRange()).set(analyticRRectIndexTemplate);
   buffer.unmap();
   return buffer;
 };
@@ -1655,6 +1801,8 @@ const prepareStepResources = (
   step: DrawingPreparedRenderStep,
   sampleCount: 1 | 4,
   patchTemplates: Readonly<{
+    analyticRRectVertexBuffer: GPUBuffer;
+    analyticRRectIndexBuffer: GPUBuffer;
     wedgeVertexBuffer: GPUBuffer;
     curveVertexBuffer: GPUBuffer;
   }>,
@@ -1781,7 +1929,9 @@ const prepareStepResources = (
         clipDrawKey: getClipDrawKey(step),
         vertexBuffer: null,
         instanceBuffer: null,
+        indexBuffer: null,
         vertexCount: 0,
+        indexCount: 0,
         instanceCount: 0,
       };
     }
@@ -1835,7 +1985,9 @@ const prepareStepResources = (
       clipDrawKey: getClipDrawKey(step),
       vertexBuffer: null,
       instanceBuffer,
+      indexBuffer: null,
       vertexCount: 4,
+      indexCount: 0,
       instanceCount: step.draw.glyphs.length,
     };
   }
@@ -1855,9 +2007,11 @@ const prepareStepResources = (
       textAtlasViews,
       sampledTextureFilter: 'nearest',
       clipDrawKey: getClipDrawKey(step),
-      vertexBuffer: null,
+      vertexBuffer: patchTemplates.analyticRRectVertexBuffer,
       instanceBuffer,
-      vertexCount: 4,
+      indexBuffer: patchTemplates.analyticRRectIndexBuffer,
+      vertexCount: analyticRRectStaticVertexCount,
+      indexCount: analyticRRectIndexCount,
       instanceCount: 1,
     };
   }
@@ -1879,7 +2033,9 @@ const prepareStepResources = (
       clipDrawKey: getClipDrawKey(step),
       vertexBuffer: null,
       instanceBuffer,
+      indexBuffer: null,
       vertexCount: 4,
+      indexCount: 0,
       instanceCount: 1,
     };
   }
@@ -1949,6 +2105,8 @@ const prepareStepResources = (
       vertexBuffer,
       instanceBuffer,
       vertexCount,
+      indexCount: 0,
+      indexBuffer: null,
       instanceCount,
     };
   }
@@ -1996,7 +2154,9 @@ const prepareStepResources = (
     clipDrawKey: getClipDrawKey(step),
     vertexBuffer,
     instanceBuffer: null,
+    indexBuffer: null,
     vertexCount,
+    indexCount: 0,
     instanceCount,
   };
 };
@@ -2005,6 +2165,8 @@ const preparePassResources = (
   sharedContext: DawnSharedContext,
   passInfo: DrawingPreparedRecording['passes'][number],
   patchTemplates: Readonly<{
+    analyticRRectVertexBuffer: GPUBuffer;
+    analyticRRectIndexBuffer: GPUBuffer;
     wedgeVertexBuffer: GPUBuffer;
     curveVertexBuffer: GPUBuffer;
   }>,
@@ -2037,6 +2199,8 @@ const collectOwnedBuffers = (
     fullscreenClipVertexBuffer: GPUBuffer;
     wedgePatchVertexBuffer: GPUBuffer;
     curvePatchVertexBuffer: GPUBuffer;
+    analyticRRectVertexBuffer: GPUBuffer;
+    analyticRRectIndexBuffer: GPUBuffer;
   }>,
 ): readonly GPUBuffer[] => {
   const buffers: GPUBuffer[] = [
@@ -2046,6 +2210,8 @@ const collectOwnedBuffers = (
     globals.fullscreenClipVertexBuffer,
     globals.wedgePatchVertexBuffer,
     globals.curvePatchVertexBuffer,
+    globals.analyticRRectVertexBuffer,
+    globals.analyticRRectIndexBuffer,
   ];
 
   for (const task of tasks) {
@@ -2057,6 +2223,9 @@ const collectOwnedBuffers = (
         }
         if (step.instanceBuffer) {
           buffers.push(step.instanceBuffer);
+        }
+        if (step.indexBuffer) {
+          buffers.push(step.indexBuffer);
         }
       }
       for (const clipDraw of pass.clipDraws) {
@@ -2137,12 +2306,16 @@ export const prepareDawnResources = (
     sharedContext,
     fixedCurveTemplateVertices,
   );
+  const analyticRRectVertexBuffer = createAnalyticRRectStaticVertexBuffer(sharedContext);
+  const analyticRRectIndexBuffer = createAnalyticRRectIndexBuffer(sharedContext);
   const taskResources = Object.freeze(
     tasks.tasks.map((task): DrawingPreparedRenderPassTaskResources => ({
       kind: 'renderPass',
       passes: Object.freeze(
         task.drawPasses.map((passInfo) =>
           preparePassResources(sharedContext, passInfo, {
+            analyticRRectVertexBuffer,
+            analyticRRectIndexBuffer,
             wedgeVertexBuffer: wedgePatchVertexBuffer,
             curveVertexBuffer: curvePatchVertexBuffer,
           }, gradientBuilder)
@@ -2170,6 +2343,8 @@ export const prepareDawnResources = (
       gradientBuffer: finalizedGradientBuffer,
       identityStepPayloadBuffer,
       fullscreenClipVertexBuffer,
+      analyticRRectVertexBuffer,
+      analyticRRectIndexBuffer,
       wedgePatchVertexBuffer,
       curvePatchVertexBuffer,
     }),

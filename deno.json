@@ -11,6 +11,7 @@
     "@disjukr/goldlight/procedural": "./engine/procedural/mod.ts",
     "@disjukr/goldlight/raytrace": "./engine/raytrace/mod.ts",
     "@disjukr/goldlight/gpu": "./engine/gpu/mod.ts",
+    "@disjukr/goldlight/layout": "./engine/layout/mod.ts",
     "@disjukr/goldlight/renderer": "./engine/renderer/mod.ts",
     "@disjukr/goldlight/importers": "./engine/importers/mod.ts",
     "@disjukr/goldlight/exporters": "./engine/exporters/mod.ts",
@@ -63,6 +64,8 @@
     "example:byow:react-bunny:run": "deno run -A --unstable-ffi --unstable-webgpu --unstable-raw-imports ./scripts/run_byow_example.ts ./examples/byow/react_bunny_demo/main.tsx",
     "example:byow:react-glyphs:check": "deno check --unstable-ffi --unstable-webgpu --unstable-raw-imports ./examples/byow/react_glyphs_demo/main.tsx ./examples/byow/react_glyphs_demo/app.tsx",
     "example:byow:react-glyphs:run": "deno run -A --unstable-ffi --unstable-webgpu --unstable-raw-imports ./scripts/run_byow_example.ts ./examples/byow/react_glyphs_demo/main.tsx",
+    "example:byow:layout:check": "deno check --unstable-ffi --unstable-webgpu --unstable-raw-imports ./examples/byow/layout_demo/main.ts ./examples/byow/layout_demo/app.ts",
+    "example:byow:layout:run": "deno run -A --unstable-ffi --unstable-webgpu --unstable-raw-imports ./scripts/run_byow_example.ts ./examples/byow/layout_demo/main.ts",
     "example:drawing": "deno run -A --unstable-webgpu --unstable-raw-imports ./scripts/run_drawing_example.ts",
     "example:drawing:png": "deno task example:drawing -- all png"
   },

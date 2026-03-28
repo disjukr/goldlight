@@ -236,6 +236,7 @@ export type DrawingPaint = Readonly<{
 export type DrawingGlyphMaskFormat = 'a8';
 
 export type DrawingGlyphMask = Readonly<{
+  cacheKey: string;
   width: number;
   height: number;
   stride: number;

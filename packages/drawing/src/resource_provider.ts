@@ -2402,6 +2402,14 @@ struct VertexOut {
   @location(1) uv: vec2<f32>,
 };
 
+fn sample_indexed_atlas(textureCoords: vec2<f32>) -> vec4<f32> {
+  return textureSample(textTexture, textSampler, textureCoords);
+}
+
+fn bitmap_text_coverage_fn(texColor: vec4<f32>) -> vec4<f32> {
+  return texColor.rrrr;
+}
+
 @vertex
 fn vs_main(
   @builtin(vertex_index) vertexIndex: u32,
@@ -2412,10 +2420,11 @@ fn vs_main(
   @location(4) strikeToSourceScale: f32,
 ) -> VertexOut {
   let unitCorner = vec2<f32>(f32(vertexIndex >> 1u), f32(vertexIndex & 1u));
-  let localPosition = xyPos + (unitCorner * size * strikeToSourceScale);
+  let scaledBaseCoords = unitCorner * size;
+  let subRunCoords = strikeToSourceScale * scaledBaseCoords + xyPos;
   let devicePosition = vec2<f32>(
-    (step.matrix0.x * localPosition.x) + (step.matrix0.z * localPosition.y) + step.matrix1.x,
-    (step.matrix0.y * localPosition.x) + (step.matrix0.w * localPosition.y) + step.matrix1.y,
+    (step.matrix0.x * subRunCoords.x) + (step.matrix0.z * subRunCoords.y) + step.matrix1.x,
+    (step.matrix0.y * subRunCoords.x) + (step.matrix0.w * subRunCoords.y) + step.matrix1.y,
   );
   var out: VertexOut;
   out.position = vec4<f32>(
@@ -2424,13 +2433,14 @@ fn vs_main(
     1.0,
   );
   out.devicePosition = devicePosition;
-  out.uv = (uvPos + (unitCorner * size)) * step.textInfo.xy;
+  out.uv = (scaledBaseCoords + uvPos) * step.textInfo.xy;
   return out;
 }
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
-  let coverage = textureSample(textTexture, textSampler, in.uv).r * clip_coverage(in.devicePosition);
+  let coverage = bitmap_text_coverage_fn(sample_indexed_atlas(in.uv)).r *
+    clip_coverage(in.devicePosition);
   var color = apply_clip_shader(paint_shader_color(in.devicePosition));
   color.a *= coverage;
   return blend_with_dst(color, in.devicePosition);
@@ -2455,7 +2465,38 @@ struct VertexOut {
   @builtin(position) position: vec4<f32>,
   @location(0) devicePosition: vec2<f32>,
   @location(1) uv: vec2<f32>,
+  @location(2) unormTexCoords: vec2<f32>,
 };
+
+fn sample_indexed_atlas(textureCoords: vec2<f32>) -> vec4<f32> {
+  return textureSample(textTexture, textSampler, textureCoords);
+}
+
+fn sdf_text_coverage_fn(
+  texColor: f32,
+  gammaParams: vec2<f32>,
+  unormTexCoords: vec2<f32>,
+) -> vec4<f32> {
+  var dist = 7.96875 * (texColor - 0.50196078431);
+  dist -= gammaParams.x;
+
+  var distGrad = vec2<f32>(dpdx(dist), dpdy(dist));
+  let dgLen2 = dot(distGrad, distGrad);
+  distGrad = select(vec2<f32>(0.7071), distGrad * inverseSqrt(dgLen2), dgLen2 >= 0.0001);
+
+  let jacobian = mat2x2<f32>(dpdx(unormTexCoords), dpdy(unormTexCoords));
+  let grad = jacobian * distGrad;
+  let approxFragWidth = 0.65 * length(grad);
+
+  if (gammaParams.y > 0.0) {
+    let denom = max(2.0 * approxFragWidth, 1e-5);
+    let coverage = clamp((dist + approxFragWidth) / denom, 0.0, 1.0);
+    return vec4<f32>(coverage);
+  }
+  let safeWidth = max(approxFragWidth, 1e-5);
+  let coverage = smoothstep(-safeWidth, safeWidth, dist);
+  return vec4<f32>(coverage);
+}
 
 @vertex
 fn vs_main(
@@ -2467,10 +2508,11 @@ fn vs_main(
   @location(4) strikeToSourceScale: f32,
 ) -> VertexOut {
   let unitCorner = vec2<f32>(f32(vertexIndex >> 1u), f32(vertexIndex & 1u));
-  let localPosition = xyPos + (unitCorner * size * strikeToSourceScale);
+  let scaledBaseCoords = unitCorner * size;
+  let subRunCoords = strikeToSourceScale * scaledBaseCoords + xyPos;
   let devicePosition = vec2<f32>(
-    (step.matrix0.x * localPosition.x) + (step.matrix0.z * localPosition.y) + step.matrix1.x,
-    (step.matrix0.y * localPosition.x) + (step.matrix0.w * localPosition.y) + step.matrix1.y,
+    (step.matrix0.x * subRunCoords.x) + (step.matrix0.z * subRunCoords.y) + step.matrix1.x,
+    (step.matrix0.y * subRunCoords.x) + (step.matrix0.w * subRunCoords.y) + step.matrix1.y,
   );
   var out: VertexOut;
   out.position = vec4<f32>(
@@ -2479,15 +2521,18 @@ fn vs_main(
     1.0,
   );
   out.devicePosition = devicePosition;
-  out.uv = (uvPos + (unitCorner * size)) * step.textInfo.xy;
+  out.unormTexCoords = scaledBaseCoords + uvPos;
+  out.uv = out.unormTexCoords * step.textInfo.xy;
   return out;
 }
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
-  let distance = textureSample(textTexture, textSampler, in.uv).r;
-  let coverage = smoothstep(step.textInfo.z, step.textInfo.w, distance) *
-    clip_coverage(in.devicePosition);
+  let coverage = sdf_text_coverage_fn(
+    sample_indexed_atlas(in.uv).r,
+    step.textInfo.zw,
+    in.unormTexCoords,
+  ).r * clip_coverage(in.devicePosition);
   var color = apply_clip_shader(paint_shader_color(in.devicePosition));
   color.a *= coverage;
   return blend_with_dst(color, in.devicePosition);

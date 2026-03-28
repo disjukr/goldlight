@@ -66,7 +66,12 @@ struct TextHostState {
     source: SystemSource,
     family_names: Vec<String>,
     typefaces: HashMap<u64, TypefaceState>,
+    family_match_cache: HashMap<String, Option<u64>>,
     shaped_runs: HashMap<u64, ShapedRunState>,
+    shape_cache: HashMap<ShapeCacheKey, ShapedRunState>,
+    glyph_path_cache: HashMap<GlyphOutlineCacheKey, Vec<u8>>,
+    glyph_mask_cache: HashMap<GlyphBitmapCacheKey, GlyphBitmap>,
+    glyph_sdf_cache: HashMap<GlyphSdfCacheKey, GlyphBitmap>,
     next_typeface_handle: u64,
     next_shaped_run_handle: u64,
 }
@@ -77,6 +82,7 @@ struct TypefaceState {
     font: Font,
 }
 
+#[derive(Clone)]
 struct ShapedRunState {
     glyph_ids: Vec<u32>,
     positions: Vec<f32>,
@@ -90,6 +96,39 @@ struct ShapedRunState {
     advance_y: f32,
     utf8_range_start: u32,
     utf8_range_end: u32,
+}
+
+#[derive(Clone, Hash, PartialEq, Eq)]
+struct ShapeCacheKey {
+    typeface_handle: u64,
+    text: String,
+    size_bits: u32,
+    direction: u8,
+    language: String,
+    script_tag: u32,
+}
+
+#[derive(Clone, Copy, Hash, PartialEq, Eq)]
+struct GlyphOutlineCacheKey {
+    typeface_handle: u64,
+    glyph_id: u32,
+    size_bits: u32,
+}
+
+#[derive(Clone, Copy, Hash, PartialEq, Eq)]
+struct GlyphBitmapCacheKey {
+    typeface_handle: u64,
+    glyph_id: u32,
+    size_bits: u32,
+}
+
+#[derive(Clone, Copy, Hash, PartialEq, Eq)]
+struct GlyphSdfCacheKey {
+    typeface_handle: u64,
+    glyph_id: u32,
+    size_bits: u32,
+    inset: u32,
+    radius_bits: u32,
 }
 
 thread_local! {
@@ -177,6 +216,56 @@ fn load_typeface_state_from_font(font: Font) -> Option<TypefaceState> {
         face_index,
         font,
     })
+}
+
+fn shape_cache_key(
+    typeface_handle: u64,
+    text: &str,
+    size: f32,
+    direction: u8,
+    language: &str,
+    script_tag: u32,
+) -> ShapeCacheKey {
+    ShapeCacheKey {
+        typeface_handle,
+        text: text.to_owned(),
+        size_bits: size.to_bits(),
+        direction,
+        language: language.to_owned(),
+        script_tag,
+    }
+}
+
+fn glyph_outline_cache_key(typeface_handle: u64, glyph_id: u32, size: f32) -> GlyphOutlineCacheKey {
+    GlyphOutlineCacheKey {
+        typeface_handle,
+        glyph_id,
+        size_bits: size.to_bits(),
+    }
+}
+
+fn glyph_bitmap_cache_key(typeface_handle: u64, glyph_id: u32, size: f32) -> GlyphBitmapCacheKey {
+    GlyphBitmapCacheKey {
+        typeface_handle,
+        glyph_id,
+        size_bits: size.to_bits(),
+    }
+}
+
+fn glyph_sdf_cache_key(
+    typeface_handle: u64,
+    glyph_id: u32,
+    size: f32,
+    inset: u32,
+    radius: f32,
+) -> GlyphSdfCacheKey {
+    GlyphSdfCacheKey {
+        typeface_handle,
+        glyph_id,
+        size_bits: size.to_bits(),
+        inset,
+        radius_bits: radius.to_bits(),
+    }
 }
 
 fn rasterize_glyph_mask(
@@ -402,7 +491,12 @@ pub extern "C" fn text_host_init() -> u8 {
             source,
             family_names,
             typefaces: HashMap::new(),
+            family_match_cache: HashMap::new(),
             shaped_runs: HashMap::new(),
+            shape_cache: HashMap::new(),
+            glyph_path_cache: HashMap::new(),
+            glyph_mask_cache: HashMap::new(),
+            glyph_sdf_cache: HashMap::new(),
             next_typeface_handle: 1,
             next_shaped_run_handle: 1,
         });
@@ -447,16 +541,23 @@ pub extern "C" fn text_host_match_typeface_by_family(
     };
 
     with_state_mut(|state| {
+        if let Some(cached) = state.family_match_cache.get(&family_name) {
+            return cached.unwrap_or_default();
+        }
         let Ok(family) = state.source.select_family_by_name(&family_name) else {
+            state.family_match_cache.insert(family_name, None);
             return 0;
         };
         let Some(font_handle) = family.fonts().first() else {
+            state.family_match_cache.insert(family_name, None);
             return 0;
         };
         let Ok(font) = Font::from_handle(font_handle) else {
+            state.family_match_cache.insert(family_name, None);
             return 0;
         };
         let Some(typeface_state) = load_typeface_state_from_font(font) else {
+            state.family_match_cache.insert(family_name, None);
             return 0;
         };
 
@@ -464,12 +565,14 @@ pub extern "C" fn text_host_match_typeface_by_family(
             Arc::ptr_eq(&existing.font_data, &typeface_state.font_data)
                 && existing.face_index == typeface_state.face_index
         }) {
+            state.family_match_cache.insert(family_name, Some(*handle));
             return *handle;
         }
 
         let handle = state.next_typeface_handle;
         state.next_typeface_handle += 1;
         state.typefaces.insert(handle, typeface_state);
+        state.family_match_cache.insert(family_name, Some(handle));
         handle
     })
     .unwrap_or_default()
@@ -543,6 +646,13 @@ pub extern "C" fn text_host_shape_text(
     let language = read_utf8(language_ptr, language_len).unwrap_or_default();
 
     with_state_mut(|state| {
+        let cache_key = shape_cache_key(typeface_handle, &text, size, direction, &language, script_tag);
+        if let Some(cached) = state.shape_cache.get(&cache_key) {
+            let handle = state.next_shaped_run_handle;
+            state.next_shaped_run_handle += 1;
+            state.shaped_runs.insert(handle, cached.clone());
+            return handle;
+        }
         let Some(typeface) = state.typefaces.get(&typeface_handle) else {
             return 0;
         };
@@ -686,6 +796,8 @@ pub extern "C" fn text_host_shape_text(
             }
         };
 
+        state.shape_cache.insert(cache_key, shaped_run.clone());
+
         let handle = state.next_shaped_run_handle;
         state.next_shaped_run_handle += 1;
         state.shaped_runs.insert(handle, shaped_run);
@@ -702,7 +814,11 @@ pub extern "C" fn text_host_get_glyph_svg_path(
     out_buffer: *mut c_void,
     out_buffer_len: usize,
 ) -> usize {
-    with_state(|state| {
+    with_state_mut(|state| {
+        let cache_key = glyph_outline_cache_key(typeface_handle, glyph_id, size);
+        if let Some(cached) = state.glyph_path_cache.get(&cache_key) {
+            return write_bytes(cached, out_buffer, out_buffer_len);
+        }
         let Some(typeface) = state.typefaces.get(&typeface_handle) else {
             return 0;
         };
@@ -722,7 +838,10 @@ pub extern "C" fn text_host_get_glyph_svg_path(
             return 0;
         }
 
-        write_bytes(builder.path.as_bytes(), out_buffer, out_buffer_len)
+        let path_bytes = builder.path.into_bytes();
+        let written = write_bytes(&path_bytes, out_buffer, out_buffer_len);
+        state.glyph_path_cache.insert(cache_key, path_bytes);
+        written
     })
     .unwrap_or_default()
 }
@@ -738,7 +857,14 @@ pub extern "C" fn text_host_get_glyph_mask_info(
         return 0;
     }
 
-    with_state(|state| {
+    with_state_mut(|state| {
+        let cache_key = glyph_bitmap_cache_key(typeface_handle, glyph_id, size);
+        if let Some(bitmap) = state.glyph_mask_cache.get(&cache_key) {
+            unsafe {
+                *out_info = bitmap.info;
+            }
+            return TEXT_HOST_RESULT_OK;
+        }
         let Some(typeface) = state.typefaces.get(&typeface_handle) else {
             return 0;
         };
@@ -749,6 +875,7 @@ pub extern "C" fn text_host_get_glyph_mask_info(
         unsafe {
             *out_info = bitmap.info;
         }
+        state.glyph_mask_cache.insert(cache_key, bitmap);
         TEXT_HOST_RESULT_OK
     })
     .unwrap_or_default()
@@ -762,11 +889,18 @@ pub extern "C" fn text_host_copy_glyph_mask_pixels(
     out_buffer: *mut c_void,
     out_buffer_len: usize,
 ) -> usize {
-    with_state(|state| {
-        let Some(typeface) = state.typefaces.get(&typeface_handle) else {
-            return 0;
-        };
-        let Some(bitmap) = rasterize_glyph_mask(typeface, glyph_id, size) else {
+    with_state_mut(|state| {
+        let cache_key = glyph_bitmap_cache_key(typeface_handle, glyph_id, size);
+        if !state.glyph_mask_cache.contains_key(&cache_key) {
+            let Some(typeface) = state.typefaces.get(&typeface_handle) else {
+                return 0;
+            };
+            let Some(bitmap) = rasterize_glyph_mask(typeface, glyph_id, size) else {
+                return 0;
+            };
+            state.glyph_mask_cache.insert(cache_key, bitmap);
+        }
+        let Some(bitmap) = state.glyph_mask_cache.get(&cache_key) else {
             return 0;
         };
         write_bytes(&bitmap.pixels, out_buffer, out_buffer_len)
@@ -790,7 +924,14 @@ pub extern "C" fn text_host_get_glyph_sdf_info(
     let inset = inset.max(1);
     let radius = radius.max(1.0);
 
-    with_state(|state| {
+    with_state_mut(|state| {
+        let cache_key = glyph_sdf_cache_key(typeface_handle, glyph_id, size, inset, radius);
+        if let Some(bitmap) = state.glyph_sdf_cache.get(&cache_key) {
+            unsafe {
+                *out_info = bitmap.info;
+            }
+            return TEXT_HOST_RESULT_OK;
+        }
         let Some(typeface) = state.typefaces.get(&typeface_handle) else {
             return 0;
         };
@@ -801,6 +942,7 @@ pub extern "C" fn text_host_get_glyph_sdf_info(
         unsafe {
             *out_info = bitmap.info;
         }
+        state.glyph_sdf_cache.insert(cache_key, bitmap);
         TEXT_HOST_RESULT_OK
     })
     .unwrap_or_default()
@@ -819,11 +961,18 @@ pub extern "C" fn text_host_copy_glyph_sdf_pixels(
     let inset = inset.max(1);
     let radius = radius.max(1.0);
 
-    with_state(|state| {
-        let Some(typeface) = state.typefaces.get(&typeface_handle) else {
-            return 0;
-        };
-        let Some(bitmap) = create_glyph_sdf(typeface, glyph_id, size, inset, radius) else {
+    with_state_mut(|state| {
+        let cache_key = glyph_sdf_cache_key(typeface_handle, glyph_id, size, inset, radius);
+        if !state.glyph_sdf_cache.contains_key(&cache_key) {
+            let Some(typeface) = state.typefaces.get(&typeface_handle) else {
+                return 0;
+            };
+            let Some(bitmap) = create_glyph_sdf(typeface, glyph_id, size, inset, radius) else {
+                return 0;
+            };
+            state.glyph_sdf_cache.insert(cache_key, bitmap);
+        }
+        let Some(bitmap) = state.glyph_sdf_cache.get(&cache_key) else {
             return 0;
         };
         write_bytes(&bitmap.pixels, out_buffer, out_buffer_len)

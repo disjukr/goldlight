@@ -36,6 +36,7 @@ export type FontMetrics = Readonly<{
 export type GlyphMaskFormat = 'a8';
 
 export type GlyphMask = Readonly<{
+  cacheKey: string;
   width: number;
   height: number;
   stride: number;

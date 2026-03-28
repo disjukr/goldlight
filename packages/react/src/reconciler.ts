@@ -31,9 +31,12 @@ import type {
 import {
   buildDirectMaskSubRun,
   buildSdfSubRun,
+  type DirectMaskSubRun,
   recordDirectMaskSubRun,
   recordPathFallbackRun,
   recordSdfSubRun,
+  type SdfSubRun,
+  type ShapedRun,
   type TextHost,
 } from '@goldlight/text';
 import { createG3dSceneRootCommit, type G3dSceneRootSubscriber } from './scene_root.ts';
@@ -329,7 +332,30 @@ type HostRevisionState = {
   lastChildSubtreeRevisions: readonly number[];
 };
 
+type GlyphPathFallbackRun = Readonly<{
+  typeface: bigint;
+  size: number;
+  glyphIDs: Uint32Array;
+  positions: Float32Array;
+  offsets: Float32Array;
+}>;
+
+type TranslatedShapedRun = ShapedRun;
+
+type GlyphRenderCacheState = {
+  host?: TextHost;
+  selfVersion: number;
+  typeface?: bigint;
+  shapedRun?: ShapedRun;
+  translatedRun?: TranslatedShapedRun;
+  directMaskSubRun?: DirectMaskSubRun;
+  sdfSubRun?: SdfSubRun;
+  sdfKey?: string;
+  pathRun?: GlyphPathFallbackRun;
+};
+
 const hostRevisionStates = new WeakMap<HostInstance, HostRevisionState>();
+const glyphRenderCaches = new WeakMap<Glyph2dHostInstance, GlyphRenderCacheState>();
 const mixHash = (hash: number, byte: number): number => {
   return Math.imul(hash ^ byte, HASH_PRIME) >>> 0;
 };
@@ -536,53 +562,100 @@ const resolve2dGlyphTypeface = (host: TextHost, props: Reconciler2dGlyphProps): 
   throw new Error('<g2d-glyphs> could not resolve a typeface');
 };
 
+const translateGlyphRun = (
+  run: ShapedRun,
+  x: number,
+  y: number,
+): TranslatedShapedRun => {
+  const positions = new Float32Array(run.positions.length);
+  for (let index = 0; index < run.glyphIDs.length; index += 1) {
+    positions[index * 2] = run.positions[index * 2]! + x;
+    positions[index * 2 + 1] = run.positions[index * 2 + 1]! + y;
+  }
+  positions[run.glyphIDs.length * 2] = run.positions[run.glyphIDs.length * 2]! + x;
+  positions[run.glyphIDs.length * 2 + 1] = run.positions[run.glyphIDs.length * 2 + 1]! + y;
+  return {
+    ...run,
+    positions,
+  };
+};
+
+const getGlyphRenderCache = (instance: Glyph2dHostInstance): GlyphRenderCacheState => {
+  let cache = glyphRenderCaches.get(instance);
+  if (!cache) {
+    cache = { selfVersion: -1 };
+    glyphRenderCaches.set(instance, cache);
+  }
+  return cache;
+};
+
 const render2dGlyph = (
+  instance: Glyph2dHostInstance,
   recorder: DrawingRecorder,
   sceneProps: Reconciler2dSceneProps,
   props: Reconciler2dGlyphProps,
   frameState: FrameState,
 ): void => {
   const host = resolve2dGlyphTextHost(sceneProps, props, frameState);
-  const typeface = resolve2dGlyphTypeface(host, props);
-  const run = host.shapeText({
-    typeface,
-    text: props.text,
-    size: props.fontSize,
-    direction: props.direction,
-    language: props.language,
-    scriptTag: props.scriptTag,
-  });
+  const revisionState = getHostRevisionState(instance);
+  const cache = getGlyphRenderCache(instance);
+  if (cache.host !== host || cache.selfVersion !== revisionState.selfVersion) {
+    const typeface = resolve2dGlyphTypeface(host, props);
+    const run = host.shapeText({
+      typeface,
+      text: props.text,
+      size: props.fontSize,
+      direction: props.direction,
+      language: props.language,
+      scriptTag: props.scriptTag,
+    });
+    cache.host = host;
+    cache.selfVersion = revisionState.selfVersion;
+    cache.typeface = typeface;
+    cache.shapedRun = run;
+    cache.translatedRun = undefined;
+    cache.directMaskSubRun = undefined;
+    cache.sdfSubRun = undefined;
+    cache.sdfKey = undefined;
+    cache.pathRun = undefined;
+  }
+  const run = cache.shapedRun!;
   const paint = create2dPaint(props);
   if ((props.mode ?? 'a8') === 'path') {
-    recordPathFallbackRun(host, recorder, {
-      typeface: run.typeface,
-      size: run.size,
-      glyphIDs: run.glyphIDs,
-      positions: run.positions.map((value, index) =>
-        index % 2 === 0 ? value + props.x : value + props.y
-      ),
-      offsets: run.offsets,
-    }, paint);
+    if (!cache.pathRun) {
+      const translatedRun = cache.translatedRun ??= translateGlyphRun(run, props.x, props.y);
+      cache.pathRun = {
+        typeface: translatedRun.typeface,
+        size: translatedRun.size,
+        glyphIDs: translatedRun.glyphIDs,
+        positions: translatedRun.positions,
+        offsets: translatedRun.offsets,
+      };
+    }
+    recordPathFallbackRun(host, recorder, cache.pathRun, paint);
     return;
   }
-  const translatedRun = {
-    ...run,
-    positions: run.positions.map((value, index) =>
-      index % 2 === 0 ? value + props.x : value + props.y
-    ),
-  };
+  const translatedRun = cache.translatedRun ??= translateGlyphRun(run, props.x, props.y);
   if ((props.mode ?? 'a8') === 'sdf') {
-    recordSdfSubRun(
-      recorder,
-      buildSdfSubRun(host, translatedRun, {
+    const sdfKey = `${props.sdfInset ?? ''}:${props.sdfRadius ?? ''}`;
+    if (!cache.sdfSubRun || cache.sdfKey !== sdfKey) {
+      cache.sdfSubRun = buildSdfSubRun(host, translatedRun, {
         inset: props.sdfInset,
         radius: props.sdfRadius,
-      }),
+      });
+      cache.sdfKey = sdfKey;
+    }
+    recordSdfSubRun(
+      recorder,
+      cache.sdfSubRun,
       paint,
     );
     return;
   }
-  recordDirectMaskSubRun(recorder, buildDirectMaskSubRun(host, translatedRun), paint);
+  if (!cache.directMaskSubRun) {
+    cache.directMaskSubRun = buildDirectMaskSubRun(host, translatedRun);
+  }
+  recordDirectMaskSubRun(recorder, cache.directMaskSubRun, paint);
 };
 
 const render2dChild = (
@@ -638,7 +711,7 @@ const render2dChild = (
       if (child.children.length > 0) {
         throw new Error('<g2d-glyphs> does not support children');
       }
-      render2dGlyph(recorder, sceneProps, child.props, frameState);
+      render2dGlyph(child, recorder, sceneProps, child.props, frameState);
       return;
     case 'g2d-scene':
       throw new Error('nested <g2d-scene> is not supported');

@@ -2,6 +2,7 @@ import type { DawnBackendContext } from './dawn_backend_context.ts';
 import type { DawnResourceProvider } from './resource_provider.ts';
 
 export type DrawingTextAtlasMask = Readonly<{
+  cacheKey: string;
   width: number;
   height: number;
   stride: number;
@@ -67,7 +68,16 @@ const createEmptyAtlasState = (): DrawingTextAtlasState => ({
 });
 
 const hashMask = (mask: DrawingTextAtlasMask): string => {
+  if (mask.cacheKey.length > 0) {
+    return mask.cacheKey;
+  }
   let hash = 2166136261;
+  hash ^= mask.width;
+  hash = Math.imul(hash, 16777619);
+  hash ^= mask.height;
+  hash = Math.imul(hash, 16777619);
+  hash ^= mask.stride;
+  hash = Math.imul(hash, 16777619);
   for (let row = 0; row < mask.height; row += 1) {
     const rowStart = row * mask.stride;
     for (let column = 0; column < mask.width; column += 1) {

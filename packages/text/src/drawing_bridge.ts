@@ -15,17 +15,7 @@ export const recordDirectMaskSubRun = (
 ): void => {
   recordDrawDirectMaskText(
     recorder,
-    subRun.glyphs.map((glyph) => ({
-      glyphID: glyph.glyphID,
-      x: glyph.x,
-      y: glyph.y,
-      mask: glyph.mask
-        ? {
-          ...glyph.mask,
-          pixels: new Uint8Array(glyph.mask.pixels),
-        }
-        : null,
-    })),
+    subRun.glyphs,
     paint,
   );
 };
@@ -37,25 +27,7 @@ export const recordSdfSubRun = (
 ): void => {
   recordDrawSdfText(
     recorder,
-    subRun.glyphs.map((glyph) => ({
-      glyphID: glyph.glyphID,
-      x: glyph.x,
-      y: glyph.y,
-      mask: glyph.mask
-        ? {
-          ...glyph.mask,
-          pixels: new Uint8Array(glyph.mask.pixels),
-        }
-        : null,
-      sdf: glyph.sdf
-        ? {
-          ...glyph.sdf,
-          pixels: new Uint8Array(glyph.sdf.pixels),
-        }
-        : null,
-      sdfInset: glyph.sdfInset,
-      sdfRadius: glyph.sdfRadius,
-    })),
+    subRun.glyphs,
     paint,
   );
 };

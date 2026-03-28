@@ -1115,6 +1115,7 @@ Deno.test('dawn text preparation uses Graphite-style instanced quad draws', () =
       x: 18,
       y: 32,
       mask: {
+        cacheKey: 'test-mask',
         width: 12,
         height: 16,
         stride: 12,

@@ -115,7 +115,7 @@ export type Reconciler2dCircleProps = Readonly<
   } & Reconciler2dPaintProps
 >;
 
-export type Reconciler2dGlyphMode = 'a8' | 'sdf' | 'path';
+export type Reconciler2dGlyphMode = 'a8' | 'transformed-mask' | 'sdf' | 'path';
 
 export type Reconciler2dGlyphProps = Readonly<
   {

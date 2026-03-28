@@ -4,9 +4,10 @@ import {
   recordDrawDirectMaskText,
   recordDrawPath,
   recordDrawSdfText,
+  recordDrawTransformedMaskText,
 } from '@goldlight/drawing';
 import { createTranslationMatrix2d, transformPath2d } from '@goldlight/geometry';
-import type { DirectMaskSubRun, SdfSubRun, TextHost } from './types.ts';
+import type { DirectMaskSubRun, SdfSubRun, TextHost, TransformedMaskSubRun } from './types.ts';
 
 export const recordDirectMaskSubRun = (
   recorder: DrawingRecorder,
@@ -26,6 +27,18 @@ export const recordSdfSubRun = (
   paint: DrawingPaint = {},
 ): void => {
   recordDrawSdfText(
+    recorder,
+    subRun.glyphs,
+    paint,
+  );
+};
+
+export const recordTransformedMaskSubRun = (
+  recorder: DrawingRecorder,
+  subRun: TransformedMaskSubRun,
+  paint: DrawingPaint = {},
+): void => {
+  recordDrawTransformedMaskText(
     recorder,
     subRun.glyphs,
     paint,

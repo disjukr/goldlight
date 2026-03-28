@@ -254,6 +254,14 @@ export type DrawingDirectMaskGlyph = Readonly<{
   strikeToSourceScale?: number;
 }>;
 
+export type DrawingTransformedMaskGlyph = Readonly<{
+  glyphID: number;
+  x: number;
+  y: number;
+  mask: DrawingGlyphMask | null;
+  strikeToSourceScale: number;
+}>;
+
 export type DrawingSdfGlyph = Readonly<{
   glyphID: number;
   x: number;
@@ -309,11 +317,20 @@ export type DrawSdfTextCommand = Readonly<{
   clipStack: DrawingClipStackSnapshot;
 }>;
 
+export type DrawTransformedMaskTextCommand = Readonly<{
+  kind: 'drawTransformedMaskText';
+  glyphs: readonly DrawingTransformedMaskGlyph[];
+  paint: DrawingPaint;
+  transform: DrawingMatrix2d;
+  clipStack: DrawingClipStackSnapshot;
+}>;
+
 export type DrawingCommand =
   | ClearCommand
   | DrawPathCommand
   | DrawShapeCommand
   | DrawDirectMaskTextCommand
+  | DrawTransformedMaskTextCommand
   | DrawSdfTextCommand;
 
 export type DrawingSubmission = Readonly<{

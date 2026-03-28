@@ -19,6 +19,7 @@ import type {
   DrawPathCommand,
   DrawSdfTextCommand,
   DrawShapeCommand,
+  DrawTransformedMaskTextCommand,
 } from './types.ts';
 import type { DrawingRecording } from './recording.ts';
 import {
@@ -393,6 +394,24 @@ export type DrawingPreparedDirectMaskText = Readonly<{
   usesStencil: boolean;
 }>;
 
+export type DrawingPreparedTransformedMaskText = Readonly<{
+  kind: 'transformedMaskText';
+  renderer: DrawingRenderer;
+  triangles: readonly Point2d[];
+  glyphs: readonly DrawingPreparedTextGlyphInstance[];
+  color: readonly [number, number, number, number];
+  shader?: DrawingPreparedShader;
+  blendMode: DrawingBlendMode;
+  coverage: DrawingCoverage;
+  blender?: DrawingCustomBlender;
+  dstUsage: DrawingDstUsage;
+  transform: readonly [number, number, number, number, number, number];
+  bounds: Rect;
+  clipRect?: DrawingClipRect;
+  clip?: DrawingPreparedClip;
+  usesStencil: boolean;
+}>;
+
 export type DrawingPreparedSdfText = Readonly<{
   kind: 'sdfText';
   renderer: DrawingRenderer;
@@ -425,6 +444,7 @@ export type DrawingPreparedDraw =
   | DrawingPreparedPathFill
   | DrawingPreparedPathStroke
   | DrawingPreparedDirectMaskText
+  | DrawingPreparedTransformedMaskText
   | DrawingPreparedSdfText;
 
 export type DrawingDrawPreparation = Readonly<
@@ -5602,7 +5622,7 @@ export const prepareDrawingPathCommand = (
 
 export const prepareDrawingTextCommand = (
   recording: Pick<DrawingRecording, 'caps' | 'targetFormat'>,
-  command: DrawDirectMaskTextCommand | DrawSdfTextCommand,
+  command: DrawDirectMaskTextCommand | DrawTransformedMaskTextCommand | DrawSdfTextCommand,
 ): DrawingDrawPreparation => {
   const preparedClipStack = visitDrawingClipStackForDraw(
     command.clipStack,
@@ -5660,6 +5680,66 @@ export const prepareDrawingTextCommand = (
       supported: true,
       draw: {
         kind: 'directMaskText',
+        renderer: bitmapTextRenderer,
+        triangles: Object.freeze([]),
+        glyphs,
+        color,
+        shader,
+        blendMode,
+        coverage,
+        blender: command.paint.blender,
+        dstUsage,
+        transform: command.transform,
+        bounds,
+        clipRect: preparedClipStack.bounds,
+        clip: preparedClip,
+        usesStencil: Boolean(preparedClipStack.stencilClip?.elements?.length),
+      },
+    };
+  }
+
+  if (command.kind === 'drawTransformedMaskText') {
+    const glyphBounds: Rect[] = [];
+    const glyphs = command.glyphs
+      .filter((glyph): glyph is typeof glyph & { mask: NonNullable<typeof glyph.mask> } =>
+        Boolean(glyph.mask)
+      )
+      .map((glyph) => {
+        const localBounds: Rect = {
+          origin: [glyph.x, glyph.y],
+          size: {
+            width: glyph.mask.width,
+            height: glyph.mask.height,
+          },
+        };
+        glyphBounds.push(transformRectBounds({
+          origin: localBounds.origin,
+          size: {
+            width: localBounds.size.width * glyph.strikeToSourceScale,
+            height: localBounds.size.height * glyph.strikeToSourceScale,
+          },
+        }, command.transform));
+        return {
+          glyphID: glyph.glyphID,
+          mask: glyph.mask,
+          size: [glyph.mask.width, glyph.mask.height] as const,
+          xyPos: [glyph.x, glyph.y] as const,
+          uvInset: [0, 0] as const,
+          indexAndFlags: [0, 0] as const,
+          strikeToSourceScale: glyph.strikeToSourceScale,
+        };
+      });
+    const bounds = unionTextBounds(glyphBounds);
+    if (!bounds) {
+      return {
+        supported: false,
+        reason: 'transformed mask text resolved to no drawable glyph masks',
+      };
+    }
+    return {
+      supported: true,
+      draw: {
+        kind: 'transformedMaskText',
         renderer: bitmapTextRenderer,
         triangles: Object.freeze([]),
         glyphs,

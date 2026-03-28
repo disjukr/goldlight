@@ -2406,6 +2406,7 @@ struct VertexOut {
   @builtin(position) position: vec4<f32>,
   @location(0) devicePosition: vec2<f32>,
   @location(1) uv: vec2<f32>,
+  @location(2) texIndex: f32,
 };
 
 fn sample_indexed_atlas(textureCoords: vec2<f32>, atlasIndex: i32) -> vec4<f32> {
@@ -2453,12 +2454,13 @@ fn vs_main(
   );
   out.devicePosition = devicePosition;
   out.uv = (scaledBaseCoords + uvPos) * step.textInfo.xy;
+  out.texIndex = indexAndFlags.x;
   return out;
 }
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
-  let coverage = bitmap_text_coverage_fn(sample_indexed_atlas(in.uv, 0)).r *
+  let coverage = bitmap_text_coverage_fn(sample_indexed_atlas(in.uv, i32(round(in.texIndex)))).r *
     clip_coverage(in.devicePosition);
   var color = apply_clip_shader(paint_shader_color(in.devicePosition));
   color.a *= coverage;

@@ -30,6 +30,7 @@ import type {
   DrawPathCommand,
   DrawSdfTextCommand,
   DrawShapeCommand,
+  DrawTransformedMaskTextCommand,
 } from './types.ts';
 
 export type DrawingRecorder = Readonly<{
@@ -137,6 +138,22 @@ export const recordDrawSdfText = (
 ): DrawSdfTextCommand => {
   const command: DrawSdfTextCommand = {
     kind: 'drawSdfText',
+    glyphs,
+    paint,
+    transform: recorder.state.transform,
+    clipStack: recorder.state.clipStack,
+  };
+  recorder.commands.push(command);
+  return command;
+};
+
+export const recordDrawTransformedMaskText = (
+  recorder: DrawingRecorder,
+  glyphs: DrawTransformedMaskTextCommand['glyphs'],
+  paint: DrawingPaint = {},
+): DrawTransformedMaskTextCommand => {
+  const command: DrawTransformedMaskTextCommand = {
+    kind: 'drawTransformedMaskText',
     glyphs,
     paint,
     transform: recorder.state.transform,

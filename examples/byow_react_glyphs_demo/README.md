@@ -4,8 +4,8 @@ This demo shows `@goldlight/react/reconciler` `g2d-glyphs` authoring with a root
 
 It exercises:
 
-- direct-present root `g2d-scene` output
-- `g2d-glyphs` in `a8`, `sdf`, and `path` modes
+- root `g2d-scene` output
+- `g2d-glyphs` in `a8`, `transformed-mask`, `sdf`, and `path` modes
 - `g2d-group` transforms applied to glyph rendering and normal vector primitives together
 - shared `TextHost` usage through `<g2d-scene textHost={...}>`
 
@@ -25,6 +25,6 @@ deno check --unstable-ffi --unstable-webgpu --unstable-raw-imports examples/byow
 
 Expected output:
 
-- a dark 2D canvas window with three glyph rendering cards
-- A8 atlas, SDF, and path fallback text shown side by side
-- a lower section where `g2d-group` rotates glyphs and surrounding vector primitives together
+- a dark 2D canvas window with four glyph rendering cards
+- A8 atlas, transformed-mask, SDF, and path fallback text shown side by side
+- a lower section where `g2d-group` rotates each text mode with surrounding vector primitives

@@ -66,6 +66,22 @@ const cloneCommand = (command: DrawingCommand): DrawingCommand => {
         transform: [...command.transform] as typeof command.transform,
         clipStack: cloneDrawingClipStackSnapshot(command.clipStack),
       };
+    case 'drawTransformedMaskText':
+      return {
+        kind: 'drawTransformedMaskText',
+        glyphs: command.glyphs.map((glyph) => ({
+          ...glyph,
+          mask: glyph.mask
+            ? {
+              ...glyph.mask,
+              pixels: new Uint8Array(glyph.mask.pixels),
+            }
+            : null,
+        })),
+        paint: { ...command.paint },
+        transform: [...command.transform] as typeof command.transform,
+        clipStack: cloneDrawingClipStackSnapshot(command.clipStack),
+      };
     case 'drawSdfText':
       return {
         kind: 'drawSdfText',

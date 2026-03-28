@@ -31,13 +31,16 @@ import type {
 import {
   buildDirectMaskSubRun,
   buildSdfSubRun,
+  buildTransformedMaskSubRun,
   type DirectMaskSubRun,
   recordDirectMaskSubRun,
   recordPathFallbackRun,
   recordSdfSubRun,
+  recordTransformedMaskSubRun,
   type SdfSubRun,
   type ShapedRun,
   type TextHost,
+  type TransformedMaskSubRun,
 } from '@goldlight/text';
 import { createG3dSceneRootCommit, type G3dSceneRootSubscriber } from './scene_root.ts';
 import type { SceneIr, TextureRef } from '@goldlight/ir';
@@ -349,6 +352,8 @@ type GlyphRenderCacheState = {
   shapedRun?: ShapedRun;
   translatedRun?: TranslatedShapedRun;
   directMaskSubRun?: DirectMaskSubRun;
+  transformedMaskSubRun?: TransformedMaskSubRun;
+  transformedMaskScale?: number;
   sdfSubRun?: SdfSubRun;
   sdfKey?: string;
   pathRun?: GlyphPathFallbackRun;
@@ -580,6 +585,28 @@ const translateGlyphRun = (
   };
 };
 
+const getTransformedMaskStrikeScale = (
+  transform: readonly [number, number, number, number, number, number],
+): number => {
+  const scaleX = Math.hypot(transform[0], transform[1]);
+  const scaleY = Math.hypot(transform[2], transform[3]);
+  const maxScale = Math.max(scaleX, scaleY, 1);
+  const axisAlignmentX = scaleX > 0
+    ? Math.max(Math.abs(transform[0]), Math.abs(transform[1])) / scaleX
+    : 1;
+  const axisAlignmentY = scaleY > 0
+    ? Math.max(Math.abs(transform[2]), Math.abs(transform[3])) / scaleY
+    : 1;
+  const axisAlignment = Math.min(axisAlignmentX, axisAlignmentY);
+  if (!Number.isFinite(axisAlignment) || axisAlignment <= 0) {
+    return Math.min(4, Math.ceil(maxScale));
+  }
+  const transformedScale = axisAlignment < 0.97
+    ? Math.ceil(maxScale / axisAlignment)
+    : Math.ceil(maxScale);
+  return Math.min(4, Math.max(1, transformedScale));
+};
+
 const getGlyphRenderCache = (instance: Glyph2dHostInstance): GlyphRenderCacheState => {
   let cache = glyphRenderCaches.get(instance);
   if (!cache) {
@@ -615,6 +642,8 @@ const render2dGlyph = (
     cache.shapedRun = run;
     cache.translatedRun = undefined;
     cache.directMaskSubRun = undefined;
+    cache.transformedMaskSubRun = undefined;
+    cache.transformedMaskScale = undefined;
     cache.sdfSubRun = undefined;
     cache.sdfKey = undefined;
     cache.pathRun = undefined;
@@ -636,6 +665,18 @@ const render2dGlyph = (
     return;
   }
   const translatedRun = cache.translatedRun ??= translateGlyphRun(run, props.x, props.y);
+  if ((props.mode ?? 'a8') === 'transformed-mask') {
+    const strikeScale = getTransformedMaskStrikeScale(recorder.state.transform);
+    if (
+      !cache.transformedMaskSubRun ||
+      cache.transformedMaskScale !== strikeScale
+    ) {
+      cache.transformedMaskSubRun = buildTransformedMaskSubRun(host, translatedRun, strikeScale);
+      cache.transformedMaskScale = strikeScale;
+    }
+    recordTransformedMaskSubRun(recorder, cache.transformedMaskSubRun, paint);
+    return;
+  }
   if ((props.mode ?? 'a8') === 'sdf') {
     if (!cache.sdfSubRun) {
       cache.sdfSubRun = buildSdfSubRun(host, translatedRun);

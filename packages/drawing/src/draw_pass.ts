@@ -26,12 +26,14 @@ import type {
   DrawPathCommand,
   DrawSdfTextCommand,
   DrawShapeCommand,
+  DrawTransformedMaskTextCommand,
 } from './types.ts';
 
 export type DrawingDrawCommand =
   | DrawPathCommand
   | DrawShapeCommand
   | DrawDirectMaskTextCommand
+  | DrawTransformedMaskTextCommand
   | DrawSdfTextCommand;
 
 export type DrawingShaderKey =
@@ -197,7 +199,8 @@ const firstLayerOrder = 1;
 
 const isDrawCommand = (command: DrawingCommand): command is DrawingDrawCommand =>
   command.kind === 'drawPath' || command.kind === 'drawShape' ||
-  command.kind === 'drawDirectMaskText' || command.kind === 'drawSdfText';
+  command.kind === 'drawDirectMaskText' || command.kind === 'drawTransformedMaskText' ||
+  command.kind === 'drawSdfText';
 
 const rectsIntersect = (left: Rect, right: Rect): boolean => {
   const leftRight = left.origin[0] + left.size.width;
@@ -1406,6 +1409,7 @@ const getPipelineDescsForDraw = (
           'triangle-strip',
         )];
     case 'directMaskText':
+    case 'transformedMaskText':
       return [createPipelineDesc(
         usesStencilClip ? 'drawing-text-bitmap-clip-cover' : 'drawing-text-bitmap-cover',
         'bitmap-text',

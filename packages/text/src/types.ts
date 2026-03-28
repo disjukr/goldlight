@@ -86,6 +86,21 @@ export type DirectMaskSubRun = Readonly<{
   glyphs: readonly DirectMaskGlyph[];
 }>;
 
+export type TransformedMaskGlyph = Readonly<{
+  glyphID: number;
+  x: number;
+  y: number;
+  mask: GlyphMask | null;
+  strikeToSourceScale: number;
+}>;
+
+export type TransformedMaskSubRun = Readonly<{
+  typeface: TypefaceHandle;
+  size: number;
+  glyphs: readonly TransformedMaskGlyph[];
+  strikeScale: number;
+}>;
+
 export type SdfGlyph = Readonly<{
   glyphID: number;
   x: number;

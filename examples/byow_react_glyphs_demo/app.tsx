@@ -23,6 +23,7 @@ const labelColor = [0.77, 0.79, 0.85, 1] as const;
 
 const hangulPangram = '다람쥐 헌 쳇바퀴에 타고파';
 const rotatedSdfLabel = '회전된 SDF 텍스트';
+const rotatedTransformedMaskLabel = '회전된 transformed-mask 텍스트';
 
 const latinFamilies = ['Calibri', 'Segoe UI'] as const;
 const hangulFamilies = ['Malgun Gothic', 'Segoe UI'] as const;
@@ -85,7 +86,7 @@ const ModeCard = (
     height: number;
     accent: readonly [number, number, number, number];
     title: string;
-    mode: 'a8' | 'sdf' | 'path';
+    mode: 'a8' | 'transformed-mask' | 'sdf' | 'path';
   }>,
 ) => (
   <>
@@ -174,7 +175,9 @@ const AffineGroupDemo = () => {
         mode='path'
         color={labelColor}
       />
-      <g2d-group transform={createCenteredTransform(172, 468, -0.16 + (Math.sin(t * 0.95) * 0.18))}>
+      <g2d-group
+        transform={createCenteredTransform(172, 468, -0.16 + (Math.sin(t * 0.95) * 0.18))}
+      >
         <g2d-rect
           x={94}
           y={430}
@@ -192,9 +195,31 @@ const AffineGroupDemo = () => {
           color={[0.96, 0.78, 0.36, 1]}
         />
       </g2d-group>
-      <g2d-group transform={createCenteredTransform(490, 468, 0.08 + (Math.cos(t * 0.9) * 0.22))}>
+      <g2d-group
+        transform={createCenteredTransform(490, 468, 0.08 + (Math.cos(t * 0.9) * 0.22))}
+      >
         <g2d-rect
           x={392}
+          y={430}
+          width={232}
+          height={56}
+          color={[0.17, 0.12, 0.18, 0.92]}
+        />
+        <g2d-glyphs
+          text={rotatedTransformedMaskLabel}
+          x={404}
+          y={464}
+          fontSize={24}
+          fontFamily={hangulFamilies}
+          mode='transformed-mask'
+          color={[0.9, 0.66, 0.96, 1]}
+        />
+      </g2d-group>
+      <g2d-group
+        transform={createCenteredTransform(780, 468, -0.11 + (Math.cos(t * 1.1) * 0.24))}
+      >
+        <g2d-rect
+          x={664}
           y={430}
           width={196}
           height={56}
@@ -202,7 +227,7 @@ const AffineGroupDemo = () => {
         />
         <g2d-glyphs
           text={rotatedSdfLabel}
-          x={406}
+          x={678}
           y={464}
           fontSize={27}
           fontFamily={hangulFamilies}
@@ -211,17 +236,17 @@ const AffineGroupDemo = () => {
         />
       </g2d-group>
       <g2d-group
-        transform={createCenteredTransform(960, 468, -0.09 + (Math.sin(t * 0.7) * 0.16), 0, -10)}
+        transform={createCenteredTransform(1140, 468, -0.09 + (Math.sin(t * 0.7) * 0.16), 0, -10)}
       >
         <g2d-path
-          path={createLinePath(808, 484, 1112, 484)}
+          path={createLinePath(988, 484, 1292, 484)}
           style='stroke'
           strokeWidth={2}
           color={[0.42, 0.45, 0.58, 1]}
         />
         <g2d-glyphs
           text='Path fallback transform'
-          x={822}
+          x={1002}
           y={468}
           fontSize={29}
           fontFamily={latinFamilies}
@@ -245,32 +270,41 @@ const DemoScene = () => {
       <ModeCard
         x={32}
         y={34}
-        width={263}
+        width={285}
         height={177}
         accent={[0.97, 0.47, 0.21, 1]}
         title='A8 atlas'
         mode='a8'
       />
       <ModeCard
-        x={321}
+        x={343}
         y={34}
-        width={263}
+        width={285}
+        height={177}
+        accent={[0.86, 0.47, 0.98, 1]}
+        title='Transformed mask'
+        mode='transformed-mask'
+      />
+      <ModeCard
+        x={654}
+        y={34}
+        width={285}
         height={177}
         accent={[0.18, 0.82, 0.72, 1]}
         title='SDF'
         mode='sdf'
       />
       <ModeCard
-        x={610}
+        x={965}
         y={34}
-        width={263}
+        width={285}
         height={177}
         accent={[0.39, 0.57, 1, 1]}
         title='Path fallback'
         mode='path'
       />
       <g2d-path
-        path={createLinePath(52, 280, 844, 280)}
+        path={createLinePath(52, 280, 1238, 280)}
         style='stroke'
         strokeWidth={1}
         color={gridLineColor}

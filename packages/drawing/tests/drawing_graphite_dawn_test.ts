@@ -56,6 +56,16 @@ import {
   visitDrawingClipStackForDraw,
 } from '@goldlight/drawing';
 
+const createNonRectConvexFillPath = () =>
+  createPath2d(
+    { kind: 'moveTo', to: [16, 16] },
+    { kind: 'lineTo', to: [96, 16] },
+    { kind: 'lineTo', to: [120, 56] },
+    { kind: 'lineTo', to: [96, 96] },
+    { kind: 'lineTo', to: [16, 96] },
+    { kind: 'close' },
+  );
+
 const createMockGpuContext = () => {
   type MockTextureCopy = {
     source: unknown;
@@ -266,7 +276,7 @@ Deno.test('dawn shared context exposes resource provider over gpu device', () =>
   assertEquals(sharedContext.rendererProvider.pathRendererStrategy, 'tessellation');
   assertEquals(sharedContext.caps.supportsTimestampQuery, true);
   assertEquals(sharedContext.rendererProvider.pathRendererStrategy, 'tessellation');
-  assertEquals(sharedContext.rendererProvider.renderers.length, 6);
+  assertEquals(sharedContext.rendererProvider.renderers.length, 8);
   assertEquals(mock.created.bindGroupLayouts.length, 2);
   assertEquals(mock.created.buffers.length, 1);
   assertEquals(mock.created.textures.length, 1);
@@ -339,13 +349,7 @@ Deno.test('prepareDawnRecording uses the shared-context renderer provider', () =
 
   recordDrawPath(
     recorder,
-    createPath2d(
-      { kind: 'moveTo', to: [16, 16] },
-      { kind: 'lineTo', to: [96, 16] },
-      { kind: 'lineTo', to: [96, 96] },
-      { kind: 'lineTo', to: [16, 96] },
-      { kind: 'close' },
-    ),
+    createNonRectConvexFillPath(),
     { style: 'fill' },
   );
 
@@ -367,13 +371,7 @@ Deno.test('curve stencil fills use Graphite middle-out fan triangles', () => {
 
   recordDrawPath(
     recorder,
-    createPath2d(
-      { kind: 'moveTo', to: [16, 16] },
-      { kind: 'lineTo', to: [96, 16] },
-      { kind: 'lineTo', to: [96, 96] },
-      { kind: 'lineTo', to: [16, 96] },
-      { kind: 'close' },
-    ),
+    createNonRectConvexFillPath(),
     { style: 'fill' },
   );
 
@@ -381,13 +379,19 @@ Deno.test('curve stencil fills use Graphite middle-out fan triangles', () => {
   const draw = prepared.prepared.passes[0]?.steps[0]?.draw;
   assertEquals(draw?.kind, 'pathFill');
   assertEquals(draw?.renderer.kind, 'stencil-tessellated-curves');
-  assertEquals(draw?.triangles, [
+  if (draw?.kind !== 'pathFill') {
+    throw new Error('expected pathFill draw');
+  }
+  assertEquals(draw.triangles, [
     [16, 16],
     [96, 16],
-    [96, 96],
+    [120, 56],
+    [120, 56],
     [96, 96],
     [16, 96],
     [16, 16],
+    [120, 56],
+    [16, 96],
   ]);
 });
 
@@ -403,13 +407,7 @@ Deno.test('curve stencil fills keep a non-empty fan draw step', () => {
 
   recordDrawPath(
     recorder,
-    createPath2d(
-      { kind: 'moveTo', to: [16, 16] },
-      { kind: 'lineTo', to: [96, 16] },
-      { kind: 'lineTo', to: [96, 96] },
-      { kind: 'lineTo', to: [16, 96] },
-      { kind: 'close' },
-    ),
+    createNonRectConvexFillPath(),
     { style: 'fill' },
   );
 
@@ -418,7 +416,7 @@ Deno.test('curve stencil fills keep a non-empty fan draw step', () => {
     prepared.prepared.passes[0]?.renderSteps.map((step) => step.kind),
     ['fill-stencil-fan', 'fill-stencil', 'fill-cover'],
   );
-  assertEquals(prepared.resources.tasks[0]?.passes[0]?.steps[0]?.vertexCount, 6);
+  assertEquals(prepared.resources.tasks[0]?.passes[0]?.steps[0]?.vertexCount, 9);
   assertEquals(prepared.resources.tasks[0]?.passes[0]?.steps[0]?.instanceCount, 1);
 });
 
@@ -590,7 +588,7 @@ Deno.test('dawn stroke shader keeps graphite duplicated-edge seam handling', () 
   assertEquals(typeof strokeShaderCode, 'string');
 });
 
-Deno.test('dawn stroke shader pretransforms hairlines before tessellation like graphite', () => {
+Deno.test('dawn stroke shader pretransforms hairline curves before tessellation like graphite', () => {
   const mock = createMockGpuContext();
   const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
   const binding = createOffscreenBinding(mock.context);
@@ -600,7 +598,7 @@ Deno.test('dawn stroke shader pretransforms hairlines before tessellation like g
     recorder,
     createPath2d(
       { kind: 'moveTo', to: [24, 24] },
-      { kind: 'lineTo', to: [96, 48] },
+      { kind: 'cubicTo', control1: [36, 4], control2: [84, 52], to: [96, 48] },
     ),
     { style: 'stroke', strokeWidth: 0, strokeCap: 'round' },
   );
@@ -920,6 +918,109 @@ Deno.test('clip stack invalidates superseded rect intersects within the active s
     throw new Error('expected rect clip');
   }
   assertEquals(visited.effectiveElements[0].clip.rect, createRect(16, 20, 32, 28));
+});
+
+Deno.test('clip stack invalidates superseded simple circular rrect intersects within the active save record', () => {
+  let clipStack = createDrawingClipStackSnapshot();
+  clipStack = appendDrawingClipStackElement(clipStack, {
+    kind: 'rect',
+    op: 'intersect',
+    rect: createRect(0, 0, 96, 96),
+    transform: identityMatrix2d,
+  });
+  clipStack = appendDrawingClipStackElement(clipStack, {
+    kind: 'path',
+    op: 'intersect',
+    path: createDrawingPath2dFromShape({
+      kind: 'rrect',
+      rrect: {
+        rect: createRect(16, 20, 32, 28),
+        topLeft: { x: 10, y: 10 },
+        topRight: { x: 10, y: 10 },
+        bottomRight: { x: 10, y: 10 },
+        bottomLeft: { x: 10, y: 10 },
+      },
+    }),
+    transform: identityMatrix2d,
+  });
+
+  assertEquals(clipStack.elements.length, 2);
+  assertEquals(clipStack.elements[0]?.invalidatedByIndex, 0);
+  assertEquals(clipStack.saveRecords[0]?.oldestValidIndex, 1);
+
+  const visited = visitDrawingClipStackForDraw(
+    clipStack,
+    () => null,
+    (bounds, candidate) => {
+      if (!candidate) {
+        return bounds;
+      }
+      if (!bounds) {
+        return candidate;
+      }
+      const x0 = Math.max(bounds.origin[0], candidate.origin[0]);
+      const y0 = Math.max(bounds.origin[1], candidate.origin[1]);
+      const x1 = Math.min(
+        bounds.origin[0] + bounds.size.width,
+        candidate.origin[0] + candidate.size.width,
+      );
+      const y1 = Math.min(
+        bounds.origin[1] + bounds.size.height,
+        candidate.origin[1] + candidate.size.height,
+      );
+      return createRect(x0, y0, Math.max(0, x1 - x0), Math.max(0, y1 - y0));
+    },
+    (points) => {
+      let minX = Number.POSITIVE_INFINITY;
+      let minY = Number.POSITIVE_INFINITY;
+      let maxX = Number.NEGATIVE_INFINITY;
+      let maxY = Number.NEGATIVE_INFINITY;
+      for (const point of points) {
+        minX = Math.min(minX, point[0]);
+        minY = Math.min(minY, point[1]);
+        maxX = Math.max(maxX, point[0]);
+        maxY = Math.max(maxY, point[1]);
+      }
+      return createRect(minX, minY, Math.max(0, maxX - minX), Math.max(0, maxY - minY));
+    },
+  );
+
+  assertEquals(visited.effectiveElements.length, 1);
+  assertEquals(visited.analyticClip?.kind, 'rrect');
+});
+
+Deno.test('clip stack skips redundant containing rect intersect after simple circular rrect', () => {
+  let clipStack = createDrawingClipStackSnapshot();
+  clipStack = appendDrawingClipStackElement(clipStack, {
+    kind: 'path',
+    op: 'intersect',
+    path: createDrawingPath2dFromShape({
+      kind: 'rrect',
+      rrect: {
+        rect: createRect(16, 20, 32, 28),
+        topLeft: { x: 10, y: 10 },
+        topRight: { x: 10, y: 10 },
+        bottomRight: { x: 10, y: 10 },
+        bottomLeft: { x: 10, y: 10 },
+      },
+    }),
+    transform: identityMatrix2d,
+  });
+  clipStack = appendDrawingClipStackElement(clipStack, {
+    kind: 'rect',
+    op: 'intersect',
+    rect: createRect(0, 0, 96, 96),
+    transform: identityMatrix2d,
+  });
+
+  assertEquals(clipStack.elements.length, 1);
+  const visited = visitDrawingClipStackForDraw(
+    clipStack,
+    () => null,
+    (bounds, candidate) => candidate ?? bounds,
+    () => createRect(0, 0, 0, 0),
+  );
+  assertEquals(visited.analyticClip?.kind, 'rrect');
 });
 
 Deno.test('drawing recorder supports explicit transform concatenation', () => {
@@ -1785,11 +1886,11 @@ Deno.test('drawing prepared recording preserves clip boundary ordering across su
   const pass = prepared.passes[0]!;
 
   assertEquals(pass.steps.length, 2);
-  assertEquals(pass.steps[1]!.paintOrder > pass.steps[0]!.paintOrder, false);
+  assertEquals(pass.steps[1]!.paintOrder > pass.steps[0]!.paintOrder, true);
   assertEquals(pass.clipDraws[0]?.latestInsertion.wrapperKind, 'depth-only');
   assertEquals(pass.renderSteps.filter((step) => step.paintOrder === 0).length > 0, true);
-  assertEquals(pass.renderSteps.filter((step) => step.paintOrder === 1).length > 0, false);
-  assertEquals(pass.renderSteps.some((step) => step.kind === 'fill-main'), true);
+  assertEquals(pass.renderSteps.filter((step) => step.paintOrder === 1).length > 0, true);
+  assertEquals(pass.renderSteps.some((step) => step.kind === 'analytic-main'), true);
 });
 
 Deno.test('drawing prepared recording isolates dst-read barrier wrappers from ordinary fills', () => {
@@ -1813,7 +1914,7 @@ Deno.test('drawing prepared recording isolates dst-read barrier wrappers from or
   assertEquals(pass.steps.length, 2);
   assertEquals(pass.steps[0]!.requiresBarrier, true);
   assertEquals(pass.steps[1]!.requiresBarrier, false);
-  assertEquals(pass.steps[1]!.paintOrder > pass.steps[0]!.paintOrder, false);
+  assertEquals(pass.steps[1]!.paintOrder > pass.steps[0]!.paintOrder, true);
   assertEquals(pass.renderSteps[0]!.requiresBarrier, true);
   assertEquals(pass.renderSteps.some((step) => step.requiresBarrier === false), true);
 });
@@ -1842,7 +1943,7 @@ Deno.test('drawing prepared recording preserves record order for ordinary fills 
   const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
   const pass = prepared.passes[0]!;
 
-  assertEquals(pass.steps.map((step) => step.paintOrder), [0, 0, 0]);
+  assertEquals(pass.steps.map((step) => step.paintOrder), [0, 1, 1]);
   assertEquals(pass.renderSteps.map((step) => step.originalOrder), [0, 1, 2]);
 });
 
@@ -1969,7 +2070,10 @@ Deno.test('drawing prepared recording selects convex tessellated wedges for simp
 
   assertEquals(draw?.kind, 'pathFill');
   assertEquals(draw?.renderer.kind, 'convex-tessellated-wedges');
-  assertEquals((draw?.triangles.length ?? 0) > 0, true);
+  if (draw?.kind !== 'pathFill') {
+    throw new Error('expected pathFill draw');
+  }
+  assertEquals(draw.triangles.length > 0, true);
 });
 
 Deno.test('drawing prepared recording uses Graphite convexity for concave cubic fills', () => {
@@ -2324,7 +2428,7 @@ Deno.test('drawing prepared recording derives clip bounds from clip path', () =>
   const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
   assertEquals(prepared.passes[0]?.steps[0]?.clipRect, createRect(32, 40, 64, 48));
   assertEquals(prepared.passes[0]?.steps[0]?.pipelineDescs.map((pipeline) => pipeline.label), [
-    'drawing-path-fill-patch-clip-cover',
+    'drawing-analytic-rrect-clip-cover',
   ]);
 });
 
@@ -2529,9 +2633,9 @@ Deno.test('drawing prepared recording collapses multiple complex path clips into
   const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
   const draw = prepared.passes[0]?.steps[0]?.draw;
 
-  assertEquals(draw?.kind, 'pathFill');
-  if (draw?.kind !== 'pathFill') {
-    throw new Error('expected pathFill draw');
+  assertEquals(draw?.kind, 'analyticRRect');
+  if (draw?.kind !== 'analyticRRect') {
+    throw new Error('expected analyticRRect draw');
   }
   assertEquals(draw.usesStencil, false);
   assertEquals(draw.clip?.atlasClip !== undefined, true);
@@ -2564,14 +2668,191 @@ Deno.test('drawing prepared recording carries analytic and shader clip metadata'
 
   const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
   const draw = prepared.passes[0]?.steps[0]?.draw;
-  assertEquals(draw?.kind, 'pathFill');
-  if (draw?.kind !== 'pathFill') {
-    throw new Error('expected pathFill draw');
+  assertEquals(draw?.kind, 'analyticRRect');
+  if (draw?.kind !== 'analyticRRect') {
+    throw new Error('expected analyticRRect draw');
   }
   assertEquals(draw.clip?.analyticClip?.kind, 'rect');
-  assertEquals(draw.clip?.analyticClip?.rect, createRect(12, 18, 40, 36));
+  if (draw.clip?.analyticClip?.kind !== 'rect') {
+    throw new Error('expected rect analytic clip');
+  }
+  assertEquals(draw.clip.analyticClip.rect, createRect(12, 18, 40, 36));
   assertEquals(draw.clip?.shader?.kind, 'solidColor');
   assertEquals(draw.clip?.shader?.color, [0.5, 0.75, 1, 0.5]);
+});
+
+Deno.test('drawing prepared recording promotes rect path clips to analytic non-msaa clips', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  clipDrawingRecorderPath(
+    recorder,
+    createRectPath2d(createRect(12, 18, 40, 36)),
+  );
+  recordDrawShape(
+    recorder,
+    { kind: 'rect', rect: createRect(0, 0, 96, 96) },
+    { style: 'fill' },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const draw = prepared.passes[0]?.steps[0]?.draw;
+  assertEquals(draw?.clip?.analyticClip?.kind, 'rect');
+  if (draw?.clip?.analyticClip?.kind !== 'rect') {
+    throw new Error('expected rect analytic clip');
+  }
+  assertEquals(draw.clip.analyticClip.rect, createRect(12, 18, 40, 36));
+  assertEquals(draw.clip?.atlasClip, undefined);
+});
+
+Deno.test('drawing prepared recording keeps rotated rect path clips on the stencil clip path', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  clipDrawingRecorderPath(
+    recorder,
+    createPath2d(
+      { kind: 'moveTo', to: [20, 22] },
+      { kind: 'lineTo', to: [48, 62] },
+      { kind: 'lineTo', to: [12, 86] },
+      { kind: 'lineTo', to: [-16, 46] },
+      { kind: 'close' },
+    ),
+  );
+  recordDrawShape(
+    recorder,
+    { kind: 'rect', rect: createRect(0, 0, 96, 96) },
+    { style: 'fill' },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const draw = prepared.passes[0]?.steps[0]?.draw;
+  assertEquals(draw?.clip?.analyticClip, undefined);
+  assertEquals((draw?.clip?.deferredClipDraws?.length ?? 0) > 0, true);
+});
+
+Deno.test('drawing prepared recording keeps complex rrect path clips on the stencil clip path', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  clipDrawingRecorderPath(
+    recorder,
+    createDrawingPath2dFromShape({
+      kind: 'rrect',
+      rrect: {
+        rect: createRect(12, 18, 64, 48),
+        topLeft: { x: 8, y: 10 },
+        topRight: { x: 12, y: 6 },
+        bottomRight: { x: 14, y: 16 },
+        bottomLeft: { x: 4, y: 8 },
+      },
+    }),
+  );
+  recordDrawShape(
+    recorder,
+    { kind: 'rect', rect: createRect(0, 0, 120, 96) },
+    { style: 'fill' },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const draw = prepared.passes[0]?.steps[0]?.draw;
+  assertEquals(draw?.clip?.analyticClip, undefined);
+  assertEquals((draw?.clip?.deferredClipDraws?.length ?? 0) > 0, true);
+});
+
+Deno.test('drawing prepared recording promotes simple circular rrect path clips to analytic non-msaa clips', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  clipDrawingRecorderPath(
+    recorder,
+    createDrawingPath2dFromShape({
+      kind: 'rrect',
+      rrect: {
+        rect: createRect(12, 18, 64, 48),
+        topLeft: { x: 12, y: 12 },
+        topRight: { x: 12, y: 12 },
+        bottomRight: { x: 12, y: 12 },
+        bottomLeft: { x: 12, y: 12 },
+      },
+    }),
+  );
+  recordDrawShape(
+    recorder,
+    { kind: 'rect', rect: createRect(0, 0, 120, 96) },
+    { style: 'fill' },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const draw = prepared.passes[0]?.steps[0]?.draw;
+  assertEquals(draw?.clip?.analyticClip?.kind, 'rrect');
+  if (draw?.clip?.analyticClip?.kind !== 'rrect') {
+    throw new Error('expected rrect analytic clip');
+  }
+  assertEquals(draw.clip.analyticClip.rect, createRect(12, 18, 64, 48));
+  assertEquals(draw.clip.analyticClip.xRadii, [12, 12, 12, 12]);
+  assertEquals(draw.clip.analyticClip.yRadii, [12, 12, 12, 12]);
+  assertEquals(draw.clip?.atlasClip, undefined);
+});
+
+Deno.test('drawing prepared recording collapses multiple axis-aligned rect clips into one analytic rect', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  clipDrawingRecorderRect(recorder, createRect(12, 18, 80, 64));
+  clipDrawingRecorderPath(recorder, createRectPath2d(createRect(24, 30, 40, 28)));
+  recordDrawShape(
+    recorder,
+    { kind: 'rect', rect: createRect(0, 0, 128, 96) },
+    { style: 'fill' },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const draw = prepared.passes[0]?.steps[0]?.draw;
+  assertEquals(draw?.clip?.analyticClip?.kind, 'rect');
+  if (draw?.clip?.analyticClip?.kind !== 'rect') {
+    throw new Error('expected rect analytic clip');
+  }
+  assertEquals(draw.clip.analyticClip.rect, createRect(24, 30, 40, 28));
+});
+
+Deno.test('drawing prepared recording collapses containing rect and simple rrect clips to analytic rrect', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  clipDrawingRecorderRect(recorder, createRect(0, 0, 128, 96));
+  clipDrawingRecorderPath(
+    recorder,
+    createDrawingPath2dFromShape({
+      kind: 'rrect',
+      rrect: {
+        rect: createRect(12, 18, 64, 48),
+        topLeft: { x: 12, y: 12 },
+        topRight: { x: 12, y: 12 },
+        bottomRight: { x: 12, y: 12 },
+        bottomLeft: { x: 12, y: 12 },
+      },
+    }),
+  );
+  recordDrawShape(
+    recorder,
+    { kind: 'rect', rect: createRect(0, 0, 128, 96) },
+    { style: 'fill' },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const draw = prepared.passes[0]?.steps[0]?.draw;
+  assertEquals(draw?.clip?.analyticClip?.kind, 'rrect');
+  if (draw?.clip?.analyticClip?.kind !== 'rrect') {
+    throw new Error('expected rrect analytic clip');
+  }
+  assertEquals(draw.clip.analyticClip.rect, createRect(12, 18, 64, 48));
 });
 
 Deno.test('drawing prepared recording carries linear gradient shader metadata', () => {
@@ -2598,7 +2879,7 @@ Deno.test('drawing prepared recording carries linear gradient shader metadata', 
 
   const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
   const draw = prepared.passes[0]?.steps[0]?.draw;
-  assertEquals(draw?.kind, 'pathFill');
+  assertEquals(draw?.kind, 'analyticRRect');
   assertEquals(draw?.shader?.kind, 'linear-gradient');
   assertEquals(draw?.shader?.stops[0], { offset: 0, color: [1, 0.4, 0.2, 1] });
   assertEquals(draw?.shader?.stops[1], { offset: 1, color: [0.1, 0.5, 1, 1] });
@@ -2674,7 +2955,10 @@ Deno.test('drawing prepared recording falls back for self-intersecting fill path
   const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
   const draw = prepared.passes[0]?.steps[0]?.draw;
   assertEquals(draw?.kind, 'pathFill');
-  assertEquals((draw?.triangles.length ?? 0) > 0, true);
+  if (draw?.kind !== 'pathFill') {
+    throw new Error('expected pathFill draw');
+  }
+  assertEquals(draw.triangles.length > 0, true);
 });
 
 Deno.test('drawing prepared recording expands stroke geometry', () => {
@@ -2701,6 +2985,218 @@ Deno.test('drawing prepared recording expands stroke geometry', () => {
   assertEquals(draw.renderer.kind, 'tessellated-strokes');
   assertEquals(draw.patches.length > 0, true);
   assertEquals(draw.usesTessellatedStrokePatches, true);
+});
+
+Deno.test('drawing prepared recording routes rect and rrect shape fills through analytic rrect renderer', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const rectRecorder = drawingContext.createRecorder();
+  const rrectRecorder = drawingContext.createRecorder();
+
+  recordDrawShape(
+    rectRecorder,
+    {
+      kind: 'rect',
+      rect: createRect(24, 36, 96, 64),
+    },
+    { style: 'fill', color: [0.2, 0.4, 0.8, 1] },
+  );
+  recordDrawShape(
+    rrectRecorder,
+    {
+      kind: 'rrect',
+      rrect: {
+        rect: createRect(24, 36, 96, 64),
+        topLeft: { x: 12, y: 12 },
+        topRight: { x: 12, y: 12 },
+        bottomRight: { x: 12, y: 12 },
+        bottomLeft: { x: 12, y: 12 },
+      },
+    },
+    { style: 'fill', color: [0.8, 0.4, 0.2, 1] },
+  );
+
+  const rectPrepared = prepareDrawingRecording(finishDrawingRecorder(rectRecorder));
+  const rrectPrepared = prepareDrawingRecording(finishDrawingRecorder(rrectRecorder));
+  const rectDraw = rectPrepared.passes[0]?.steps[0]?.draw;
+  const rrectDraw = rrectPrepared.passes[0]?.steps[0]?.draw;
+
+  assertEquals(rectDraw?.kind, 'analyticRRect');
+  assertEquals(rrectDraw?.kind, 'analyticRRect');
+  if (rectDraw?.kind !== 'analyticRRect' || rrectDraw?.kind !== 'analyticRRect') {
+    throw new Error('expected analyticRRect draws');
+  }
+  assertEquals(rectDraw.renderer.kind, 'analytic-rrect');
+  assertEquals(rrectDraw.renderer.kind, 'analytic-rrect');
+  assertEquals(rectDraw.instance.xRadiiOrFlags, [-1, -1, -1, -1]);
+  assertEquals(rrectDraw.instance.xRadiiOrFlags, [12, 12, 12, 12]);
+});
+
+Deno.test('drawing prepared recording routes rect and rrect path fills through analytic rrect renderer', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const rectRecorder = drawingContext.createRecorder();
+  const rrectRecorder = drawingContext.createRecorder();
+
+  recordDrawPath(
+    rectRecorder,
+    createRectPath2d(createRect(24, 36, 96, 64)),
+    { style: 'fill', color: [0.2, 0.4, 0.8, 1] },
+  );
+  recordDrawPath(
+    rrectRecorder,
+    createRRectPath2d({
+      rect: createRect(24, 36, 96, 64),
+      topLeft: { x: 12, y: 12 },
+      topRight: { x: 12, y: 12 },
+      bottomRight: { x: 12, y: 12 },
+      bottomLeft: { x: 12, y: 12 },
+    }),
+    { style: 'fill', color: [0.8, 0.4, 0.2, 1] },
+  );
+
+  const rectPrepared = prepareDrawingRecording(finishDrawingRecorder(rectRecorder));
+  const rrectPrepared = prepareDrawingRecording(finishDrawingRecorder(rrectRecorder));
+  const rectDraw = rectPrepared.passes[0]?.steps[0]?.draw;
+  const rrectDraw = rrectPrepared.passes[0]?.steps[0]?.draw;
+
+  assertEquals(rectDraw?.kind, 'analyticRRect');
+  assertEquals(rrectDraw?.kind, 'analyticRRect');
+  if (rectDraw?.kind !== 'analyticRRect' || rrectDraw?.kind !== 'analyticRRect') {
+    throw new Error('expected analyticRRect draws');
+  }
+  assertEquals(rectDraw.renderer.kind, 'analytic-rrect');
+  assertEquals(rrectDraw.renderer.kind, 'analytic-rrect');
+  assertEquals(rectDraw.instance.xRadiiOrFlags, [-1, -1, -1, -1]);
+  assertEquals(rrectDraw.instance.xRadiiOrFlags, [12, 12, 12, 12]);
+});
+
+Deno.test('drawing prepared recording routes rect and rrect strokes through analytic rrect renderer', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const rectRecorder = drawingContext.createRecorder();
+  const rrectRecorder = drawingContext.createRecorder();
+
+  recordDrawShape(
+    rectRecorder,
+    { kind: 'rect', rect: createRect(24, 36, 96, 64) },
+    { style: 'stroke', strokeWidth: 6, color: [0.2, 0.4, 0.8, 1] },
+  );
+  recordDrawShape(
+    rrectRecorder,
+    {
+      kind: 'rrect',
+      rrect: {
+        rect: createRect(24, 36, 96, 64),
+        topLeft: { x: 12, y: 12 },
+        topRight: { x: 12, y: 12 },
+        bottomRight: { x: 12, y: 12 },
+        bottomLeft: { x: 12, y: 12 },
+      },
+    },
+    { style: 'stroke', strokeWidth: 6, strokeJoin: 'round', color: [0.8, 0.4, 0.2, 1] },
+  );
+
+  const rectPrepared = prepareDrawingRecording(finishDrawingRecorder(rectRecorder));
+  const rrectPrepared = prepareDrawingRecording(finishDrawingRecorder(rrectRecorder));
+  const rectDraw = rectPrepared.passes[0]?.steps[0]?.draw;
+  const rrectDraw = rrectPrepared.passes[0]?.steps[0]?.draw;
+
+  assertEquals(rectDraw?.kind, 'analyticRRect');
+  assertEquals(rrectDraw?.kind, 'analyticRRect');
+  if (rectDraw?.kind !== 'analyticRRect' || rrectDraw?.kind !== 'analyticRRect') {
+    throw new Error('expected analyticRRect stroke draws');
+  }
+  assertEquals(rectDraw.instance.xRadiiOrFlags[0], -2);
+  assertEquals(rectDraw.instance.xRadiiOrFlags[1], 0);
+  assertEquals(rrectDraw.instance.xRadiiOrFlags[0], -2);
+  assertEquals(rrectDraw.instance.radiiOrQuadXs, [12, 12, 12, 12]);
+});
+
+Deno.test('drawing prepared recording keeps single line path strokes on the stroke patch path so caps survive', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const lineRecorder = drawingContext.createRecorder();
+
+  recordDrawPath(
+    lineRecorder,
+    createPath2d(
+      { kind: 'moveTo', to: [20, 40] },
+      { kind: 'lineTo', to: [180, 92] },
+    ),
+    { style: 'stroke', strokeWidth: 4, strokeCap: 'round', color: [0.8, 0.4, 0.2, 1] },
+  );
+
+  const linePrepared = prepareDrawingRecording(finishDrawingRecorder(lineRecorder));
+  const lineDraw = linePrepared.passes[0]?.steps[0]?.draw;
+
+  assertEquals(lineDraw?.kind, 'pathStroke');
+  if (lineDraw?.kind !== 'pathStroke') {
+    throw new Error('expected pathStroke draw');
+  }
+  assertEquals(lineDraw.renderer.kind, 'tessellated-strokes');
+  assertEquals(
+    lineDraw.patches.some((patch) => patch.startCap === 'round' || patch.endCap === 'round'),
+    true,
+  );
+});
+
+Deno.test('drawing prepared recording routes thin rect fills through per-edge aa quad renderer', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  recordDrawShape(
+    recorder,
+    {
+      kind: 'rect',
+      rect: createRect(24, 36, 180, 1.5),
+    },
+    { style: 'fill', color: [0.2, 0.8, 0.6, 1] },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const draw = prepared.passes[0]?.steps[0]?.draw;
+
+  assertEquals(draw?.kind, 'perEdgeAAQuad');
+  if (draw?.kind !== 'perEdgeAAQuad') {
+    throw new Error('expected perEdgeAAQuad draw');
+  }
+  assertEquals(draw.renderer.kind, 'per-edge-aa-quad');
+  assertEquals(draw.instance.edgeFlags, [1, 1, 1, 1]);
+});
+
+Deno.test('drawing prepared recording routes convex quad path fills through per-edge aa quad renderer', () => {
+  const mock = createMockGpuContext();
+  const drawingContext = createDrawingContext(createDawnBackendContext(mock.context));
+  const recorder = drawingContext.createRecorder();
+
+  recordDrawPath(
+    recorder,
+    createPath2d(
+      { kind: 'moveTo', to: [48, 24] },
+      { kind: 'lineTo', to: [176, 40] },
+      { kind: 'lineTo', to: [160, 136] },
+      { kind: 'lineTo', to: [32, 120] },
+      { kind: 'close' },
+    ),
+    { style: 'fill', color: [0.7, 0.5, 0.2, 1] },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  const draw = prepared.passes[0]?.steps[0]?.draw;
+
+  assertEquals(draw?.kind, 'perEdgeAAQuad');
+  if (draw?.kind !== 'perEdgeAAQuad') {
+    throw new Error('expected perEdgeAAQuad draw');
+  }
+  assertEquals(draw.renderer.kind, 'per-edge-aa-quad');
+  assertEquals(draw.instance.points, [
+    [48, 24],
+    [176, 40],
+    [160, 136],
+    [32, 120],
+  ]);
 });
 
 Deno.test('drawing prepared recording expands stroke joins and caps', () => {
@@ -2956,13 +3452,11 @@ Deno.test('drawing prepared stroke patches emit square cap patches for open cont
   if (draw?.kind !== 'pathStroke') {
     throw new Error('expected pathStroke draw');
   }
-  assertEquals(draw.patches[0]?.patch.kind, 'line');
-  assertEquals(draw.patches[1]?.patch.kind, 'line');
-  assertEquals(draw.patches.at(-1)?.patch.kind, 'line');
-  assertEquals(draw.patches[0]?.joinControlPoint, [260, 315]);
-  assertEquals(draw.patches[1]?.joinControlPoint, [244, 315]);
-  assertEquals(draw.patches[0]?.patch.points, [[380, 315], [396, 315]]);
-  assertEquals(draw.patches[1]?.patch.points, [[244, 315], [260, 315]]);
+  assertEquals(draw.renderer.kind, 'tessellated-strokes');
+  assertEquals(
+    draw.patches.some((patch) => patch.startCap === 'square' || patch.endCap === 'square'),
+    true,
+  );
 });
 
 Deno.test('drawing prepared stroke patches emit synthetic cap patches for degenerate contours', () => {
@@ -3301,8 +3795,15 @@ Deno.test('drawing prepared recording applies dash pattern to strokes', () => {
   if (draw?.kind !== 'pathStroke') {
     throw new Error('expected pathStroke draw');
   }
-  assertEquals(draw.patches.length > 0, true);
-  assertEquals(draw.usesTessellatedStrokePatches, true);
+  assertEquals(draw.renderer.kind, 'tessellated-strokes');
+  assertEquals(
+    draw.patches.filter((patch) => patch.patch.kind === 'line').length > 1,
+    true,
+  );
+  assertEquals(
+    draw.patches.some((patch) => patch.contourStart || patch.contourEnd),
+    true,
+  );
 });
 
 Deno.test('drawing prepared recording scales hairline alpha coverage', () => {
@@ -3346,7 +3847,7 @@ Deno.test('drawing prepared recording adds non-AA inner fill render step for ren
   const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
   const renderSteps = prepared.passes[0]?.renderSteps ?? [];
 
-  assertEquals(renderSteps.map((step) => step.kind), ['fill-main']);
+  assertEquals(renderSteps.map((step) => step.kind), ['analytic-main']);
 });
 
 Deno.test('drawing prepared recording skips non-AA inner fill for non-rect path fills', () => {
@@ -3914,10 +4415,10 @@ Deno.test('dawn command buffer encodes arithmetic custom blender coefficients in
     buffer.label === 'drawing-step-payload'
   );
   const payload = new Float32Array(mock.created.mappedBuffers[payloadIndex]!);
-  assertAlmostEquals(payload[32]!, 0.25);
-  assertAlmostEquals(payload[33]!, 0.5);
-  assertAlmostEquals(payload[34]!, 0.25);
-  assertAlmostEquals(payload[35]!, 0.1);
+  assertAlmostEquals(payload[44]!, 0.25);
+  assertAlmostEquals(payload[45]!, 0.5);
+  assertAlmostEquals(payload[46]!, 0.25);
+  assertAlmostEquals(payload[47]!, 0.1);
 });
 
 Deno.test('dawn command buffer isolates tessellated stroke patches into a depth-tested render pass', () => {
@@ -3940,13 +4441,10 @@ Deno.test('dawn command buffer isolates tessellated stroke patches into a depth-
   recordDrawPath(
     recorder,
     createPath2d(
-      { kind: 'moveTo', to: [96, 16] },
-      { kind: 'lineTo', to: [160, 16] },
-      { kind: 'lineTo', to: [160, 80] },
-      { kind: 'lineTo', to: [96, 80] },
-      { kind: 'close' },
+      { kind: 'moveTo', to: [96, 40] },
+      { kind: 'cubicTo', control1: [112, 0], control2: [144, 96], to: [160, 40] },
     ),
-    { style: 'stroke', strokeWidth: 6 },
+    { style: 'stroke', strokeWidth: 6, strokeJoin: 'round', strokeCap: 'round' },
   );
 
   const commandBuffer = encodeDawnCommandBuffer(
@@ -3966,6 +4464,55 @@ Deno.test('dawn command buffer isolates tessellated stroke patches into a depth-
   );
   assertEquals(strokePatchPipeline?.depthStencil?.depthCompare, 'less');
   assertEquals(strokePatchPipeline?.depthStencil?.depthWriteEnabled, true);
+});
+
+Deno.test('drawing prepared recording marks tessellated fill and stroke passes as requiring MSAA', () => {
+  const context = createMockGpuContext().context;
+  const sharedContext = createDawnSharedContext(createDawnBackendContext(context));
+  const recorder = createDrawingRecorder(sharedContext);
+
+  recordDrawShape(recorder, {
+    kind: 'rect',
+    rect: { origin: [8, 8], size: { width: 40, height: 24 } },
+  }, {
+    style: 'fill',
+  });
+  recordDrawPath(
+    recorder,
+    createPath2d(
+      { kind: 'moveTo', to: [96, 40] },
+      { kind: 'cubicTo', control1: [112, 0], control2: [144, 96], to: [160, 40] },
+    ),
+    { style: 'stroke', strokeWidth: 6, strokeJoin: 'round', strokeCap: 'round' },
+  );
+
+  const prepared = prepareDrawingRecording(finishDrawingRecorder(recorder));
+  assertEquals(prepared.passes.length, 1);
+  assertEquals(prepared.passes[0]?.requiresMSAA, true);
+});
+
+Deno.test('dawn command buffer resolves transient MSAA color for Graphite tessellated passes on 1x targets', () => {
+  const mock = createMockGpuContext();
+  const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
+  const recorder = createDrawingRecorder(sharedContext);
+  const binding = createOffscreenBinding(mock.context);
+
+  recordDrawPath(
+    recorder,
+    createPath2d(
+      { kind: 'moveTo', to: [96, 40] },
+      { kind: 'cubicTo', control1: [112, 0], control2: [144, 96], to: [160, 40] },
+    ),
+    { style: 'stroke', strokeWidth: 6, strokeJoin: 'round', strokeCap: 'round' },
+  );
+
+  encodeDawnCommandBuffer(sharedContext, finishDrawingRecorder(recorder), binding);
+
+  assertEquals(
+    mock.created.textures.some((texture) => texture.label === 'drawing-pass-msaa-color'),
+    true,
+  );
+  assertEquals(mock.created.renderPipelines[0]?.multisample?.count, 4);
 });
 
 Deno.test('dawn stroke patch shader keeps Skia-like combined-edge solve structure', () => {
@@ -4064,8 +4611,8 @@ Deno.test('dawn resource provider reuses pipelines across command buffers', () =
   encodeDawnCommandBuffer(sharedContext, createRecording('stroke'), binding);
   encodeDawnCommandBuffer(sharedContext, createRecording('stroke'), binding);
 
-  assertEquals(mock.created.renderPipelines.length, 2);
-  assertEquals(mock.created.shaderModules.length, 3);
+  assertEquals(mock.created.renderPipelines.length, 1);
+  assertEquals(mock.created.shaderModules.length, 2);
   assertEquals(mock.created.bindGroupLayouts.length > 0, true);
   assertEquals(mock.created.pipelineLayouts.length > 0, true);
 });

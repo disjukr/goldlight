@@ -1,4 +1,5 @@
 import {
+  type CornerRadii,
   identityMatrix2d,
   type PathFillRule2d,
   type Point2d,
@@ -318,6 +319,52 @@ export type DrawingPreparedPathStroke = Readonly<{
   usesStencil: boolean;
 }>;
 
+export type DrawingPreparedAnalyticRRectInstance = Readonly<{
+  xRadiiOrFlags: readonly [number, number, number, number];
+  radiiOrQuadXs: readonly [number, number, number, number];
+  ltrbOrQuadYs: readonly [number, number, number, number];
+  boundsRect: Rect;
+}>;
+
+export type DrawingPreparedAnalyticRRect = Readonly<{
+  kind: 'analyticRRect';
+  renderer: DrawingRenderer;
+  instance: DrawingPreparedAnalyticRRectInstance;
+  color: readonly [number, number, number, number];
+  shader?: DrawingPreparedShader;
+  blendMode: DrawingBlendMode;
+  coverage: DrawingCoverage;
+  blender?: DrawingCustomBlender;
+  dstUsage: DrawingDstUsage;
+  transform: readonly [number, number, number, number, number, number];
+  bounds: Rect;
+  clipRect?: DrawingClipRect;
+  clip?: DrawingPreparedClip;
+  usesStencil: boolean;
+}>;
+
+export type DrawingPreparedPerEdgeAAQuadInstance = Readonly<{
+  points: readonly [Point2d, Point2d, Point2d, Point2d];
+  edgeFlags: readonly [number, number, number, number];
+}>;
+
+export type DrawingPreparedPerEdgeAAQuad = Readonly<{
+  kind: 'perEdgeAAQuad';
+  renderer: DrawingRenderer;
+  instance: DrawingPreparedPerEdgeAAQuadInstance;
+  color: readonly [number, number, number, number];
+  shader?: DrawingPreparedShader;
+  blendMode: DrawingBlendMode;
+  coverage: DrawingCoverage;
+  blender?: DrawingCustomBlender;
+  dstUsage: DrawingDstUsage;
+  transform: readonly [number, number, number, number, number, number];
+  bounds: Rect;
+  clipRect?: DrawingClipRect;
+  clip?: DrawingPreparedClip;
+  usesStencil: boolean;
+}>;
+
 export type DrawingPreparedTextGlyphInstance = Readonly<{
   glyphID: number;
   mask: NonNullable<DrawDirectMaskTextCommand['glyphs'][number]['mask']>;
@@ -372,6 +419,8 @@ export type DrawingPreparedSdfText = Readonly<{
 }>;
 
 export type DrawingPreparedDraw =
+  | DrawingPreparedAnalyticRRect
+  | DrawingPreparedPerEdgeAAQuad
   | DrawingPreparedPathFill
   | DrawingPreparedPathStroke
   | DrawingPreparedDirectMaskText
@@ -389,6 +438,7 @@ const bitmapTextRenderer: DrawingRenderer = Object.freeze({
   patchMode: 'text',
   requiresStencil: false,
   usesDepth: false,
+  requiresMSAA: false,
 });
 const sdfTextRenderer: DrawingRenderer = Object.freeze({
   name: 'SDFText',
@@ -396,6 +446,7 @@ const sdfTextRenderer: DrawingRenderer = Object.freeze({
   patchMode: 'text',
   requiresStencil: false,
   usesDepth: false,
+  requiresMSAA: false,
 });
 const defaultBlendMode: DrawingBlendMode = 'src-over';
 const advancedBlendModes = new Set<DrawingBlendMode>([
@@ -615,6 +666,366 @@ const transformRectBounds = (
       width: Math.max(0, maxX - minX),
       height: Math.max(0, maxY - minY),
     },
+  };
+};
+
+const clampCornerRadius = (
+  radius: CornerRadii | undefined,
+  halfWidth: number,
+  halfHeight: number,
+): CornerRadii => ({
+  x: Math.max(0, Math.min(radius?.x ?? 0, halfWidth)),
+  y: Math.max(0, Math.min(radius?.y ?? 0, halfHeight)),
+});
+
+const maxScaleFromTransform = (
+  transform: readonly [number, number, number, number, number, number],
+): number => {
+  const scaleX = Math.hypot(transform[0], transform[1]);
+  const scaleY = Math.hypot(transform[2], transform[3]);
+  return Math.max(scaleX, scaleY, epsilon);
+};
+
+const resolveAnalyticStrokeHalfWidth = (
+  strokeStyle: DrawingStrokeStyle,
+  transform: readonly [number, number, number, number, number, number],
+): number =>
+  strokeStyle.halfWidth <= 0.5
+    ? Math.max(0.5 / maxScaleFromTransform(transform), epsilon)
+    : strokeStyle.halfWidth;
+
+const getPackedFilledShapeInstance = (
+  shape: Extract<DrawShapeCommand['shape'], Readonly<{ kind: 'rect' | 'rrect' }>>,
+): DrawingPreparedAnalyticRRectInstance => {
+  if (shape.kind === 'rect') {
+    const rect = shape.rect;
+    const left = rect.origin[0];
+    const top = rect.origin[1];
+    const right = left + rect.size.width;
+    const bottom = top + rect.size.height;
+    return {
+      xRadiiOrFlags: [-1, -1, -1, -1],
+      radiiOrQuadXs: [left, right, right, left],
+      ltrbOrQuadYs: [top, top, bottom, bottom],
+      boundsRect: rect,
+    };
+  }
+  const rect = shape.rrect.rect;
+  const halfWidth = rect.size.width / 2;
+  const halfHeight = rect.size.height / 2;
+  const topLeft = clampCornerRadius(shape.rrect.topLeft, halfWidth, halfHeight);
+  const topRight = clampCornerRadius(shape.rrect.topRight, halfWidth, halfHeight);
+  const bottomRight = clampCornerRadius(shape.rrect.bottomRight, halfWidth, halfHeight);
+  const bottomLeft = clampCornerRadius(shape.rrect.bottomLeft, halfWidth, halfHeight);
+  return {
+    xRadiiOrFlags: [topLeft.x, topRight.x, bottomRight.x, bottomLeft.x],
+    radiiOrQuadXs: [topLeft.y, topRight.y, bottomRight.y, bottomLeft.y],
+    ltrbOrQuadYs: [
+      rect.origin[0],
+      rect.origin[1],
+      rect.origin[0] + rect.size.width,
+      rect.origin[1] + rect.size.height,
+    ],
+    boundsRect: rect,
+  };
+};
+
+const getPackedStrokeShapeInstance = (
+  shape: Extract<DrawShapeCommand['shape'], Readonly<{ kind: 'rect' | 'rrect' }>>,
+  strokeStyle: DrawingStrokeStyle,
+  transform: readonly [number, number, number, number, number, number],
+): DrawingPreparedAnalyticRRectInstance => {
+  const halfWidth = resolveAnalyticStrokeHalfWidth(strokeStyle, transform);
+  if (shape.kind === 'rect') {
+    const rect = shape.rect;
+    return {
+      xRadiiOrFlags: [-2, 0, halfWidth, strokeStyle.joinLimit],
+      radiiOrQuadXs: [0, 0, 0, 0],
+      ltrbOrQuadYs: [
+        rect.origin[0],
+        rect.origin[1],
+        rect.origin[0] + rect.size.width,
+        rect.origin[1] + rect.size.height,
+      ],
+      boundsRect: {
+        origin: [rect.origin[0] - halfWidth, rect.origin[1] - halfWidth],
+        size: {
+          width: rect.size.width + (2 * halfWidth),
+          height: rect.size.height + (2 * halfWidth),
+        },
+      },
+    };
+  }
+  const rect = shape.rrect.rect;
+  const cornerLimitX = rect.size.width / 2;
+  const cornerLimitY = rect.size.height / 2;
+  const topLeft = clampCornerRadius(shape.rrect.topLeft, cornerLimitX, cornerLimitY);
+  const topRight = clampCornerRadius(shape.rrect.topRight, cornerLimitX, cornerLimitY);
+  const bottomRight = clampCornerRadius(shape.rrect.bottomRight, cornerLimitX, cornerLimitY);
+  const bottomLeft = clampCornerRadius(shape.rrect.bottomLeft, cornerLimitX, cornerLimitY);
+  return {
+    xRadiiOrFlags: [-2, 0, halfWidth, strokeStyle.joinLimit],
+    radiiOrQuadXs: [topLeft.x, topRight.x, bottomRight.x, bottomLeft.x],
+    ltrbOrQuadYs: [
+      rect.origin[0],
+      rect.origin[1],
+      rect.origin[0] + rect.size.width,
+      rect.origin[1] + rect.size.height,
+    ],
+    boundsRect: {
+      origin: [rect.origin[0] - halfWidth, rect.origin[1] - halfWidth],
+      size: {
+        width: rect.size.width + (2 * halfWidth),
+        height: rect.size.height + (2 * halfWidth),
+      },
+    },
+  };
+};
+
+const getAnalyticFillInstance = (
+  shape: DrawShapeCommand['shape'],
+): DrawingPreparedAnalyticRRectInstance | null => {
+  if (shape.kind !== 'rect' && shape.kind !== 'rrect') {
+    return null;
+  }
+  return getPackedFilledShapeInstance(shape);
+};
+
+const getPerEdgeAAQuadInstance = (
+  shape: DrawShapeCommand['shape'],
+): DrawingPreparedPerEdgeAAQuadInstance | null => {
+  if (shape.kind !== 'rect') {
+    return null;
+  }
+  const x0 = shape.rect.origin[0];
+  const y0 = shape.rect.origin[1];
+  const x1 = x0 + shape.rect.size.width;
+  const y1 = y0 + shape.rect.size.height;
+  return {
+    points: [
+      [x0, y0],
+      [x1, y0],
+      [x1, y1],
+      [x0, y1],
+    ],
+    edgeFlags: [1, 1, 1, 1],
+  };
+};
+
+const shouldUsePerEdgeAAQuad = (
+  shape: DrawShapeCommand['shape'],
+  paint: DrawingPaint,
+): boolean => {
+  if (shape.kind !== 'rect') {
+    return false;
+  }
+  const style = paint.style ?? 'fill';
+  if (style !== 'fill') {
+    return false;
+  }
+  const { width, height } = shape.rect.size;
+  const minDimension = Math.min(Math.abs(width), Math.abs(height));
+  return minDimension > 0 && minDimension <= 2;
+};
+
+const matchesRectPath = (path: DrawingPath2d): DrawShapeCommand['shape'] | null => {
+  const verbs = path.verbs;
+  if (verbs.length !== 5) {
+    return null;
+  }
+  const [moveTo, line1, line2, line3, close] = verbs;
+  if (
+    moveTo.kind !== 'moveTo' ||
+    line1.kind !== 'lineTo' ||
+    line2.kind !== 'lineTo' ||
+    line3.kind !== 'lineTo' ||
+    close.kind !== 'close'
+  ) {
+    return null;
+  }
+  const p0 = moveTo.to;
+  const p1 = line1.to;
+  const p2 = line2.to;
+  const p3 = line3.to;
+  if (
+    Math.abs(p1[1] - p0[1]) > epsilon ||
+    Math.abs(p2[0] - p1[0]) > epsilon ||
+    Math.abs(p3[1] - p2[1]) > epsilon ||
+    Math.abs(p3[0] - p0[0]) > epsilon ||
+    Math.abs(p2[1] - p3[1]) > epsilon
+  ) {
+    return null;
+  }
+  return {
+    kind: 'rect',
+    rect: {
+      origin: [Math.min(p0[0], p2[0]), Math.min(p0[1], p2[1])],
+      size: {
+        width: Math.abs(p2[0] - p0[0]),
+        height: Math.abs(p2[1] - p0[1]),
+      },
+    },
+  };
+};
+
+const matchesRRectPath = (path: DrawingPath2d): DrawShapeCommand['shape'] | null => {
+  const verbs = path.verbs;
+  if (verbs.length !== 10) {
+    return null;
+  }
+  const [moveTo, line1, quad1, line2, quad2, line3, quad3, line4, quad4, close] = verbs;
+  if (
+    moveTo.kind !== 'moveTo' ||
+    line1.kind !== 'lineTo' ||
+    quad1.kind !== 'quadTo' ||
+    line2.kind !== 'lineTo' ||
+    quad2.kind !== 'quadTo' ||
+    line3.kind !== 'lineTo' ||
+    quad3.kind !== 'quadTo' ||
+    line4.kind !== 'lineTo' ||
+    quad4.kind !== 'quadTo' ||
+    close.kind !== 'close'
+  ) {
+    return null;
+  }
+
+  const x = quad4.control[0];
+  const y = quad4.control[1];
+  const width = quad1.control[0] - x;
+  const height = quad2.control[1] - y;
+  if (width < -epsilon || height < -epsilon) {
+    return null;
+  }
+
+  const topLeft: CornerRadii = {
+    x: moveTo.to[0] - x,
+    y: line4.to[1] - y,
+  };
+  const topRight: CornerRadii = {
+    x: x + width - line1.to[0],
+    y: quad1.to[1] - y,
+  };
+  const bottomRight: CornerRadii = {
+    x: x + width - quad2.to[0],
+    y: y + height - line2.to[1],
+  };
+  const bottomLeft: CornerRadii = {
+    x: line3.to[0] - x,
+    y: y + height - quad3.to[1],
+  };
+
+  if (
+    Math.abs(moveTo.to[1] - y) > epsilon ||
+    Math.abs(line1.to[1] - y) > epsilon ||
+    !pointsEqual(quad1.control, [x + width, y]) ||
+    !pointsEqual(quad1.to, [x + width, y + topRight.y]) ||
+    !pointsEqual(line2.to, [x + width, y + height - bottomRight.y]) ||
+    !pointsEqual(quad2.control, [x + width, y + height]) ||
+    !pointsEqual(quad2.to, [x + width - bottomRight.x, y + height]) ||
+    !pointsEqual(line3.to, [x + bottomLeft.x, y + height]) ||
+    !pointsEqual(quad3.control, [x, y + height]) ||
+    !pointsEqual(quad3.to, [x, y + height - bottomLeft.y]) ||
+    !pointsEqual(line4.to, [x, y + topLeft.y]) ||
+    !pointsEqual(quad4.control, [x, y]) ||
+    !pointsEqual(quad4.to, [x + topLeft.x, y]) ||
+    !pointsEqual(quad4.to, moveTo.to)
+  ) {
+    return null;
+  }
+
+  return {
+    kind: 'rrect',
+    rrect: {
+      rect: {
+        origin: [x, y],
+        size: {
+          width: Math.max(0, width),
+          height: Math.max(0, height),
+        },
+      },
+      topLeft,
+      topRight,
+      bottomRight,
+      bottomLeft,
+    },
+  };
+};
+
+const getAnalyticShapeFromPath = (path: DrawingPath2d): DrawShapeCommand['shape'] | null =>
+  matchesRectPath(path) ?? matchesRRectPath(path);
+
+const getQuadBounds = (
+  points: readonly [Point2d, Point2d, Point2d, Point2d],
+): Rect => {
+  const xs = points.map((point) => point[0]);
+  const ys = points.map((point) => point[1]);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  return {
+    origin: [minX, minY],
+    size: {
+      width: maxX - minX,
+      height: maxY - minY,
+    },
+  };
+};
+
+const isConvexQuad = (
+  points: readonly [Point2d, Point2d, Point2d, Point2d],
+): boolean => {
+  let winding = 0;
+  for (let index = 0; index < 4; index += 1) {
+    const current = points[index]!;
+    const next = points[(index + 1) % 4]!;
+    const after = points[(index + 2) % 4]!;
+    const turn = ((next[0] - current[0]) * (after[1] - next[1])) -
+      ((next[1] - current[1]) * (after[0] - next[0]));
+    if (Math.abs(turn) <= epsilon) {
+      return false;
+    }
+    const sign = Math.sign(turn);
+    if (winding === 0) {
+      winding = sign;
+    } else if (sign !== winding) {
+      return false;
+    }
+  }
+  return true;
+};
+
+const matchesConvexQuadPath = (
+  path: DrawingPath2d,
+): DrawingPreparedPerEdgeAAQuadInstance | null => {
+  const verbs = path.verbs;
+  if (verbs.length !== 5) {
+    return null;
+  }
+  const [moveTo, line1, line2, line3, close] = verbs;
+  if (
+    moveTo.kind !== 'moveTo' ||
+    line1.kind !== 'lineTo' ||
+    line2.kind !== 'lineTo' ||
+    line3.kind !== 'lineTo' ||
+    close.kind !== 'close'
+  ) {
+    return null;
+  }
+  const points = [moveTo.to, line1.to, line2.to, line3.to] as const;
+  for (let index = 0; index < points.length; index += 1) {
+    for (let other = index + 1; other < points.length; other += 1) {
+      if (pointsEqual(points[index]!, points[other]!)) {
+        return null;
+      }
+    }
+  }
+  if (!isConvexQuad(points)) {
+    return null;
+  }
+  return {
+    points,
+    edgeFlags: [1, 1, 1, 1],
   };
 };
 
@@ -4928,11 +5339,265 @@ const preparePathFill = (
   };
 };
 
+const preparePreparedClipForCommand = (
+  command: DrawPathCommand | DrawShapeCommand,
+): Readonly<{
+  preparedClipStack: ReturnType<typeof visitDrawingClipStackForDraw>;
+  preparedClip: DrawingPreparedClip | undefined;
+}> => {
+  const preparedClipStack = visitDrawingClipStackForDraw(
+    command.clipStack,
+    (path, transform) => {
+      const subpaths = flattenMidpointContourSubpaths(path, transform);
+      if (!subpaths || subpaths.length === 0) {
+        return null;
+      }
+      const fillSubpaths = closeSubpathsForFill(subpaths);
+      return {
+        bounds: computePathBounds(path, transform),
+        triangles: prepareFillTriangles(fillSubpaths, path.fillRule) ?? undefined,
+      };
+    },
+    (bounds, candidate) => candidate ? intersectBounds(bounds, candidate) : bounds,
+    computeBounds,
+  );
+  return {
+    preparedClipStack,
+    preparedClip: createPreparedDrawClip(preparedClipStack),
+  };
+};
+
+const prepareAnalyticShape = (
+  recording: Pick<DrawingRecording, 'caps' | 'targetFormat'>,
+  rendererProvider: DrawingRendererProvider,
+  command: DrawShapeCommand,
+): DrawingDrawPreparation | null => {
+  const style = command.paint.style ?? 'fill';
+  if (style === 'fill' && shouldUsePerEdgeAAQuad(command.shape, command.paint)) {
+    const instance = getPerEdgeAAQuadInstance(command.shape);
+    if (!instance) {
+      return null;
+    }
+    const { preparedClipStack, preparedClip } = preparePreparedClipForCommand(command);
+    const color = resolveFillColor(command.paint);
+    const shader = resolvePaintShader(command.paint);
+    const blendMode = resolveBlendMode(command.paint);
+    const coverage = resolveCoverage(command.paint, true);
+    const dstUsage = computeDstUsage(
+      recording,
+      color,
+      shader,
+      preparedClip,
+      coverage,
+      blendMode,
+      command.paint.blender,
+    );
+    return {
+      supported: true,
+      draw: {
+        kind: 'perEdgeAAQuad',
+        renderer: rendererProvider.perEdgeAAQuad(),
+        instance,
+        color,
+        shader,
+        blendMode,
+        coverage,
+        blender: command.paint.blender,
+        dstUsage,
+        transform: command.transform,
+        bounds: transformRectBounds(getQuadBounds(instance.points), command.transform),
+        clipRect: preparedClipStack.bounds,
+        clip: preparedClip,
+        usesStencil: Boolean(preparedClipStack.stencilClip?.elements?.length),
+      },
+    };
+  }
+  const instance = style === 'fill'
+    ? getAnalyticFillInstance(command.shape)
+    : command.shape.kind === 'rect' || command.shape.kind === 'rrect'
+    ? getPackedStrokeShapeInstance(
+      command.shape,
+      resolveStrokeStyle(command.paint),
+      command.transform,
+    )
+    : null;
+  if (!instance) {
+    return null;
+  }
+  const { preparedClipStack, preparedClip } = preparePreparedClipForCommand(command);
+  const color = style === 'fill'
+    ? resolveFillColor(command.paint)
+    : resolveStrokeColor(command.paint);
+  const shader = resolvePaintShader(command.paint);
+  const blendMode = resolveBlendMode(command.paint);
+  const coverage = resolveCoverage(command.paint, true);
+  const dstUsage = computeDstUsage(
+    recording,
+    color,
+    shader,
+    preparedClip,
+    coverage,
+    blendMode,
+    command.paint.blender,
+  );
+  return {
+    supported: true,
+    draw: {
+      kind: 'analyticRRect',
+      renderer: rendererProvider.analyticRRect(),
+      instance,
+      color,
+      shader,
+      blendMode,
+      coverage,
+      blender: command.paint.blender,
+      dstUsage,
+      transform: command.transform,
+      bounds: transformRectBounds(instance.boundsRect, command.transform),
+      clipRect: preparedClipStack.bounds,
+      clip: preparedClip,
+      usesStencil: Boolean(preparedClipStack.stencilClip?.elements?.length),
+    },
+  };
+};
+
+const prepareAnalyticPath = (
+  recording: Pick<DrawingRecording, 'caps' | 'targetFormat'>,
+  rendererProvider: DrawingRendererProvider,
+  command: DrawPathCommand,
+): DrawingDrawPreparation | null => {
+  const style = command.paint.style ?? 'fill';
+  const strokeStyle = style === 'stroke' ? resolveStrokeStyle(command.paint) : null;
+  const shape = getAnalyticShapeFromPath(command.path);
+  if (!shape) {
+    const quad = matchesConvexQuadPath(command.path);
+    if (!quad || style !== 'fill') {
+      return null;
+    }
+    const { preparedClipStack, preparedClip } = preparePreparedClipForCommand(command);
+    const color = resolveFillColor(command.paint);
+    const shader = resolvePaintShader(command.paint);
+    const blendMode = resolveBlendMode(command.paint);
+    const coverage = resolveCoverage(command.paint, true);
+    const dstUsage = computeDstUsage(
+      recording,
+      color,
+      shader,
+      preparedClip,
+      coverage,
+      blendMode,
+      command.paint.blender,
+    );
+    return {
+      supported: true,
+      draw: {
+        kind: 'perEdgeAAQuad',
+        renderer: rendererProvider.perEdgeAAQuad(),
+        instance: quad,
+        color,
+        shader,
+        blendMode,
+        coverage,
+        blender: command.paint.blender,
+        dstUsage,
+        transform: command.transform,
+        bounds: transformRectBounds(getQuadBounds(quad.points), command.transform),
+        clipRect: preparedClipStack.bounds,
+        clip: preparedClip,
+        usesStencil: Boolean(preparedClipStack.stencilClip?.elements?.length),
+      },
+    };
+  }
+  const { preparedClipStack, preparedClip } = preparePreparedClipForCommand(command);
+  const color = style === 'fill'
+    ? resolveFillColor(command.paint)
+    : resolveStrokeColor(command.paint);
+  const shader = resolvePaintShader(command.paint);
+  const blendMode = resolveBlendMode(command.paint);
+  const coverage = resolveCoverage(command.paint, true);
+  const dstUsage = computeDstUsage(
+    recording,
+    color,
+    shader,
+    preparedClip,
+    coverage,
+    blendMode,
+    command.paint.blender,
+  );
+
+  if (style === 'fill' && shouldUsePerEdgeAAQuad(shape, command.paint)) {
+    const instance = getPerEdgeAAQuadInstance(shape);
+    if (!instance) {
+      return null;
+    }
+    return {
+      supported: true,
+      draw: {
+        kind: 'perEdgeAAQuad',
+        renderer: rendererProvider.perEdgeAAQuad(),
+        instance,
+        color,
+        shader,
+        blendMode,
+        coverage,
+        blender: command.paint.blender,
+        dstUsage,
+        transform: command.transform,
+        bounds: transformRectBounds(getQuadBounds(instance.points), command.transform),
+        clipRect: preparedClipStack.bounds,
+        clip: preparedClip,
+        usesStencil: Boolean(preparedClipStack.stencilClip?.elements?.length),
+      },
+    };
+  }
+
+  const instance = style === 'fill'
+    ? getAnalyticFillInstance(shape)
+    : shape.kind === 'rect' || shape.kind === 'rrect'
+    ? getPackedStrokeShapeInstance(shape, strokeStyle!, command.transform)
+    : null;
+  if (!instance) {
+    return null;
+  }
+  return {
+    supported: true,
+    draw: {
+      kind: 'analyticRRect',
+      renderer: rendererProvider.analyticRRect(),
+      instance,
+      color,
+      shader,
+      blendMode,
+      coverage,
+      blender: command.paint.blender,
+      dstUsage,
+      transform: command.transform,
+      bounds: transformRectBounds(instance.boundsRect, command.transform),
+      clipRect: preparedClipStack.bounds,
+      clip: preparedClip,
+      usesStencil: Boolean(preparedClipStack.stencilClip?.elements?.length),
+    },
+  };
+};
+
 export const prepareDrawingPathCommand = (
   recording: Pick<DrawingRecording, 'caps' | 'targetFormat'>,
   rendererProvider: DrawingRendererProvider,
   command: DrawPathCommand | DrawShapeCommand,
-): DrawingDrawPreparation => preparePathFill(recording, rendererProvider, command);
+): DrawingDrawPreparation => {
+  if (command.kind === 'drawShape') {
+    const analytic = prepareAnalyticShape(recording, rendererProvider, command);
+    if (analytic) {
+      return analytic;
+    }
+  } else {
+    const analytic = prepareAnalyticPath(recording, rendererProvider, command);
+    if (analytic) {
+      return analytic;
+    }
+  }
+  return preparePathFill(recording, rendererProvider, command);
+};
 
 export const prepareDrawingTextCommand = (
   recording: Pick<DrawingRecording, 'caps' | 'targetFormat'>,

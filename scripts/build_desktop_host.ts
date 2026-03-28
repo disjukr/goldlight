@@ -3,6 +3,7 @@ import { dirname, fromFileUrl, resolve } from '@std/path';
 const repoRoot = resolve(dirname(fromFileUrl(import.meta.url)), '..');
 const manifestPath = resolve(repoRoot, 'packages', 'desktop', 'native', 'Cargo.toml');
 const checkOnly = Deno.args.includes('--check');
+const release = Deno.args.includes('--release');
 const command = new Deno.Command('mise', {
   args: [
     'exec',
@@ -10,6 +11,7 @@ const command = new Deno.Command('mise', {
     '--',
     'cargo',
     checkOnly ? 'check' : 'build',
+    ...(release ? ['--release'] : []),
     '--manifest-path',
     manifestPath,
   ],

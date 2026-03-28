@@ -13,7 +13,6 @@ import {
   type RuntimeResidency,
   type TextureResidency,
 } from '@goldlight/gpu';
-import { EXRLoader } from 'npm:three@0.180.0/examples/jsm/loaders/EXRLoader.js';
 import builtInForwardShader from './shaders/built_in_forward_unlit.wgsl' with { type: 'text' };
 import builtInForwardLitShader from './shaders/built_in_forward_lit.wgsl' with { type: 'text' };
 import builtInForwardTexturedShader from './shaders/built_in_forward_unlit_textured.wgsl' with {
@@ -642,7 +641,6 @@ const pathtracedAccumulationStates = new WeakMap<
   PathtracedAccumulationState
 >();
 const pathtracedMeshSceneStates = new WeakMap<RenderContextBinding, PathtracedMeshSceneState>();
-const exrLoader = new EXRLoader();
 type ForwardEnvironmentPrefilterLevel = Readonly<{
   width: number;
   height: number;
@@ -745,6 +743,33 @@ const queueForwardEnvironmentPrefilter = (
     },
   }, [bytes]);
   return true;
+};
+
+const queueForwardEnvironmentDecodeFallback = (
+  cacheId: string,
+  environmentMap: ForwardEnvironmentMap,
+): void => {
+  if (forwardEnvironmentPrefilterStates.get(cacheId)?.status === 'pending') {
+    return;
+  }
+
+  forwardEnvironmentPrefilterStates.set(cacheId, { status: 'pending' });
+  void loadExrParser()
+    .then((parseExr) => decodeEnvironmentImageAsset(environmentMap.image, parseExr))
+    .then((decoded) => {
+      forwardEnvironmentPrefilterStates.set(cacheId, {
+        status: 'ready',
+        width: decoded.width,
+        height: decoded.height,
+        levels: [{ width: decoded.width, height: decoded.height, data: decoded.data }],
+      });
+    })
+    .catch((error) => {
+      forwardEnvironmentPrefilterStates.set(cacheId, {
+        status: 'error',
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
 };
 
 const pathtracedFallbackTextureBindings = new WeakMap<
@@ -3299,6 +3324,11 @@ const createDefaultEnvironmentPixels = (): Uint16Array => {
 
 const decodeEnvironmentImageAsset = (
   image: ImageAsset,
+  parseExr: (bytes: ArrayBuffer) => {
+    width: number;
+    height: number;
+    data: Uint16Array;
+  },
 ): Readonly<{
   width: number;
   height: number;
@@ -3314,11 +3344,11 @@ const decodeEnvironmentImageAsset = (
     );
   }
 
-  const parsed = exrLoader.parse(
+  const parsed = parseExr(
     image.bytes.buffer.slice(
       image.bytes.byteOffset,
       image.bytes.byteOffset + image.bytes.byteLength,
-    ),
+    ) as ArrayBuffer,
   ) as {
     width: number;
     height: number;
@@ -3330,6 +3360,32 @@ const decodeEnvironmentImageAsset = (
     height: parsed.height,
     data: parsed.data,
   };
+};
+
+let exrParseLoaderPromise:
+  | Promise<
+    (bytes: ArrayBuffer) => {
+      width: number;
+      height: number;
+      data: Uint16Array;
+    }
+  >
+  | null = null;
+
+const loadExrParser = async (): Promise<
+  (bytes: ArrayBuffer) => {
+    width: number;
+    height: number;
+    data: Uint16Array;
+  }
+> => {
+  if (!exrParseLoaderPromise) {
+    const environmentExrModuleSpecifier = './environment_exr.ts';
+    exrParseLoaderPromise = import(environmentExrModuleSpecifier).then(
+      ({ parseExrEnvironmentImage }) => parseExrEnvironmentImage,
+    );
+  }
+  return await exrParseLoaderPromise;
 };
 
 const halfFloatScratchBuffer = new ArrayBuffer(4);
@@ -3865,14 +3921,7 @@ const ensureForwardEnvironmentTexture = (
   if (pendingState?.status !== 'pending') {
     const queued = queueForwardEnvironmentPrefilter(cacheId, environmentMap);
     if (!queued || pendingState?.status === 'error') {
-      const decoded = decodeEnvironmentImageAsset(environmentMap.image);
-      const uploaded = uploadForwardEnvironmentTexture(context, residency, cacheId, decoded);
-      forwardEnvironmentPrefilterStates.delete(cacheId);
-      return {
-        residency: uploaded,
-        intensity: environmentMap.intensity ?? 0,
-        ready: true,
-      };
+      queueForwardEnvironmentDecodeFallback(cacheId, environmentMap);
     }
   }
 

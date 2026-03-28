@@ -1,7 +1,7 @@
 examples/browser_forward/dist/main.js
 examples/browser_textured_forward/dist/main.js
 examples/assets/sponza
-vendor/sdl2
+examples/**/*.exe
 packages/**/native/target
 packages/drawing/examples/render_tiger_png/tiger.png
 packages/**/out.png

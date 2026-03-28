@@ -23,6 +23,35 @@ Type-check with:
 deno check --unstable-ffi --unstable-webgpu --unstable-raw-imports examples/byow_react_glyphs_demo/main.tsx examples/byow_react_glyphs_demo/app.tsx
 ```
 
+Compile to a single executable with:
+
+```sh
+deno task compile examples/byow_react_glyphs_demo
+```
+
+This writes a debug build next to the entrypoint as
+`examples/byow_react_glyphs_demo/byow_react_glyphs_demo.exe` by default. The local demo resources
+listed in [`goldlight.json`](./goldlight.json) are included, and common runtime dependencies are
+picked up automatically:
+
+- desktop worker modules
+- desktop/text native host DLLs
+
+Build a release executable with:
+
+```sh
+deno task compile examples/byow_react_glyphs_demo --release
+```
+
+On Windows, release builds default to `--no-terminal`, so the executable opens without a console
+window.
+
+Override the output path with:
+
+```sh
+deno task compile examples/byow_react_glyphs_demo --output tmp/byow_react_glyphs_custom.exe
+```
+
 Expected output:
 
 - a dark 2D canvas window with four glyph rendering cards

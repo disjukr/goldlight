@@ -103,6 +103,15 @@ const desktopHostSystemByCode = new Map<number, DesktopHostSystem>([
 
 const repoRoot = join(dirname(fromFileUrl(import.meta.url)), '..', '..', '..');
 
+const pathExists = (path: string): boolean => {
+  try {
+    Deno.statSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 const getDefaultDesktopHostLibraryPath = (): string => {
   const extension = Deno.build.os === 'windows'
     ? 'dll'
@@ -112,8 +121,11 @@ const getDefaultDesktopHostLibraryPath = (): string => {
   const fileName = Deno.build.os === 'windows'
     ? 'goldlight_desktop_host.dll'
     : `libgoldlight_desktop_host.${extension}`;
-
-  return join(repoRoot, 'packages', 'desktop', 'native', 'target', 'debug', fileName);
+  const debugPath = join(repoRoot, 'packages', 'desktop', 'native', 'target', 'debug', fileName);
+  if (pathExists(debugPath)) {
+    return debugPath;
+  }
+  return join(repoRoot, 'packages', 'desktop', 'native', 'target', 'release', fileName);
 };
 
 const decodeHostSystem = (code: number): DesktopHostSystem => {

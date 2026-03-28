@@ -29,6 +29,35 @@ Type-check with:
 deno task example:byow:react-bunny:check
 ```
 
+Compile to a single executable with:
+
+```sh
+deno task compile examples/byow_react_bunny_demo
+```
+
+This writes a debug build next to the entrypoint as
+`examples/byow_react_bunny_demo/byow_react_bunny_demo.exe` by default. The local demo resources
+listed in [`goldlight.json`](./goldlight.json) are included, and common runtime dependencies are
+picked up automatically:
+
+- desktop worker modules
+- desktop/text native host DLLs when the module graph requires them
+
+Build a release executable with:
+
+```sh
+deno task compile examples/byow_react_bunny_demo --release
+```
+
+On Windows, release builds default to `--no-terminal`, so the executable opens without a console
+window.
+
+Override the output path with:
+
+```sh
+deno task compile examples/byow_react_bunny_demo --output tmp/byow_react_bunny_custom.exe
+```
+
 Expected output:
 
 - a slowly rotating Stanford Bunny centered in the frame

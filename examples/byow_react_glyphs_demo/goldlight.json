@@ -1,0 +1,7 @@
+{
+  "entrypoint": "./main.tsx",
+  "output": "./byow_react_glyphs_demo.exe",
+  "includes": [
+    "./app.tsx"
+  ]
+}

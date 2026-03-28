@@ -102,6 +102,15 @@ type TextHostLibrary = Deno.DynamicLibrary<{
 
 const repoRoot = join(dirname(fromFileUrl(import.meta.url)), '..', '..', '..');
 
+const pathExists = (path: string): boolean => {
+  try {
+    Deno.statSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 const getDefaultTextHostLibraryPath = (): string => {
   const extension = Deno.build.os === 'windows'
     ? 'dll'
@@ -111,8 +120,11 @@ const getDefaultTextHostLibraryPath = (): string => {
   const fileName = Deno.build.os === 'windows'
     ? 'goldlight_text_host.dll'
     : `libgoldlight_text_host.${extension}`;
-
-  return join(repoRoot, 'packages', 'text', 'native', 'target', 'debug', fileName);
+  const debugPath = join(repoRoot, 'packages', 'text', 'native', 'target', 'debug', fileName);
+  if (pathExists(debugPath)) {
+    return debugPath;
+  }
+  return join(repoRoot, 'packages', 'text', 'native', 'target', 'release', fileName);
 };
 
 const decodeMetrics = (bytes: Uint8Array): FontMetrics => {

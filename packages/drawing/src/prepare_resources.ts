@@ -1831,10 +1831,7 @@ const prepareStepResources = (
       clipTextureView: clipAtlasView,
       sampledTextureView,
       textAtlasViews,
-      sampledTextureFilter:
-        step.draw.kind === 'directMaskText'
-          ? 'nearest'
-          : 'linear',
+      sampledTextureFilter: step.draw.kind === 'directMaskText' ? 'nearest' : 'linear',
       clipDrawKey: getClipDrawKey(step),
       vertexBuffer: null,
       instanceBuffer,

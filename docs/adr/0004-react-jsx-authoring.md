@@ -6,9 +6,9 @@ Accepted
 
 ## Decision
 
-`@goldlight/react` exposes a JSX authoring surface that lowers into goldlight-owned scene data. JSX
-is the package's public authoring boundary, but React does not become the source of truth for core
-runtime state.
+`@disjukr/goldlight/react` exposes a JSX authoring surface that lowers into goldlight-owned scene
+data. JSX is the package's public authoring boundary, but React does not become the source of truth
+for core runtime state.
 
 The package now owns:
 

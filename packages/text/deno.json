@@ -1,5 +1,0 @@
-{
-  "name": "@goldlight/text",
-  "version": "0.0.0",
-  "exports": "./mod.ts"
-}

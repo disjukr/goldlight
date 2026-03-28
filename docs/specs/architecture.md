@@ -20,31 +20,30 @@ The runtime is split into explicit data and execution stages:
 
 ## Packages
 
-- `packages/ir`: schema and generated types for serializable scene IR.
+- `engine/ir`: schema and generated types for serializable scene IR.
 - BDL schema files must declare an explicit standard. `goldlight` currently uses the `conventional`
   standard for scene IR modules.
-- `packages/math`: low-level deterministic math and sampling helpers, including reusable noise
+- `engine/math`: low-level deterministic math and sampling helpers, including reusable noise
   functions.
-- `packages/geometry`: shape definitions, mesh primitive generation, triangulation, and local
+- `engine/geometry`: shape definitions, mesh primitive generation, triangulation, and local
   SDF-to-mesh extraction helpers.
-- `packages/spatial`: spatial indexing, broad-phase query helpers, and screen-to-world ray helpers.
-- `packages/renderer`: pure functions that evaluate IR into renderable CPU state.
-- `packages/math`: reusable CPU-side quaternion and other math helpers beyond deterministic noise.
-- `packages/geometry`: mesh bounds plus generated mesh normals/tangents alongside shape helpers.
-- `packages/gpu`: explicit WebGPU context and residency management helpers.
-- `packages/renderer`: pass contracts, renderer descriptors, and frame planning.
-- `packages/renderer` also owns renderer-side id-buffer picking for mesh-node selection and
-  readback.
-- `packages/renderer` also owns intermediate scene-color targets plus renderer-managed post-process
+- `engine/spatial`: spatial indexing, broad-phase query helpers, and screen-to-world ray helpers.
+- `engine/renderer`: pure functions that evaluate IR into renderable CPU state.
+- `engine/math`: reusable CPU-side quaternion and other math helpers beyond deterministic noise.
+- `engine/geometry`: mesh bounds plus generated mesh normals/tangents alongside shape helpers.
+- `engine/gpu`: explicit WebGPU context and residency management helpers.
+- `engine/renderer`: pass contracts, renderer descriptors, and frame planning.
+- `engine/renderer` also owns renderer-side id-buffer picking for mesh-node selection and readback.
+- `engine/renderer` also owns intermediate scene-color targets plus renderer-managed post-process
   pass execution.
 - renderer descriptors also publish capability contracts for primitive/material compatibility before
   execution. See [`renderer-capabilities.md`](./renderer-capabilities.md).
-- `packages/procedural`: deterministic CPU-side procedural texture, volume, and future field
+- `engine/procedural`: deterministic CPU-side procedural texture, volume, and future field
   generation helpers.
-- `packages/raytrace`: tracing acceleration and traversal helpers for ray or path-traced execution.
-- `packages/importers`: format parsers that normalize input into Scene IR.
-- `packages/react`: declarative scene authoring that feeds the same IR/renderer pipeline.
-- `packages/exporters`: output encoders that serialize renderer results such as PNG.
+- `engine/raytrace`: tracing acceleration and traversal helpers for ray or path-traced execution.
+- `engine/importers`: format parsers that normalize input into Scene IR.
+- `engine/react`: declarative scene authoring that feeds the same IR/renderer pipeline.
+- `engine/exporters`: output encoders that serialize renderer results such as PNG.
 - device-loss recovery remains a caller-visible workflow rather than an implicit runtime reset. See
   [`device-loss-recovery.md`](./device-loss-recovery.md).
 

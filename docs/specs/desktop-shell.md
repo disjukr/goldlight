@@ -1,6 +1,6 @@
 # Desktop Shell
 
-`@goldlight/desktop` is a rendering-first desktop shell for Deno applications. It provides:
+`@disjukr/goldlight/desktop` is a rendering-first desktop shell for Deno applications. It provides:
 
 - process-level desktop initialization through `initializeMain()` / `disposeMain()`
 - window creation through `createWindow(...)`
@@ -34,7 +34,7 @@ The native host exposes a narrow ABI:
 - query window state
 - query raw surface handles for `Deno.UnsafeWindowSurface`
 
-App authors do not call the FFI layer directly. They go through `@goldlight/desktop`.
+App authors do not call the FFI layer directly. They go through `@disjukr/goldlight/desktop`.
 
 ## Process Model
 

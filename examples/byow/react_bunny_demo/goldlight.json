@@ -1,0 +1,8 @@
+{
+  "entrypoint": "./main.tsx",
+  "output": "./byow_react_bunny_demo.exe",
+  "includes": [
+    "./app.tsx",
+    "../../assets/stanford-bunny/bun_zipper.ply"
+  ]
+}

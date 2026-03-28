@@ -2,8 +2,8 @@
 
 ## Screen-To-World Ray Utility
 
-`@goldlight/spatial` exposes `createScreenWorldRay()` for pointer-driven scene queries that need a
-world-space ray from the current evaluated camera.
+`@disjukr/goldlight/spatial` exposes `createScreenWorldRay()` for pointer-driven scene queries that
+need a world-space ray from the current evaluated camera.
 
 ## Contract
 
@@ -29,8 +29,8 @@ world-space ray from the current evaluated camera.
 
 ## Renderer-Side Picking
 
-`@goldlight/renderer` exposes a mesh-node picking path that rasterizes stable encoded ids into an
-offscreen color target.
+`@disjukr/goldlight/renderer` exposes a mesh-node picking path that rasterizes stable encoded ids
+into an offscreen color target.
 
 ### Contract
 

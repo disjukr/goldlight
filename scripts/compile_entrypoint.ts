@@ -113,17 +113,17 @@ const getDenoInfo = async (): Promise<DenoInfoJson> => {
 const getNativeLibraryIncludes = (localModulePaths: readonly string[]): readonly string[] => {
   const includes: string[] = [];
   const usesDesktopHost = localModulePaths.some((path) =>
-    path.replaceAll('\\', '/').endsWith('/packages/desktop/src/ffi.ts')
+    path.replaceAll('\\', '/').endsWith('/engine/desktop/ffi.ts')
   );
   const usesTextHost = localModulePaths.some((path) =>
-    path.replaceAll('\\', '/').endsWith('/packages/text/src/ffi.ts')
+    path.replaceAll('\\', '/').endsWith('/engine/text/ffi.ts')
   );
 
   if (usesDesktopHost) {
-    includes.push(`packages/desktop/native/target/${buildMode}/goldlight_desktop_host.dll`);
+    includes.push(`engine/desktop/native/target/${buildMode}/goldlight_desktop_host.dll`);
   }
   if (usesTextHost) {
-    includes.push(`packages/text/native/target/${buildMode}/goldlight_text_host.dll`);
+    includes.push(`engine/text/native/target/${buildMode}/goldlight_text_host.dll`);
   }
 
   return includes;
@@ -131,7 +131,7 @@ const getNativeLibraryIncludes = (localModulePaths: readonly string[]): readonly
 
 const getCommonWorkerIncludes = (localModulePaths: readonly string[]): readonly string[] => {
   const usesDesktopApp = localModulePaths.some((path) =>
-    path.replaceAll('\\', '/').endsWith('/packages/desktop/src/app.ts')
+    path.replaceAll('\\', '/').endsWith('/engine/desktop/app.ts')
   );
 
   if (!usesDesktopApp) {
@@ -139,18 +139,18 @@ const getCommonWorkerIncludes = (localModulePaths: readonly string[]): readonly 
   }
 
   return [
-    'packages/desktop/src/window_manager_worker.ts',
-    'packages/desktop/src/worker_module.ts',
+    'engine/desktop/window_manager_worker.ts',
+    'engine/desktop/worker_module.ts',
   ];
 };
 
 const getNativeBuildTasks = (localModulePaths: readonly string[]): readonly string[] => {
   const tasks: string[] = [];
   const usesDesktopHost = localModulePaths.some((path) =>
-    path.replaceAll('\\', '/').endsWith('/packages/desktop/src/ffi.ts')
+    path.replaceAll('\\', '/').endsWith('/engine/desktop/ffi.ts')
   );
   const usesTextHost = localModulePaths.some((path) =>
-    path.replaceAll('\\', '/').endsWith('/packages/text/src/ffi.ts')
+    path.replaceAll('\\', '/').endsWith('/engine/text/ffi.ts')
   );
 
   if (usesDesktopHost) {

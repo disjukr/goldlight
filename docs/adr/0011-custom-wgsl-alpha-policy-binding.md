@@ -6,9 +6,9 @@ Accepted
 
 ## Decision
 
-`@goldlight/renderer` should expose first-class alpha-policy data to custom WGSL materials through
-an explicit optional material binding contract instead of packing that policy into the existing
-generic material uniform payload.
+`@disjukr/goldlight/renderer` should expose first-class alpha-policy data to custom WGSL materials
+through an explicit optional material binding contract instead of packing that policy into the
+existing generic material uniform payload.
 
 This decision applies to both hand-authored custom WGSL programs and future template-generated
 shader variants.

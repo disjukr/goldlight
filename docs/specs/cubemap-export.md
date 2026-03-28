@@ -2,8 +2,9 @@
 
 ## Goal
 
-`@goldlight/renderer` exposes CPU-side export helpers that consume a captured cubemap snapshot and
-produce common 2D environment-map layouts without coupling those layouts back into scene capture.
+`@disjukr/goldlight/renderer` exposes CPU-side export helpers that consume a captured cubemap
+snapshot and produce common 2D environment-map layouts without coupling those layouts back into
+scene capture.
 
 ## Current Scope
 

@@ -6,9 +6,9 @@ Open.
 
 ## Context
 
-`@goldlight/desktop` now runs desktop modules in per-window Deno workers while a separate window
-manager worker owns the Rust `winit` host and event pumping. That split isolates application logic,
-React updates, and WebGPU rendering from the main bootstrap isolate.
+`@disjukr/goldlight/desktop` now runs desktop modules in per-window Deno workers while a separate
+window manager worker owns the Rust `winit` host and event pumping. That split isolates application
+logic, React updates, and WebGPU rendering from the main bootstrap isolate.
 
 However, Windows move/resize interactions still enter a native modal loop on the host side. During
 that loop the `winit`-driven host pump may delay or stall redraw-aligned frame delivery. The

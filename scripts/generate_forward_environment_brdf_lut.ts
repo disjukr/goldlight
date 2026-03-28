@@ -1,5 +1,5 @@
 const outputPath = new URL(
-  '../packages/renderer/src/images/forward_environment_brdf_lut_rg16f.bin',
+  '../engine/renderer/images/forward_environment_brdf_lut_rg16f.bin',
   import.meta.url,
 );
 
@@ -206,7 +206,7 @@ const createEnvironmentBrdfLutData = (
 };
 
 const lut = createEnvironmentBrdfLutData();
-await Deno.mkdir(new URL('../packages/renderer/src/images/', import.meta.url), { recursive: true });
+await Deno.mkdir(new URL('../engine/renderer/images/', import.meta.url), { recursive: true });
 await Deno.writeFile(outputPath, new Uint8Array(lut.data.buffer));
 
 console.log(

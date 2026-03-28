@@ -1,10 +1,11 @@
 # Procedural Generation
 
-`@goldlight/procedural` provides deterministic CPU-side helpers for generating 2D textures and 3D
-volumes without depending on checked-in source assets.
+`@disjukr/goldlight/procedural` provides deterministic CPU-side helpers for generating 2D textures
+and 3D volumes without depending on checked-in source assets.
 
-Low-level deterministic samplers live in `@goldlight/math`, while `@goldlight/procedural` owns baked
-resource generation on top of those samplers and no longer re-exports the math layer.
+Low-level deterministic samplers live in `@disjukr/goldlight/math`, while
+`@disjukr/goldlight/procedural` owns baked resource generation on top of those samplers and no
+longer re-exports the math layer.
 
 ## Package Role
 

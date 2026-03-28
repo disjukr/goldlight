@@ -10,9 +10,8 @@ const configPath = join(dirname(fromFileUrl(import.meta.url)), '..', 'bdl.yaml')
 const outputRoot = join(
   dirname(fromFileUrl(import.meta.url)),
   '..',
-  'packages',
+  'engine',
   'ir',
-  'src',
   'generated',
 );
 

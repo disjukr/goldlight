@@ -1,4 +1,4 @@
-import { createMaterialRegistry, inspectMaterialTemplateBake } from '@goldlight/renderer';
+import { createMaterialRegistry, inspectMaterialTemplateBake } from '@disjukr/goldlight/renderer';
 
 const [templateId, variantJson] = Deno.args;
 

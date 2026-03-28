@@ -9,7 +9,7 @@ Core scene, evaluation, GPU, and renderer packages remain usable without React.
 
 ## Two Integration Surfaces
 
-`@goldlight/react` currently exposes two distinct integration surfaces.
+`@disjukr/goldlight/react` currently exposes two distinct integration surfaces.
 
 ### Snapshot Bridge
 
@@ -25,7 +25,8 @@ This is still a valid path, especially in browser integrations and lower-level r
 
 ### Live Reconciler
 
-The live reconciler is centered on `@goldlight/react/reconciler` and `createReactSceneRoot()`.
+The live reconciler is centered on `@disjukr/goldlight/react/reconciler` and
+`createReactSceneRoot()`.
 
 - normal React components mount into a package-local scene document
 - React state and lifecycle drive authored scene changes directly
@@ -62,8 +63,8 @@ The main React authoring story today is scene composition.
 That last point means a parent `g3d-scene` can keep animating while an unchanged nested `g2d-scene`
 or `g3d-scene` keeps reusing its cached output texture.
 
-The currently unsupported direction is `3d in 2d`: `@goldlight/drawing` does not yet support drawing
-images or textures, so a `g2d-scene` cannot yet consume a `g3d-scene` output.
+The currently unsupported direction is `3d in 2d`: `@disjukr/goldlight/drawing` does not yet support
+drawing images or textures, so a `g2d-scene` cannot yet consume a `g3d-scene` output.
 
 ## Desktop Runtime Integration
 
@@ -97,11 +98,11 @@ This is an intentional part of the contract, not just a demo detail.
 ## References
 
 - Snapshot bridge browser example:
-  [`../../examples/browser_react_authoring/README.md`](../../examples/browser_react_authoring/README.md)
+  [`../../examples/browser/react_authoring/README.md`](../../examples/browser/react_authoring/README.md)
 - Live reconciler desktop examples:
-  [`../../examples/byow_react_bunny_demo/README.md`](../../examples/byow_react_bunny_demo/README.md),
-  [`../../examples/byow_react_surface_2d_in_3d_demo/README.md`](../../examples/byow_react_surface_2d_in_3d_demo/README.md),
-  [`../../examples/byow_react_scene3d_in_3d_demo/README.md`](../../examples/byow_react_scene3d_in_3d_demo/README.md)
+  [`../../examples/byow/react_bunny_demo/README.md`](../../examples/byow/react_bunny_demo/README.md),
+  [`../../examples/byow/react_surface_2d_in_3d_demo/README.md`](../../examples/byow/react_surface_2d_in_3d_demo/README.md),
+  [`../../examples/byow/react_scene3d_in_3d_demo/README.md`](../../examples/byow/react_scene3d_in_3d_demo/README.md)
 - Reconciler scene document ADR:
   [`../adr/0008-react-reconciler-scene-document.md`](../adr/0008-react-reconciler-scene-document.md)
 - Snapshot bridge ADR:

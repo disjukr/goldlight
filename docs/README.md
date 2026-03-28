@@ -38,7 +38,7 @@ Use this page as the main navigation hub.
 - Understand cubemap reprojection and export layouts:
   [`specs/cubemap-export.md`](./specs/cubemap-export.md)
 - Understand reusable built-in mesh generation and example coverage:
-  [`../examples/byow_primitives_demo/README.md`](../examples/byow_primitives_demo/README.md)
+  [`../examples/byow/primitives_demo/README.md`](../examples/byow/primitives_demo/README.md)
 - Review accepted architecture constraints: [`adr/README.md`](./adr/README.md)
 - Review proposed architecture discussions: [`adr/proposals.md`](./adr/proposals.md)
 - Review the accepted post-processing execution boundary:
@@ -58,7 +58,7 @@ Use this page as the main navigation hub.
 - Run the browser and native examples, including the textured and custom-material browser workflows:
   [`../examples/README.md`](../examples/README.md)
 - Review the React authoring browser example with full-scene TSX lowering and scene-root commits:
-  [`../examples/browser_react_authoring/README.md`](../examples/browser_react_authoring/README.md)
+  [`../examples/browser/react_authoring/README.md`](../examples/browser/react_authoring/README.md)
 - Review the accepted React scene update planning boundary, internal scene-document waypoint, and
   current helper surface: [`specs/react-authoring.md`](./specs/react-authoring.md)
 - Run the headless snapshot PNG workflow:

@@ -10,7 +10,7 @@ type ExampleEntry = Readonly<{
 }>;
 
 const repoRoot = fromFileUrl(new URL('../', import.meta.url));
-const drawingExamplesRoot = join(repoRoot, 'packages', 'drawing', 'examples');
+const drawingExamplesRoot = join(repoRoot, 'examples', 'drawing');
 
 const fileExists = async (path: string): Promise<boolean> => {
   try {

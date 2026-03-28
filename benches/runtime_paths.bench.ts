@@ -1,4 +1,4 @@
-import { evaluateScene } from '@goldlight/renderer';
+import { evaluateScene } from '@disjukr/goldlight/renderer';
 import {
   createMaterialUploadPlan,
   createOffscreenBinding,
@@ -8,7 +8,7 @@ import {
   ensureSceneMeshResidency,
   type GpuTextureUploadContext,
   uploadTextureResidency,
-} from '@goldlight/gpu';
+} from '@disjukr/goldlight/gpu';
 import {
   appendMaterial,
   appendMesh,
@@ -16,7 +16,7 @@ import {
   appendTexture,
   createNode,
   createSceneIr,
-} from '@goldlight/ir';
+} from '@disjukr/goldlight/ir';
 import {
   assertRendererSceneCapabilities,
   collectRendererCapabilityIssues,
@@ -25,7 +25,7 @@ import {
   createMaterialRegistry,
   type GpuRenderExecutionContext,
   renderForwardFrame,
-} from '@goldlight/renderer';
+} from '@disjukr/goldlight/renderer';
 
 const createBenchScene = () => {
   let scene = createSceneIr('bench-scene');

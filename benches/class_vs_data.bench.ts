@@ -1,4 +1,4 @@
-import { createScratchMatrixBuffer } from '@goldlight/renderer';
+import { createScratchMatrixBuffer } from '@disjukr/goldlight/renderer';
 
 const writeWithFunction = (target: Float32Array, iterations: number) => {
   for (let index = 0; index < iterations; index += 1) {

@@ -167,7 +167,7 @@ The initial renderer uses a lightweight pass graph:
 - `deno task example:headless:png` renders an offscreen forward frame and writes a PNG to
   `examples/headless_snapshot/out/forward.png`.
 - The workflow reuses `requestGpuContext`, `rebuildRuntimeResidency`, `renderForwardSnapshot`, and
-  `@goldlight/exporters` `exportPngRgba` instead of adding a separate renderer path.
+  `@disjukr/goldlight/exporters` `exportPngRgba` instead of adding a separate renderer path.
 - The command accepts optional output path, width, and height arguments for ad hoc captures.
 
 ## Known Gaps

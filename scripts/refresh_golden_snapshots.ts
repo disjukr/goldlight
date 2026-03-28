@@ -1,13 +1,13 @@
 import { dirname, fromFileUrl, join } from '@std/path';
-import { evaluateScene } from '@goldlight/renderer';
+import { evaluateScene } from '@disjukr/goldlight/renderer';
 import {
   createOffscreenBinding,
   createRuntimeResidency,
   rebuildRuntimeResidency,
   requestGpuContext,
-} from '@goldlight/gpu';
-import { exportPngRgba } from '@goldlight/exporters';
-import { renderForwardSnapshot } from '@goldlight/renderer';
+} from '@disjukr/goldlight/gpu';
+import { exportPngRgba } from '@disjukr/goldlight/exporters';
+import { renderForwardSnapshot } from '@disjukr/goldlight/renderer';
 import {
   createClearScene,
   createSdfBoxScene,

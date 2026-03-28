@@ -1,2 +1,2 @@
 paths:
-  goldlight: ./packages/ir/schema
+  goldlight: ./engine/ir/schema

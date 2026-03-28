@@ -5,7 +5,7 @@ const repoRoot = join(dirname(fromFileUrl(import.meta.url)), '..');
 const entrypoint = Deno.args[0];
 const desktopHostLibrary = join(
   repoRoot,
-  'packages',
+  'engine',
   'desktop',
   'native',
   'target',
@@ -15,7 +15,7 @@ const desktopHostLibrary = join(
 
 if (!entrypoint) {
   throw new Error(
-    'Missing BYOW example entrypoint. Pass a relative path such as ./examples/byow_triangle/main.ts',
+    'Missing BYOW example entrypoint. Pass a relative path such as ./examples/byow/triangle/main.ts',
   );
 }
 

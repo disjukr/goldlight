@@ -2,23 +2,25 @@
 
 `goldlight` is a functional WebGPU spatial runtime for Deno and browsers.
 
-The repository is organized as a Deno workspace with packages for:
+The repository is organized around a single `engine/` tree with role-oriented modules for:
 
-- `@goldlight/ir`: BDL-backed scene IR definitions
-- `@goldlight/renderer`: scene evaluation and animation helpers
-- `@goldlight/math`: low-level deterministic sampling and reusable math helpers
-- `@goldlight/geometry`: shape definition, mesh primitive generation, and local SDF-to-mesh helpers
-- `@goldlight/spatial`: spatial indexing, broad-phase query helpers, and screen/world ray helpers
-- `@goldlight/procedural`: deterministic procedural texture and volume generators
-- `@goldlight/raytrace`: tracing acceleration and traversal helpers
-- `@goldlight/gpu`: WebGPU context and runtime residency helpers
-- `@goldlight/renderer`: forward/deferred frame planning and execution contracts
-- `@goldlight/importers`: OBJ/STL/PLY/glTF ingestion into scene IR
-- `@goldlight/react`: declarative authoring adapter
-- `@goldlight/react/reconciler`: experimental React reconciler host over the package-local scene
-  document
-- `@goldlight/exporters`: output encoders such as PNG
-- `@goldlight/desktop`: desktop shell bootstrap over a Rust `winit` FFI host
+- `@disjukr/goldlight/ir`: BDL-backed scene IR definitions
+- `@disjukr/goldlight/renderer`: scene evaluation and animation helpers
+- `@disjukr/goldlight/math`: low-level deterministic sampling and reusable math helpers
+- `@disjukr/goldlight/geometry`: shape definition, mesh primitive generation, and local SDF-to-mesh
+  helpers
+- `@disjukr/goldlight/spatial`: spatial indexing, broad-phase query helpers, and screen/world ray
+  helpers
+- `@disjukr/goldlight/procedural`: deterministic procedural texture and volume generators
+- `@disjukr/goldlight/raytrace`: tracing acceleration and traversal helpers
+- `@disjukr/goldlight/gpu`: WebGPU context and runtime residency helpers
+- `@disjukr/goldlight/renderer`: forward/deferred frame planning and execution contracts
+- `@disjukr/goldlight/importers`: OBJ/STL/PLY/glTF ingestion into scene IR
+- `@disjukr/goldlight/react`: declarative authoring adapter
+- `@disjukr/goldlight/react/reconciler`: experimental React reconciler host over the package-local
+  scene document
+- `@disjukr/goldlight/exporters`: output encoders such as PNG
+- `@disjukr/goldlight/desktop`: desktop shell bootstrap over a Rust `winit` FFI host
 
 The design source of truth lives in [`docs/specs`](./docs/specs) and [`docs/adr`](./docs/adr).
 
@@ -45,8 +47,8 @@ The current React authoring story is centered on scene composition:
 - except for the root scene, nested scene outputs are cached by scene revision, so unchanged nested
   scenes do not rerender just because their parent scene keeps animating
 
-The currently unsupported direction is `3d in 2d`: `@goldlight/drawing` does not yet support drawing
-images or textures, so a `g2d-scene` cannot yet consume the output of a `g3d-scene`.
+The currently unsupported direction is `3d in 2d`: `@disjukr/goldlight/drawing` does not yet support
+drawing images or textures, so a `g2d-scene` cannot yet consume the output of a `g3d-scene`.
 
 Rendering cadence is application-controlled. If an app drives `const setTimeMs = useSetTimeMs();`
 from its own `requestAnimationFrame` loop, it behaves like a game-style continuously updating
@@ -77,10 +79,10 @@ Implemented today:
 - forward-renderer cubemap capture for mesh, SDF, and volume scenes as six ordered offscreen face
   snapshots, plus CPU-side export helpers for equirectangular, angular-map, cross, and strip layouts
   with optional filtered reprojection and caller-controlled output dimensions
-- Perlin gradient-noise samplers in `@goldlight/math` plus grayscale texture/volume generators in
-  `@goldlight/procedural` that share the existing deterministic seed model
-- triangle BVH construction in `@goldlight/raytrace` plus a mesh pathtraced renderer slice for
-  static mesh scenes
+- Perlin gradient-noise samplers in `@disjukr/goldlight/math` plus grayscale texture/volume
+  generators in `@disjukr/goldlight/procedural` that share the existing deterministic seed model
+- triangle BVH construction in `@disjukr/goldlight/raytrace` plus a mesh pathtraced renderer slice
+  for static mesh scenes
 - local-space SDF-to-mesh extraction for supported sphere and box primitives, including
   canonical-table marching-cubes and naive surface-nets contouring helpers for baking or inspection
   workflows
@@ -104,17 +106,17 @@ Implemented today:
   path tracing
 - Windows BYOW Cornell Helmet pathtraced demo combining the Damaged Helmet mesh with Cornell-box SDF
   walls and light
-- Windows BYOW primitives demo using `@goldlight/geometry`, a reusable BYOW runner script, built-in
-  `lit` materials, and directional-light shading
-- Windows BYOW Stanford Bunny demo authored through `@goldlight/react`, loading the vendored ASCII
-  PLY mesh, generating runtime normals for built-in lit shading, and publishing live bunny rotation
-  updates through the experimental React reconciler host
+- Windows BYOW primitives demo using `@disjukr/goldlight/geometry`, a reusable BYOW runner script,
+  built-in `lit` materials, and directional-light shading
+- Windows BYOW Stanford Bunny demo authored through `@disjukr/goldlight/react`, loading the vendored
+  ASCII PLY mesh, generating runtime normals for built-in lit shading, and publishing live bunny
+  rotation updates through the experimental React reconciler host
 - a browser React authoring example plus the current `createG3dSceneRoot()` snapshot path that
   commits JSX-authored trees into `SceneIr` snapshots before rendering, including targeted residency
   invalidation planning for stable resource IDs
-- an experimental `@goldlight/react/reconciler` entrypoint that mounts normal React components into
-  the package-local scene document so hooks, state updates, and layout effects can publish live
-  scene updates without rebuilding authored trees by hand
+- an experimental `@disjukr/goldlight/react/reconciler` entrypoint that mounts normal React
+  components into the package-local scene document so hooks, state updates, and layout effects can
+  publish live scene updates without rebuilding authored trees by hand
 - live React scene composition through nested `g2d-scene` and `g3d-scene`, including `2d in 3d`,
   `3d in 3d`, explicit viewport-versus-texture sizing, application-controlled redraw cadence through
   `useSetTimeMs()`, and scene-level offscreen texture caching for unchanged nested scenes
@@ -158,11 +160,11 @@ Read in this order when onboarding:
 2. [`docs/specs/scene-ir.md`](./docs/specs/scene-ir.md)
 3. [`docs/specs/runtime-residency.md`](./docs/specs/runtime-residency.md)
 4. [`docs/specs/rendering.md`](./docs/specs/rendering.md)
-5. [`examples/browser_forward/README.md`](./examples/browser_forward/README.md)
-6. [`examples/browser_textured_forward/README.md`](./examples/browser_textured_forward/README.md)
-7. [`examples/browser_react_authoring/README.md`](./examples/browser_react_authoring/README.md)
-8. [`examples/byow_primitives_demo/README.md`](./examples/byow_primitives_demo/README.md)
-9. [`examples/byow_native_demo/README.md`](./examples/byow_native_demo/README.md)
+5. [`examples/browser/forward/README.md`](./examples/browser/forward/README.md)
+6. [`examples/browser/textured_forward/README.md`](./examples/browser/textured_forward/README.md)
+7. [`examples/browser/react_authoring/README.md`](./examples/browser/react_authoring/README.md)
+8. [`examples/byow/primitives_demo/README.md`](./examples/byow/primitives_demo/README.md)
+9. [`examples/byow/native_demo/README.md`](./examples/byow/native_demo/README.md)
 10. [`examples/headless_snapshot/README.md`](./examples/headless_snapshot/README.md)
 
 ## Tasks
@@ -177,7 +179,7 @@ Read in this order when onboarding:
 - `deno task asset:damaged-helmet`: refresh the Khronos `DamagedHelmet.glb` sample
 - `deno task asset:sponza`: download the ignored Khronos `Sponza` sample under
   `examples/assets/sponza`
-- `deno task desktop:host:build`: compile the Rust `winit` FFI host for `@goldlight/desktop`
+- `deno task desktop:host:build`: compile the Rust `winit` FFI host for `@disjukr/goldlight/desktop`
 - `deno task desktop:host:check`: type-check the Rust `winit` host crate without producing a DLL
 - `deno task example:headless:check`: type-check the headless snapshot PNG workflow
 - `deno task example:headless:png`: render a headless frame and write

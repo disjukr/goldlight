@@ -4,47 +4,48 @@ Runnable examples live here. Each example should document how to build, serve, o
 
 ## Available Examples
 
-- [`byow_native_demo/README.md`](./byow_native_demo/README.md): Windows-native BYOW surface demo
+- [`byow/native_demo/README.md`](./byow/native_demo/README.md): Windows-native BYOW surface demo
   using runtime mesh, texture residency, and built-in textured unlit rendering
-- [`byow_primitives_demo/README.md`](./byow_primitives_demo/README.md): Windows-native BYOW demo
+- [`byow/primitives_demo/README.md`](./byow/primitives_demo/README.md): Windows-native BYOW demo
   rendering the built-in procedural mesh primitive set through a camera-backed, depth-tested forward
   path
-- [`byow_helmet_pathtraced_demo/README.md`](./byow_helmet_pathtraced_demo/README.md): Windows-native
+- [`byow/helmet_pathtraced_demo/README.md`](./byow/helmet_pathtraced_demo/README.md): Windows-native
   BYOW demo exercising the default triangle-BVH mesh path tracing path with the vendored Damaged
   Helmet GLB
-- [`byow_helmet_forward_demo/README.md`](./byow_helmet_forward_demo/README.md): Windows-native BYOW
+- [`byow/helmet_forward_demo/README.md`](./byow/helmet_forward_demo/README.md): Windows-native BYOW
   demo exercising the React-reconciler-driven forward `lit` template system against the full
   vendored Damaged Helmet material texture set, environment-map IBL, and renderer debug views
-- [`byow_cornell_pathtraced_demo/README.md`](./byow_cornell_pathtraced_demo/README.md):
+- [`byow/cornell_pathtraced_demo/README.md`](./byow/cornell_pathtraced_demo/README.md):
   Windows-native BYOW Cornell-box demo that supplies SDF room data through the pathtraced renderer's
   scene extension
-- [`byow_cornell_helmet_pathtraced_demo/README.md`](./byow_cornell_helmet_pathtraced_demo/README.md):
+- [`byow/cornell_helmet_pathtraced_demo/README.md`](./byow/cornell_helmet_pathtraced_demo/README.md):
   Windows-native BYOW demo mixing the Damaged Helmet mesh path with a Cornell-box SDF renderer
   extension
-- [`byow_react_bunny_demo/README.md`](./byow_react_bunny_demo/README.md): Windows-native BYOW demo
-  mounted through `@goldlight/react/reconciler` and rendering the vendored Stanford Bunny PLY mesh
-- [`byow_react_glyphs_demo/README.md`](./byow_react_glyphs_demo/README.md): Windows-native BYOW demo
+- [`byow/react_bunny_demo/README.md`](./byow/react_bunny_demo/README.md): Windows-native BYOW demo
+  mounted through `@disjukr/goldlight/react/reconciler` and rendering the vendored Stanford Bunny
+  PLY mesh
+- [`byow/react_glyphs_demo/README.md`](./byow/react_glyphs_demo/README.md): Windows-native BYOW demo
   showing root-`g2d-scene` presentation with `g2d-glyphs` in A8 atlas, SDF, and path fallback modes
-- [`byow_react_surface_2d_in_3d_demo/README.md`](./byow_react_surface_2d_in_3d_demo/README.md):
+- [`byow/react_surface_2d_in_3d_demo/README.md`](./byow/react_surface_2d_in_3d_demo/README.md):
   Windows-native BYOW demo showing vector-drawn `g2d-scene` composition inside `g3d-scene`, scene
   texture caching, and app-controlled frame driving through `useSetTimeMs()`
-- [`byow_react_scene3d_in_3d_demo/README.md`](./byow_react_scene3d_in_3d_demo/README.md):
+- [`byow/react_scene3d_in_3d_demo/README.md`](./byow/react_scene3d_in_3d_demo/README.md):
   Windows-native BYOW demo showing nested `g3d-scene` composition with a different child camera
   rendered into a texture-backed 3D panel
-- [`byow_multiwindow_demo/README.md`](./byow_multiwindow_demo/README.md): Windows-native BYOW demo
+- [`byow/multiwindow_demo/README.md`](./byow/multiwindow_demo/README.md): Windows-native BYOW demo
   opening two small windows at once to validate multiwindow orchestration
 - [`assets/README.md`](./assets/README.md): in-repo small example assets plus refresh commands
   including the Stanford Bunny PLY source mesh
-- [`browser_forward/README.md`](./browser_forward/README.md): browser-based forward rendering flow
-- [`browser_react_authoring/README.md`](./browser_react_authoring/README.md): browser forward flow
-  with scene nodes authored through `@goldlight/react` TSX and committed through the `g3d-*`
+- [`browser/forward/README.md`](./browser/forward/README.md): browser-based forward rendering flow
+- [`browser/react_authoring/README.md`](./browser/react_authoring/README.md): browser forward flow
+  with scene nodes authored through `@disjukr/goldlight/react` TSX and committed through the `g3d-*`
   snapshot bridge
-- [`browser_textured_forward/README.md`](./browser_textured_forward/README.md): browser forward flow
+- [`browser/textured_forward/README.md`](./browser/textured_forward/README.md): browser forward flow
   with uploaded texture residency and built-in unlit sampling
-- [`browser_custom_textured_forward/README.md`](./browser_custom_textured_forward/README.md):
+- [`browser/custom_textured_forward/README.md`](./browser/custom_textured_forward/README.md):
   browser forward flow with a custom WGSL program that declares texture and sampler bindings
 - [`headless_snapshot/README.md`](./headless_snapshot/README.md): offscreen render-to-PNG workflow
-- [`byow_triangle/README.md`](./byow_triangle/README.md): Windows BYOW surface presentation smoke
+- [`byow/triangle/README.md`](./byow/triangle/README.md): Windows BYOW surface presentation smoke
   test
 
 ## Common Commands
@@ -70,17 +71,17 @@ Runnable examples live here. Each example should document how to build, serve, o
 - Run the BYOW React glyphs demo: `deno task example:byow:react-glyphs:run`
 - Type-check the BYOW React glyphs demo: `deno task example:byow:react-glyphs:check`
 - Run the BYOW React 2D surface demo:
-  `deno run -A --unstable-ffi --unstable-webgpu --unstable-raw-imports examples/byow_react_surface_2d_in_3d_demo/main.ts`
+  `deno run -A --unstable-ffi --unstable-webgpu --unstable-raw-imports examples/byow/react_surface_2d_in_3d_demo/main.ts`
 - Type-check the BYOW React 2D surface demo:
-  `deno check --unstable-raw-imports examples/byow_react_surface_2d_in_3d_demo/main.ts examples/byow_react_surface_2d_in_3d_demo/app.tsx`
+  `deno check --unstable-raw-imports examples/byow/react_surface_2d_in_3d_demo/main.ts examples/byow/react_surface_2d_in_3d_demo/app.tsx`
 - Run the BYOW React 3D scene-in-scene demo:
-  `deno run -A --unstable-ffi --unstable-webgpu --unstable-raw-imports examples/byow_react_scene3d_in_3d_demo/main.ts`
+  `deno run -A --unstable-ffi --unstable-webgpu --unstable-raw-imports examples/byow/react_scene3d_in_3d_demo/main.ts`
 - Type-check the BYOW React 3D scene-in-scene demo:
-  `deno check --unstable-raw-imports examples/byow_react_scene3d_in_3d_demo/main.ts examples/byow_react_scene3d_in_3d_demo/app.tsx`
+  `deno check --unstable-raw-imports examples/byow/react_scene3d_in_3d_demo/main.ts examples/byow/react_scene3d_in_3d_demo/app.tsx`
 - Run the BYOW multiwindow demo:
-  `deno run -A --unstable-ffi --unstable-webgpu --unstable-raw-imports examples/byow_multiwindow_demo/main.ts`
+  `deno run -A --unstable-ffi --unstable-webgpu --unstable-raw-imports examples/byow/multiwindow_demo/main.ts`
 - Type-check the BYOW multiwindow demo:
-  `deno check --unstable-raw-imports examples/byow_multiwindow_demo/main.ts`
+  `deno check --unstable-raw-imports examples/byow/multiwindow_demo/main.ts`
 - Build the desktop host library: `deno task desktop:host:build`
 - Refresh the in-repo example assets: `deno task asset:examples`
 - Refresh the Stanford Bunny source and extracted mesh: `deno task asset:stanford-bunny`
@@ -95,12 +96,12 @@ Runnable examples live here. Each example should document how to build, serve, o
 
 ## Primitive Authoring
 
-`@goldlight/geometry` exposes polygon mesh generators that return `MeshPrimitive` data. These are
-mesh helpers, not SDF primitives.
+`@disjukr/goldlight/geometry` exposes polygon mesh generators that return `MeshPrimitive` data.
+These are mesh helpers, not SDF primitives.
 
 ```ts
-import { appendMesh, createSceneIr } from '@goldlight/ir';
-import { createBoxMesh } from '@goldlight/geometry';
+import { appendMesh, createSceneIr } from '@disjukr/goldlight/ir';
+import { createBoxMesh } from '@disjukr/goldlight/geometry';
 
 const scene = appendMesh(
   createSceneIr('primitive-scene'),
@@ -115,16 +116,16 @@ reconciler host instead of the snapshot-only JSX lowering helper.
 
 For React integrations, read the examples in this order:
 
-- [`browser_react_authoring/README.md`](./browser_react_authoring/README.md) for the data-only
+- [`browser/react_authoring/README.md`](./browser/react_authoring/README.md) for the data-only
   `createG3dSceneRoot()` snapshot bridge
-- [`byow_react_bunny_demo/README.md`](./byow_react_bunny_demo/README.md) for the experimental
-  `@goldlight/react/reconciler` live host
-- [`byow_react_glyphs_demo/README.md`](./byow_react_glyphs_demo/README.md) for root-`g2d-scene`
+- [`byow/react_bunny_demo/README.md`](./byow/react_bunny_demo/README.md) for the experimental
+  `@disjukr/goldlight/react/reconciler` live host
+- [`byow/react_glyphs_demo/README.md`](./byow/react_glyphs_demo/README.md) for root-`g2d-scene`
   presentation and `g2d-glyphs` authoring
-- [`byow_react_surface_2d_in_3d_demo/README.md`](./byow_react_surface_2d_in_3d_demo/README.md) for
+- [`byow/react_surface_2d_in_3d_demo/README.md`](./byow/react_surface_2d_in_3d_demo/README.md) for
   the current `g2d-scene` vector-drawing-in-`g3d-scene` path, scene output caching, and
   app-controlled frame driving
-- [`byow_react_scene3d_in_3d_demo/README.md`](./byow_react_scene3d_in_3d_demo/README.md) for the
+- [`byow/react_scene3d_in_3d_demo/README.md`](./byow/react_scene3d_in_3d_demo/README.md) for the
   current `g3d-scene`-in-`g3d-scene` offscreen-to-texture path with a different child camera
 
 ## Related Docs

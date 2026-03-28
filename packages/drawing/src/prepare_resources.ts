@@ -1762,7 +1762,7 @@ const prepareStepResources = (
 
   if (step.draw.kind === 'directMaskText' || step.draw.kind === 'sdfText') {
     const atlas = sharedContext.atlasProvider.getTextAtlasManager().findOrCreateEntries(
-      step.draw.kind === 'directMaskText' ? 'bitmap' : 'sdf',
+      'a8',
       step.draw.glyphs,
     );
     if (!atlas) {

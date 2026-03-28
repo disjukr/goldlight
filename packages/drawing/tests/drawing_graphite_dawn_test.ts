@@ -1188,24 +1188,53 @@ Deno.test('drawing prepared sdf text insets uv and visible quad like Graphite SD
 
 Deno.test('text atlas manager assigns atlas page indices across multiple pages like Graphite', () => {
   const mock = createMockGpuContext();
-  const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context));
-  const atlas = sharedContext.atlasProvider.getTextAtlasManager().findOrCreateEntries('bitmap', [
+  const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context), {
+    resourceBudget: 1 << 18,
+  });
+  const atlas = sharedContext.atlasProvider.getTextAtlasManager().findOrCreateEntries('a8', [
     {
       mask: {
         cacheKey: 'page-0',
-        width: 1000,
-        height: 1000,
-        stride: 1000,
-        pixels: new Uint8Array(1000 * 1000).fill(255),
+        width: 200,
+        height: 200,
+        stride: 200,
+        pixels: new Uint8Array(200 * 200).fill(255),
       },
     },
     {
       mask: {
         cacheKey: 'page-1',
-        width: 1000,
-        height: 1000,
-        stride: 1000,
-        pixels: new Uint8Array(1000 * 1000).fill(127),
+        width: 200,
+        height: 200,
+        stride: 200,
+        pixels: new Uint8Array(200 * 200).fill(127),
+      },
+    },
+    {
+      mask: {
+        cacheKey: 'page-2',
+        width: 200,
+        height: 200,
+        stride: 200,
+        pixels: new Uint8Array(200 * 200).fill(96),
+      },
+    },
+    {
+      mask: {
+        cacheKey: 'page-3',
+        width: 200,
+        height: 200,
+        stride: 200,
+        pixels: new Uint8Array(200 * 200).fill(64),
+      },
+    },
+    {
+      mask: {
+        cacheKey: 'page-4',
+        width: 200,
+        height: 200,
+        stride: 200,
+        pixels: new Uint8Array(200 * 200).fill(32),
       },
     },
   ]);
@@ -1214,6 +1243,48 @@ Deno.test('text atlas manager assigns atlas page indices across multiple pages l
     throw new Error('expected atlas entries');
   }
 
+  assertEquals(atlas.width, 512);
+  assertEquals(atlas.height, 512);
+  assertEquals(atlas.views.length, 2);
+  assertEquals(atlas.placements[0]?.atlasIndex, 0);
+  assertEquals(atlas.placements[1]?.atlasIndex, 0);
+  assertEquals(atlas.placements[2]?.atlasIndex, 0);
+  assertEquals(atlas.placements[3]?.atlasIndex, 0);
+  assertEquals(atlas.placements[4]?.atlasIndex, 1);
+});
+
+Deno.test('text atlas manager uses format-specific atlas sizes for argb pages like Graphite', () => {
+  const mock = createMockGpuContext();
+  const sharedContext = createDawnSharedContext(createDawnBackendContext(mock.context), {
+    resourceBudget: 1 << 18,
+  });
+  const atlas = sharedContext.atlasProvider.getTextAtlasManager().findOrCreateEntries('argb', [
+    {
+      mask: {
+        cacheKey: 'argb-page-0',
+        width: 200,
+        height: 200,
+        stride: 800,
+        pixels: new Uint8Array(200 * 200 * 4).fill(255),
+      },
+    },
+    {
+      mask: {
+        cacheKey: 'argb-page-1',
+        width: 200,
+        height: 200,
+        stride: 800,
+        pixels: new Uint8Array(200 * 200 * 4).fill(127),
+      },
+    },
+  ]);
+
+  if (!atlas) {
+    throw new Error('expected atlas entries');
+  }
+
+  assertEquals(atlas.width, 256);
+  assertEquals(atlas.height, 256);
   assertEquals(atlas.views.length, 2);
   assertEquals(atlas.placements[0]?.atlasIndex, 0);
   assertEquals(atlas.placements[1]?.atlasIndex, 1);

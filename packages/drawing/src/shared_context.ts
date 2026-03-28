@@ -115,7 +115,12 @@ export const createDawnSharedContext = (
     resourceBudget: options.resourceBudget,
   });
   const clipAtlasManager = createDawnClipAtlasManager(backend, resourceProvider);
-  const textAtlasManager = createDawnTextAtlasManager(backend, resourceProvider);
+  const textAtlasManager = createDawnTextAtlasManager(backend, resourceProvider, {
+    maxTextureSize: caps.limits.maxTextureDimension2D,
+    glyphCacheTextureMaximumBytes: Number.isFinite(options.resourceBudget)
+      ? options.resourceBudget
+      : undefined,
+  });
   return {
     backend,
     caps,

@@ -1,6 +1,13 @@
 import React, { type ReactNode } from 'npm:react@19.2.0';
 import type { DrawingBlendMode } from '@disjukr/goldlight/drawing';
 import type { Matrix2d, Path2d } from '@disjukr/goldlight/geometry';
+import type {
+  LayoutBoxStyle,
+  LayoutItemStyle,
+  ParagraphLayout,
+  ParagraphTextStyle,
+  PreparedParagraph,
+} from '@disjukr/goldlight/layout';
 import type { TextDirection, TextHost } from '@disjukr/goldlight/text';
 
 import type {
@@ -130,6 +137,88 @@ export type Reconciler2dGlyphProps = Readonly<
   } & Reconciler2dPaintProps
 >;
 
+export type G2lRect = Readonly<{
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}>;
+
+export type G2lResolvedBoxes = Readonly<{
+  marginRect: G2lRect;
+  borderRect: G2lRect;
+  paddingRect: G2lRect;
+  contentRect: G2lRect;
+}>;
+
+export type G2lBoxRenderNode = Readonly<{
+  kind: 'box';
+  id: string;
+  style?: LayoutBoxStyle;
+  boxes: G2lResolvedBoxes;
+  childIds: readonly string[];
+}>;
+
+export type G2lRootRenderNode = Readonly<{
+  kind: 'root';
+  id: string;
+  boxes: G2lResolvedBoxes;
+  childIds: readonly string[];
+}>;
+
+export type G2lTextRenderNode = Readonly<{
+  kind: 'text';
+  id: string;
+  style?: ParagraphTextStyle;
+  itemStyle?: LayoutItemStyle;
+  boxes: G2lResolvedBoxes;
+  paragraph: Readonly<{
+    prepared: PreparedParagraph;
+    layout: ParagraphLayout;
+  }>;
+}>;
+
+export type G2lRenderNode = G2lRootRenderNode | G2lBoxRenderNode | G2lTextRenderNode;
+
+export type G2lRenderTreeReader = Readonly<{
+  getNode: (id: string) => G2lRenderNode | undefined;
+  getParent: (id: string) => G2lRenderNode | undefined;
+  getChildren: (id: string) => readonly G2lRenderNode[];
+  getRoot: () => G2lRenderNode;
+}>;
+
+export type G2lRenderContext = Readonly<{
+  node: G2lRenderNode;
+  tree: G2lRenderTreeReader;
+}>;
+
+export type ReconcilerG2lRootProps = Readonly<{
+  id: string;
+  x?: number;
+  y?: number;
+  width: number;
+  height: number;
+  textHost?: TextHost;
+  children?: ReactNode;
+  render?: (context: G2lRenderContext) => ReactNode;
+}>;
+
+export type ReconcilerG2lBoxProps = Readonly<{
+  id: string;
+  style?: LayoutBoxStyle;
+  children?: ReactNode;
+  render?: (context: G2lRenderContext) => ReactNode;
+}>;
+
+export type ReconcilerG2lTextProps = Readonly<{
+  id: string;
+  text: string;
+  style: ParagraphTextStyle;
+  layoutStyle?: LayoutItemStyle;
+  children?: never;
+  render?: (context: G2lRenderContext) => ReactNode;
+}>;
+
 type WithJsxKey<TProps> = TProps & { key?: React.Key };
 
 const hasChildIntent = (children: ReactNode): boolean => {
@@ -257,6 +346,9 @@ declare global {
       'g2d-rect': WithJsxKey<Reconciler2dRectProps>;
       'g2d-circle': WithJsxKey<Reconciler2dCircleProps>;
       'g2d-glyphs': WithJsxKey<Reconciler2dGlyphProps>;
+      'g2l-root': WithJsxKey<ReconcilerG2lRootProps>;
+      'g2l-box': WithJsxKey<ReconcilerG2lBoxProps>;
+      'g2l-text': WithJsxKey<ReconcilerG2lTextProps>;
     }
   }
 }

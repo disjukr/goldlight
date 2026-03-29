@@ -42,7 +42,7 @@ import type { React2dScene, React3dScene, React3dSceneRoot } from './reconciler.
 type React3dSceneRootLike =
   & React3dSceneRoot
   & Readonly<{
-    getRootType: () => 'g3d-scene' | 'g2d-scene' | undefined;
+    getRootType: () => 'g3d-scene' | 'g2d-scene' | 'g2l-root' | undefined;
     get2dScenes: () => readonly React2dScene[];
     get3dScenes: () => readonly React3dScene[];
     getRootClearColor: () => readonly [number, number, number, number] | undefined;

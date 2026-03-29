@@ -9,7 +9,7 @@ try {
     width: 1024,
     height: 768,
     backgroundColor: [0.08, 0.09, 0.11, 1],
-    module: new URL('./app.ts', import.meta.url),
+    module: new URL('./app.tsx', import.meta.url),
   });
   await window.whenClosed();
 } finally {

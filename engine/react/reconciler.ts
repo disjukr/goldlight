@@ -1,4 +1,4 @@
-import type { ReactNode } from 'npm:react@19.2.0';
+import React, { type ReactNode } from 'npm:react@19.2.0';
 import Reconciler from 'npm:react-reconciler@0.33.0';
 import {
   DefaultEventPriority,
@@ -20,6 +20,9 @@ import type {
 } from './authoring.ts';
 import { normalizeCameraJsxProps, normalizeNodeProps } from './authoring.ts';
 import type {
+  G2lRect,
+  G2lRenderNode,
+  G2lRenderTreeReader,
   Reconciler2dCircleProps,
   Reconciler2dGlyphProps,
   Reconciler2dGroupProps,
@@ -27,7 +30,20 @@ import type {
   Reconciler2dRectProps,
   Reconciler2dSceneProps,
   Reconciler3dSceneProps,
+  ReconcilerG2lBoxProps,
+  ReconcilerG2lRootProps,
+  ReconcilerG2lTextProps,
 } from './reconciler_runtime.ts';
+import {
+  type ComputedLayoutNode,
+  computeLayoutNode,
+  createBoxLayoutNode,
+  createTextLayoutNode,
+  type LayoutNode,
+  layoutParagraph,
+  type LayoutTextNode,
+  prepareParagraph,
+} from '@disjukr/goldlight/layout';
 import {
   buildDirectMaskSubRun,
   buildSdfSubRun,
@@ -84,6 +100,9 @@ type HostIntrinsicType =
   | 'g2d-rect'
   | 'g2d-circle'
   | 'g2d-glyphs'
+  | 'g2l-root'
+  | 'g2l-box'
+  | 'g2l-text'
   | 'g3d-asset'
   | 'g3d-texture'
   | 'g3d-material'
@@ -101,6 +120,9 @@ const supportedIntrinsicTypes = new Set<HostIntrinsicType>([
   'g2d-rect',
   'g2d-circle',
   'g2d-glyphs',
+  'g2l-root',
+  'g2l-box',
+  'g2l-text',
   'g3d-asset',
   'g3d-texture',
   'g3d-material',
@@ -119,6 +141,9 @@ type HostPropsByType = {
   'g2d-rect': Reconciler2dRectProps;
   'g2d-circle': Reconciler2dCircleProps;
   'g2d-glyphs': Reconciler2dGlyphProps;
+  'g2l-root': ReconcilerG2lRootProps;
+  'g2l-box': ReconcilerG2lBoxProps;
+  'g2l-text': ReconcilerG2lTextProps;
   'g3d-asset': AssetJsxProps;
   'g3d-texture': TextureJsxProps;
   'g3d-material': MaterialJsxProps;
@@ -230,6 +255,24 @@ type Glyph2dHostInstance = {
   children: HostChild[];
 };
 
+type G2lRootHostInstance = {
+  readonly type: 'g2l-root';
+  props: HostPropsWithoutChildren<'g2l-root'>;
+  children: HostChild[];
+};
+
+type G2lBoxHostInstance = {
+  readonly type: 'g2l-box';
+  props: HostPropsWithoutChildren<'g2l-box'>;
+  children: HostChild[];
+};
+
+type G2lTextHostInstance = {
+  readonly type: 'g2l-text';
+  props: HostPropsWithoutChildren<'g2l-text'>;
+  children: HostChild[];
+};
+
 type ResourceHostInstance =
   | AssetHostInstance
   | TextureHostInstance
@@ -249,8 +292,11 @@ type HostChild =
   | Rect2dHostInstance
   | Circle2dHostInstance
   | Glyph2dHostInstance
+  | G2lRootHostInstance
+  | G2lBoxHostInstance
+  | G2lTextHostInstance
   | ResourceHostInstance;
-type RootHostInstance = SceneHostInstance | Scene2dHostInstance;
+type RootHostInstance = SceneHostInstance | Scene2dHostInstance | G2lRootHostInstance;
 type HostInstance = RootHostInstance | HostChild;
 export type React2dScene = Readonly<{
   id: string;
@@ -274,12 +320,24 @@ export type React3dScene = Readonly<{
   scene: SceneIr;
   clearColor?: readonly [number, number, number, number];
 }>;
+export type ReactG2lLayoutSnapshot = Readonly<{
+  id: string;
+  revision: number;
+  root: G2lRenderNode;
+  tree: G2lRenderTreeReader;
+}>;
+
+type G2lComputedRender = Readonly<{
+  snapshot: ReactG2lLayoutSnapshot;
+  outputs: readonly HostChild[];
+}>;
 type HostContainer = {
   rootChildren: RootHostInstance[];
   document?: G3dSceneDocument;
   currentScene?: SceneIr;
   current2dScenes: readonly React2dScene[];
   current3dScenes: readonly React3dScene[];
+  currentG2lLayouts: readonly ReactG2lLayoutSnapshot[];
   currentRootClearColor?: readonly [number, number, number, number];
   currentRootViewportWidth: number;
   currentRootViewportHeight: number;
@@ -298,10 +356,11 @@ export type React3dSceneRoot = Readonly<{
   render: (element: ReactNode) => SceneIr | undefined;
   flushUpdates: (work?: () => void) => void;
   unmount: () => void;
-  getRootType: () => 'g3d-scene' | 'g2d-scene' | undefined;
+  getRootType: () => 'g3d-scene' | 'g2d-scene' | 'g2l-root' | undefined;
   getScene: () => SceneIr | undefined;
   get2dScenes: () => readonly React2dScene[];
   get3dScenes: () => readonly React3dScene[];
+  getG2lLayouts: () => readonly ReactG2lLayoutSnapshot[];
   getRootClearColor: () => readonly [number, number, number, number] | undefined;
   getRootViewportWidth: () => number;
   getRootViewportHeight: () => number;
@@ -488,6 +547,275 @@ const get3dSceneTextureId = (props: Reconciler3dSceneProps): string => {
     throw new Error('<g3d-scene> requires outputTextureId when used as a nested scene');
   }
   return props.outputTextureId;
+};
+
+type G2lBuildContext = Readonly<{
+  textHost: TextHost;
+}>;
+
+const createG2lRect = (x: number, y: number, width: number, height: number): G2lRect => ({
+  x,
+  y,
+  width,
+  height,
+});
+
+const createG2lBoxes = (computed: ComputedLayoutNode) => {
+  const borderRect = createG2lRect(computed.x, computed.y, computed.width, computed.height);
+  const marginRect = borderRect;
+  if (computed.kind !== 'box') {
+    return {
+      marginRect,
+      borderRect,
+      paddingRect: borderRect,
+      contentRect: borderRect,
+    };
+  }
+
+  const padding = computed.node.style?.padding;
+  const resolvedPadding = typeof padding === 'number'
+    ? { top: padding, right: padding, bottom: padding, left: padding }
+    : {
+      top: padding?.top ?? 0,
+      right: padding?.right ?? 0,
+      bottom: padding?.bottom ?? 0,
+      left: padding?.left ?? 0,
+    };
+
+  return {
+    marginRect,
+    borderRect,
+    paddingRect: borderRect,
+    contentRect: createG2lRect(
+      computed.x + resolvedPadding.left,
+      computed.y + resolvedPadding.top,
+      Math.max(0, computed.width - resolvedPadding.left - resolvedPadding.right),
+      Math.max(0, computed.height - resolvedPadding.top - resolvedPadding.bottom),
+    ),
+  };
+};
+
+const buildG2lLayoutNode = (
+  host: G2lBoxHostInstance | G2lTextHostInstance,
+  context: G2lBuildContext,
+): LayoutNode => {
+  if (host.type === 'g2l-text') {
+    if (host.children.length > 0) {
+      throw new Error('<g2l-text> does not support children');
+    }
+    const prepared = prepareParagraph(context.textHost, host.props.text, host.props.style);
+    return createTextLayoutNode(prepared, host.props.layoutStyle);
+  }
+
+  return createBoxLayoutNode(
+    host.children.map((child) => {
+      if (child.type !== 'g2l-box' && child.type !== 'g2l-text') {
+        throw new Error(`<${child.type}> must be placed inside <g2l-root> or <g2l-box>`);
+      }
+      return buildG2lLayoutNode(child, context);
+    }),
+    host.props.style,
+  );
+};
+
+const createG2lTreeReader = (
+  rootId: string,
+  nodeMap: ReadonlyMap<string, G2lRenderNode>,
+  parentMap: ReadonlyMap<string, string | undefined>,
+): G2lRenderTreeReader => ({
+  getNode: (id) => nodeMap.get(id),
+  getParent: (id) => {
+    const parentId = parentMap.get(id);
+    return parentId ? nodeMap.get(parentId) : undefined;
+  },
+  getChildren: (id) => {
+    const node = nodeMap.get(id);
+    if (!node || node.kind === 'text') {
+      return [];
+    }
+    return node.childIds.map((childId: string) => nodeMap.get(childId)).filter((
+      value: G2lRenderNode | undefined,
+    ): value is G2lRenderNode => value !== undefined);
+  },
+  getRoot: () => nodeMap.get(rootId)!,
+});
+
+const buildG2lRenderNode = (
+  host: G2lRootHostInstance | G2lBoxHostInstance | G2lTextHostInstance,
+  computed: ComputedLayoutNode,
+  nodeMap: Map<string, G2lRenderNode>,
+  parentMap: Map<string, string | undefined>,
+  parentId: string | undefined,
+): G2lRenderNode => {
+  parentMap.set(host.props.id, parentId);
+
+  if (host.type === 'g2l-text') {
+    const textNode = computed.node as LayoutTextNode;
+    const renderNode: G2lRenderNode = {
+      kind: 'text',
+      id: host.props.id,
+      style: host.props.style,
+      itemStyle: host.props.layoutStyle,
+      boxes: createG2lBoxes(computed),
+      paragraph: {
+        prepared: textNode.prepared,
+        layout: layoutParagraph(textNode.prepared, computed.width),
+      },
+    };
+    nodeMap.set(renderNode.id, renderNode);
+    return renderNode;
+  }
+
+  if (computed.kind !== 'box') {
+    throw new Error(
+      `@disjukr/goldlight/react reconciler expected computed box layout for <${host.type}>`,
+    );
+  }
+
+  const childHosts = host.children.filter((
+    child,
+  ): child is G2lBoxHostInstance | G2lTextHostInstance =>
+    child.type === 'g2l-box' || child.type === 'g2l-text'
+  );
+  const childIds = childHosts.map((child) => child.props.id);
+  const renderNode: G2lRenderNode = host.type === 'g2l-root'
+    ? {
+      kind: 'root',
+      id: host.props.id,
+      boxes: createG2lBoxes(computed),
+      childIds,
+    }
+    : {
+      kind: 'box',
+      id: host.props.id,
+      style: host.props.style,
+      boxes: createG2lBoxes(computed),
+      childIds,
+    };
+  nodeMap.set(renderNode.id, renderNode);
+  for (let index = 0; index < childHosts.length; index += 1) {
+    buildG2lRenderNode(
+      childHosts[index]!,
+      computed.children[index]!,
+      nodeMap,
+      parentMap,
+      host.props.id,
+    );
+  }
+  return renderNode;
+};
+
+const computeG2lSnapshot = (
+  host: G2lRootHostInstance,
+  revision: number,
+): ReactG2lLayoutSnapshot => {
+  const textHost = host.props.textHost;
+  if (!textHost) {
+    throw new Error('<g2l-root> currently requires textHost for paragraph measurement');
+  }
+
+  const layoutRoot = createBoxLayoutNode(
+    host.children.map((child) => {
+      if (child.type !== 'g2l-box' && child.type !== 'g2l-text') {
+        throw new Error(`<${child.type}> must be placed inside <g2l-root>`);
+      }
+      return buildG2lLayoutNode(child, { textHost });
+    }),
+    {
+      width: host.props.width,
+      height: host.props.height,
+    },
+  );
+  const computed = computeLayoutNode(
+    layoutRoot,
+    {
+      width: { kind: 'definite', value: host.props.width },
+      height: { kind: 'definite', value: host.props.height },
+    },
+    host.props.x ?? 0,
+    host.props.y ?? 0,
+  );
+  const nodeMap = new Map<string, G2lRenderNode>();
+  const parentMap = new Map<string, string | undefined>();
+  const root = buildG2lRenderNode(host, computed, nodeMap, parentMap, undefined);
+  return {
+    id: host.props.id,
+    revision,
+    root,
+    tree: createG2lTreeReader(host.props.id, nodeMap, parentMap),
+  };
+};
+
+const lowerG2lRenderedElement = (element: ReactNode): readonly HostChild[] => {
+  if (element === null || element === undefined || typeof element === 'boolean') {
+    return [];
+  }
+  if (Array.isArray(element)) {
+    return element.flatMap((child) => [...lowerG2lRenderedElement(child)]);
+  }
+  if (typeof element === 'string' || typeof element === 'number' || typeof element === 'bigint') {
+    throw new Error(
+      '@disjukr/goldlight/react <g2l-*> render() currently only supports intrinsic elements, fragments, and arrays',
+    );
+  }
+  if (!React.isValidElement(element)) {
+    throw new Error(
+      '@disjukr/goldlight/react <g2l-*> render() returned an unsupported React node',
+    );
+  }
+  if (element.type === React.Fragment) {
+    return lowerG2lRenderedElement(element.props.children);
+  }
+  if (typeof element.type !== 'string') {
+    throw new Error(
+      '@disjukr/goldlight/react <g2l-*> render() currently only supports intrinsic elements and fragments',
+    );
+  }
+  const instance = createHostInstance(element.type, element.props as Record<string, unknown>);
+  const loweredChildren = lowerG2lRenderedElement(element.props.children);
+  for (const child of loweredChildren) {
+    appendChild(instance, child);
+  }
+  return [instance];
+};
+
+const appendG2lRenderedOutputs = (
+  host:
+    | G2lRootHostInstance
+    | G2lBoxHostInstance
+    | G2lTextHostInstance,
+  snapshot: ReactG2lLayoutSnapshot,
+  target: HostChild[],
+): void => {
+  const render = host.props.render;
+  if (render) {
+    const node = snapshot.tree.getNode(host.props.id);
+    if (!node) {
+      throw new Error(
+        `@disjukr/goldlight/react could not resolve committed layout state for <${host.type} id="${host.props.id}">`,
+      );
+    }
+    const rendered = render({ node, tree: snapshot.tree });
+    target.push(...lowerG2lRenderedElement(rendered));
+  }
+  if (host.type === 'g2l-text') {
+    return;
+  }
+  for (const child of host.children) {
+    if (child.type === 'g2l-box' || child.type === 'g2l-text') {
+      appendG2lRenderedOutputs(child, snapshot, target);
+    }
+  }
+};
+
+const computeG2lRender = (
+  host: G2lRootHostInstance,
+  revision: number,
+): G2lComputedRender => {
+  const snapshot = computeG2lSnapshot(host, revision);
+  const outputs: HostChild[] = [];
+  appendG2lRenderedOutputs(host, snapshot, outputs);
+  return { snapshot, outputs };
 };
 
 const create2dSceneTextureRef = (props: Reconciler2dSceneProps): TextureRef => ({
@@ -754,6 +1082,16 @@ const render2dChild = (
       }
       render2dGlyph(child, recorder, sceneProps, child.props, frameState);
       return;
+    case 'g2l-root': {
+      const computed = computeG2lRender(child, getHostSubtreeRevision(child));
+      for (const renderedChild of computed.outputs) {
+        render2dChild(recorder, renderedChild, sceneProps, frameState);
+      }
+      return;
+    }
+    case 'g2l-box':
+    case 'g2l-text':
+      throw new Error(`<${child.type}> must be placed inside <g2l-root> or <g2l-box>`);
     case 'g2d-scene':
       throw new Error('nested <g2d-scene> is not supported');
     default:
@@ -796,6 +1134,13 @@ const create2dSceneDescriptor = (
   revision,
   draw: create2dSceneDraw(props, children),
 });
+
+const collectG2lRootSnapshots = (
+  children: readonly HostChild[],
+): readonly ReactG2lLayoutSnapshot[] =>
+  children.filter((child): child is G2lRootHostInstance => child.type === 'g2l-root').map((child) =>
+    computeG2lSnapshot(child, getHostSubtreeRevision(child))
+  );
 
 const create3dSceneTextureRef = (props: Reconciler3dSceneProps): TextureRef => ({
   id: get3dSceneTextureId(props),
@@ -884,6 +1229,9 @@ const renderer = Reconciler({
       & HostPropsWithoutChildren<'g2d-rect'>
       & HostPropsWithoutChildren<'g2d-circle'>
       & HostPropsWithoutChildren<'g2d-glyphs'>
+      & HostPropsWithoutChildren<'g2l-root'>
+      & HostPropsWithoutChildren<'g2l-box'>
+      & HostPropsWithoutChildren<'g2l-text'>
       & HostPropsWithoutChildren<'g3d-asset'>
       & HostPropsWithoutChildren<'g3d-texture'>
       & HostPropsWithoutChildren<'g3d-material'>
@@ -1004,6 +1352,27 @@ const createHostInstance = (
       children: [],
     });
   }
+  if (intrinsicType === 'g2l-root') {
+    return initializeHostRevisionState({
+      type: intrinsicType,
+      props: normalizedProps as HostPropsWithoutChildren<'g2l-root'>,
+      children: [],
+    });
+  }
+  if (intrinsicType === 'g2l-box') {
+    return initializeHostRevisionState({
+      type: intrinsicType,
+      props: normalizedProps as HostPropsWithoutChildren<'g2l-box'>,
+      children: [],
+    });
+  }
+  if (intrinsicType === 'g2l-text') {
+    return initializeHostRevisionState({
+      type: intrinsicType,
+      props: normalizedProps as HostPropsWithoutChildren<'g2l-text'>,
+      children: [],
+    });
+  }
   return initializeHostRevisionState({
     type: intrinsicType,
     props: normalizedProps as
@@ -1056,9 +1425,9 @@ const appendChild = (parent: HostInstance, child: HostChild): void => {
 };
 
 const assertRootChild = (child: HostInstance): RootHostInstance => {
-  if (child.type !== 'g3d-scene' && child.type !== 'g2d-scene') {
+  if (child.type !== 'g3d-scene' && child.type !== 'g2d-scene' && child.type !== 'g2l-root') {
     throw new Error(
-      '@disjukr/goldlight/react reconciler root must be a <g3d-scene> or <g2d-scene> element',
+      '@disjukr/goldlight/react reconciler root must be a <g3d-scene>, <g2d-scene>, or <g2l-root> element',
     );
   }
   return child;
@@ -1122,6 +1491,7 @@ type ReconciledSceneSnapshot = Readonly<{
   scene: SceneIr;
   scenes2d: readonly React2dScene[];
   scenes3d: readonly React3dScene[];
+  layouts: readonly ReactG2lLayoutSnapshot[];
 }>;
 
 const reconcile3DSceneSnapshot = (
@@ -1131,6 +1501,7 @@ const reconcile3DSceneSnapshot = (
   const visitedNodeIds = new Set<string>();
   const scenes2d: React2dScene[] = [];
   const scenes3d: React3dScene[] = [];
+  const layouts: ReactG2lLayoutSnapshot[] = [];
   const visitedResourceIds = {
     asset: new Set<string>(),
     texture: new Set<string>(),
@@ -1172,6 +1543,7 @@ const reconcile3DSceneSnapshot = (
       );
       scenes2d.push(...nestedSnapshot.scenes2d);
       scenes3d.push(...nestedSnapshot.scenes3d, scene3d);
+      layouts.push(...nestedSnapshot.layouts);
       visitedResourceIds.texture.add(scene3d.textureId);
       upsertG3dSceneDocumentResource(document, {
         kind: 'texture',
@@ -1204,12 +1576,18 @@ const reconcile3DSceneSnapshot = (
         },
       );
       scenes2d.push(scene2d);
+      layouts.push(...collectG2lRootSnapshots(child.children));
       visitedResourceIds.texture.add(scene2d.textureId);
       upsertG3dSceneDocumentResource(document, {
         kind: 'texture',
         value: create2dSceneTextureRef(child.props),
       });
       return nodeIndex;
+    }
+    if (child.type === 'g2l-root') {
+      const computed = computeG2lRender(child, getHostSubtreeRevision(child));
+      layouts.push(computed.snapshot);
+      return visitChildren(parentId, computed.outputs, nodeIndex);
     }
 
     switch (child.type) {
@@ -1219,6 +1597,9 @@ const reconcile3DSceneSnapshot = (
       case 'g2d-circle':
       case 'g2d-glyphs':
         throw new Error(`<${child.type}> must be placed inside <g2d-scene>`);
+      case 'g2l-box':
+      case 'g2l-text':
+        throw new Error(`<${child.type}> must be placed inside <g2l-root> or <g2l-box>`);
       case 'g3d-asset':
         visitedResourceIds.asset.add(child.props.id);
         upsertG3dSceneDocumentResource(document, { kind: 'asset', value: child.props });
@@ -1274,6 +1655,7 @@ const reconcile3DSceneSnapshot = (
     scene: g3dSceneDocumentToSceneIr(document),
     scenes2d,
     scenes3d,
+    layouts,
   };
 };
 
@@ -1284,6 +1666,7 @@ const syncContainerSceneDocument = (container: HostContainer): void => {
     container.currentScene = undefined;
     container.current2dScenes = [];
     container.current3dScenes = [];
+    container.currentG2lLayouts = [];
     container.currentRootClearColor = undefined;
     container.currentRootViewportWidth = container.runtimeRootViewportWidth;
     container.currentRootViewportHeight = container.runtimeRootViewportHeight;
@@ -1305,13 +1688,117 @@ const syncContainerSceneDocument = (container: HostContainer): void => {
 
   if (container.rootChildren.length > 1) {
     throw new Error(
-      '@disjukr/goldlight/react reconciler expects a single <g3d-scene> or <g2d-scene> root',
+      '@disjukr/goldlight/react reconciler expects a single <g3d-scene>, <g2d-scene>, or <g2l-root> root',
     );
   }
 
   const previousScene = container.currentScene;
   const rootInstance = container.rootChildren[0];
   const rootSubtreeRevision = syncHostSubtreeRevision(rootInstance);
+  if (rootInstance.type === 'g2l-root') {
+    const computed = computeG2lRender(rootInstance, rootSubtreeRevision);
+    container.currentG2lLayouts = [computed.snapshot];
+    if (computed.outputs.length === 0) {
+      container.document = undefined;
+      container.currentScene = undefined;
+      container.current2dScenes = [];
+      container.current3dScenes = [];
+      container.currentRootClearColor = undefined;
+      container.currentRootViewportWidth = rootInstance.props.width;
+      container.currentRootViewportHeight = rootInstance.props.height;
+      if (container.contentTreeRevision !== rootSubtreeRevision) {
+        container.contentTreeRevision = rootSubtreeRevision;
+        container.contentRevision += 1;
+      }
+      container.revision += 1;
+      return;
+    }
+    if (computed.outputs.length !== 1) {
+      throw new Error(
+        '@disjukr/goldlight/react root <g2l-root> must render exactly one root scene element when used as the container root',
+      );
+    }
+    const renderedRoot = assertRootChild(computed.outputs[0] as HostInstance);
+    if (renderedRoot.type === 'g2l-root') {
+      container.rootChildren = [renderedRoot];
+      syncContainerSceneDocument(container);
+      container.rootChildren = [rootInstance];
+      container.currentG2lLayouts = [computed.snapshot, ...container.currentG2lLayouts];
+      return;
+    }
+    if (renderedRoot.type === 'g2d-scene') {
+      const document = container.document ?? createG3dSceneDocument(renderedRoot.props.id);
+      container.document = document;
+      const scene2d = create2dSceneDescriptor(
+        renderedRoot.props,
+        renderedRoot.children,
+        getHostSubtreeRevision(renderedRoot),
+        {
+          nested: false,
+          defaultViewportWidth: container.runtimeRootViewportWidth,
+          defaultViewportHeight: container.runtimeRootViewportHeight,
+          defaultTextureWidth: container.runtimeRootViewportWidth,
+          defaultTextureHeight: container.runtimeRootViewportHeight,
+        },
+      );
+      applyG3dSceneDocumentScene(document, { id: renderedRoot.props.id });
+      for (const nodeId of [...document.nodes.order].reverse()) {
+        removeG3dSceneDocumentNode(document, nodeId);
+      }
+      sweepUnvisitedResourceIds(document, 'asset', new Set());
+      sweepUnvisitedResourceIds(document, 'texture', new Set());
+      sweepUnvisitedResourceIds(document, 'material', new Set());
+      sweepUnvisitedResourceIds(document, 'light', new Set());
+      sweepUnvisitedResourceIds(document, 'mesh', new Set());
+      sweepUnvisitedResourceIds(document, 'animationClip', new Set());
+      sweepUnvisitedResourceIds(document, 'camera', new Set());
+      const scene = g3dSceneDocumentToSceneIr(document);
+      const commit = createG3dSceneRootCommit(scene, previousScene, container.revision + 1);
+      container.currentScene = scene;
+      container.current2dScenes = [scene2d];
+      container.current3dScenes = [];
+      container.currentG2lLayouts = [
+        computed.snapshot,
+        ...collectG2lRootSnapshots(renderedRoot.children),
+      ];
+      container.currentRootClearColor = undefined;
+      container.currentRootViewportWidth = renderedRoot.props.viewportWidth ??
+        container.runtimeRootViewportWidth;
+      container.currentRootViewportHeight = renderedRoot.props.viewportHeight ??
+        container.runtimeRootViewportHeight;
+      if (container.contentTreeRevision !== rootSubtreeRevision) {
+        container.contentTreeRevision = rootSubtreeRevision;
+        container.contentRevision += 1;
+      }
+      container.revision = commit.revision;
+      for (const subscriber of [...container.subscribers]) {
+        subscriber(commit);
+      }
+      return;
+    }
+    const document = container.document ?? createG3dSceneDocument(renderedRoot.props.id);
+    container.document = document;
+    const snapshot = reconcile3DSceneSnapshot(renderedRoot, document);
+    const commit = createG3dSceneRootCommit(snapshot.scene, previousScene, container.revision + 1);
+    container.currentScene = snapshot.scene;
+    container.current2dScenes = snapshot.scenes2d;
+    container.current3dScenes = snapshot.scenes3d;
+    container.currentG2lLayouts = [computed.snapshot, ...snapshot.layouts];
+    container.currentRootClearColor = renderedRoot.props.clearColor;
+    container.currentRootViewportWidth = renderedRoot.props.viewportWidth ??
+      container.runtimeRootViewportWidth;
+    container.currentRootViewportHeight = renderedRoot.props.viewportHeight ??
+      container.runtimeRootViewportHeight;
+    if (container.contentTreeRevision !== rootSubtreeRevision) {
+      container.contentTreeRevision = rootSubtreeRevision;
+      container.contentRevision += 1;
+    }
+    container.revision = commit.revision;
+    for (const subscriber of [...container.subscribers]) {
+      subscriber(commit);
+    }
+    return;
+  }
   if (rootInstance.type === 'g2d-scene') {
     const document = container.document ?? createG3dSceneDocument(rootInstance.props.id);
     container.document = document;
@@ -1343,6 +1830,7 @@ const syncContainerSceneDocument = (container: HostContainer): void => {
     container.currentScene = scene;
     container.current2dScenes = [scene2d];
     container.current3dScenes = [];
+    container.currentG2lLayouts = collectG2lRootSnapshots(rootInstance.children);
     container.currentRootClearColor = undefined;
     container.currentRootViewportWidth = rootInstance.props.viewportWidth ??
       container.runtimeRootViewportWidth;
@@ -1366,6 +1854,7 @@ const syncContainerSceneDocument = (container: HostContainer): void => {
   container.currentScene = snapshot.scene;
   container.current2dScenes = snapshot.scenes2d;
   container.current3dScenes = snapshot.scenes3d;
+  container.currentG2lLayouts = snapshot.layouts;
   container.currentRootClearColor = rootInstance.props.clearColor;
   container.currentRootViewportWidth = rootInstance.props.viewportWidth ??
     container.runtimeRootViewportWidth;
@@ -1386,6 +1875,7 @@ const createRootContainer = (config: CreateReactSceneRootConfig): HostContainer 
   rootChildren: [],
   current2dScenes: [],
   current3dScenes: [],
+  currentG2lLayouts: [],
   currentRootClearColor: undefined,
   currentRootViewportWidth: Math.max(1, Math.round(config.rootViewportWidth)),
   currentRootViewportHeight: Math.max(1, Math.round(config.rootViewportHeight)),
@@ -1495,10 +1985,10 @@ export const createReactSceneRoot = (
       container.currentRootViewportHeight = nextHeight;
       return;
     }
-    if (rootInstance.props.viewportWidth === undefined) {
+    if (rootInstance.type !== 'g2l-root' && rootInstance.props.viewportWidth === undefined) {
       container.currentRootViewportWidth = nextWidth;
     }
-    if (rootInstance.props.viewportHeight === undefined) {
+    if (rootInstance.type !== 'g2l-root' && rootInstance.props.viewportHeight === undefined) {
       container.currentRootViewportHeight = nextHeight;
     }
   };
@@ -1515,6 +2005,7 @@ export const createReactSceneRoot = (
     getScene: () => container.currentScene,
     get2dScenes: () => container.current2dScenes,
     get3dScenes: () => container.current3dScenes,
+    getG2lLayouts: () => container.currentG2lLayouts,
     getRootClearColor: () => container.currentRootClearColor,
     getRootViewportWidth: () => container.currentRootViewportWidth,
     getRootViewportHeight: () => container.currentRootViewportHeight,

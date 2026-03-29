@@ -9,6 +9,8 @@ source of truth for package boundaries and feature expectations.
 - [`scene-ir.md`](./scene-ir.md): serializable scene schema and lowering expectations
 - [`react-authoring.md`](./react-authoring.md): current snapshot bridge, live reconciler, scene
   composition, and desktop React runtime model
+- [`g2l-layout.md`](./g2l-layout.md): planned `g2l-*` layout substrate, render-context model, and
+  relationship to `g2d-*` / `g3d-*`
 - [`desktop-shell.md`](./desktop-shell.md): desktop host/runtime boundary, shared manager worker,
   multiwindow model, and redraw behavior
 - [`interop-gltf.md`](./interop-gltf.md): interchange strategy for Blender, glTF, OBJ, and STL

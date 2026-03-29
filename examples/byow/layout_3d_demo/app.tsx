@@ -10,19 +10,19 @@ import {
   useTimeMs,
   useWindowMetrics,
 } from '@disjukr/goldlight/desktop';
-import {
-  type ComputedLayoutNode,
-  computeLayout,
-  createBoxLayoutNode,
-  createTextLayoutNode,
-  layoutParagraph,
-  prepareParagraph,
-} from '@disjukr/goldlight/layout';
 import { createRRectPath2d } from '@disjukr/goldlight/geometry';
 import type { MeshPrimitive } from '@disjukr/goldlight/ir';
 import { createQuaternionFromEulerDegrees } from '@disjukr/goldlight/math';
 import { createTextHost } from '@disjukr/goldlight/text';
-import { G3dDirectionalLight, G3dPerspectiveCamera } from '@disjukr/goldlight/react/reconciler';
+import {
+  type G2lBoxRenderNode,
+  type G2lRenderContext,
+  type G2lRenderNode,
+  type G2lRenderTreeReader,
+  type G2lTextRenderNode,
+  G3dDirectionalLight,
+  G3dPerspectiveCamera,
+} from '@disjukr/goldlight/react/reconciler';
 
 const demoTextHost = createTextHost();
 
@@ -91,7 +91,7 @@ type LayoutCard = Readonly<{
   textureId: string;
   bodyMeshId: string;
   surfaceMeshId: string;
-  node: ComputedLayoutNode & { kind: 'box' };
+  node: G2lBoxRenderNode;
   zOffset: number;
 }>;
 
@@ -231,28 +231,26 @@ const createExtrudedRoundedRectMesh = (
 const createCardBodyMesh = (card: LayoutCard) =>
   createExtrudedRoundedRectMesh(
     card.bodyMeshId,
-    card.node.width * boardScale,
-    card.node.height * boardScale,
+    card.node.boxes.borderRect.width * boardScale,
+    card.node.boxes.borderRect.height * boardScale,
     panelDepth,
-    Math.max(0.0001, (card.node.node.style?.cornerRadius ?? 0) * boardScale),
+    Math.max(0.0001, (card.node.style?.cornerRadius ?? 0) * boardScale),
     panelCornerSegments,
   );
 
-const isPureHardBreakClusterText = (text: string): boolean =>
-  text.replaceAll('\r', '').replaceAll('\n', '').length === 0;
-
 const createBoxPath = (
-  node: ComputedLayoutNode & { kind: 'box' },
-  originX: number,
-  originY: number,
+  node: G2lBoxRenderNode,
+  panelRoot: G2lBoxRenderNode,
 ) => {
-  const radius = node.node.style?.cornerRadius ?? 0;
+  const rect = node.boxes.borderRect;
+  const panelRect = panelRoot.boxes.borderRect;
+  const radius = node.style?.cornerRadius ?? 0;
   return createRRectPath2d({
     rect: {
-      origin: [node.x - originX, node.y - originY],
+      origin: [rect.x - panelRect.x, rect.y - panelRect.y],
       size: {
-        width: node.width,
-        height: node.height,
+        width: rect.width,
+        height: rect.height,
       },
     },
     topLeft: { x: radius, y: radius },
@@ -272,11 +270,21 @@ const getPreparedTextColor = (fontSize: number): readonly [number, number, numbe
   return mutedTextColor;
 };
 
+const asBoxNode = (node: G2lRenderNode | undefined): G2lBoxRenderNode => {
+  if (!node || node.kind !== 'box') {
+    throw new Error('Expected layout box node');
+  }
+  return node;
+};
+
+const isPureHardBreakClusterText = (text: string): boolean =>
+  text.replaceAll('\r', '').replaceAll('\n', '').length === 0;
+
 const extractLineText = (
-  node: ComputedLayoutNode & { kind: 'text' },
-  run: NonNullable<ReturnType<typeof layoutParagraph>['lines'][number]>['runs'][number],
+  node: G2lTextRenderNode,
+  run: G2lTextRenderNode['paragraph']['layout']['lines'][number]['runs'][number],
 ): string => {
-  const preparedRun = node.node.prepared.runs[run.logicalStart.runIndex];
+  const preparedRun = node.paragraph.prepared.runs[run.logicalStart.runIndex];
   if (!preparedRun) {
     return '';
   }
@@ -298,18 +306,19 @@ const extractLineText = (
   return text;
 };
 
-const renderComputedNode = (
-  node: ComputedLayoutNode,
-  panelRoot: ComputedLayoutNode & { kind: 'box' },
+const renderLayoutNode2d = (
+  node: G2lRenderNode,
+  panelRoot: G2lBoxRenderNode,
+  tree: G2lRenderTreeReader,
   keyPrefix: string,
   skipOwnChrome: boolean,
 ): React.ReactNode[] => {
   if (node.kind === 'box') {
-    const style = node.node.style;
-    const path = createBoxPath(node, panelRoot.x, panelRoot.y);
-    const nodes: React.ReactNode[] = [];
+    const style = node.style;
+    const path = createBoxPath(node, panelRoot);
+    const output: React.ReactNode[] = [];
     if (!skipOwnChrome && style?.backgroundColor) {
-      nodes.push(
+      output.push(
         <g2d-path
           key={`${keyPrefix}-fill`}
           path={path}
@@ -319,7 +328,7 @@ const renderComputedNode = (
       );
     }
     if (!skipOwnChrome && style?.borderColor && (style.borderWidth ?? 0) > 0) {
-      nodes.push(
+      output.push(
         <g2d-path
           key={`${keyPrefix}-border`}
           path={path}
@@ -329,253 +338,55 @@ const renderComputedNode = (
         />,
       );
     }
-    node.children.forEach((child, index) => {
-      nodes.push(
-        ...renderComputedNode(child, panelRoot, `${keyPrefix}-${index}`, false),
-      );
-    });
-    return nodes;
+    for (const [index, child] of tree.getChildren(node.id).entries()) {
+      output.push(...renderLayoutNode2d(child, panelRoot, tree, `${keyPrefix}-${index}`, false));
+    }
+    return output;
   }
 
-  const prepared = node.node.prepared;
-  const style = prepared.style;
-  const lineHeight = style.lineHeight ?? style.fontSize;
-  const paragraph = layoutParagraph(prepared, node.width, lineHeight);
-  const color = getPreparedTextColor(style.fontSize);
-  const nodes: React.ReactNode[] = [];
-
-  paragraph.lines.forEach((line, lineIndex) => {
-    const baselineY = (node.y - panelRoot.y) + (lineIndex * lineHeight) + Math.abs(line.ascent);
-    line.runs.forEach((run, runIndex) => {
+  if (node.kind !== 'text') {
+    return [];
+  }
+  const style = node.style;
+  const lineHeight = style?.lineHeight ?? style?.fontSize ?? 16;
+  const color = getPreparedTextColor(style?.fontSize ?? 16);
+  const contentRect = node.boxes.contentRect;
+  const panelRect = panelRoot.boxes.borderRect;
+  return node.paragraph.layout.lines.flatMap((line, lineIndex) => {
+    const baselineY = (contentRect.y - panelRect.y) + (lineIndex * lineHeight) +
+      Math.abs(line.ascent);
+    return line.runs.map((run, runIndex) => {
       if (run.glyphStart >= run.glyphEnd) {
-        return;
+        return null;
       }
-      const lineText = extractLineText(node, run);
-      if (lineText.length === 0) {
-        return;
+      const text = extractLineText(node, run);
+      if (text.length === 0) {
+        return null;
       }
-      nodes.push(
+      return (
         <g2d-glyphs
           key={`${keyPrefix}-line-${lineIndex}-run-${runIndex}`}
-          x={(node.x - panelRoot.x) + run.x}
+          x={(contentRect.x - panelRect.x) + run.x}
           y={baselineY}
-          text={lineText}
+          text={text}
           mode='sdf'
           color={color}
-          fontSize={style.fontSize}
-          fontFamily={style.fontFamily}
-          direction={style.direction}
-          language={style.language}
-          scriptTag={style.scriptTag}
-        />,
+          fontSize={style?.fontSize ?? 16}
+          fontFamily={style?.fontFamily}
+          direction={style?.direction}
+          language={style?.language}
+          scriptTag={style?.scriptTag}
+          textHost={demoTextHost}
+        />
       );
     });
   });
-
-  return nodes;
 };
 
-const buildDemoTree = (
-  viewportWidth: number,
-  timeMs: number,
-) => {
-  const oscillation = (Math.sin(timeMs / 900) + 1) * 0.5;
-  const inspectorWidth = 340 + (oscillation * 220);
-  const contentWidth = Math.min(layoutMaxContentWidth, viewportWidth - layoutViewportPadding);
-  const flowingCardMaxWidth = Math.max(contentWidth - 280, 280);
-
-  const title = createTextLayoutNode(
-    prepareParagraph(demoTextHost, 'Goldlight Layout in 3D', {
-      fontSize: 34,
-      fontFamily: latinFamilies,
-      lineHeight: 40,
-    }),
-  );
-  const subtitle = createTextLayoutNode(
-    prepareParagraph(
-      demoTextHost,
-      'Taffy-style card layout feeding nested g2d-scene textures on rounded 3D panels.',
-      {
-        fontSize: 18,
-        fontFamily: latinFamilies,
-        lineHeight: 24,
-      },
-    ),
-  );
-  const paragraph = createTextLayoutNode(
-    prepareParagraph(
-      demoTextHost,
-      'This panel recomputes paragraph layout every frame against an animated width constraint and then remaps the result onto a tilted 3D card.',
-      {
-        fontSize: 19,
-        fontFamily: latinFamilies,
-        lineHeight: 28,
-      },
-    ),
-  );
-  const hangul = createTextLayoutNode(
-    prepareParagraph(
-      demoTextHost,
-      '다람쥐 한 챗바퀴에 타고파 라인이 폭에 따라 다시 배치됩니다.',
-      {
-        fontSize: 22,
-        fontFamily: hangulFamilies,
-        lineHeight: 30,
-      },
-    ),
-  );
-
-  const badgeRow = createBoxLayoutNode(
-    [
-      createTextLayoutNode(
-        prepareParagraph(demoTextHost, 'layout drives texture size', {
-          fontSize: 15,
-          fontFamily: latinFamilies,
-          lineHeight: 18,
-        }),
-      ),
-      createTextLayoutNode(
-        prepareParagraph(demoTextHost, 'text stays 2d', {
-          fontSize: 15,
-          fontFamily: latinFamilies,
-          lineHeight: 18,
-        }),
-      ),
-      createTextLayoutNode(
-        prepareParagraph(demoTextHost, 'panel stays 3d', {
-          fontSize: 15,
-          fontFamily: latinFamilies,
-          lineHeight: 18,
-        }),
-      ),
-    ],
-    {
-      direction: 'row',
-      gap: 16,
-      padding: { left: 14, right: 14, top: 10, bottom: 10 },
-      backgroundColor: [0.12, 0.15, 0.19, 1],
-      borderColor: [0.21, 0.24, 0.29, 1],
-      borderWidth: 1,
-      cornerRadius: 12,
-    },
-  );
-
-  const heroCard = createBoxLayoutNode(
-    [title, subtitle, badgeRow],
-    {
-      width: Math.min(contentWidth, heroCardWidth),
-      padding: 24,
-      gap: 16,
-      backgroundColor: [0.12, 0.13, 0.17, 1],
-      borderColor: [0.22, 0.25, 0.32, 1],
-      borderWidth: 1,
-      cornerRadius: 18,
-    },
-  );
-
-  const flowingCard = createBoxLayoutNode(
-    [
-      createTextLayoutNode(
-        prepareParagraph(
-          demoTextHost,
-          `Animated paragraph width: ${Math.round(inspectorWidth)}px`,
-          {
-            fontSize: 18,
-            fontFamily: latinFamilies,
-            lineHeight: 24,
-          },
-        ),
-      ),
-      paragraph,
-      hangul,
-    ],
-    {
-      width: inspectorWidth,
-      minWidth: 280,
-      maxWidth: flowingCardMaxWidth,
-      flexBasis: inspectorWidth,
-      flexGrow: 0,
-      flexShrink: 1,
-      padding: 20,
-      gap: 14,
-      backgroundColor: [0.15, 0.16, 0.2, 1],
-      borderColor: [0.26, 0.31, 0.4, 1],
-      borderWidth: 1,
-      cornerRadius: 18,
-    },
-  );
-
-  const metricsCard = createBoxLayoutNode(
-    [
-      createTextLayoutNode(
-        prepareParagraph(demoTextHost, 'Current Constraints', {
-          fontSize: 18,
-          fontFamily: latinFamilies,
-          lineHeight: 24,
-        }),
-      ),
-      createTextLayoutNode(
-        prepareParagraph(
-          demoTextHost,
-          `viewport=${Math.round(viewportWidth)}px\ncontent=${
-            Math.round(contentWidth)
-          }px\ninspector=${Math.round(inspectorWidth)}px`,
-          {
-            fontSize: 16,
-            fontFamily: latinFamilies,
-            lineHeight: 22,
-          },
-        ),
-      ),
-    ],
-    {
-      width: 260,
-      minWidth: 260,
-      maxWidth: 260,
-      flexBasis: 260,
-      flexGrow: 0,
-      flexShrink: 0,
-      padding: 18,
-      gap: 12,
-      backgroundColor: [0.11, 0.15, 0.18, 1],
-      borderColor: [0.22, 0.44, 0.78, 1],
-      borderWidth: 1,
-      cornerRadius: 18,
-    },
-  );
-
-  return createBoxLayoutNode(
-    [
-      heroCard,
-      createBoxLayoutNode(
-        [flowingCard, metricsCard],
-        {
-          direction: 'row',
-          gap: 20,
-          alignItems: 'start',
-        },
-      ),
-    ],
-    {
-      width: contentWidth,
-      padding: 0,
-      gap: 20,
-    },
-  );
-};
-
-const asBoxNode = (node: ComputedLayoutNode | undefined): ComputedLayoutNode & { kind: 'box' } => {
-  if (!node || node.kind !== 'box') {
-    throw new Error('Expected computed layout box node');
-  }
-  return node;
-};
-
-const extractCards = (layout: ComputedLayoutNode & { kind: 'box' }): readonly LayoutCard[] => {
-  const hero = asBoxNode(layout.children[0]);
-  const lowerRow = asBoxNode(layout.children[1]);
-  const flowing = asBoxNode(lowerRow.children[0]);
-  const metrics = asBoxNode(lowerRow.children[1]);
+const extractCards = (tree: G2lRenderTreeReader): readonly LayoutCard[] => {
+  const hero = asBoxNode(tree.getNode('layout-hero-card'));
+  const flowing = asBoxNode(tree.getNode('layout-flowing-card'));
+  const metrics = asBoxNode(tree.getNode('layout-metrics-card'));
   return [
     {
       id: 'hero',
@@ -627,90 +438,21 @@ const FrameDriver = () => {
   return null;
 };
 
-const LayoutCardSurfaceScene = (
-  { card }: { card: LayoutCard },
-) => {
-  const { scaleFactor } = useWindowMetrics();
-  const viewportWidth = Math.max(1, Math.ceil(card.node.width));
-  const viewportHeight = Math.max(1, Math.ceil(card.node.height));
-  const textureWidth = Math.max(1, Math.round(viewportWidth * scaleFactor));
-  const textureHeight = Math.max(1, Math.round(viewportHeight * scaleFactor));
+const renderLayoutBoard = (
+  context: G2lRenderContext,
+  scaleFactor: number,
+  boardRotation: readonly [number, number, number, number],
+): React.ReactNode => {
+  if (context.node.kind !== 'root') {
+    throw new Error('layout board render expects the g2l root node');
+  }
+  const rootNode = context.node;
+  const cards = extractCards(context.tree);
+  const boardWidth = rootNode.boxes.borderRect.width;
+  const boardHeight = rootNode.boxes.borderRect.height;
 
   return (
-    <g2d-scene
-      id={`layout-card-surface-${card.id}`}
-      outputTextureId={card.textureId}
-      textHost={demoTextHost}
-      clearColor={[0, 0, 0, 0]}
-      viewportWidth={viewportWidth}
-      viewportHeight={viewportHeight}
-      textureWidth={textureWidth}
-      textureHeight={textureHeight}
-    >
-      {renderComputedNode(card.node, card.node, `panel-${card.id}`, true)}
-    </g2d-scene>
-  );
-};
-
-const LayoutCardNode = (
-  { card, boardWidth, boardHeight }: {
-    card: LayoutCard;
-    boardWidth: number;
-    boardHeight: number;
-  },
-) => {
-  const centerX = ((card.node.x + (card.node.width / 2)) - (boardWidth / 2)) * boardScale;
-  const centerY = ((boardHeight / 2) - (card.node.y + (card.node.height / 2))) * boardScale;
-  const width = card.node.width * boardScale;
-  const height = card.node.height * boardScale;
-  const surfaceWidth = Math.max(0.001, width - (panelSurfaceInset * 2));
-  const surfaceHeight = Math.max(0.001, height - (panelSurfaceInset * 2));
-
-  return (
-    <g3d-node
-      id={`layout-card-${card.id}`}
-      position={[centerX, centerY, card.zOffset]}
-    >
-      <g3d-node
-        id={`layout-card-${card.id}-body`}
-        meshId={card.bodyMeshId}
-      />
-      <g3d-node
-        id={`layout-card-${card.id}-surface`}
-        meshId={card.surfaceMeshId}
-        position={[0, 0, (panelDepth / 2) + panelSurfaceOffset]}
-        scale={[surfaceWidth, surfaceHeight, 1]}
-      />
-    </g3d-node>
-  );
-};
-
-const Layout3dScene = () => {
-  const timeMs = useTimeMs();
-  const contentWidth = Math.min(
-    layoutMaxContentWidth,
-    layoutDesignViewportWidth - layoutViewportPadding,
-  );
-  const root = buildDemoTree(layoutDesignViewportWidth, timeMs);
-  const layout = asBoxNode(computeLayout(root, {
-    width: { kind: 'definite', value: contentWidth },
-    height: { kind: 'definite', value: layoutDesignHeight },
-  }));
-  const cards = extractCards(layout);
-  const timeSeconds = timeMs / 1000;
-  const boardRotation = createQuaternionFromEulerDegrees(
-    -16 + (Math.sin(timeSeconds * 0.42) * 2.8),
-    -24 + (Math.cos(timeSeconds * 0.33) * 4.5),
-    Math.sin(timeSeconds * 0.51) * 1.4,
-  );
-
-  return (
-    <g3d-scene
-      id='byow-layout-3d-demo'
-      activeCameraId='camera-main'
-      clearColor={backgroundColor}
-    >
-      <FrameDriver />
+    <>
       {cards.map((card) => (
         <g3d-mesh
           key={`body-mesh-${card.id}`}
@@ -750,14 +492,6 @@ const Layout3dScene = () => {
           color: { x: 0.14, y: 0.18, z: 0.22, w: 1 },
           emissive: { x: 0.01, y: 0.02, z: 0.02, w: 1 },
           metallicRoughness: { x: 0.04, y: 0.7, z: 1, w: 1 },
-        }}
-      />
-      <g3d-material
-        id='layout-board-material'
-        kind='unlit'
-        textures={[]}
-        parameters={{
-          color: { x: 0.1, y: 0.11, z: 0.13, w: 1 },
         }}
       />
       <g3d-material
@@ -823,6 +557,90 @@ const Layout3dScene = () => {
         indices={[0, 1, 2, 0, 2, 3]}
         materialId='layout-metrics-surface-material'
       />
+      <g3d-node
+        id='layout-board-root'
+        position={[0, -0.05, 0]}
+        rotation={boardRotation}
+      >
+        {cards.map((card) => {
+          const rect = card.node.boxes.borderRect;
+          const centerX = ((rect.x + (rect.width / 2)) - (boardWidth / 2)) * boardScale;
+          const centerY = ((boardHeight / 2) - (rect.y + (rect.height / 2))) * boardScale;
+          const width = rect.width * boardScale;
+          const height = rect.height * boardScale;
+          const surfaceWidth = Math.max(0.001, width - (panelSurfaceInset * 2));
+          const surfaceHeight = Math.max(0.001, height - (panelSurfaceInset * 2));
+          return (
+            <g3d-node
+              key={card.id}
+              id={`layout-card-${card.id}`}
+              position={[centerX, centerY, card.zOffset]}
+            >
+              <g3d-node id={`layout-card-${card.id}-body`} meshId={card.bodyMeshId} />
+              <g3d-node
+                id={`layout-card-${card.id}-surface`}
+                meshId={card.surfaceMeshId}
+                position={[0, 0, (panelDepth / 2) + panelSurfaceOffset]}
+                scale={[surfaceWidth, surfaceHeight, 1]}
+              />
+            </g3d-node>
+          );
+        })}
+      </g3d-node>
+      {cards.map((card) => {
+        const viewportWidth = Math.max(1, Math.ceil(card.node.boxes.borderRect.width));
+        const viewportHeight = Math.max(1, Math.ceil(card.node.boxes.borderRect.height));
+        const textureWidth = Math.max(1, Math.round(viewportWidth * scaleFactor));
+        const textureHeight = Math.max(1, Math.round(viewportHeight * scaleFactor));
+        return (
+          <g2d-scene
+            key={`scene-${card.id}`}
+            id={`layout-card-surface-${card.id}`}
+            outputTextureId={card.textureId}
+            textHost={demoTextHost}
+            clearColor={[0, 0, 0, 0]}
+            viewportWidth={viewportWidth}
+            viewportHeight={viewportHeight}
+            textureWidth={textureWidth}
+            textureHeight={textureHeight}
+          >
+            {renderLayoutNode2d(card.node, card.node, context.tree, `panel-${card.id}`, true)}
+          </g2d-scene>
+        );
+      })}
+    </>
+  );
+};
+
+const Layout3dScene = () => {
+  const timeMs = useTimeMs();
+  const { scaleFactor } = useWindowMetrics();
+  const contentWidth = Math.min(
+    layoutMaxContentWidth,
+    layoutDesignViewportWidth - layoutViewportPadding,
+  );
+  const inspectorWidth = 340 + (((Math.sin(timeMs / 900) + 1) * 0.5) * 220);
+  const flowingCardMaxWidth = Math.max(contentWidth - 280, 280);
+  const timeSeconds = timeMs / 1000;
+  const boardRotationQuaternion = createQuaternionFromEulerDegrees(
+    -16 + (Math.sin(timeSeconds * 0.42) * 2.8),
+    -24 + (Math.cos(timeSeconds * 0.33) * 4.5),
+    Math.sin(timeSeconds * 0.51) * 1.4,
+  );
+  const boardRotation = [
+    boardRotationQuaternion.x,
+    boardRotationQuaternion.y,
+    boardRotationQuaternion.z,
+    boardRotationQuaternion.w,
+  ] as const;
+
+  return (
+    <g3d-scene
+      id='byow-layout-3d-demo'
+      activeCameraId='camera-main'
+      clearColor={backgroundColor}
+    >
+      <FrameDriver />
       <G3dPerspectiveCamera
         id='camera-main'
         position={[-0.2, 0.09, 2.04]}
@@ -851,21 +669,186 @@ const Layout3dScene = () => {
         nodeId='rim-light-node'
         rotation={rimLightRotation}
       />
-      <g3d-node
-        id='layout-board-root'
-        position={[0, -0.05, 0]}
-        rotation={[boardRotation.x, boardRotation.y, boardRotation.z, boardRotation.w]}
+      <g2l-root
+        id='layout-3d-root'
+        width={contentWidth}
+        height={layoutDesignHeight}
+        textHost={demoTextHost}
+        render={(context) => renderLayoutBoard(context, scaleFactor, boardRotation)}
       >
-        {cards.map((card) => (
-          <LayoutCardNode
-            key={card.id}
-            card={card}
-            boardWidth={layout.width}
-            boardHeight={layout.height}
-          />
-        ))}
-      </g3d-node>
-      {cards.map((card) => <LayoutCardSurfaceScene key={`scene-${card.id}`} card={card} />)}
+        <g2l-box
+          id='layout-stack'
+          style={{
+            width: contentWidth,
+            padding: 0,
+            gap: 20,
+          }}
+        >
+          <g2l-box
+            id='layout-hero-card'
+            style={{
+              width: Math.min(contentWidth, heroCardWidth),
+              padding: 24,
+              gap: 16,
+              backgroundColor: [0.12, 0.13, 0.17, 1],
+              borderColor: [0.22, 0.25, 0.32, 1],
+              borderWidth: 1,
+              cornerRadius: 18,
+            }}
+          >
+            <g2l-text
+              id='layout-title'
+              text='Goldlight Layout in 3D'
+              style={{
+                fontSize: 34,
+                fontFamily: latinFamilies,
+                lineHeight: 40,
+              }}
+            />
+            <g2l-text
+              id='layout-subtitle'
+              text='Taffy-style card layout feeding nested g2d-scene textures on rounded 3D panels.'
+              style={{
+                fontSize: 18,
+                fontFamily: latinFamilies,
+                lineHeight: 24,
+              }}
+            />
+            <g2l-box
+              id='layout-badges'
+              style={{
+                direction: 'row',
+                gap: 16,
+                padding: { left: 14, right: 14, top: 10, bottom: 10 },
+                backgroundColor: [0.12, 0.15, 0.19, 1],
+                borderColor: [0.21, 0.24, 0.29, 1],
+                borderWidth: 1,
+                cornerRadius: 12,
+              }}
+            >
+              <g2l-text
+                id='layout-badge-size'
+                text='layout drives texture size'
+                style={{
+                  fontSize: 15,
+                  fontFamily: latinFamilies,
+                  lineHeight: 18,
+                }}
+              />
+              <g2l-text
+                id='layout-badge-text'
+                text='text stays 2d'
+                style={{
+                  fontSize: 15,
+                  fontFamily: latinFamilies,
+                  lineHeight: 18,
+                }}
+              />
+              <g2l-text
+                id='layout-badge-panel'
+                text='panel stays 3d'
+                style={{
+                  fontSize: 15,
+                  fontFamily: latinFamilies,
+                  lineHeight: 18,
+                }}
+              />
+            </g2l-box>
+          </g2l-box>
+          <g2l-box
+            id='layout-lower-row'
+            style={{
+              direction: 'row',
+              gap: 20,
+              alignItems: 'start',
+            }}
+          >
+            <g2l-box
+              id='layout-flowing-card'
+              style={{
+                width: inspectorWidth,
+                minWidth: 280,
+                maxWidth: flowingCardMaxWidth,
+                flexBasis: inspectorWidth,
+                flexGrow: 0,
+                flexShrink: 1,
+                padding: 20,
+                gap: 14,
+                backgroundColor: [0.15, 0.16, 0.2, 1],
+                borderColor: [0.26, 0.31, 0.4, 1],
+                borderWidth: 1,
+                cornerRadius: 18,
+              }}
+            >
+              <g2l-text
+                id='layout-flowing-title'
+                text={`Animated paragraph width: ${Math.round(inspectorWidth)}px`}
+                style={{
+                  fontSize: 18,
+                  fontFamily: latinFamilies,
+                  lineHeight: 24,
+                }}
+              />
+              <g2l-text
+                id='layout-flowing-body'
+                text='This panel recomputes paragraph layout every frame against an animated width constraint and then remaps the result onto a tilted 3D card.'
+                style={{
+                  fontSize: 19,
+                  fontFamily: latinFamilies,
+                  lineHeight: 28,
+                }}
+              />
+              <g2l-text
+                id='layout-flowing-hangul'
+                text='다람쥐 헌 쳇바퀴에 타고파 라인이 폭에 따라 다시 배치됩니다.'
+                style={{
+                  fontSize: 22,
+                  fontFamily: hangulFamilies,
+                  lineHeight: 30,
+                }}
+              />
+            </g2l-box>
+            <g2l-box
+              id='layout-metrics-card'
+              style={{
+                width: 260,
+                minWidth: 260,
+                maxWidth: 260,
+                flexBasis: 260,
+                flexGrow: 0,
+                flexShrink: 0,
+                padding: 18,
+                gap: 12,
+                backgroundColor: [0.11, 0.15, 0.18, 1],
+                borderColor: [0.22, 0.44, 0.78, 1],
+                borderWidth: 1,
+                cornerRadius: 18,
+              }}
+            >
+              <g2l-text
+                id='layout-metrics-title'
+                text='Current Constraints'
+                style={{
+                  fontSize: 18,
+                  fontFamily: latinFamilies,
+                  lineHeight: 24,
+                }}
+              />
+              <g2l-text
+                id='layout-metrics-body'
+                text={`viewport=${Math.round(layoutDesignViewportWidth)}px\ncontent=${
+                  Math.round(contentWidth)
+                }px\ninspector=${Math.round(inspectorWidth)}px`}
+                style={{
+                  fontSize: 16,
+                  fontFamily: latinFamilies,
+                  lineHeight: 22,
+                }}
+              />
+            </g2l-box>
+          </g2l-box>
+        </g2l-box>
+      </g2l-root>
     </g3d-scene>
   );
 };

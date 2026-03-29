@@ -192,6 +192,34 @@ export type G2lRenderContext = Readonly<{
   tree: G2lRenderTreeReader;
 }>;
 
+export type G2lCompositionDomain = 'g2d' | 'g3d' | null;
+
+export type G2lCompositionRootContextInput = Readonly<{
+  domain: G2lCompositionDomain;
+}>;
+
+export type G2lCompositionNodeContextInput = Readonly<{
+  node: G2lRenderNode;
+  tree: G2lRenderTreeReader;
+  parentContext: unknown;
+  domain: G2lCompositionDomain;
+}>;
+
+export type G2lCompositionInput = Readonly<{
+  node: G2lRenderNode;
+  tree: G2lRenderTreeReader;
+  context: unknown;
+  domain: G2lCompositionDomain;
+  own: ReactNode;
+  children: ReactNode;
+}>;
+
+export type G2lCompositionStrategy = Readonly<{
+  createRootContext: (input: G2lCompositionRootContextInput) => unknown;
+  createNodeContext: (input: G2lCompositionNodeContextInput) => unknown;
+  compose: (input: G2lCompositionInput) => ReactNode;
+}>;
+
 export type ReconcilerG2lRootProps = Readonly<{
   id: string;
   x?: number;
@@ -200,14 +228,14 @@ export type ReconcilerG2lRootProps = Readonly<{
   height: number;
   textHost?: TextHost;
   children?: ReactNode;
-  render?: (context: G2lRenderContext) => ReactNode;
+  render?: (context: G2lRenderContext, children: ReactNode) => ReactNode;
 }>;
 
 export type ReconcilerG2lBoxProps = Readonly<{
   id: string;
   style?: LayoutBoxStyle;
   children?: ReactNode;
-  render?: (context: G2lRenderContext) => ReactNode;
+  render?: (context: G2lRenderContext, children: ReactNode) => ReactNode;
 }>;
 
 export type ReconcilerG2lTextProps = Readonly<{
@@ -216,7 +244,7 @@ export type ReconcilerG2lTextProps = Readonly<{
   style: ParagraphTextStyle;
   layoutStyle?: LayoutItemStyle;
   children?: never;
-  render?: (context: G2lRenderContext) => ReactNode;
+  render?: (context: G2lRenderContext, children: ReactNode) => ReactNode;
 }>;
 
 type WithJsxKey<TProps> = TProps & { key?: React.Key };

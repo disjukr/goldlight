@@ -1,9 +1,10 @@
 # BYOW Layout 3D Demo
 
-This demo applies the current `@disjukr/goldlight/layout` prototype to a 3D scene.
+This demo applies the current `g2l-*` layout substrate to a 3D scene.
 
 It exercises:
 
+- `g2l-root`, `g2l-box`, and `g2l-text` inside a `g3d-scene`
 - Taffy-style box layout driving multiple panel sizes
 - nested `g2d-scene` text surfaces rendered into textures
 - textured front faces mapped onto rounded 3D cards

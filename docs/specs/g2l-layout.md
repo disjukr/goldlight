@@ -42,7 +42,7 @@ returns normal React children, typically built from `g2d-*` or `g3d-*`.
 Conceptually:
 
 ```tsx
-<g2l-box render={(ctx) => ...}>
+<g2l-box render={(ctx, children) => ...}>
   ...
 </g2l-box>
 ```
@@ -53,6 +53,36 @@ The important split is:
 - `render` consumes the computed layout snapshot
 
 This keeps `g2l-*` renderer-agnostic and avoids a default 2D-or-3D policy.
+
+When a node wants to control where its layout-children visual subtrees appear, its `render` callback
+receives the already-composed child visual subtree as its second argument. It may place that subtree
+explicitly instead of relying on the default append-after-own behavior.
+
+## Composition Strategy
+
+`g2l-*` does not hardcode how a node's own render output is combined with the visual subtrees
+produced by its layout children.
+
+That policy is owned by the React runtime layer and is configured at `createReactSceneRoot(...)`
+time via a `g2lComposition` strategy.
+
+Conceptually, the strategy is responsible for three decisions:
+
+- creating a root composition context from the current render domain (`g2d`, `g3d`, or no scene)
+- deriving per-node composition context from the committed layout node plus parent context
+- composing:
+  - the current node's own `render(ctx, children)` result
+  - the already-composed visual subtrees of its layout children
+
+The default strategy intentionally preserves the current simple behavior and concatenates:
+
+- own render output first
+- child visual subtrees after it
+
+without inserting any extra `g2d-*` or `g3d-*` wrapper nodes.
+
+This keeps the substrate neutral while allowing future strategies to inject local containers,
+flatten where possible, or vary behavior by node style or render domain.
 
 ## Why Reconciler-Owned
 
@@ -159,4 +189,15 @@ That keeps the substrate generic while allowing opinionated higher-level compone
 - paragraph preparation and layout
 - bidi-safe run-based line output
 
-The next implementation step is to connect that headless model to `g2l-*` reconciler host nodes.
+`g2l-*` is now wired into the live React reconciler:
+
+- `g2l-root`, `g2l-box`, and `g2l-text` are real host nodes
+- committed layout snapshots are computed from the `engine/layout` model
+- `render(ctx)` is evaluated from committed layout state
+- a root-level `g2lComposition` strategy controls how own render output and child visual subtrees
+  are combined
+
+The current default composition still behaves like a flat concatenation model when a node's
+`render(ctx, children)` implementation does not place `children` itself. The next architecture step
+is to evolve that into persistent derived render trees with stronger subtree identity and cache
+reuse.

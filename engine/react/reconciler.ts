@@ -19,10 +19,12 @@ import type {
   TextureJsxProps,
 } from './authoring.ts';
 import { normalizeCameraJsxProps, normalizeNodeProps } from './authoring.ts';
-import type {
-  G2lRect,
-  G2lRenderNode,
-  G2lRenderTreeReader,
+import {
+  type G2lCompositionDomain,
+  type G2lCompositionStrategy,
+  type G2lRect,
+  type G2lRenderNode,
+  type G2lRenderTreeReader,
   Reconciler2dCircleProps,
   Reconciler2dGlyphProps,
   Reconciler2dGroupProps,
@@ -331,7 +333,9 @@ type G2lComputedRender = Readonly<{
   snapshot: ReactG2lLayoutSnapshot;
   outputs: readonly HostChild[];
 }>;
+
 type HostContainer = {
+  kind: 'root';
   rootChildren: RootHostInstance[];
   document?: G3dSceneDocument;
   currentScene?: SceneIr;
@@ -348,7 +352,16 @@ type HostContainer = {
   contentTreeRevision?: number;
   subscribers: Set<G3dSceneRootSubscriber>;
   pendingError?: Error;
+  g2lComposition: G2lCompositionStrategy;
 };
+
+type DerivedHostContainer = {
+  kind: 'derived';
+  derivedChildren: HostChild[];
+  pendingError?: Error;
+};
+
+type ReconcilerContainer = HostContainer | DerivedHostContainer;
 
 type HostContext = Record<string, never>;
 
@@ -373,10 +386,16 @@ export type React3dSceneRoot = Readonly<{
 export type CreateReactSceneRootConfig = Readonly<{
   rootViewportWidth: number;
   rootViewportHeight: number;
+  g2lComposition?: G2lCompositionStrategy;
 }>;
 
 const default2dSceneTextureSize = 512;
 const default3dSceneTextureSize = 512;
+export const defaultG2lCompositionStrategy: G2lCompositionStrategy = {
+  createRootContext: () => null,
+  createNodeContext: ({ parentContext }) => parentContext,
+  compose: ({ own, children }) => React.createElement(React.Fragment, null, own, children),
+};
 const HASH_OFFSET = 2166136261;
 const HASH_PRIME = 16777619;
 const numberHashBuffer = new ArrayBuffer(8);
@@ -501,6 +520,20 @@ const getHostRevisionState = (instance: HostInstance): HostRevisionState => {
 
 const getHostSubtreeRevision = (instance: HostInstance): number =>
   getHostRevisionState(instance).subtreeRevision;
+
+const stampHostRenderedSubtreeRevision = (
+  instance: HostInstance,
+  revision: number,
+): void => {
+  const state = getHostRevisionState(instance);
+  state.selfVersion = revision;
+  state.subtreeRevision = revision;
+  state.lastChildRefs = [...instance.children];
+  state.lastChildSubtreeRevisions = instance.children.map(() => revision);
+  for (const child of instance.children) {
+    stampHostRenderedSubtreeRevision(child, revision);
+  }
+};
 
 const syncHostSubtreeRevision = (instance: HostInstance): number => {
   const state = getHostRevisionState(instance);
@@ -746,75 +779,63 @@ const computeG2lSnapshot = (
   };
 };
 
-const lowerG2lRenderedElement = (element: ReactNode): readonly HostChild[] => {
-  if (element === null || element === undefined || typeof element === 'boolean') {
-    return [];
-  }
-  if (Array.isArray(element)) {
-    return element.flatMap((child) => [...lowerG2lRenderedElement(child)]);
-  }
-  if (typeof element === 'string' || typeof element === 'number' || typeof element === 'bigint') {
-    throw new Error(
-      '@disjukr/goldlight/react <g2l-*> render() currently only supports intrinsic elements, fragments, and arrays',
-    );
-  }
-  if (!React.isValidElement(element)) {
-    throw new Error(
-      '@disjukr/goldlight/react <g2l-*> render() returned an unsupported React node',
-    );
-  }
-  if (element.type === React.Fragment) {
-    return lowerG2lRenderedElement(element.props.children);
-  }
-  if (typeof element.type !== 'string') {
-    throw new Error(
-      '@disjukr/goldlight/react <g2l-*> render() currently only supports intrinsic elements and fragments',
-    );
-  }
-  const instance = createHostInstance(element.type, element.props as Record<string, unknown>);
-  const loweredChildren = lowerG2lRenderedElement(element.props.children);
-  for (const child of loweredChildren) {
-    appendChild(instance, child);
-  }
-  return [instance];
-};
-
-const appendG2lRenderedOutputs = (
+const composeG2lRenderedNode = (
   host:
     | G2lRootHostInstance
     | G2lBoxHostInstance
     | G2lTextHostInstance,
   snapshot: ReactG2lLayoutSnapshot,
-  target: HostChild[],
-): void => {
-  const render = host.props.render;
-  if (render) {
-    const node = snapshot.tree.getNode(host.props.id);
-    if (!node) {
-      throw new Error(
-        `@disjukr/goldlight/react could not resolve committed layout state for <${host.type} id="${host.props.id}">`,
-      );
-    }
-    const rendered = render({ node, tree: snapshot.tree });
-    target.push(...lowerG2lRenderedElement(rendered));
+  domain: G2lCompositionDomain,
+  strategy: G2lCompositionStrategy,
+  parentContext: unknown,
+): ReactNode => {
+  const node = snapshot.tree.getNode(host.props.id);
+  if (!node) {
+    throw new Error(
+      `@disjukr/goldlight/react could not resolve committed layout state for <${host.type} id="${host.props.id}">`,
+    );
   }
-  if (host.type === 'g2l-text') {
-    return;
-  }
-  for (const child of host.children) {
-    if (child.type === 'g2l-box' || child.type === 'g2l-text') {
-      appendG2lRenderedOutputs(child, snapshot, target);
-    }
-  }
+  const context = strategy.createNodeContext({
+    node,
+    tree: snapshot.tree,
+    parentContext,
+    domain,
+  });
+  const children = host.type === 'g2l-text'
+    ? null
+    : host.children.flatMap((child) =>
+      child.type === 'g2l-box' || child.type === 'g2l-text'
+        ? [composeG2lRenderedNode(child, snapshot, domain, strategy, context)]
+        : []
+    );
+  const own = host.props.render ? host.props.render({ node, tree: snapshot.tree }, children) : null;
+  return strategy.compose({
+    node,
+    tree: snapshot.tree,
+    context,
+    domain,
+    own,
+    children,
+  });
 };
 
 const computeG2lRender = (
   host: G2lRootHostInstance,
   revision: number,
+  domain: G2lCompositionDomain,
+  strategy: G2lCompositionStrategy,
 ): G2lComputedRender => {
   const snapshot = computeG2lSnapshot(host, revision);
-  const outputs: HostChild[] = [];
-  appendG2lRenderedOutputs(host, snapshot, outputs);
+  const rootContext = strategy.createRootContext({ domain });
+  const composed = composeG2lRenderedNode(host, snapshot, domain, strategy, rootContext);
+  const derived = getDerivedFiberRootState(host);
+  renderer.updateContainerSync(composed, derived.fiberRoot, null, null);
+  flushRendererWork();
+  throwPendingContainerError(derived.container);
+  const outputs = derived.container.derivedChildren.map((child) => {
+    stampHostRenderedSubtreeRevision(child, snapshot.revision);
+    return child;
+  });
   return { snapshot, outputs };
 };
 
@@ -1032,6 +1053,7 @@ const render2dChild = (
   child: HostChild,
   sceneProps: Reconciler2dSceneProps,
   frameState: FrameState,
+  g2lComposition: G2lCompositionStrategy,
 ): void => {
   switch (child.type) {
     case 'g2d-group':
@@ -1040,7 +1062,7 @@ const render2dChild = (
         concatDrawingRecorderTransform(recorder, child.props.transform);
       }
       for (const grandChild of child.children) {
-        render2dChild(recorder, grandChild, sceneProps, frameState);
+        render2dChild(recorder, grandChild, sceneProps, frameState, g2lComposition);
       }
       restoreDrawingRecorder(recorder);
       return;
@@ -1083,9 +1105,14 @@ const render2dChild = (
       render2dGlyph(child, recorder, sceneProps, child.props, frameState);
       return;
     case 'g2l-root': {
-      const computed = computeG2lRender(child, getHostSubtreeRevision(child));
+      const computed = computeG2lRender(
+        child,
+        getHostSubtreeRevision(child),
+        'g2d',
+        g2lComposition,
+      );
       for (const renderedChild of computed.outputs) {
-        render2dChild(recorder, renderedChild, sceneProps, frameState);
+        render2dChild(recorder, renderedChild, sceneProps, frameState, g2lComposition);
       }
       return;
     }
@@ -1102,11 +1129,12 @@ const render2dChild = (
 const create2dSceneDraw = (
   props: Reconciler2dSceneProps,
   children: readonly HostChild[],
+  g2lComposition: G2lCompositionStrategy,
 ): React2dScene['draw'] => {
   return (recorder, frameState) => {
     recordClear(recorder, props.clearColor ?? [0, 0, 0, 0]);
     for (const child of children) {
-      render2dChild(recorder, child, props, frameState);
+      render2dChild(recorder, child, props, frameState, g2lComposition);
     }
   };
 };
@@ -1115,6 +1143,7 @@ const create2dSceneDescriptor = (
   props: Reconciler2dSceneProps,
   children: readonly HostChild[],
   revision: number,
+  g2lComposition: G2lCompositionStrategy,
   options: Readonly<{
     nested: boolean;
     defaultViewportWidth: number;
@@ -1132,7 +1161,7 @@ const create2dSceneDescriptor = (
   textureWidth: props.textureWidth ?? options.defaultTextureWidth,
   textureHeight: props.textureHeight ?? options.defaultTextureHeight,
   revision,
-  draw: create2dSceneDraw(props, children),
+  draw: create2dSceneDraw(props, children, g2lComposition),
 });
 
 const collectG2lRootSnapshots = (
@@ -1173,8 +1202,10 @@ const renderer = Reconciler({
   getRootHostContext: () => hostContext,
   getChildHostContext: () => hostContext,
   prepareForCommit: () => null,
-  resetAfterCommit: (container: HostContainer) => {
-    syncContainerSceneDocument(container);
+  resetAfterCommit: (container: ReconcilerContainer) => {
+    if (container.kind === 'root') {
+      syncContainerSceneDocument(container);
+    }
   },
   shouldSetTextContent: () => false,
   createTextInstance: (_text: string) => {
@@ -1191,26 +1222,30 @@ const renderer = Reconciler({
   appendChild: (parent: HostInstance, child: HostChild) => {
     appendChild(parent, child);
   },
-  appendChildToContainer: (container: HostContainer, child: RootHostInstance) => {
+  appendChildToContainer: (container: ReconcilerContainer, child: HostInstance) => {
     appendChildToContainer(container, child);
   },
   insertBefore: (parent: HostInstance, child: HostChild, beforeChild: HostChild) => {
     insertChildBefore(parent, child, beforeChild);
   },
   insertInContainerBefore: (
-    container: HostContainer,
-    child: RootHostInstance,
-    beforeChild: RootHostInstance,
+    container: ReconcilerContainer,
+    child: HostInstance,
+    beforeChild: HostInstance,
   ) => {
     insertContainerChildBefore(container, child, beforeChild);
   },
   removeChild: (parent: HostInstance, child: HostChild) => {
     removeChild(parent, child);
   },
-  removeChildFromContainer: (container: HostContainer, child: RootHostInstance) => {
+  removeChildFromContainer: (container: ReconcilerContainer, child: HostInstance) => {
     removeContainerChild(container, child);
   },
-  clearContainer: (container: HostContainer) => {
+  clearContainer: (container: ReconcilerContainer) => {
+    if (container.kind === 'derived') {
+      container.derivedChildren.length = 0;
+      return;
+    }
     container.rootChildren.length = 0;
   },
   commitUpdate: (
@@ -1433,7 +1468,12 @@ const assertRootChild = (child: HostInstance): RootHostInstance => {
   return child;
 };
 
-const appendChildToContainer = (container: HostContainer, child: HostInstance): void => {
+const appendChildToContainer = (container: ReconcilerContainer, child: HostInstance): void => {
+  if (container.kind === 'derived') {
+    removeIfPresent(container.derivedChildren, child);
+    container.derivedChildren.push(child);
+    return;
+  }
   const sceneChild = assertRootChild(child);
   removeIfPresent(container.rootChildren, child);
   container.rootChildren.push(sceneChild);
@@ -1443,10 +1483,14 @@ const insertChildBefore = (parent: HostInstance, child: HostChild, beforeChild: 
   insertBeforeValue(parent.children, child, beforeChild);
 
 const insertContainerChildBefore = (
-  container: HostContainer,
+  container: ReconcilerContainer,
   child: HostInstance,
   beforeChild: HostInstance,
 ): void => {
+  if (container.kind === 'derived') {
+    insertBeforeValue(container.derivedChildren, child, beforeChild);
+    return;
+  }
   insertBeforeValue(
     container.rootChildren,
     assertRootChild(child),
@@ -1458,7 +1502,11 @@ const removeChild = (parent: HostInstance, child: HostChild): void => {
   removeIfPresent(parent.children, child);
 };
 
-const removeContainerChild = (container: HostContainer, child: HostInstance): void => {
+const removeContainerChild = (container: ReconcilerContainer, child: HostInstance): void => {
+  if (container.kind === 'derived') {
+    removeIfPresent(container.derivedChildren, child);
+    return;
+  }
   removeIfPresent(container.rootChildren, assertRootChild(child));
 };
 
@@ -1496,6 +1544,7 @@ type ReconciledSceneSnapshot = Readonly<{
 
 const reconcile3DSceneSnapshot = (
   sceneInstance: SceneHostInstance,
+  g2lComposition: G2lCompositionStrategy,
   document = createG3dSceneDocument(sceneInstance.props.id),
 ): ReconciledSceneSnapshot => {
   const visitedNodeIds = new Set<string>();
@@ -1535,7 +1584,7 @@ const reconcile3DSceneSnapshot = (
     nodeIndex: number,
   ): number => {
     if (child.type === 'g3d-scene') {
-      const nestedSnapshot = reconcile3DSceneSnapshot(child);
+      const nestedSnapshot = reconcile3DSceneSnapshot(child, g2lComposition);
       const scene3d = create3dSceneDescriptor(
         child.props,
         nestedSnapshot.scene,
@@ -1567,6 +1616,7 @@ const reconcile3DSceneSnapshot = (
         child.props,
         child.children,
         getHostSubtreeRevision(child),
+        g2lComposition,
         {
           nested: true,
           defaultViewportWidth: default2dSceneTextureSize,
@@ -1585,7 +1635,12 @@ const reconcile3DSceneSnapshot = (
       return nodeIndex;
     }
     if (child.type === 'g2l-root') {
-      const computed = computeG2lRender(child, getHostSubtreeRevision(child));
+      const computed = computeG2lRender(
+        child,
+        getHostSubtreeRevision(child),
+        'g3d',
+        g2lComposition,
+      );
       layouts.push(computed.snapshot);
       return visitChildren(parentId, computed.outputs, nodeIndex);
     }
@@ -1696,7 +1751,12 @@ const syncContainerSceneDocument = (container: HostContainer): void => {
   const rootInstance = container.rootChildren[0];
   const rootSubtreeRevision = syncHostSubtreeRevision(rootInstance);
   if (rootInstance.type === 'g2l-root') {
-    const computed = computeG2lRender(rootInstance, rootSubtreeRevision);
+    const computed = computeG2lRender(
+      rootInstance,
+      rootSubtreeRevision,
+      null,
+      container.g2lComposition,
+    );
     container.currentG2lLayouts = [computed.snapshot];
     if (computed.outputs.length === 0) {
       container.document = undefined;
@@ -1733,6 +1793,7 @@ const syncContainerSceneDocument = (container: HostContainer): void => {
         renderedRoot.props,
         renderedRoot.children,
         getHostSubtreeRevision(renderedRoot),
+        container.g2lComposition,
         {
           nested: false,
           defaultViewportWidth: container.runtimeRootViewportWidth,
@@ -1778,7 +1839,7 @@ const syncContainerSceneDocument = (container: HostContainer): void => {
     }
     const document = container.document ?? createG3dSceneDocument(renderedRoot.props.id);
     container.document = document;
-    const snapshot = reconcile3DSceneSnapshot(renderedRoot, document);
+    const snapshot = reconcile3DSceneSnapshot(renderedRoot, container.g2lComposition, document);
     const commit = createG3dSceneRootCommit(snapshot.scene, previousScene, container.revision + 1);
     container.currentScene = snapshot.scene;
     container.current2dScenes = snapshot.scenes2d;
@@ -1806,6 +1867,7 @@ const syncContainerSceneDocument = (container: HostContainer): void => {
       rootInstance.props,
       rootInstance.children,
       rootSubtreeRevision,
+      container.g2lComposition,
       {
         nested: false,
         defaultViewportWidth: container.runtimeRootViewportWidth,
@@ -1849,7 +1911,7 @@ const syncContainerSceneDocument = (container: HostContainer): void => {
 
   const document = container.document ?? createG3dSceneDocument(rootInstance.props.id);
   container.document = document;
-  const snapshot = reconcile3DSceneSnapshot(rootInstance, document);
+  const snapshot = reconcile3DSceneSnapshot(rootInstance, container.g2lComposition, document);
   const commit = createG3dSceneRootCommit(snapshot.scene, previousScene, container.revision + 1);
   container.currentScene = snapshot.scene;
   container.current2dScenes = snapshot.scenes2d;
@@ -1872,6 +1934,7 @@ const syncContainerSceneDocument = (container: HostContainer): void => {
 };
 
 const createRootContainer = (config: CreateReactSceneRootConfig): HostContainer => ({
+  kind: 'root',
   rootChildren: [],
   current2dScenes: [],
   current3dScenes: [],
@@ -1885,13 +1948,14 @@ const createRootContainer = (config: CreateReactSceneRootConfig): HostContainer 
   contentRevision: 0,
   contentTreeRevision: undefined,
   subscribers: new Set(),
+  g2lComposition: config.g2lComposition ?? defaultG2lCompositionStrategy,
 });
 
 const toRendererError = (error: unknown): Error => {
   return error instanceof Error ? error : new Error(String(error));
 };
 
-const throwPendingContainerError = (container: HostContainer): void => {
+const throwPendingContainerError = (container: ReconcilerContainer): void => {
   const pendingError = container.pendingError;
   if (pendingError) {
     container.pendingError = undefined;
@@ -1899,13 +1963,13 @@ const throwPendingContainerError = (container: HostContainer): void => {
   }
 };
 
-const throwPendingContainerErrors = (containers: Iterable<HostContainer>): void => {
+const throwPendingContainerErrors = (containers: Iterable<ReconcilerContainer>): void => {
   for (const container of containers) {
     throwPendingContainerError(container);
   }
 };
 
-const createFiberRoot = (container: HostContainer): ReconcilerRoot =>
+const createFiberRoot = (container: ReconcilerContainer): ReconcilerRoot =>
   renderer.createContainer(
     container,
     LegacyRoot,
@@ -1924,6 +1988,33 @@ const createFiberRoot = (container: HostContainer): ReconcilerRoot =>
     },
     null,
   );
+
+type DerivedFiberRootState = Readonly<{
+  container: DerivedHostContainer;
+  fiberRoot: ReconcilerRoot;
+}>;
+
+const derivedFiberRoots = new WeakMap<
+  G2lRootHostInstance | G2lBoxHostInstance | G2lTextHostInstance,
+  DerivedFiberRootState
+>();
+
+const getDerivedFiberRootState = (
+  owner: G2lRootHostInstance | G2lBoxHostInstance | G2lTextHostInstance,
+): DerivedFiberRootState => {
+  const existing = derivedFiberRoots.get(owner);
+  if (existing) {
+    return existing;
+  }
+  const container: DerivedHostContainer = {
+    kind: 'derived',
+    derivedChildren: [],
+  };
+  const fiberRoot = createFiberRoot(container);
+  const state = { container, fiberRoot };
+  derivedFiberRoots.set(owner, state);
+  return state;
+};
 
 const flushRendererWork = (): void => {
   renderer.flushSyncWork();

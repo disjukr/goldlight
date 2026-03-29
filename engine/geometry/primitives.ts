@@ -151,6 +151,45 @@ const createMeshPrimitive = (
   materialId: options.materialId,
 });
 
+const appendGridToBuffers = (
+  positions: number[],
+  normals: number[],
+  texcoords: number[],
+  indices: number[],
+  ringCount: number,
+  segmentCount: number,
+  vertexAt: (ringIndex: number, segmentIndex: number) => Readonly<{
+    position: Vec3;
+    normal: Vec3;
+    uv: Vec2;
+  }>,
+  winding: 'default' | 'reverse' = 'default',
+): void => {
+  const startIndex = positions.length / 3;
+  for (let ringIndex = 0; ringIndex < ringCount; ringIndex += 1) {
+    for (let segmentIndex = 0; segmentIndex < segmentCount; segmentIndex += 1) {
+      const vertex = vertexAt(ringIndex, segmentIndex);
+      positions.push(...vertex.position);
+      normals.push(...normalizeVec3(vertex.normal));
+      texcoords.push(...vertex.uv);
+    }
+  }
+
+  for (let ringIndex = 0; ringIndex < ringCount - 1; ringIndex += 1) {
+    for (let segmentIndex = 0; segmentIndex < segmentCount - 1; segmentIndex += 1) {
+      const a = startIndex + (ringIndex * segmentCount) + segmentIndex;
+      const b = a + segmentCount;
+      const c = b + 1;
+      const d = a + 1;
+      if (winding === 'reverse') {
+        indices.push(a, d, b, b, d, c);
+      } else {
+        indices.push(a, b, d, b, c, d);
+      }
+    }
+  }
+};
+
 const createGridMesh = (
   options: BaseMeshOptions,
   ringCount: number,
@@ -167,28 +206,16 @@ const createGridMesh = (
   const texcoords: number[] = [];
   const indices: number[] = [];
 
-  for (let ringIndex = 0; ringIndex < ringCount; ringIndex += 1) {
-    for (let segmentIndex = 0; segmentIndex < segmentCount; segmentIndex += 1) {
-      const vertex = vertexAt(ringIndex, segmentIndex);
-      positions.push(...vertex.position);
-      normals.push(...normalizeVec3(vertex.normal));
-      texcoords.push(...vertex.uv);
-    }
-  }
-
-  for (let ringIndex = 0; ringIndex < ringCount - 1; ringIndex += 1) {
-    for (let segmentIndex = 0; segmentIndex < segmentCount - 1; segmentIndex += 1) {
-      const a = (ringIndex * segmentCount) + segmentIndex;
-      const b = a + segmentCount;
-      const c = b + 1;
-      const d = a + 1;
-      if (winding === 'reverse') {
-        indices.push(a, d, b, b, d, c);
-      } else {
-        indices.push(a, b, d, b, c, d);
-      }
-    }
-  }
+  appendGridToBuffers(
+    positions,
+    normals,
+    texcoords,
+    indices,
+    ringCount,
+    segmentCount,
+    vertexAt,
+    winding,
+  );
 
   return createMeshPrimitive(options, { positions, normals, texcoords, indices });
 };

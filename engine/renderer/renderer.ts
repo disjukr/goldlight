@@ -18,6 +18,9 @@ import builtInForwardLitShader from './shaders/built_in_forward_lit.wgsl' with {
 import builtInForwardTexturedShader from './shaders/built_in_forward_unlit_textured.wgsl' with {
   type: 'text',
 };
+import builtInForwardTexturedPremulShader from './shaders/built_in_forward_unlit_textured_premul.wgsl' with {
+  type: 'text',
+};
 import builtInForwardTexturedLitShader from './shaders/built_in_forward_lit_textured.wgsl' with {
   type: 'text',
 };
@@ -602,6 +605,7 @@ export type DirectionalLightItem = Readonly<{
 const builtInUnlitProgramId = 'built-in:unlit';
 const builtInLitProgramId = 'built-in:lit';
 const builtInTexturedUnlitProgramId = 'built-in:unlit-textured';
+const builtInTexturedPremulUnlitProgramId = 'built-in:unlit-textured-premul';
 const builtInTexturedLitProgramId = 'built-in:lit-textured';
 const builtInUnlitTemplateId = 'built-in:unlit-template';
 const builtInLitTemplateId = 'built-in:lit-template';
@@ -1591,6 +1595,65 @@ const builtInTexturedUnlitProgram: MaterialProgram = {
   ],
 };
 
+const builtInTexturedPremulUnlitProgram: MaterialProgram = {
+  id: builtInTexturedPremulUnlitProgramId,
+  label: 'Built-in Unlit (Textured Premultiplied)',
+  wgsl: builtInForwardTexturedPremulShader,
+  vertexEntryPoint: 'vsMain',
+  fragmentEntryPoint: 'fsMain',
+  usesMaterialBindings: true,
+  usesTransformBindings: true,
+  usesFrameBindings: true,
+  programBindings: [
+    {
+      kind: 'uniform',
+      binding: 0,
+    },
+    {
+      kind: 'texture',
+      binding: 1,
+      textureSemantic: 'baseColor',
+    },
+    {
+      kind: 'sampler',
+      binding: 2,
+      textureSemantic: 'baseColor',
+    },
+  ],
+  materialBindings: [
+    {
+      kind: 'uniform',
+      binding: 0,
+    },
+    {
+      kind: 'texture',
+      binding: 1,
+      textureSemantic: 'baseColor',
+    },
+    {
+      kind: 'sampler',
+      binding: 2,
+      textureSemantic: 'baseColor',
+    },
+  ],
+  vertexAttributes: [
+    {
+      semantic: 'POSITION',
+      shaderLocation: 0,
+      format: 'float32x3',
+      offset: 0,
+      arrayStride: 12,
+    },
+    {
+      semantic: 'TEXCOORD_0',
+      shaderLocation: 1,
+      format: 'float32x2',
+      offset: 0,
+      arrayStride: 8,
+    },
+  ],
+};
+
 const builtInTexturedLitProgram: MaterialProgram = {
   id: builtInTexturedLitProgramId,
   label: 'Built-in Lit (Textured)',
@@ -2010,6 +2073,7 @@ export const createMaterialRegistry = (): MaterialRegistry => ({
     [builtInUnlitProgramId, builtInUnlitProgram],
     [builtInLitProgramId, builtInLitProgram],
     [builtInTexturedUnlitProgramId, builtInTexturedUnlitProgram],
+    [builtInTexturedPremulUnlitProgramId, builtInTexturedPremulUnlitProgram],
     [builtInTexturedLitProgramId, builtInTexturedLitProgram],
   ]),
   templates: new Map<string, RegisteredMaterialProgramTemplate>([

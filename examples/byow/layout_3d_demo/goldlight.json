@@ -1,0 +1,7 @@
+{
+  "entrypoint": "./main.tsx",
+  "output": "./byow_layout_3d_demo.exe",
+  "includes": [
+    "./app.tsx"
+  ]
+}

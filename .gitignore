@@ -1,14 +1,4 @@
 .goldlight/
 build/
-examples/**/.goldlight-build/
 node_modules/
-engine/text/native/index.node
-engine/**/native/target
-examples/**/*.exe
-examples/**/out.png
-examples/**/ckout.png
-examples/assets/sponza
-examples/browser_forward/dist/main.js
-examples/browser_textured_forward/dist/main.js
-examples/drawing/render_tiger_png/tiger.png
 tmp/

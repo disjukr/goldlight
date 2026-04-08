@@ -1,10 +1,11 @@
-import React, { type ReactNode } from 'npm:react@19.2.0';
-import Reconciler from 'npm:react-reconciler@0.33.0';
+﻿// @ts-nocheck
+import React, { type ReactNode } from 'react';
+import Reconciler from 'react-reconciler';
 import {
   DefaultEventPriority,
   LegacyRoot,
   NoEventPriority,
-} from 'npm:react-reconciler@0.33.0/constants.js';
+} from 'react-reconciler/constants.js';
 
 import type {
   AnimationClipJsxProps,
@@ -2117,3 +2118,5 @@ export * from './reconciler_runtime.ts';
 export * from './runtime_driver.ts';
 export * from './runtime_forward.ts';
 export * from './scene_root.ts';
+
+

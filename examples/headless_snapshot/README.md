@@ -1,17 +1,17 @@
 # Headless Snapshot PNG
 
-Render a small offscreen frame and write the PNG result to disk.
+Render a small offscreen forward frame and write the PNG result to disk.
 
-Run with:
+Run from the repository root:
 
 ```sh
-deno task example:headless:png
+bun examples/headless_snapshot/main.ts
 ```
 
 Optional arguments:
 
 ```sh
-deno task example:headless:png ./tmp/custom.png 256 256
+bun examples/headless_snapshot/main.ts ./tmp/custom.png 256 256
 ```
 
 - Argument 1: output path
@@ -22,9 +22,5 @@ Default output path: `examples/headless_snapshot/out/forward.png`
 
 Requirements:
 
-- Deno with `--unstable-webgpu`
-- A runtime where `navigator.gpu` can request a WebGPU adapter/device
-
-The script builds a small indexed + non-indexed unlit scene, renders it through the existing forward
-renderer, reads back the offscreen texture, and exports the RGBA bytes with
-`@disjukr/goldlight/exporters` `exportPngRgba`.
+- Bun installed through `bun install`
+- a runtime where `navigator.gpu` can request a WebGPU adapter/device

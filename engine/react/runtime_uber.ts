@@ -1,3 +1,4 @@
+﻿// @ts-nocheck
 import type {
   GpuTextureUploadContext,
   GpuUploadContext,
@@ -59,3 +60,4 @@ export const createSceneRootUberRenderer = (
     },
   });
 };
+

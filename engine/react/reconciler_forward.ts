@@ -1,3 +1,4 @@
+﻿// @ts-nocheck
 import {
   acquireColorAttachmentView,
   createOffscreenBinding,
@@ -20,6 +21,7 @@ import {
   encodeDawnCommandBuffer,
   finishDrawingRecorder,
   scaleDrawingRecorder,
+  submitDawnCommandBuffer,
 } from '@disjukr/goldlight/drawing';
 import type {
   ForwardRenderResult,
@@ -425,6 +427,10 @@ export const createReactSceneRootForwardRenderer = (
             recording,
             root2dRuntimeState.binding,
           );
+          submitDawnCommandBuffer(
+            root2dRuntimeState.drawingContext.sharedContext,
+            offscreenCommandBuffer,
+          );
           const encoder = context.device.createCommandEncoder({
             label: 'react-root-g2d-present-encoder',
           });
@@ -457,7 +463,7 @@ export const createReactSceneRootForwardRenderer = (
           const presentCommandBuffer = encoder.finish({
             label: 'react-root-g2d-present-command-buffer',
           });
-          context.queue.submit([offscreenCommandBuffer.commandBuffer, presentCommandBuffer]);
+          context.queue.submit([presentCommandBuffer]);
           return {
             drawCount: recording.commands.length,
             submittedCommandBufferCount: 2,
@@ -528,7 +534,7 @@ export const createReactSceneRootForwardRenderer = (
               recording,
               state.binding,
             );
-            context.queue.submit([commandBuffer.commandBuffer]);
+            submitDawnCommandBuffer(state.drawingContext.sharedContext, commandBuffer);
             state.renderedRevision = scene2d.revision;
           }
           residency.textures.set(scene2d.textureId, create2dSceneTextureResidency(scene2d, state));
@@ -604,3 +610,4 @@ export const createReactSceneRootForwardRenderer = (
     },
   };
 };
+

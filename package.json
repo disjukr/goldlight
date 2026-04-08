@@ -1,0 +1,43 @@
+{
+  "name": "goldlight",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build:text:native": "node ./scripts/build_text_host.mjs",
+    "example:byow:run": "cross-env GOLDLIGHT_ENTRYPOINT=./examples/byow/native_demo/main.ts node ./scripts/run_electrobun.mjs dev",
+    "example:byow:triangle:run": "cross-env GOLDLIGHT_ENTRYPOINT=./examples/byow/triangle/main.ts node ./scripts/run_electrobun.mjs dev",
+    "example:byow:primitives:run": "cross-env GOLDLIGHT_ENTRYPOINT=./examples/byow/primitives_demo/main.ts node ./scripts/run_electrobun.mjs dev",
+    "example:byow:cornell:run": "cross-env GOLDLIGHT_ENTRYPOINT=./examples/byow/cornell_pathtraced_demo/main.ts node ./scripts/run_electrobun.mjs dev",
+    "example:byow:cornell-helmet:run": "cross-env GOLDLIGHT_ENTRYPOINT=./examples/byow/cornell_helmet_pathtraced_demo/main.ts node ./scripts/run_electrobun.mjs dev",
+    "example:byow:helmet-forward:run": "cross-env GOLDLIGHT_ENTRYPOINT=./examples/byow/helmet_forward_demo/main.ts node ./scripts/run_electrobun.mjs dev",
+    "example:byow:helmet-pathtraced:run": "cross-env GOLDLIGHT_ENTRYPOINT=./examples/byow/helmet_pathtraced_demo/main.ts node ./scripts/run_electrobun.mjs dev",
+    "example:byow:react-bunny:run": "cross-env GOLDLIGHT_ENTRYPOINT=./examples/byow/react_bunny_demo/main.tsx node ./scripts/run_electrobun.mjs dev",
+    "example:byow:react-glyphs:run": "cross-env GOLDLIGHT_ENTRYPOINT=./examples/byow/react_glyphs_demo/main.tsx node ./scripts/run_electrobun.mjs dev",
+    "example:byow:react-scene3d-in-3d:run": "cross-env GOLDLIGHT_ENTRYPOINT=./examples/byow/react_scene3d_in_3d_demo/main.ts node ./scripts/run_electrobun.mjs dev",
+    "example:byow:react-surface-2d-in-3d:run": "cross-env GOLDLIGHT_ENTRYPOINT=./examples/byow/react_surface_2d_in_3d_demo/main.ts node ./scripts/run_electrobun.mjs dev",
+    "example:byow:layout:run": "cross-env GOLDLIGHT_ENTRYPOINT=./examples/byow/layout_demo/main.ts node ./scripts/run_electrobun.mjs dev",
+    "example:byow:layout-3d:run": "cross-env GOLDLIGHT_ENTRYPOINT=./examples/byow/layout_3d_demo/main.tsx node ./scripts/run_electrobun.mjs dev",
+    "example:byow:multiwindow:run": "cross-env GOLDLIGHT_ENTRYPOINT=./examples/byow/multiwindow_demo/main.ts node ./scripts/run_electrobun.mjs dev"
+  },
+  "dependencies": {
+    "canvaskit-wasm": "^0.40.0",
+    "cross-env": "^10.0.0",
+    "electrobun": "^1.0.0",
+    "jpeg-js": "0.4.4",
+    "pngjs": "7.0.0",
+    "react": "19.2.0",
+    "react-reconciler": "0.33.0",
+    "three": "0.180.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.6.0",
+    "@types/pngjs": "^6.0.5",
+    "@types/react": "^19.2.14",
+    "@types/react-reconciler": "^0.33.0",
+    "@types/three": "^0.183.1",
+    "bun-types": "^1.3.11",
+    "typescript": "^5.9.3"
+  }
+}

@@ -1,43 +1,27 @@
-# BYOW Layout Demo
+﻿# BYOW Layout Demo
 
-This demo shows the first `@disjukr/goldlight/layout` box-tree and paragraph APIs driving a live
-BYOW window through the new `g2l-*` React substrate layered over `g2d-*`.
-
-It exercises:
-
-- `g2l-root`, `g2l-box`, and `g2l-text`
-- reconciler-owned layout collection and committed `render(ctx)` callbacks
-- `row` / `column`, `padding`, `gap`, and flex sizing
-- `g2d-*` rendering produced from `g2l` render callbacks
-- atlas text rendering in the demo app, with a single constant switch for `sdf` or `a8`
-- animated width constraints so text reflow is visible frame-to-frame
+Electrobun layout demo using g2l nodes, paragraph layout, and drawing-backed text rendering.
 
 Run with:
 
 ```sh
-deno task desktop:host:build
-deno task text:host:build
-deno run -A --unstable-ffi --unstable-webgpu --unstable-raw-imports examples/byow/layout_demo/main.ts
+bun run example:byow:layout:run
 ```
 
-Type-check with:
+Build the text host first when the demo renders glyphs or layout text:
 
 ```sh
-deno check --unstable-ffi --unstable-webgpu --unstable-raw-imports examples/byow/layout_demo/main.ts examples/byow/layout_demo/app.tsx
+bun run build:text:native
 ```
 
-Compile to a single executable with:
+Verify the migrated runtime surface with:
 
 ```sh
-deno task compile examples/byow/layout_demo
+bun run typecheck
 ```
 
-Expected output:
+Requirements:
 
-- a dark BYOW window with nested cards and text
-- one animated paragraph panel whose width changes over time
-- visible line reflow for both Latin and Hangul text
-
-The demo currently defaults to `A8 atlas` text in
-[app.tsx](/C:/Users/user/github/disjukr/goldlight/examples/byow/layout_demo/app.tsx). To compare
-with `SDF` rendering, change `layoutDemoTextMode` from `'a8'` to `'sdf'`.
+- Bun dependencies installed through `bun install`
+- a successful native text build for text-heavy demos
+- a WebGPU-capable desktop environment

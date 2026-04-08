@@ -3,6 +3,8 @@ use font_kit::font::Font;
 use font_kit::hinting::HintingOptions;
 use font_kit::source::SystemSource;
 use harfbuzz_sys::*;
+use napi::bindgen_prelude::Buffer;
+use napi_derive::napi;
 use pathfinder_geometry::transform2d::Transform2F;
 use pathfinder_geometry::vector::{Vector2F, Vector2I};
 use std::cell::RefCell;
@@ -1387,4 +1389,330 @@ pub extern "C" fn text_host_shaped_run_destroy(shaped_run_handle: u64) {
     let _ = with_state_mut(|state| {
         state.shaped_runs.remove(&shaped_run_handle);
     });
+}
+
+#[napi(object)]
+pub struct JsFontMetrics {
+    pub units_per_em: u32,
+    pub ascent: f64,
+    pub descent: f64,
+    pub line_gap: f64,
+    pub x_height: f64,
+    pub cap_height: f64,
+    pub underline_position: f64,
+    pub underline_thickness: f64,
+    pub strikeout_position: f64,
+    pub strikeout_thickness: f64,
+}
+
+#[napi(object)]
+pub struct JsGlyphBitmap {
+    pub width: u32,
+    pub height: u32,
+    pub stride: u32,
+    pub format_code: u32,
+    pub offset_x: i32,
+    pub offset_y: i32,
+    pub pixels: Buffer,
+}
+
+#[napi(object)]
+pub struct JsShapedRun {
+    pub glyph_count: u32,
+    pub bidi_level: u32,
+    pub direction: String,
+    pub script_tag_code: u32,
+    pub advance_x: f64,
+    pub advance_y: f64,
+    pub utf8_range_start: u32,
+    pub utf8_range_end: u32,
+    pub glyph_ids: Vec<u32>,
+    pub positions: Vec<f64>,
+    pub offsets: Vec<f64>,
+    pub cluster_indices: Vec<u32>,
+}
+
+fn read_family_name_at(index: u32) -> Option<String> {
+    let required_len = text_host_get_family_name(index, std::ptr::null_mut(), 0);
+    if required_len == 0 {
+        return None;
+    }
+
+    let mut buffer = vec![0u8; required_len];
+    let written_len = text_host_get_family_name(
+        index,
+        buffer.as_mut_ptr() as *mut c_void,
+        buffer.len(),
+    );
+    if written_len == 0 {
+        return None;
+    }
+    buffer.truncate(written_len);
+    String::from_utf8(buffer).ok()
+}
+
+fn decode_js_metrics(metrics: TextFontMetrics) -> JsFontMetrics {
+    JsFontMetrics {
+        units_per_em: metrics.units_per_em as u32,
+        ascent: metrics.ascent as f64,
+        descent: metrics.descent as f64,
+        line_gap: metrics.line_gap as f64,
+        x_height: metrics.x_height as f64,
+        cap_height: metrics.cap_height as f64,
+        underline_position: metrics.underline_position as f64,
+        underline_thickness: metrics.underline_thickness as f64,
+        strikeout_position: metrics.strikeout_position as f64,
+        strikeout_thickness: metrics.strikeout_thickness as f64,
+    }
+}
+
+fn copy_u32_buffer(
+    length: usize,
+    copy_fn: impl FnOnce(*mut c_void, usize) -> u8,
+) -> Option<Vec<u32>> {
+    let mut values = vec![0u32; length];
+    let result = copy_fn(values.as_mut_ptr() as *mut c_void, values.len());
+    if result != TEXT_HOST_RESULT_OK {
+        return None;
+    }
+    Some(values)
+}
+
+fn copy_f32_buffer(
+    length: usize,
+    copy_fn: impl FnOnce(*mut c_void, usize) -> u8,
+) -> Option<Vec<f64>> {
+    let mut values = vec![0f32; length];
+    let result = copy_fn(values.as_mut_ptr() as *mut c_void, values.len());
+    if result != TEXT_HOST_RESULT_OK {
+        return None;
+    }
+    Some(values.into_iter().map(|value| value as f64).collect())
+}
+
+fn read_svg_path(typeface_handle: u64, glyph_id: u32, size: f32) -> Option<String> {
+    let required_len = text_host_get_glyph_svg_path(
+        typeface_handle,
+        glyph_id,
+        size,
+        std::ptr::null_mut(),
+        0,
+    );
+    if required_len == 0 {
+        return None;
+    }
+
+    let mut buffer = vec![0u8; required_len];
+    let written_len = text_host_get_glyph_svg_path(
+        typeface_handle,
+        glyph_id,
+        size,
+        buffer.as_mut_ptr() as *mut c_void,
+        buffer.len(),
+    );
+    if written_len == 0 {
+        return None;
+    }
+    buffer.truncate(written_len);
+    String::from_utf8(buffer).ok()
+}
+
+fn read_bitmap(
+    info_result: u8,
+    info: TextGlyphMaskInfo,
+    copy_len: usize,
+    copy_fn: impl FnOnce(*mut c_void, usize) -> usize,
+) -> Option<JsGlyphBitmap> {
+    if info_result != TEXT_HOST_RESULT_OK {
+        return None;
+    }
+
+    let mut pixels = vec![0u8; copy_len];
+    let written_len = copy_fn(pixels.as_mut_ptr() as *mut c_void, pixels.len());
+    if written_len == 0 {
+        return None;
+    }
+    pixels.truncate(written_len);
+
+    Some(JsGlyphBitmap {
+        width: info.width,
+        height: info.height,
+        stride: info.stride,
+        format_code: info.format,
+        offset_x: info.offset_x,
+        offset_y: info.offset_y,
+        pixels: pixels.into(),
+    })
+}
+
+#[napi]
+pub fn init_text_host() -> bool {
+    text_host_init() == TEXT_HOST_INIT_OK
+}
+
+#[napi]
+pub fn shutdown_text_host() {
+    text_host_shutdown();
+}
+
+#[napi]
+pub fn list_families() -> Vec<String> {
+    let count = text_host_get_family_count();
+    (0..count).filter_map(read_family_name_at).collect()
+}
+
+#[napi]
+pub fn match_typeface(family: String) -> Option<String> {
+    let bytes = family.into_bytes();
+    let handle = text_host_match_typeface_by_family(bytes.as_ptr(), bytes.len());
+    if handle == 0 {
+        None
+    } else {
+        Some(handle.to_string())
+    }
+}
+
+#[napi]
+pub fn get_font_metrics(typeface_handle: String, size: f64) -> Option<JsFontMetrics> {
+    let typeface_handle = typeface_handle.parse::<u64>().ok()?;
+    let mut metrics = TextFontMetrics::default();
+    let result = text_host_get_font_metrics(typeface_handle, size as f32, &mut metrics as *mut _);
+    if result != TEXT_HOST_RESULT_OK {
+        return None;
+    }
+    Some(decode_js_metrics(metrics))
+}
+
+#[napi]
+pub fn shape_text(
+    typeface_handle: String,
+    text: String,
+    size: f64,
+    direction: u32,
+    language: String,
+    script_tag: u32,
+) -> Option<JsShapedRun> {
+    let typeface_handle = typeface_handle.parse::<u64>().ok()?;
+    let text_bytes = text.into_bytes();
+    let language_bytes = language.into_bytes();
+    let handle = text_host_shape_text(
+        typeface_handle,
+        text_bytes.as_ptr(),
+        text_bytes.len(),
+        size as f32,
+        direction as u8,
+        language_bytes.as_ptr(),
+        language_bytes.len(),
+        script_tag,
+    );
+    if handle == 0 {
+        return None;
+    }
+
+    let mut info = TextShapedRunInfo::default();
+    let info_result = text_host_shaped_run_get_info(handle, &mut info as *mut _);
+    if info_result != TEXT_HOST_RESULT_OK {
+        text_host_shaped_run_destroy(handle);
+        return None;
+    }
+
+    let glyph_ids =
+        copy_u32_buffer(info.glyph_count as usize, |ptr, len| text_host_shaped_run_copy_glyph_ids(handle, ptr, len))?;
+    let positions = copy_f32_buffer(
+        ((info.glyph_count as usize) + 1) * 2,
+        |ptr, len| text_host_shaped_run_copy_positions(handle, ptr, len),
+    )?;
+    let offsets = copy_f32_buffer(
+        ((info.glyph_count as usize) + 1) * 2,
+        |ptr, len| text_host_shaped_run_copy_offsets(handle, ptr, len),
+    )?;
+    let cluster_indices = copy_u32_buffer(
+        (info.glyph_count as usize) + 1,
+        |ptr, len| text_host_shaped_run_copy_cluster_indices(handle, ptr, len),
+    )?;
+
+    text_host_shaped_run_destroy(handle);
+
+    Some(JsShapedRun {
+        glyph_count: info.glyph_count,
+        bidi_level: info.bidi_level as u32,
+        direction: if info.direction == 2 { "rtl".into() } else { "ltr".into() },
+        script_tag_code: info.script_tag,
+        advance_x: info.advance_x as f64,
+        advance_y: info.advance_y as f64,
+        utf8_range_start: info.utf8_range_start,
+        utf8_range_end: info.utf8_range_end,
+        glyph_ids,
+        positions,
+        offsets,
+        cluster_indices,
+    })
+}
+
+#[napi]
+pub fn get_glyph_svg_path(typeface_handle: String, glyph_id: u32, size: f64) -> Option<String> {
+    let typeface_handle = typeface_handle.parse::<u64>().ok()?;
+    read_svg_path(typeface_handle, glyph_id, size as f32)
+}
+
+#[napi]
+pub fn get_glyph_mask(
+    typeface_handle: String,
+    glyph_id: u32,
+    size: f64,
+    subpixel_x: f64,
+    subpixel_y: f64,
+) -> Option<JsGlyphBitmap> {
+    let typeface_handle = typeface_handle.parse::<u64>().ok()?;
+    let mut info = TextGlyphMaskInfo::default();
+    let info_result = text_host_get_glyph_mask_info(
+        typeface_handle,
+        glyph_id,
+        size as f32,
+        subpixel_x as f32,
+        subpixel_y as f32,
+        &mut info as *mut _,
+    );
+    read_bitmap(info_result, info, (info.stride * info.height) as usize, |ptr, len| {
+        text_host_copy_glyph_mask_pixels(
+            typeface_handle,
+            glyph_id,
+            size as f32,
+            subpixel_x as f32,
+            subpixel_y as f32,
+            ptr,
+            len,
+        )
+    })
+}
+
+#[napi]
+pub fn get_glyph_sdf(
+    typeface_handle: String,
+    glyph_id: u32,
+    size: f64,
+    inset: u32,
+    radius: f64,
+) -> Option<JsGlyphBitmap> {
+    let typeface_handle = typeface_handle.parse::<u64>().ok()?;
+    let mut info = TextGlyphMaskInfo::default();
+    let info_result = text_host_get_glyph_sdf_info(
+        typeface_handle,
+        glyph_id,
+        size as f32,
+        inset,
+        radius as f32,
+        &mut info as *mut _,
+    );
+    read_bitmap(info_result, info, (info.stride * info.height) as usize, |ptr, len| {
+        text_host_copy_glyph_sdf_pixels(
+            typeface_handle,
+            glyph_id,
+            size as f32,
+            inset,
+            radius as f32,
+            ptr,
+            len,
+        )
+    })
 }

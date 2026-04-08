@@ -1,11 +1,4 @@
-/// <reference lib="deno.unstable" />
-
-export type DesktopHostSystem = 'win32' | 'cocoa' | 'x11' | 'wayland';
-
 export type DesktopWindowSurfaceInfo = Readonly<{
-  system: DesktopHostSystem;
-  windowHandle: Deno.PointerValue<unknown>;
-  displayHandle: Deno.PointerValue<unknown>;
   width: number;
   height: number;
   scaleFactor: number;
@@ -15,12 +8,6 @@ export type DesktopWindowState = Readonly<{
   width: number;
   height: number;
   focused: boolean;
-}>;
-
-export type DesktopFrameEvent = Readonly<{
-  kind: 'frame';
-  windowId: bigint;
-  timeMs: number;
 }>;
 
 export type DesktopResizeEvent = Readonly<{
@@ -76,7 +63,6 @@ export type DesktopMessageEnvelopeEvent = Readonly<{
 }>;
 
 export type DesktopWindowEvent =
-  | DesktopFrameEvent
   | DesktopResizeEvent
   | DesktopScaleFactorChangedEvent
   | DesktopCloseRequestedEvent
@@ -93,13 +79,31 @@ export type DesktopWindowOptions = Readonly<{
   backgroundColor?: readonly [number, number, number, number];
 }>;
 
-export type DesktopHostOptions = Readonly<{
-  libraryPath?: string;
-}>;
+export type DesktopModuleCleanup = () => void | Promise<void>;
+
+export type DesktopModuleEntry = (
+  context: DesktopModuleContext,
+) => void | DesktopModuleCleanup | Promise<void | DesktopModuleCleanup>;
 
 export type GoldlightWindowOptions =
   & DesktopWindowOptions
-  & DesktopHostOptions
   & Readonly<{
-    module: string | URL;
+    entry: DesktopModuleEntry;
   }>;
+
+export type DesktopWindow = Readonly<{
+  id: bigint;
+  runtime: import('./runtime.ts').DesktopWindowRuntime;
+  surfaceInfo: DesktopWindowSurfaceInfo;
+  canvasContext: GPUCanvasContext;
+  compatibleSurface: unknown;
+  getState: () => DesktopWindowState;
+  requestRedraw: () => void;
+  present: () => void;
+  resizeSurface: (width: number, height: number) => void;
+  close: () => void;
+}>;
+
+export type DesktopModuleContext = Readonly<{
+  window: DesktopWindow;
+}>;

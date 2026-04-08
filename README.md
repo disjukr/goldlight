@@ -1,212 +1,60 @@
-# goldlight
+﻿# goldlight
 
-`goldlight` is a functional WebGPU spatial runtime for Deno and browsers.
+`goldlight` is a functional WebGPU spatial runtime built around Bun, Electrobun, and browser-capable engine modules.
 
-The repository is organized around a single `engine/` tree with role-oriented modules for:
+## Runtime Direction
 
-- `@disjukr/goldlight/ir`: BDL-backed scene IR definitions
-- `@disjukr/goldlight/renderer`: scene evaluation and animation helpers
-- `@disjukr/goldlight/math`: low-level deterministic sampling and reusable math helpers
-- `@disjukr/goldlight/geometry`: shape definition, mesh primitive generation, and local SDF-to-mesh
-  helpers
-- `@disjukr/goldlight/spatial`: spatial indexing, broad-phase query helpers, and screen/world ray
-  helpers
-- `@disjukr/goldlight/procedural`: deterministic procedural texture and volume generators
-- `@disjukr/goldlight/raytrace`: tracing acceleration and traversal helpers
-- `@disjukr/goldlight/gpu`: WebGPU context and runtime residency helpers
-- `@disjukr/goldlight/renderer`: forward/deferred frame planning and execution contracts
-- `@disjukr/goldlight/importers`: OBJ/STL/PLY/glTF ingestion into scene IR
-- `@disjukr/goldlight/react`: declarative authoring adapter
-- `@disjukr/goldlight/react/reconciler`: experimental React reconciler host over the package-local
-  scene document
-- `@disjukr/goldlight/exporters`: output encoders such as PNG
-- `@disjukr/goldlight/desktop`: desktop shell bootstrap over a Rust `winit` FFI host
+- desktop applications run through `@disjukr/goldlight/desktop` on top of Electrobun
+- text shaping and glyph rasterization run through the bundled Rust `napi-rs` host at `engine/text/native`
+- browser-oriented engine modules remain usable where they do not depend on the desktop shell
+- the old Deno desktop FFI path is removed
 
-The design source of truth lives in [`docs/specs`](./docs/specs) and [`docs/adr`](./docs/adr).
+## Package Areas
 
-Utility and generation modules are organized around role-oriented boundaries such as `geometry`,
-`spatial`, `procedural`, and `raytrace`. See
-[`docs/adr/0012-role-oriented-utility-package-layout.md`](./docs/adr/0012-role-oriented-utility-package-layout.md).
+- `@disjukr/goldlight/ir`: scene IR definitions
+- `@disjukr/goldlight/math`: deterministic math helpers
+- `@disjukr/goldlight/geometry`: shapes, mesh generation, and SDF helpers
+- `@disjukr/goldlight/gpu`: WebGPU context and residency helpers
+- `@disjukr/goldlight/renderer`: scene evaluation and frame rendering
+- `@disjukr/goldlight/importers`: OBJ/STL/PLY/glTF ingestion
+- `@disjukr/goldlight/react`: declarative authoring and reconciler integration
+- `@disjukr/goldlight/text`: text host abstraction backed by the Rust native module
+- `@disjukr/goldlight/desktop`: Electrobun desktop shell
 
-## Documentation Map
+## Getting Started
 
-- Start at [`docs/README.md`](./docs/README.md) for a guided index across architecture, runtime,
-  schema, and contributor references.
-- Browse [`docs/specs/README.md`](./docs/specs/README.md) for design and behavior specifications.
-- Browse [`docs/adr/README.md`](./docs/adr/README.md) for accepted architectural decisions.
-- Browse [`docs/adr/proposals.md`](./docs/adr/proposals.md) for proposed architectural decisions.
-- Browse [`examples/README.md`](./examples/README.md) for runnable example entry points.
+```sh
+bun install
+bun run build:text:native
+bun run typecheck
+```
 
-## Scene Composition
+Run desktop examples with Electrobun:
 
-The current React authoring story is centered on scene composition:
+```sh
+bun run example:byow:run
+bun run example:byow:triangle:run
+bun run example:byow:primitives:run
+bun run example:byow:cornell:run
+bun run example:byow:cornell-helmet:run
+bun run example:byow:helmet-forward:run
+bun run example:byow:helmet-pathtraced:run
+bun run example:byow:react-bunny:run
+bun run example:byow:react-glyphs:run
+bun run example:byow:layout:run
+bun run example:byow:layout-3d:run
+bun run example:byow:multiwindow:run
+```
 
-- you can embed a vector-drawn `<g2d-scene>` inside a `<g3d-scene>`
-- you can embed a `<g3d-scene>` inside another `<g3d-scene>` with a different camera
-- nested scene drawing and final composition happen inside one GPU context
-- except for the root scene, nested scene outputs are cached by scene revision, so unchanged nested
-  scenes do not rerender just because their parent scene keeps animating
+## Notes
 
-The currently unsupported direction is `3d in 2d`: `@disjukr/goldlight/drawing` does not yet support
-drawing images or textures, so a `g2d-scene` cannot yet consume the output of a `g3d-scene`.
-
-Rendering cadence is application-controlled. If an app drives `const setTimeMs = useSetTimeMs();`
-from its own `requestAnimationFrame` loop, it behaves like a game-style continuously updating
-renderer. If it does not, the desktop runtime behaves like a normal application shell and redraws
-only when React state changes or when the system requires a new frame, such as resize or restore.
-
-## Status
-
-This is an initial scaffold that establishes package boundaries, Scene IR, residency separation,
-importer entry points, and frame-planning contracts. It is intentionally functional-first and avoids
-object-oriented API design.
-
-Implemented today:
-
-- BDL-driven `SceneIr` generation with drift checks in CI
-- camera declarations in Scene IR plus evaluated active-camera view/projection support
-- screen-to-world mouse ray generation from evaluated camera state for interaction foundations
-- reusable math and geometry helpers for quaternion-from-Euler rotation authoring, mesh bounds, and
-  generated mesh normals
-- mesh and texture residency upload paths
-- forward rendering, minimal deferred mesh execution with built-in unlit/lit plus custom WGSL
-  G-buffer paths, deferred directional-light resolve support, optional scene-color post-process blit
-  passes, first-class directional light nodes with built-in forward metallic-roughness shading,
-  EXR-backed environment-map diffuse/specular IBL in the forward lit path, template-assembled built-
-  in unlit/lit shader variants with binding-spec-driven forward material pipeline layouts, triangle-
-  BVH mesh path tracing plus caller-owned pathtraced scene extensions, and headless snapshot
-  readback
-- forward-renderer cubemap capture for mesh, SDF, and volume scenes as six ordered offscreen face
-  snapshots, plus CPU-side export helpers for equirectangular, angular-map, cross, and strip layouts
-  with optional filtered reprojection and caller-controlled output dimensions
-- Perlin gradient-noise samplers in `@disjukr/goldlight/math` plus grayscale texture/volume
-  generators in `@disjukr/goldlight/procedural` that share the existing deterministic seed model
-- triangle BVH construction in `@disjukr/goldlight/raytrace` plus a mesh pathtraced renderer slice
-  for static mesh scenes
-- local-space SDF-to-mesh extraction for supported sphere and box primitives, including
-  canonical-table marching-cubes and naive surface-nets contouring helpers for baking or inspection
-  workflows
-- mesh node id-buffer picking snapshots with stable node-to-mesh id mapping and screen-pixel
-  readback helpers
-- built-in unlit material registration, evaluated mesh transform uploads, base-color texture
-  sampling, material parameter uploads, custom WGSL registration, declared material texture
-  bindings, explicit alpha-policy bindings, and residency-aware custom texture binding validation
-- first-class material alpha policy fields (`alphaMode`, `alphaCutoff`, `renderQueue`, `depthWrite`,
-  and `doubleSided`) plus uber forward/deferred mesh partitioning
-- depth-tested forward mesh rendering with per-target depth attachments and back-face culling
-- glTF JSON, GLB, data-URI buffers, and caller-provided external glTF resource ingestion
-- ASCII PLY ingestion for in-repo meshes such as the Stanford Bunny reconstruction asset
-- browser/Deno helpers for resolving external glTF buffers and images into the existing importer
-  contract
-- direct surface/offscreen target literals at the call site instead of a dedicated target-helper
-  package
-- browser canvas examples, Windows BYOW native textured demo, headless PNG snapshot workflow, and
-  PNG snapshot encoding
-- Windows BYOW Damaged Helmet pathtraced demo using the vendored GLB asset and triangle-BVH mesh
-  path tracing
-- Windows BYOW Cornell Helmet pathtraced demo combining the Damaged Helmet mesh with Cornell-box SDF
-  walls and light
-- Windows BYOW primitives demo using `@disjukr/goldlight/geometry`, a reusable BYOW runner script,
-  built-in `lit` materials, and directional-light shading
-- Windows BYOW Stanford Bunny demo authored through `@disjukr/goldlight/react`, loading the vendored
-  ASCII PLY mesh, generating runtime normals for built-in lit shading, and publishing live bunny
-  rotation updates through the experimental React reconciler host
-- a browser React authoring example plus the current `createG3dSceneRoot()` snapshot path that
-  commits JSX-authored trees into `SceneIr` snapshots before rendering, including targeted residency
-  invalidation planning for stable resource IDs
-- an experimental `@disjukr/goldlight/react/reconciler` entrypoint that mounts normal React
-  components into the package-local scene document so hooks, state updates, and layout effects can
-  publish live scene updates without rebuilding authored trees by hand
-- live React scene composition through nested `g2d-scene` and `g3d-scene`, including `2d in 3d`,
-  `3d in 3d`, explicit viewport-versus-texture sizing, application-controlled redraw cadence through
-  `useSetTimeMs()`, and scene-level offscreen texture caching for unchanged nested scenes
-- `createSceneRootForwardRenderer()` and `createSceneRootUberRenderer()` convenience adapters that
-  bundle scene flushing, evaluation, residency upload, and renderer invocation
-- proposed ADR/discussion tracking for the next React live-update boundary decision around
-  partial-apply scene updates without renderer ownership, plus the next proposed reconciler
-  scene-document boundary for issue #112
-- fixture-backed golden snapshot regression tests for clear, mesh, sphere/box SDF, volume, and
-  recovery rebuild renders, including guards against raymarch fixtures collapsing back to clear-only
-  output
-- device-loss observation and residency rebuild helpers plus end-to-end offscreen recovery coverage
-- benchmark coverage for residency, material binding, and renderer capability preflight paths
-- renderer capability preflight for primitive and material compatibility, including deferred-path
-  NORMAL, TEXCOORD_0, and baseColor residency gating
+- the desktop shell expects Bun/Electrobun rather than Deno runtime flags
+- the text host must be built at least once before text-heavy examples run
+- the current verification command is `bun run typecheck`
 
 ## Documentation
 
-- Architecture overview: [`docs/specs/architecture.md`](./docs/specs/architecture.md)
-- Procedural generation contracts:
-  [`docs/specs/procedural-generation.md`](./docs/specs/procedural-generation.md)
-- SDF-to-mesh extraction contracts:
-  [`docs/specs/sdf-mesh-extraction.md`](./docs/specs/sdf-mesh-extraction.md)
-- Cubemap capture contracts: [`docs/specs/cubemap-capture.md`](./docs/specs/cubemap-capture.md)
-- Cubemap export contracts: [`docs/specs/cubemap-export.md`](./docs/specs/cubemap-export.md)
-- Rendering contracts: [`docs/specs/rendering.md`](./docs/specs/rendering.md)
-- Renderer capability model:
-  [`docs/specs/renderer-capabilities.md`](./docs/specs/renderer-capabilities.md)
-- Device-loss recovery contract:
-  [`docs/specs/device-loss-recovery.md`](./docs/specs/device-loss-recovery.md)
-- Runtime residency and rebuild rules:
-  [`docs/specs/runtime-residency.md`](./docs/specs/runtime-residency.md)
-- Interaction utilities: [`docs/specs/interaction.md`](./docs/specs/interaction.md)
-- Desktop shell contracts: [`docs/specs/desktop-shell.md`](./docs/specs/desktop-shell.md)
-
-## Quick Start
-
-Read in this order when onboarding:
-
-1. [`docs/specs/architecture.md`](./docs/specs/architecture.md)
-2. [`docs/specs/scene-ir.md`](./docs/specs/scene-ir.md)
-3. [`docs/specs/runtime-residency.md`](./docs/specs/runtime-residency.md)
-4. [`docs/specs/rendering.md`](./docs/specs/rendering.md)
-5. [`examples/byow/primitives_demo/README.md`](./examples/byow/primitives_demo/README.md)
-6. [`examples/byow/native_demo/README.md`](./examples/byow/native_demo/README.md)
-7. [`examples/headless_snapshot/README.md`](./examples/headless_snapshot/README.md)
-
-## Tasks
-
-- `deno task check`: format, codegen drift check, lint, test, and bench preflight
-- `deno task docs:check`: format-check docs, packages, tests, benches, and examples content
-- `deno task generate:ir`: regenerate TypeScript from BDL IR
-- `deno task generate:ir:check`: fail when generated IR files are stale
-- `deno task asset:examples`: refresh the in-repo example assets (`Stanford Bunny` and
-  `DamagedHelmet`)
-- `deno task asset:stanford-bunny`: refresh the Stanford Bunny source archive and extracted PLY
-- `deno task asset:damaged-helmet`: refresh the Khronos `DamagedHelmet.glb` sample
-- `deno task asset:sponza`: download the ignored Khronos `Sponza` sample under
-  `examples/assets/sponza`
-- `deno task desktop:host:build`: compile the Rust `winit` FFI host for `@disjukr/goldlight/desktop`
-- `deno task desktop:host:check`: type-check the Rust `winit` host crate without producing a DLL
-- `deno task example:headless:check`: type-check the headless snapshot PNG workflow
-- `deno task example:headless:png`: render a headless frame and write
-  `examples/headless_snapshot/out/forward.png`
-- `deno task example:byow:check`: type-check the Windows BYOW native demo
-- `deno task example:byow:run`: open the Windows BYOW native demo
-- `deno task example:byow:triangle:check`: type-check the Windows BYOW triangle smoke test
-- `deno task example:byow:triangle:run`: open the Windows BYOW triangle smoke test
-- `deno task example:byow:primitives:check`: type-check the Windows BYOW primitives demo
-- `deno task example:byow:primitives:run`: open the Windows BYOW primitives demo
-- `deno task example:byow:cornell-helmet:check`: type-check the Windows BYOW Cornell Helmet
-  pathtraced demo
-- `deno task example:byow:cornell-helmet:run`: open the Windows BYOW Cornell Helmet pathtraced demo
-- `deno task example:byow:pathtraced:check`: type-check the default Windows BYOW mesh pathtraced
-  demo
-- `deno task example:byow:pathtraced:run`: open the default Windows BYOW mesh pathtraced demo
-- `deno task example:byow:helmet-pathtraced:check`: type-check the Windows BYOW Damaged Helmet
-  pathtraced demo
-- `deno task example:byow:helmet-pathtraced:run`: open the Windows BYOW Damaged Helmet pathtraced
-  demo
-- `deno task example:byow:react-bunny:check`: type-check the Windows BYOW React Stanford Bunny demo
-- `deno task example:byow:react-bunny:run`: open the Windows BYOW React Stanford Bunny demo Golden
-  snapshot fixtures live in [`tests/fixtures/golden-snapshots`](./tests/fixtures/golden-snapshots).
-  Refresh them intentionally with
-  `deno run -A --unstable-raw-imports ./scripts/refresh_golden_snapshots.ts`.
-
-## Benchmarks
-
-- Run `deno task bench` before and after runtime-facing changes.
-- Compare the `runtime_paths` benchmark names directly across runs so residency upload, material
-  binding, capability preflight, and frame encoding regressions stay visible in review.
-- When a style or architecture exception is performance-motivated, include the benchmark delta in
-  the PR summary.
+- [docs/README.md](./docs/README.md)
+- [docs/specs/desktop-shell.md](./docs/specs/desktop-shell.md)
+- [docs/specs/rendering.md](./docs/specs/rendering.md)
+- [examples/README.md](./examples/README.md)

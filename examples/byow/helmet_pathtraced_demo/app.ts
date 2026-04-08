@@ -1,4 +1,5 @@
-/// <reference lib="deno.unstable" />
+﻿// @ts-nocheck
+import { readFile } from 'node:fs/promises';
 
 import { getMeshBounds } from '@disjukr/goldlight/geometry';
 import { createQuaternionFromEulerDegrees } from '@disjukr/goldlight/math';
@@ -29,7 +30,7 @@ import { importGltfFromGlbWithAssets } from '@disjukr/goldlight/importers';
 import { createMaterialRegistry, renderPathtracedFrame } from '@disjukr/goldlight/renderer';
 
 const cameraId = 'helmet-pathtraced-camera';
-const helmetSource = await Deno.readFile(
+const helmetSource = await readFile(
   new URL('../../assets/damaged-helmet/DamagedHelmet.glb', import.meta.url),
 );
 const { scene: helmetScene, assetSource: helmetAssetSource } = importGltfFromGlbWithAssets(
@@ -148,7 +149,7 @@ export default async ({ window }: DesktopModuleContext): Promise<() => void> => 
     format: navigator.gpu.getPreferredCanvasFormat(),
     alphaMode: 'opaque' as const,
   };
-  const gpuContext = await requestGpuContext({ target });
+  const gpuContext = await requestGpuContext({ target, compatibleSurface: window.compatibleSurface });
   const binding = createSurfaceBinding(gpuContext, window.canvasContext);
   const residency = createRuntimeResidency();
   const materialRegistry = createMaterialRegistry();
@@ -169,12 +170,15 @@ export default async ({ window }: DesktopModuleContext): Promise<() => void> => 
   const drawFrame = () => {
     renderPathtracedFrame(gpuContext, binding, residency, evaluatedScene, materialRegistry);
     window.present();
-    frameHandle = requestAnimationFrame(drawFrame);
+    frameHandle = window.runtime.requestAnimationFrame(drawFrame);
   };
 
-  frameHandle = requestAnimationFrame(drawFrame);
+  frameHandle = window.runtime.requestAnimationFrame(drawFrame);
 
   return () => {
-    cancelAnimationFrame(frameHandle);
+    window.runtime.cancelAnimationFrame(frameHandle);
   };
 };
+
+
+

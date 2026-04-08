@@ -1,9 +1,8 @@
 /** @jsx React.createElement */
 /** @jsxFrag React.Fragment */
-/// <reference lib="deno.unstable" />
 /// <reference lib="dom" />
 
-import React from 'npm:react@19.2.0';
+import React from 'react';
 import {
   createRuntimeResidency,
   createSurfaceBinding,
@@ -22,7 +21,7 @@ import {
   type PostProcessPass,
 } from '@disjukr/goldlight/renderer';
 
-import type { DesktopModuleCleanup, DesktopModuleContext } from './app.ts';
+import type { DesktopModuleCleanup, DesktopModuleContext } from './types.ts';
 
 export type RuntimeFrameState = Readonly<{
   deltaTimeMs: number;
@@ -75,6 +74,9 @@ export const FrameStateHandleContext = React.createContext<FrameStateHandle | nu
 export const TimeMsHandleContext = React.createContext<TimeMsHandle | null>(null);
 export const WindowMetricsHandleContext = React.createContext<WindowMetricsHandle | null>(null);
 export const RendererConfigHandleContext = React.createContext<RendererConfigHandle | null>(null);
+export const DesktopWindowContext = React.createContext<DesktopModuleContext['window'] | null>(
+  null,
+);
 
 export const useFrameStateHandle = (): FrameStateHandle => {
   const handle = React.useContext(FrameStateHandleContext);
@@ -152,6 +154,14 @@ export const useRendererConfig = (): RendererConfig => {
     handle.getSnapshot,
     handle.getSnapshot,
   );
+};
+
+export const useDesktopWindow = (): DesktopModuleContext['window'] => {
+  const window = React.useContext(DesktopWindowContext);
+  if (!window) {
+    throw new Error('useDesktopWindow() must be used inside initializeWindow()');
+  }
+  return window;
 };
 
 type FrameStateHandleController = Readonly<{
@@ -388,18 +398,22 @@ async (
     rendererConfig: RendererConfigHandle,
   ) =>
     React.createElement(
-      WindowMetricsHandleContext.Provider,
-      { value: windowMetrics },
+      DesktopWindowContext.Provider,
+      { value: window },
       React.createElement(
-        RendererConfigHandleContext.Provider,
-        { value: rendererConfig },
+        WindowMetricsHandleContext.Provider,
+        { value: windowMetrics },
         React.createElement(
-          FrameStateHandleContext.Provider,
-          { value: frameState },
+          RendererConfigHandleContext.Provider,
+          { value: rendererConfig },
           React.createElement(
-            TimeMsHandleContext.Provider,
-            { value: timeMs },
-            React.createElement(Component),
+            FrameStateHandleContext.Provider,
+            { value: frameState },
+            React.createElement(
+              TimeMsHandleContext.Provider,
+              { value: timeMs },
+              React.createElement(Component),
+            ),
           ),
         ),
       ),
@@ -451,11 +465,15 @@ async (
     return rendererConfig.handle.getSnapshot();
   };
   const initialMetrics = windowMetrics.handle.getSnapshot();
+  const gpu = navigator.gpu;
+  if (!gpu) {
+    throw new Error('WebGPU is unavailable in the desktop window runtime');
+  }
   const createTarget = (metrics: WindowMetrics, config: RendererConfig) => ({
     kind: 'surface' as const,
     width: metrics.physicalWidth,
     height: metrics.physicalHeight,
-    format: navigator.gpu.getPreferredCanvasFormat(),
+    format: gpu.getPreferredCanvasFormat() as GPUTextureFormat,
     alphaMode: 'opaque' as const,
     msaaSampleCount: resolveSupportedMsaaSampleCount(gpuContext.adapter, config.msaaSampleCount),
   });
@@ -463,11 +481,14 @@ async (
     kind: 'surface' as const,
     width: initialMetrics.physicalWidth,
     height: initialMetrics.physicalHeight,
-    format: navigator.gpu.getPreferredCanvasFormat(),
+    format: gpu.getPreferredCanvasFormat() as GPUTextureFormat,
     alphaMode: 'opaque' as const,
     msaaSampleCount: 1,
   };
-  const gpuContext = await requestGpuContext({ target: initialTarget });
+  const gpuContext = await requestGpuContext({
+    target: initialTarget,
+    compatibleSurface: window.compatibleSurface,
+  });
   let target = createTarget(initialMetrics, getEffectiveRendererConfig());
   const createBinding = (nextTarget: typeof target) =>
     createSurfaceBinding({ ...gpuContext, target: nextTarget }, window.canvasContext);
@@ -566,7 +587,7 @@ async (
         ...progression,
       }), { requestFrame: false });
       lastPreparedFrameClockMs = nextFrameClockMs;
-      frameHandle = requestAnimationFrame(drawFrame);
+      frameHandle = window.runtime.requestAnimationFrame(drawFrame);
     }
   };
 
@@ -614,7 +635,7 @@ async (
   return () => {
     disposed = true;
     if (frameHandle !== 0) {
-      cancelAnimationFrame(frameHandle);
+      window.runtime.cancelAnimationFrame(frameHandle);
     }
     unsubscribe();
     window.runtime.removeEventListener('resize', handleResize);

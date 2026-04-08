@@ -63,9 +63,7 @@ fn fsMain(in: VsOut) -> @location(0) vec4<f32> {
     lumaMax * fxaaUniforms.relativeThreshold,
   );
 
-  if (lumaRange < threshold) {
-    return vec4<f32>(rgbM, 1.0);
-  }
+  let shouldSkipFxaa = lumaRange < threshold;
 
   let dir = vec2<f32>(
     -((lumaNW + lumaNE) - (lumaSW + lumaSE)),
@@ -94,6 +92,7 @@ fn fsMain(in: VsOut) -> @location(0) vec4<f32> {
   );
 
   let lumaB = rgbToLuma(rgbB);
-  let finalRgb = select(rgbB, rgbA, lumaB < lumaMin || lumaB > lumaMax);
+  let fxaaRgb = select(rgbB, rgbA, lumaB < lumaMin || lumaB > lumaMax);
+  let finalRgb = select(fxaaRgb, rgbM, shouldSkipFxaa);
   return vec4<f32>(finalRgb, 1.0);
 }

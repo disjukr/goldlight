@@ -1,36 +1,27 @@
-# BYOW Native Demo
+﻿# BYOW Native Demo
 
-Windows-native BYOW example using the `@disjukr/goldlight/desktop` shell and
-`Deno.UnsafeWindowSurface`.
-
-This demo exercises more of the `goldlight` runtime than the startup triangle by rendering:
-
-- an indexed quad through the built-in textured unlit path
-- an additional accent mesh with a separate material
-- a native WebGPU surface presented through the `winit` desktop host on Windows with an opaque
-  swapchain format
+Electrobun desktop demo that renders a textured quad and accent geometry through the goldlight forward path.
 
 Run with:
 
 ```sh
-deno task example:byow:run
+bun run example:byow:run
 ```
 
-Type-check with:
+Build the text host first when the demo renders glyphs or layout text:
 
 ```sh
-deno task example:byow:check
+bun run build:text:native
 ```
 
-Expected output:
+Verify the migrated runtime surface with:
 
-- a tiled checkerboard panel on the left side of the window
-- an orange accent triangle on the right side
+```sh
+bun run typecheck
+```
 
 Requirements:
 
-- Windows with Deno `--unstable-ffi` and `--unstable-webgpu`
-- the desktop host DLL built through `deno task desktop:host:build` or auto-built by the run task
-
-If the native surface drops its presentation state after window events, the runtime reconfigures the
-surface binding on the next frame before retrying `getCurrentTexture()`.
+- Bun dependencies installed through `bun install`
+- a successful native text build for text-heavy demos
+- a WebGPU-capable desktop environment

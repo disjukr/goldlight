@@ -1,4 +1,4 @@
-import { EXRLoader } from 'npm:three@0.180.0/examples/jsm/loaders/EXRLoader.js';
+import { EXRLoader } from 'three/examples/jsm/loaders/EXRLoader.js';
 
 const exrLoader = new EXRLoader();
 
@@ -12,3 +12,4 @@ export const parseExrEnvironmentImage = (bytes: ArrayBuffer): {
     height: number;
     data: Uint16Array;
   };
+

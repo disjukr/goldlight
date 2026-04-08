@@ -1,4 +1,4 @@
-import CanvasKitModule from 'npm:canvaskit-wasm@^0.40.0';
+import CanvasKitModule from 'canvaskit-wasm';
 
 const gmWidth = 800;
 const gmHeight = 800;
@@ -222,3 +222,4 @@ export const renderAaaCanvasKitSnapshot = async (): Promise<Readonly<{ png: Uint
   }
   return { png };
 };
+

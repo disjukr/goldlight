@@ -9,5 +9,10 @@ crate-type = ["cdylib"]
 [dependencies]
 font-kit = "0.14.3"
 harfbuzz-sys = { version = "0.6.1", default-features = false, features = ["bundled"] }
+napi = { version = "2", default-features = false, features = ["napi8"] }
+napi-derive = "2"
 pathfinder_geometry = "0.5"
 ttf-parser = "0.25"
+
+[build-dependencies]
+napi-build = "2"

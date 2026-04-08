@@ -1,9 +1,11 @@
+﻿// @ts-nocheck
 /** @jsx React.createElement */
 /** @jsxFrag React.Fragment */
-/// <reference lib="deno.unstable" />
 /// <reference lib="dom" />
 
-import React from 'npm:react@19.2.0';
+import { readFile } from 'node:fs/promises';
+
+import React from 'react';
 import { getMeshBounds } from '@disjukr/goldlight/geometry';
 import { createQuaternionFromEulerDegrees } from '@disjukr/goldlight/math';
 import type { DesktopModuleCleanup, DesktopModuleContext } from '@disjukr/goldlight/desktop';
@@ -30,16 +32,16 @@ import {
   renderForwardFrame,
 } from '@disjukr/goldlight/renderer';
 
-const helmetSource = await Deno.readFile(
+const helmetSource = await readFile(
   new URL('../../assets/damaged-helmet/DamagedHelmet.glb', import.meta.url),
 );
-const polyHavenStudioSource = await Deno.readFile(
+const polyHavenStudioSource = await readFile(
   new URL('../../assets/hdri/poly_haven_studio_1k.exr', import.meta.url),
 );
-const ferndaleStudioSource = await Deno.readFile(
+const ferndaleStudioSource = await readFile(
   new URL('../../assets/hdri/ferndale_studio_08_1k.exr', import.meta.url),
 );
-const pavStudioSource = await Deno.readFile(
+const pavStudioSource = await readFile(
   new URL('../../assets/hdri/pav_studio_01_1k.exr', import.meta.url),
 );
 const helmetScene = importGltfFromGlb(
@@ -182,7 +184,7 @@ export default async (
     format: navigator.gpu.getPreferredCanvasFormat(),
     alphaMode: 'opaque' as const,
   };
-  const gpuContext = await requestGpuContext({ target });
+  const gpuContext = await requestGpuContext({ target, compatibleSurface: window.compatibleSurface });
   gpuContext.device.addEventListener('uncapturederror', (event) => {
     const detail = event as Event & { error?: unknown };
     console.error('[helmet-forward] GPU uncaptured error:', detail.error ?? event);
@@ -303,15 +305,19 @@ export default async (
     };
     forwardRenderer.renderFrame(currentFrameState);
     window.present();
-    frameHandle = requestAnimationFrame(drawFrame);
+    frameHandle = window.runtime.requestAnimationFrame(drawFrame);
   };
 
-  frameHandle = requestAnimationFrame(drawFrame);
+  frameHandle = window.runtime.requestAnimationFrame(drawFrame);
 
   return () => {
-    cancelAnimationFrame(frameHandle);
+    window.runtime.cancelAnimationFrame(frameHandle);
     window.runtime.removeEventListener('keydown', handleKeyDown);
     sceneRoot.unmount();
     forwardRenderer.dispose();
   };
 };
+
+
+
+

@@ -1,4 +1,4 @@
-import CanvasKitModule from 'npm:canvaskit-wasm@^0.40.0';
+import CanvasKitModule from 'canvaskit-wasm';
 import { createPath2d } from '@disjukr/goldlight/geometry';
 
 const outputWidth = 680;
@@ -510,3 +510,4 @@ export const renderStrokesCanvasKitSnapshot = async (): Promise<
     png,
   };
 };
+

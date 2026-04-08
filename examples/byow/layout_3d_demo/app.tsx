@@ -1,14 +1,15 @@
+﻿// @ts-nocheck
 /** @jsx React.createElement */
 /** @jsxFrag React.Fragment */
-/// <reference lib="deno.unstable" />
 /// <reference lib="dom" />
 
-import React from 'npm:react@19.2.0';
+import React from 'react';
 import {
   initializeWindow,
   useSetTimeMs,
   useTimeMs,
   useWindowMetrics,
+  useDesktopWindow,
 } from '@disjukr/goldlight/desktop';
 import { createRRectPath2d } from '@disjukr/goldlight/geometry';
 import type { MeshPrimitive } from '@disjukr/goldlight/ir';
@@ -417,6 +418,7 @@ const extractCards = (tree: G2lRenderTreeReader): readonly LayoutCard[] => {
 
 const FrameDriver = () => {
   const setTimeMs = useSetTimeMs();
+  const desktopWindow = useDesktopWindow();
 
   React.useEffect(() => {
     let previousNowMs = performance.now();
@@ -428,11 +430,11 @@ const FrameDriver = () => {
       previousNowMs = nowMs;
       accumulatedTimeMs += Math.min(deltaTimeMs, 33.333);
       setTimeMs(accumulatedTimeMs);
-      handle = requestAnimationFrame(tick);
+      handle = desktopWindow.runtime.requestAnimationFrame(tick);
     };
 
-    handle = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(handle);
+    handle = desktopWindow.runtime.requestAnimationFrame(tick);
+    return () => desktopWindow.runtime.cancelAnimationFrame(handle);
   }, [setTimeMs]);
 
   return null;
@@ -800,7 +802,7 @@ const Layout3dScene = () => {
               />
               <g2l-text
                 id='layout-flowing-hangul'
-                text='다람쥐 헌 쳇바퀴에 타고파 라인이 폭에 따라 다시 배치됩니다.'
+                text='?ㅻ엺伊???爾뉖컮?댁뿉 ?怨좏뙆 ?쇱씤????뿉 ?곕씪 ?ㅼ떆 諛곗튂?⑸땲??'
                 style={{
                   fontSize: 22,
                   fontFamily: hangulFamilies,
@@ -854,3 +856,6 @@ const Layout3dScene = () => {
 };
 
 export default initializeWindow(Layout3dScene);
+
+
+

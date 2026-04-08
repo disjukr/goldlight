@@ -1,22 +1,27 @@
-# BYOW Cornell Pathtraced Demo
+﻿# BYOW Cornell Pathtraced Demo
 
-Windows-native BYOW example that drives the `pathtraced` renderer through the
-`@disjukr/goldlight/desktop` shell while supplying a Cornell-box SDF scene as a pathtraced renderer
-extension rather than as engine-owned scene IR.
-
-This demo intentionally keeps engine scene data minimal:
-
-- a perspective camera stays in `SceneIr`
-- Cornell room, light panel, box, and sphere travel through `PathtracedSceneExtension`
+Cornell-box style desktop demo using the pathtraced renderer on the Electrobun desktop shell.
 
 Run with:
 
 ```sh
-deno task example:byow:cornell:run
+bun run example:byow:cornell:run
 ```
 
-Type-check with:
+Build the text host first when the demo renders glyphs or layout text:
 
 ```sh
-deno task example:byow:cornell:check
+bun run build:text:native
 ```
+
+Verify the migrated runtime surface with:
+
+```sh
+bun run typecheck
+```
+
+Requirements:
+
+- Bun dependencies installed through `bun install`
+- a successful native text build for text-heavy demos
+- a WebGPU-capable desktop environment

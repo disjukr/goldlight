@@ -1,4 +1,4 @@
-import { dirname, isAbsolute, resolve as resolvePath } from '@std/path';
+import { dirname, isAbsolute, resolve as resolvePath } from 'node:path';
 import {
   appendAnimationClip,
   appendMaterial,
@@ -159,7 +159,7 @@ export type GltfFetchExternalResourceOptions =
     fetch?: typeof globalThis.fetch;
   }>;
 
-export type GltfDenoExternalResourceOptions =
+export type GltfNodeExternalResourceOptions =
   & GltfExternalResourceOptions
   & Readonly<{
     cwd?: string;
@@ -335,9 +335,9 @@ const fetchExternalResource = async (
   return toUint8Array(response);
 };
 
-const resolveDenoReadTarget = (
+const resolveNodeReadTarget = (
   uri: string,
-  options: GltfDenoExternalResourceOptions,
+  options: GltfNodeExternalResourceOptions,
 ): string | URL => {
   const resolvedUri = resolveUri(uri, options.baseUri);
   const parsedUrl = tryParseUrl(resolvedUri);
@@ -354,7 +354,7 @@ const resolveDenoReadTarget = (
     return resolvedUri;
   }
 
-  return resolvePath(options.cwd ?? Deno.cwd(), resolvedUri);
+  return resolvePath(options.cwd ?? process.cwd(), resolvedUri);
 };
 
 const sliceBufferView = (
@@ -1004,24 +1004,28 @@ export const fetchGltfExternalResources = async (
   return Object.fromEntries(resources);
 };
 
-export const readDenoGltfExternalResources = async (
+export const readNodeGltfExternalResources = async (
   json: GltfJson,
-  options: GltfDenoExternalResourceOptions = {},
+  options: GltfNodeExternalResourceOptions = {},
 ): Promise<Record<string, Uint8Array>> => {
-  const readFile = options.readFile ?? Deno.readFile;
+  const readFile = options.readFile ?? (async (path: string | URL) => {
+    const { readFile: readNodeFile } = await import('node:fs/promises');
+    const bytes = await readNodeFile(path);
+    return new Uint8Array(bytes);
+  });
   const fetchFn = options.fetch ?? globalThis.fetch;
   const resources = await Promise.all(
     collectExternalResourceUris(json, options).map(async (uri) => {
       const parsedUrl = tryParseUrl(uri);
       if (parsedUrl?.protocol === 'http:' || parsedUrl?.protocol === 'https:') {
         if (!fetchFn) {
-          throw new Error(`readDenoGltfExternalResources requires fetch for "${uri}"`);
+          throw new Error(`readNodeGltfExternalResources requires fetch for "${uri}"`);
         }
 
         return [uri, await fetchExternalResource(uri, fetchFn)] as const;
       }
 
-      return [uri, await readFile(resolveDenoReadTarget(uri, options))] as const;
+      return [uri, await readFile(resolveNodeReadTarget(uri, options))] as const;
     }),
   );
 

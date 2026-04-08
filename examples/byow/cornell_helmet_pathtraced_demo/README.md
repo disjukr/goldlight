@@ -1,16 +1,27 @@
-# BYOW Cornell Helmet Pathtraced Demo
+﻿# BYOW Cornell Helmet Pathtraced Demo
 
-Windows-native BYOW example that renders the vendored Damaged Helmet mesh inside the Cornell-box SDF
-extension scene through the mixed mesh + renderer-extension `pathtraced` path.
+Pathtraced desktop demo combining the Damaged Helmet asset with Cornell-style scene framing.
 
 Run with:
 
 ```sh
-deno task example:byow:cornell-helmet:run
+bun run example:byow:cornell-helmet:run
 ```
 
-Type-check with:
+Build the text host first when the demo renders glyphs or layout text:
 
 ```sh
-deno task example:byow:cornell-helmet:check
+bun run build:text:native
 ```
+
+Verify the migrated runtime surface with:
+
+```sh
+bun run typecheck
+```
+
+Requirements:
+
+- Bun dependencies installed through `bun install`
+- a successful native text build for text-heavy demos
+- a WebGPU-capable desktop environment

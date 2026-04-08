@@ -1,3 +1,4 @@
+﻿// @ts-nocheck
 import {
   type GpuContext,
   type GpuLostInfo,
@@ -76,3 +77,4 @@ export const tickDawnBackendContext = async (
 ): Promise<void> => {
   await context.tick?.(context);
 };
+

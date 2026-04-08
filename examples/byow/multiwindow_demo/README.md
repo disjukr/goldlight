@@ -1,16 +1,27 @@
-# BYOW Multiwindow Demo
+﻿# BYOW Multiwindow Demo
 
-This example opens two small native BYOW windows at the same time to validate the process-global
-desktop window manager and per-window module worker flow.
+Electrobun multiwindow smoke test that opens more than one goldlight desktop window in a single process.
 
-## Run
+Run with:
 
 ```sh
-deno run -A --unstable-ffi --unstable-webgpu --unstable-raw-imports examples/byow/multiwindow_demo/main.ts
+bun run example:byow:multiwindow:run
 ```
 
-## What To Expect
+Build the text host first when the demo renders glyphs or layout text:
 
-- Two `360x240` windows open at the same time
-- Each window has a different title and startup background color
-- Both windows run the existing BYOW triangle module independently
+```sh
+bun run build:text:native
+```
+
+Verify the migrated runtime surface with:
+
+```sh
+bun run typecheck
+```
+
+Requirements:
+
+- Bun dependencies installed through `bun install`
+- a successful native text build for text-heavy demos
+- a WebGPU-capable desktop environment

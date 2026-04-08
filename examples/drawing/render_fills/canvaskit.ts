@@ -1,4 +1,4 @@
-import CanvasKitModule from 'npm:canvaskit-wasm@^0.40.0';
+import CanvasKitModule from 'canvaskit-wasm';
 import {
   createPath2d,
   createRect,
@@ -407,3 +407,4 @@ export const renderFillsCanvasKitSnapshot = async (): Promise<
   }
   return { png };
 };
+

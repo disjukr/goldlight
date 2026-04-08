@@ -1,4 +1,6 @@
-import { dirname, fromFileUrl, join } from '@std/path';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { exportPngRgba } from '@disjukr/goldlight/exporters';
 import {
   checkForFinishedDawnQueueWork,
@@ -44,8 +46,8 @@ type SvgScene = Readonly<{
   draws: readonly SvgPathDraw[];
 }>;
 
-const exampleDir = dirname(fromFileUrl(import.meta.url));
-const inputPath = join(exampleDir, 'tiger.svg');
+const exampleDir = path.dirname(fileURLToPath(import.meta.url));
+const inputPath = path.join(exampleDir, 'tiger.svg');
 const defaultBackground = [0, 0, 0, 0] as const;
 const defaultFill = [0, 0, 0, 1] as const;
 const defaultStyleState: SvgStyleState = {
@@ -377,7 +379,7 @@ export const renderTigerSnapshot = async (): Promise<
     drawCount: number;
   }>
 > => {
-  const svg = await Deno.readTextFile(inputPath);
+  const svg = await readFile(inputPath, 'utf8');
   const scene = parseSvgScene(svg);
   const outputWidth = Math.round(scene.viewBox.width);
   const outputHeight = Math.round(scene.viewBox.height);

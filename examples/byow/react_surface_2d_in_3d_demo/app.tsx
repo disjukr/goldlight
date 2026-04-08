@@ -1,15 +1,15 @@
 /** @jsx React.createElement */
 /** @jsxFrag React.Fragment */
-/// <reference lib="deno.unstable" />
 /// <reference lib="dom" />
 
-import React from 'npm:react@19.2.0';
+import React from 'react';
 import { createQuaternionFromEulerDegrees } from '@disjukr/goldlight/math';
 import {
   initializeWindow,
   useSetTimeMs,
   useTimeMs,
   useWindowMetrics,
+  useDesktopWindow,
 } from '@disjukr/goldlight/desktop';
 import {
   createBoxMesh,
@@ -133,6 +133,7 @@ function createCenteredRotationTransform(radians: number) {
 
 const DemoFrameDriver = () => {
   const setTimeMs = useSetTimeMs();
+  const desktopWindow = useDesktopWindow();
 
   React.useEffect(() => {
     let previousNowMs = performance.now();
@@ -145,11 +146,11 @@ const DemoFrameDriver = () => {
       const clampedDeltaTimeMs = Math.min(deltaTimeMs, 33.333);
       accumulatedTimeMs += clampedDeltaTimeMs;
       setTimeMs(accumulatedTimeMs);
-      handle = requestAnimationFrame(tick);
+      handle = desktopWindow.runtime.requestAnimationFrame(tick);
     };
 
-    handle = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(handle);
+    handle = desktopWindow.runtime.requestAnimationFrame(tick);
+    return () => desktopWindow.runtime.cancelAnimationFrame(handle);
   }, [setTimeMs]);
 
   return null;
@@ -336,3 +337,5 @@ const StatusPanelScene = () => {
     </g2d-scene>
   );
 };
+
+

@@ -1,10 +1,14 @@
-/** @jsx React.createElement */
+﻿/** @jsx React.createElement */
 /** @jsxFrag React.Fragment */
-/// <reference lib="deno.unstable" />
 /// <reference lib="dom" />
 
-import React from 'npm:react@19.2.0';
-import { initializeWindow, useSetTimeMs, useTimeMs } from '@disjukr/goldlight/desktop';
+import React from 'react';
+import {
+  initializeWindow,
+  useDesktopWindow,
+  useSetTimeMs,
+  useTimeMs,
+} from '@disjukr/goldlight/desktop';
 import {
   createPath2d,
   createTranslationMatrix2d,
@@ -21,12 +25,12 @@ const panelColor = [0.15, 0.16, 0.2, 1] as const;
 const gridLineColor = [0.29, 0.32, 0.4, 1] as const;
 const labelColor = [0.77, 0.79, 0.85, 1] as const;
 
-const hangulPangram = '다람쥐 헌 쳇바퀴에 타고파';
-const rotatedSdfLabel = '회전된 SDF 텍스트';
-const rotatedTransformedMaskLabel = '회전된 transformed-mask 텍스트';
+const demoSentence = 'Sphinx of black quartz, judge my vow.';
+const rotatedSdfLabel = 'Rotated SDF text';
+const rotatedTransformedMaskLabel = 'Rotated transformed-mask text';
 
 const latinFamilies = ['Calibri', 'Segoe UI'] as const;
-const hangulFamilies = ['Malgun Gothic', 'Segoe UI'] as const;
+const alternateFamilies = ['Segoe UI', 'Arial'] as const;
 
 const createLinePath = (fromX: number, fromY: number, toX: number, toY: number): Path2d =>
   createPath2d(
@@ -57,6 +61,7 @@ const createCenteredTransform = (
 
 const DemoFrameDriver = () => {
   const setTimeMs = useSetTimeMs();
+  const desktopWindow = useDesktopWindow();
 
   React.useEffect(() => {
     let previousNowMs = performance.now();
@@ -68,12 +73,12 @@ const DemoFrameDriver = () => {
       previousNowMs = nowMs;
       accumulatedTimeMs += Math.min(deltaTimeMs, 33.333);
       setTimeMs(accumulatedTimeMs);
-      handle = requestAnimationFrame(tick);
+      handle = desktopWindow.runtime.requestAnimationFrame(tick);
     };
 
-    handle = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(handle);
-  }, [setTimeMs]);
+    handle = desktopWindow.runtime.requestAnimationFrame(tick);
+    return () => desktopWindow.runtime.cancelAnimationFrame(handle);
+  }, [desktopWindow, setTimeMs]);
 
   return null;
 };
@@ -149,11 +154,11 @@ const ModeCard = (
       color={props.accent}
     />
     <g2d-glyphs
-      text={hangulPangram}
+      text={demoSentence}
       x={props.x + 20}
       y={props.y + 164}
-      fontSize={26}
-      fontFamily={hangulFamilies}
+      fontSize={22}
+      fontFamily={alternateFamilies}
       mode={props.mode}
       color={props.accent}
     />
@@ -201,7 +206,7 @@ const AffineGroupDemo = () => {
         <g2d-rect
           x={392}
           y={430}
-          width={232}
+          width={332}
           height={56}
           color={[0.17, 0.12, 0.18, 0.92]}
         />
@@ -210,16 +215,16 @@ const AffineGroupDemo = () => {
           x={404}
           y={464}
           fontSize={24}
-          fontFamily={hangulFamilies}
+          fontFamily={alternateFamilies}
           mode='transformed-mask'
           color={[0.9, 0.66, 0.96, 1]}
         />
       </g2d-group>
       <g2d-group
-        transform={createCenteredTransform(780, 468, -0.11 + (Math.cos(t * 1.1) * 0.24))}
+        transform={createCenteredTransform(850, 468, -0.11 + (Math.cos(t * 1.1) * 0.24))}
       >
         <g2d-rect
-          x={664}
+          x={734}
           y={430}
           width={196}
           height={56}
@@ -227,10 +232,10 @@ const AffineGroupDemo = () => {
         />
         <g2d-glyphs
           text={rotatedSdfLabel}
-          x={678}
+          x={748}
           y={464}
           fontSize={27}
-          fontFamily={hangulFamilies}
+          fontFamily={alternateFamilies}
           mode='sdf'
           color={[0.4, 0.9, 0.86, 1]}
         />

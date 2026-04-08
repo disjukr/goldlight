@@ -1,21 +1,16 @@
 # Render A8 Atlas Text
 
-This example shapes text through `@disjukr/goldlight/text`, rasterizes glyphs to A8 masks, packs
-them into an atlas page, and writes `out.png`.
+This example shapes text through `@disjukr/goldlight/text`, rasterizes glyphs into A8 masks, packs them into an atlas page, and writes `out.png`.
 
-The output shows:
-
-- final text composited from the A8 atlas
-- the atlas page itself
-- packed glyph bounds in the atlas preview
-
-## Run
-
-From the repository root:
+Run from the repository root:
 
 ```sh
-deno task text:host:check
-deno task text:host:build
-deno check --unstable-ffi examples/text/render_a8_atlas_text/main.ts
-deno run -A --unstable-ffi examples/text/render_a8_atlas_text/main.ts
+bun run build:text:native
+bun examples/text/render_a8_atlas_text/main.ts
+```
+
+Optional verification:
+
+```sh
+bun run typecheck
 ```

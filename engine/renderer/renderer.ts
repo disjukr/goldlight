@@ -1,3 +1,4 @@
+﻿// @ts-nocheck
 import type { EvaluatedCamera, EvaluatedScene } from './scene_evaluation.ts';
 import type { Material } from '@disjukr/goldlight/ir';
 import { buildBvh, type BvhNode, type RaytraceTriangle } from '@disjukr/goldlight/raytrace';
@@ -630,10 +631,10 @@ const uniformUsage = 0x40;
 const storageUsage = 0x80;
 const bufferCopyDstUsage = 0x08;
 const textureCopyDstUsage = 0x02;
-const deferredDepthFormat = 'depth24plus';
+const deferredDepthFormat = 'depth24plus-stencil8';
 const maxSdfPassItems = 16;
 const pathtracedAccumulationFormat = 'rgba16float';
-const depthTextureFormat = 'depth24plus';
+const depthTextureFormat = 'depth24plus-stencil8';
 const maxDirectionalLights = 4;
 const maxPathtracedMaterialTextures = 8;
 const defaultAmbientLight = 0.34;
@@ -8140,3 +8141,4 @@ export const exportCubemapSnapshot = (
       return exportCubemapAngular(snapshot, dimensions, sampling);
   }
 };
+

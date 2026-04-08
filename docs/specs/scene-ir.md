@@ -9,8 +9,8 @@ standard and declares that explicitly with `# standard - conventional`.
 
 ## Codegen Guardrails
 
-- Regenerate IR mirrors with `deno task generate:ir`.
-- Verify generated files are current with `deno task generate:ir:check`.
+- Keep generated IR mirrors aligned with the BDL schema before landing schema changes.
+- There is no Deno task wrapper in the Bun/Electrobun runtime layout.
 - Generated files in `engine/ir/generated` must be a pure function of the BDL schema.
 - Stale generated files and schema/output drift are treated as check failures in CI.
 

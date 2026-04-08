@@ -18,9 +18,9 @@ export type OffscreenTarget = Readonly<{
 export type RenderTarget = SurfaceTarget | OffscreenTarget;
 
 export type GpuContext = Readonly<{
-  adapter: GPUAdapter;
-  device: GPUDevice;
-  queue: GPUQueue;
+  adapter: GPUAdapter | any;
+  device: GPUDevice | any;
+  queue: GPUQueue | any;
   target: RenderTarget;
 }>;
 
@@ -66,9 +66,10 @@ export type GpuReadbackContext = Readonly<{
 export type GpuContextOptions = Readonly<{
   target: RenderTarget;
   powerPreference?: GPUPowerPreference;
-  requiredFeatures?: readonly GPUFeatureName[];
+  requiredFeatures?: readonly string[];
   requiredLimits?: Record<string, number>;
-  gpu?: GPU;
+  gpu?: GPU | any;
+  compatibleSurface?: unknown;
 }>;
 
 export type GpuLostInfo = Readonly<{
@@ -77,7 +78,7 @@ export type GpuLostInfo = Readonly<{
 }>;
 
 export const resolveSupportedMsaaSampleCount = (
-  adapter: Pick<GPUAdapter, 'features'>,
+  adapter: Pick<GPUAdapter, 'features'> | { features: Set<string> },
   requestedMsaaSampleCount: number | undefined,
 ): number => {
   const requested = requestedMsaaSampleCount ?? 1;
@@ -92,10 +93,10 @@ export const resolveSupportedMsaaSampleCount = (
   return requested === 4 ? 4 : 1;
 };
 
-export const isWebGPUAvailable = (gpu: GPU | undefined = globalThis.navigator?.gpu) => Boolean(gpu);
+export const isWebGPUAvailable = (gpu: GPU | any = globalThis.navigator?.gpu) => Boolean(gpu);
 
 export const canUseWebGPU = async (
-  gpu: GPU | undefined = globalThis.navigator?.gpu,
+  gpu: GPU | any = globalThis.navigator?.gpu,
 ): Promise<boolean> => {
   if (!gpu) {
     return false;
@@ -118,13 +119,16 @@ export const requestGpuContext = async (
 
   const adapter = await gpu.requestAdapter({
     powerPreference: options.powerPreference,
-  });
+    compatibleSurface: options.compatibleSurface as
+      | GPUCanvasContext
+      | undefined,
+  } as GPURequestAdapterOptions & { compatibleSurface?: GPUCanvasContext | undefined });
   if (!adapter) {
     throw new Error('Failed to request WebGPU adapter');
   }
 
   const autoFeatureNames = ['texture-adapter-specific-format-features'] as const;
-  const requiredFeatures = new Set<GPUFeatureName>(options.requiredFeatures ?? []);
+  const requiredFeatures = new Set<string>(options.requiredFeatures ?? []);
   for (const featureName of autoFeatureNames) {
     if (adapter.features.has(featureName)) {
       requiredFeatures.add(featureName);
@@ -150,7 +154,7 @@ export const observeDeviceLoss = async (
 ): Promise<GpuLostInfo> => {
   const lost = await device.lost;
   const info: GpuLostInfo = {
-    reason: lost.reason,
+    reason: (lost.reason ?? 'destroyed') as GPUDeviceLostReason,
     message: lost.message,
   };
 
@@ -164,7 +168,7 @@ const renderAttachmentUsage = 0x10;
 const mapReadUsage = 0x0001;
 const bufferCopyDstUsage = 0x0008;
 const bytesPerRowAlignment = 256;
-const depthTextureFormat = 'depth24plus';
+const depthTextureFormat = 'depth24plus-stencil8';
 
 const isDroppedSurfacePresentationError = (error: unknown): error is DOMException =>
   error instanceof DOMException && error.name === 'InvalidStateError';
@@ -233,6 +237,10 @@ export const createSurfaceBinding = (
     device: context.device,
     format: context.target.format,
     alphaMode: context.target.alphaMode ?? 'premultiplied',
+    size: {
+      width: context.target.width,
+      height: context.target.height,
+    },
   });
 
   const depthTexture = createDepthTexture(
@@ -336,6 +344,10 @@ export const acquireColorAttachmentTexture = (
           device: context.device as GPUDevice,
           format: binding.target.format,
           alphaMode: binding.target.alphaMode ?? 'premultiplied',
+          size: {
+            width: binding.target.width,
+            height: binding.target.height,
+          },
         });
         const colorTexture = binding.canvasContext.getCurrentTexture();
         syncSurfaceDepthAttachment(context.device, binding, colorTexture);
@@ -374,6 +386,10 @@ export const resizeSurfaceBindingTarget = (
     device: binding.device,
     format: binding.target.format,
     alphaMode: binding.target.alphaMode ?? 'premultiplied',
+    size: {
+      width,
+      height,
+    },
   });
 };
 

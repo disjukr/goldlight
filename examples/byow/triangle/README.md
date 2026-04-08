@@ -1,21 +1,27 @@
-# BYOW Triangle
+﻿# BYOW Triangle Demo
 
-Windows-native triangle example using Deno BYOW (`Deno.UnsafeWindowSurface`) and the
-`@disjukr/goldlight/desktop` shell.
+Minimal Electrobun triangle smoke test for window creation, WebGPU context setup, and presentation.
 
 Run with:
 
 ```sh
-deno task example:byow:triangle:run
+bun run example:byow:triangle:run
 ```
 
-Type-check with:
+Build the text host first when the demo renders glyphs or layout text:
 
 ```sh
-deno task example:byow:triangle:check
+bun run build:text:native
+```
+
+Verify the migrated runtime surface with:
+
+```sh
+bun run typecheck
 ```
 
 Requirements:
 
-- Deno with `--unstable-ffi` and `--unstable-webgpu`
-- the desktop host DLL built through `deno task desktop:host:build` or auto-built by the run task
+- Bun dependencies installed through `bun install`
+- a successful native text build for text-heavy demos
+- a WebGPU-capable desktop environment

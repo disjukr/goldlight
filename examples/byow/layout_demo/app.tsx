@@ -1,9 +1,8 @@
 /** @jsx React.createElement */
 /** @jsxFrag React.Fragment */
-/// <reference lib="deno.unstable" />
 /// <reference lib="dom" />
 
-import React from 'npm:react@19.2.0';
+import React from 'react';
 import { createRect, createRRectPath2d } from '@disjukr/goldlight/geometry';
 import type { ParagraphLineRun, ParagraphTextStyle } from '@disjukr/goldlight/layout';
 import { createTextHost } from '@disjukr/goldlight/text';
@@ -17,6 +16,7 @@ import {
   useSetTimeMs,
   useTimeMs,
   useWindowMetrics,
+  useDesktopWindow,
 } from '@disjukr/goldlight/desktop';
 
 const demoTextHost = createTextHost();
@@ -164,6 +164,7 @@ const renderTextNode = (context: G2lRenderContext): React.ReactNode => {
 
 const DemoFrameDriver = () => {
   const setTimeMs = useSetTimeMs();
+  const desktopWindow = useDesktopWindow();
 
   React.useEffect(() => {
     let previousNowMs = performance.now();
@@ -175,11 +176,11 @@ const DemoFrameDriver = () => {
       previousNowMs = nowMs;
       accumulatedTimeMs += Math.min(deltaTimeMs, 33.333);
       setTimeMs(accumulatedTimeMs);
-      handle = requestAnimationFrame(tick);
+      handle = desktopWindow.runtime.requestAnimationFrame(tick);
     };
 
-    handle = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(handle);
+    handle = desktopWindow.runtime.requestAnimationFrame(tick);
+    return () => desktopWindow.runtime.cancelAnimationFrame(handle);
   }, [setTimeMs]);
 
   return null;
@@ -346,7 +347,7 @@ const LayoutDemoScene = () => {
               />
               <g2l-text
                 id='layout-demo-flowing-hangul'
-                text='다람쥐 헌 쳇바퀴에 타고파 라인이 폭에 따라 다시 배치됩니다.'
+                text='?�람�???쳇바?�에 ?�고파 ?�인????�� ?�라 ?�시 배치?�니??'
                 style={{
                   fontSize: 22,
                   fontFamily: hangulFamilies,
@@ -409,3 +410,5 @@ export default initializeWindow(LayoutDemoScene, {
     postProcessPasses: [],
   },
 });
+
+

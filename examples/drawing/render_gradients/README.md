@@ -1,24 +1,15 @@
 # Render Gradients
 
-This example renders Skia-style linear, radial, two-point conical, and sweep gradient fills to an
-offscreen WebGPU target and writes `out.png`. A matching CanvasKit reference can also be rendered to
-`ckout.png`.
+This example renders gradient-heavy drawing content into an offscreen PNG.
 
-What it shows:
-
-- linear gradient fill across an irregular blob and a rect
-- two-point conical and radial gradient fills
-- sweep gradient fill on star/blob shapes
-
-## Run
-
-From the repository root:
+Run from the repository root:
 
 ```sh
-deno task example:drawing -- gradients check
-deno task example:drawing -- gradients png
-deno task example:drawing -- gradients ckpng
+bun examples/drawing/render_gradients/main.ts
 ```
 
-Use `out.png` and `ckout.png` side by side to compare the current Graphite/Dawn gradient output
-against CanvasKit.
+Run the CanvasKit comparison snapshot:
+
+```sh
+bun examples/drawing/render_gradients/canvaskit_main.ts
+```

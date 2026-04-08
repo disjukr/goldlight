@@ -47,48 +47,23 @@ Runnable examples live here. Each example should document how to build, serve, o
 
 ## Common Commands
 
-- Run the native BYOW demo: `deno task example:byow:run`
-- Type-check the native BYOW demo: `deno task example:byow:check`
-- Run the BYOW triangle smoke test: `deno task example:byow:triangle:run`
-- Type-check the BYOW triangle smoke test: `deno task example:byow:triangle:check`
-- Run the BYOW primitives demo: `deno task example:byow:primitives:run`
-- Type-check the BYOW primitives demo: `deno task example:byow:primitives:check`
-- Run the default BYOW mesh pathtraced demo: `deno task example:byow:pathtraced:run`
-- Type-check the default BYOW mesh pathtraced demo: `deno task example:byow:pathtraced:check`
-- Run the BYOW Helmet pathtraced demo: `deno task example:byow:helmet-pathtraced:run`
-- Type-check the BYOW Helmet pathtraced demo: `deno task example:byow:helmet-pathtraced:check`
-- Run the BYOW Helmet forward demo: `deno task example:byow:helmet-forward:run`
-- Type-check the BYOW Helmet forward demo: `deno task example:byow:helmet-forward:check`
-- Run the BYOW Cornell pathtraced demo: `deno task example:byow:cornell:run`
-- Type-check the BYOW Cornell pathtraced demo: `deno task example:byow:cornell:check`
-- Run the BYOW Cornell Helmet pathtraced demo: `deno task example:byow:cornell-helmet:run`
-- Type-check the BYOW Cornell Helmet pathtraced demo: `deno task example:byow:cornell-helmet:check`
-- Run the BYOW React Bunny demo: `deno task example:byow:react-bunny:run`
-- Type-check the BYOW React Bunny demo: `deno task example:byow:react-bunny:check`
-- Run the BYOW React glyphs demo: `deno task example:byow:react-glyphs:run`
-- Type-check the BYOW React glyphs demo: `deno task example:byow:react-glyphs:check`
-- Run the BYOW layout demo: `deno task example:byow:layout:run`
-- Type-check the BYOW layout demo: `deno task example:byow:layout:check`
-- Run the BYOW layout 3D demo: `deno task example:byow:layout-3d:run`
-- Type-check the BYOW layout 3D demo: `deno task example:byow:layout-3d:check`
-- Run the BYOW React 2D surface demo:
-  `deno run -A --unstable-ffi --unstable-webgpu --unstable-raw-imports examples/byow/react_surface_2d_in_3d_demo/main.ts`
-- Type-check the BYOW React 2D surface demo:
-  `deno check --unstable-raw-imports examples/byow/react_surface_2d_in_3d_demo/main.ts examples/byow/react_surface_2d_in_3d_demo/app.tsx`
-- Run the BYOW React 3D scene-in-scene demo:
-  `deno run -A --unstable-ffi --unstable-webgpu --unstable-raw-imports examples/byow/react_scene3d_in_3d_demo/main.ts`
-- Type-check the BYOW React 3D scene-in-scene demo:
-  `deno check --unstable-raw-imports examples/byow/react_scene3d_in_3d_demo/main.ts examples/byow/react_scene3d_in_3d_demo/app.tsx`
-- Run the BYOW multiwindow demo:
-  `deno run -A --unstable-ffi --unstable-webgpu --unstable-raw-imports examples/byow/multiwindow_demo/main.ts`
-- Type-check the BYOW multiwindow demo:
-  `deno check --unstable-raw-imports examples/byow/multiwindow_demo/main.ts`
-- Build the desktop host library: `deno task desktop:host:build`
-- Refresh the in-repo example assets: `deno task asset:examples`
-- Refresh the Stanford Bunny source and extracted mesh: `deno task asset:stanford-bunny`
-- Refresh the Damaged Helmet sample: `deno task asset:damaged-helmet`
-- Download the external Sponza sample: `deno task asset:sponza`
-- Render a headless PNG snapshot: `deno task example:headless:png`
+- Install runtime dependencies: `bun install`
+- Build the native text host: `bun run build:text:native`
+- Type-check the migrated workspace: `bun run typecheck`
+- Run the native BYOW demo: `bun run example:byow:run`
+- Run the BYOW triangle smoke test: `bun run example:byow:triangle:run`
+- Run the BYOW primitives demo: `bun run example:byow:primitives:run`
+- Run the BYOW Cornell pathtraced demo: `bun run example:byow:cornell:run`
+- Run the BYOW Cornell Helmet pathtraced demo: `bun run example:byow:cornell-helmet:run`
+- Run the BYOW Helmet forward demo: `bun run example:byow:helmet-forward:run`
+- Run the BYOW Helmet pathtraced demo: `bun run example:byow:helmet-pathtraced:run`
+- Run the BYOW React Bunny demo: `bun run example:byow:react-bunny:run`
+- Run the BYOW React glyphs demo: `bun run example:byow:react-glyphs:run`
+- Run the BYOW layout demo: `bun run example:byow:layout:run`
+- Run the BYOW layout 3D demo: `bun run example:byow:layout-3d:run`
+- Run the BYOW React 2D surface demo: `bun run example:byow:react-surface-2d-in-3d:run`
+- Run the BYOW React 3D scene-in-scene demo: `bun run example:byow:react-scene3d-in-3d:run`
+- Run the BYOW multiwindow demo: `bun run example:byow:multiwindow:run`
 
 ## Primitive Authoring
 

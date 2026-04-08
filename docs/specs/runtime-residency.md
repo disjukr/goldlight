@@ -3,7 +3,7 @@
 ## Purpose
 
 Runtime residency is the device-local representation of evaluated scene data. It is kept separate
-from Scene IR so the same IR can run in browsers, Deno, and headless targets.
+from Scene IR so the same IR can run in browsers, Bun/Electrobun desktop targets, and headless targets.
 
 ## Separation Rules
 

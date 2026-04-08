@@ -1,27 +1,27 @@
-# BYOW Helmet Pathtraced Demo
+﻿# BYOW Helmet Pathtraced Demo
 
-Windows-native BYOW example that renders the vendored Damaged Helmet GLB through the current
-triangle-BVH mesh `pathtraced` renderer slice. This is the default mesh pathtraced BYOW demo.
-
-This demo exercises:
-
-- GLB ingestion of the in-repo Damaged Helmet sample asset
-- mesh-local triangle BVH construction through `@disjukr/goldlight/raytrace`
-- node-transform-aware fullscreen mesh path tracing with accumulation on a native
-  `Deno.UnsafeWindowSurface`
+Pathtraced Damaged Helmet desktop demo running through Electrobun.
 
 Run with:
 
 ```sh
-deno task example:byow:pathtraced:run
+bun run example:byow:helmet-pathtraced:run
 ```
 
-Type-check with:
+Build the text host first when the demo renders glyphs or layout text:
 
 ```sh
-deno task example:byow:pathtraced:check
+bun run build:text:native
 ```
 
-Expected output:
+Verify the migrated runtime surface with:
 
-- a progressively refining Damaged Helmet resting on a floor plane against the pathtraced sky
+```sh
+bun run typecheck
+```
+
+Requirements:
+
+- Bun dependencies installed through `bun install`
+- a successful native text build for text-heavy demos
+- a WebGPU-capable desktop environment

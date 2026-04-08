@@ -100,11 +100,10 @@ The initial renderer uses a lightweight pass graph:
   2D environment-map layout in the renderer itself.
 - Browser examples cover the minimal mesh-only path, a texture-backed built-in unlit path, and a
   custom WGSL path that samples texture residency through declared material bindings.
-- The native BYOW demos use the same forward renderer/runtime residency path on a `winit`-hosted
-  `Deno.UnsafeWindowSurface` target instead of a browser canvas.
+- The native BYOW demos use the same forward renderer/runtime residency path on an Electrobun
+  `GpuWindow` WebGPU surface instead of a browser canvas.
 - Fixture-backed golden snapshot tests cover clear-only and mesh headless frames.
-- Golden fixtures can be refreshed intentionally with
-  `deno run -A --unstable-raw-imports scripts/refresh_golden_snapshots.ts`.
+- Golden fixtures should be refreshed only through an explicitly maintained Bun-based workflow.
 
 ## Built-in Binding Contract
 
@@ -164,8 +163,7 @@ The initial renderer uses a lightweight pass graph:
 
 ## Headless PNG Workflow
 
-- `deno task example:headless:png` renders an offscreen forward frame and writes a PNG to
-  `examples/headless_snapshot/out/forward.png`.
+- Headless PNG capture remains a separate workflow from the Electrobun desktop shell.
 - The workflow reuses `requestGpuContext`, `rebuildRuntimeResidency`, `renderForwardSnapshot`, and
   `@disjukr/goldlight/exporters` `exportPngRgba` instead of adding a separate renderer path.
 - The command accepts optional output path, width, and height arguments for ad hoc captures.

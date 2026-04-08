@@ -1,21 +1,11 @@
-# HDRI Samples
+# HDRI Assets
 
-Repository copy of a small 1K EXR HDRI set for current lookdev and image-based lighting work in the
-forward helmet demo.
+Vendored 1K EXR environment-map samples used by the forward lighting demos.
 
-## Contents
+Included files:
 
-- `poly_haven_studio_1k.exr`
 - `ferndale_studio_08_1k.exr`
 - `pav_studio_01_1k.exr`
+- `poly_haven_studio_1k.exr`
 
-## Source
-
-- Poly Haven `poly_haven_studio`
-- Poly Haven `ferndale_studio_08`
-- Poly Haven `pav_studio_01`
-
-All three assets are downloaded from Poly Haven's official asset endpoints and remain under the Poly
-Haven CC0 license.
-
-Refresh with `deno task asset:hdri`.
+The old Deno refresh task was removed during the Bun migration. Treat these files as vendored fixtures unless a Bun refresh script is added.

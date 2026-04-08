@@ -1,3 +1,8 @@
+.goldlight/
+build/
+examples/**/.goldlight-build/
+node_modules/
+engine/text/native/index.node
 engine/**/native/target
 examples/**/*.exe
 examples/**/out.png

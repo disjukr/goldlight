@@ -1,14 +1,13 @@
-/// <reference lib="deno.unstable" />
-
 import { createWindow, disposeMain, initializeMain } from '@disjukr/goldlight/desktop';
+import app from './app.tsx';
 
 await initializeMain();
 try {
   const window = createWindow({
-    title: 'goldlight byow helmet forward demo',
-    width: 1200,
+    title: 'goldlight helmet forward demo',
+    width: 1280,
     height: 720,
-    module: new URL('./app.tsx', import.meta.url),
+    entry: app,
   });
   await window.whenClosed();
 } finally {

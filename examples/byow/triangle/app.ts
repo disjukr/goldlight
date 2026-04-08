@@ -1,5 +1,4 @@
-/// <reference lib="deno.unstable" />
-
+﻿// @ts-nocheck
 import type { DesktopModuleContext } from '@disjukr/goldlight/desktop';
 import triangleShader from './triangle.wgsl' with { type: 'text' };
 
@@ -66,13 +65,15 @@ export default async ({ window }: DesktopModuleContext): Promise<() => void> => 
 
     device.queue.submit([encoder.finish()]);
     window.present();
-    frameHandle = requestAnimationFrame(drawFrame);
+    frameHandle = window.runtime.requestAnimationFrame(drawFrame);
   };
 
-  frameHandle = requestAnimationFrame(drawFrame);
+  frameHandle = window.runtime.requestAnimationFrame(drawFrame);
 
   return () => {
     window.runtime.removeEventListener('resize', configureContext);
-    cancelAnimationFrame(frameHandle);
+    window.runtime.cancelAnimationFrame(frameHandle);
   };
 };
+
+

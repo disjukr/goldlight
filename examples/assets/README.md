@@ -4,19 +4,13 @@ This directory stores small, versioned assets that are practical to keep in the 
 
 ## Included Assets
 
-- `stanford-bunny/`: Stanford Bunny source refresh target plus the extracted `bun_zipper.ply`
-  reconstruction mesh, now directly loadable through `@disjukr/goldlight/importers`
+- `stanford-bunny/`: Stanford Bunny source mesh and extracted `bun_zipper.ply`
 - `damaged-helmet/`: Khronos `DamagedHelmet.glb` sample asset
-- `hdri/`: 1K EXR environment-map samples used by the forward helmet PBR/IBL demos
+- `hdri/`: 1K EXR environment-map samples used by the forward helmet demos
 
-## Refresh Commands
+## Refresh Status
 
-- `deno task asset:examples`: refresh the in-repo example assets
-- `deno task asset:stanford-bunny`: re-download the Stanford Bunny source archive and refresh the
-  extracted `bun_zipper.ply`
-- `deno task asset:damaged-helmet`: re-download the `DamagedHelmet.glb` sample
-- `deno task asset:hdri`: refresh the vendored 1K EXR HDRI sample set
-- `deno task asset:sponza`: download the `Sponza` glTF sample into `examples/assets/sponza/`
+The old Deno asset refresh tasks were removed during the Bun migration.
 
-Large assets that should not live in git can still be staged under `examples/assets/` when they are
-explicitly ignored, such as `examples/assets/sponza/`.
+- These assets are currently treated as vendored repository fixtures.
+- If a refresh workflow is needed again, add a Bun-based script before documenting it here.

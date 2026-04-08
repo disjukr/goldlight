@@ -78,7 +78,7 @@ The current scaffold already includes:
   registration
 - headless snapshot readback and PNG encoding
 - browser surface binding and a bundled browser example
-- a Windows BYOW triangle example for native Deno surface presentation
+- a Windows BYOW triangle example for native Electrobun surface presentation
 - Windows-native forward/pathtraced Damaged Helmet demos for real imported material validation
 - device-loss observation and residency rebuild helpers
 - explicit device-loss recovery sequencing for device replacement and target rebinding

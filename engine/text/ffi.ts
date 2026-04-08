@@ -1,6 +1,5 @@
-/// <reference lib="deno.unstable" />
+import { createRequire } from 'node:module';
 
-import { dirname, fromFileUrl, join } from '@std/path';
 import { createPath2d, type Path2d, type PathVerb2d } from '@disjukr/goldlight/geometry';
 
 import type {
@@ -17,172 +16,110 @@ import type {
 } from './types.ts';
 import { skiaDistanceFieldInset, skiaDistanceFieldRadius } from './sdf.ts';
 
-const textHostInitResultOk = 1;
-const textHostMetricsResultOk = 1;
-const textHostShapeResultOk = 1;
-const textHostFamilyNameBufferMinSize = 256;
-const ffiFontMetricsBufferSize = 40;
-const ffiShapedRunInfoBufferSize = 32;
-const ffiGlyphPathBufferMinSize = 2048;
-const ffiGlyphMaskInfoBufferSize = 24;
-
-type TextHostLibrary = Deno.DynamicLibrary<{
-  text_host_init: {
-    parameters: [];
-    result: 'u8';
-  };
-  text_host_shutdown: {
-    parameters: [];
-    result: 'void';
-  };
-  text_host_get_family_count: {
-    parameters: [];
-    result: 'u32';
-  };
-  text_host_get_family_name: {
-    parameters: ['u32', 'buffer', 'usize'];
-    result: 'usize';
-  };
-  text_host_match_typeface_by_family: {
-    parameters: ['buffer', 'usize'];
-    result: 'u64';
-  };
-  text_host_get_font_metrics: {
-    parameters: ['u64', 'f32', 'buffer'];
-    result: 'u8';
-  };
-  text_host_shape_text: {
-    parameters: ['u64', 'buffer', 'usize', 'f32', 'u8', 'buffer', 'usize', 'u32'];
-    result: 'u64';
-  };
-  text_host_get_glyph_svg_path: {
-    parameters: ['u64', 'u32', 'f32', 'buffer', 'usize'];
-    result: 'usize';
-  };
-  text_host_get_glyph_mask_info: {
-    parameters: ['u64', 'u32', 'f32', 'f32', 'f32', 'buffer'];
-    result: 'u8';
-  };
-  text_host_copy_glyph_mask_pixels: {
-    parameters: ['u64', 'u32', 'f32', 'f32', 'f32', 'buffer', 'usize'];
-    result: 'usize';
-  };
-  text_host_get_glyph_sdf_info: {
-    parameters: ['u64', 'u32', 'f32', 'u32', 'f32', 'buffer'];
-    result: 'u8';
-  };
-  text_host_copy_glyph_sdf_pixels: {
-    parameters: ['u64', 'u32', 'f32', 'u32', 'f32', 'buffer', 'usize'];
-    result: 'usize';
-  };
-  text_host_shaped_run_get_info: {
-    parameters: ['u64', 'buffer'];
-    result: 'u8';
-  };
-  text_host_shaped_run_copy_glyph_ids: {
-    parameters: ['u64', 'buffer', 'usize'];
-    result: 'u8';
-  };
-  text_host_shaped_run_copy_positions: {
-    parameters: ['u64', 'buffer', 'usize'];
-    result: 'u8';
-  };
-  text_host_shaped_run_copy_offsets: {
-    parameters: ['u64', 'buffer', 'usize'];
-    result: 'u8';
-  };
-  text_host_shaped_run_copy_cluster_indices: {
-    parameters: ['u64', 'buffer', 'usize'];
-    result: 'u8';
-  };
-  text_host_shaped_run_destroy: {
-    parameters: ['u64'];
-    result: 'void';
-  };
+type NativeFontMetrics = Readonly<{
+  units_per_em: number;
+  unitsPerEm?: number;
+  ascent: number;
+  descent: number;
+  line_gap: number;
+  lineGap?: number;
+  x_height: number;
+  xHeight?: number;
+  cap_height: number;
+  capHeight?: number;
+  underline_position: number;
+  underlinePosition?: number;
+  underline_thickness: number;
+  underlineThickness?: number;
+  strikeout_position: number;
+  strikeoutPosition?: number;
+  strikeout_thickness: number;
+  strikeoutThickness?: number;
 }>;
 
-const repoRoot = join(dirname(fromFileUrl(import.meta.url)), '..', '..');
-
-const pathExists = (path: string): boolean => {
-  try {
-    Deno.statSync(path);
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-const getDefaultTextHostLibraryPath = (): string => {
-  const extension = Deno.build.os === 'windows'
-    ? 'dll'
-    : Deno.build.os === 'darwin'
-    ? 'dylib'
-    : 'so';
-  const fileName = Deno.build.os === 'windows'
-    ? 'goldlight_text_host.dll'
-    : `libgoldlight_text_host.${extension}`;
-  const debugPath = join(repoRoot, 'engine', 'text', 'native', 'target', 'debug', fileName);
-  if (pathExists(debugPath)) {
-    return debugPath;
-  }
-  return join(repoRoot, 'engine', 'text', 'native', 'target', 'release', fileName);
-};
-
-const decodeMetrics = (bytes: Uint8Array): FontMetrics => {
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  return {
-    unitsPerEm: view.getUint16(0, true),
-    ascent: view.getFloat32(4, true),
-    descent: view.getFloat32(8, true),
-    lineGap: view.getFloat32(12, true),
-    xHeight: view.getFloat32(16, true),
-    capHeight: view.getFloat32(20, true),
-    underlinePosition: view.getFloat32(24, true),
-    underlineThickness: view.getFloat32(28, true),
-    strikeoutPosition: view.getFloat32(32, true),
-    strikeoutThickness: view.getFloat32(36, true),
-  };
-};
-
-const decodeGlyphMaskInfo = (
-  bytes: Uint8Array,
-): Omit<GlyphMask, 'pixels' | 'format'> & { formatCode: number } => {
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  return {
-    cacheKey: '',
-    width: view.getUint32(0, true),
-    height: view.getUint32(4, true),
-    stride: view.getUint32(8, true),
-    formatCode: view.getUint32(12, true),
-    offsetX: view.getInt32(16, true),
-    offsetY: view.getInt32(20, true),
-  };
-};
-
-type NativeShapedRunInfo = Readonly<{
-  glyphCount: number;
-  bidiLevel: number;
-  direction: TextDirection;
-  scriptTagCode: number;
-  advanceX: number;
-  advanceY: number;
-  utf8RangeStart: number;
-  utf8RangeEnd: number;
+type NativeGlyphBitmap = Readonly<{
+  width: number;
+  height: number;
+  stride: number;
+  format_code: number;
+  formatCode?: number;
+  offset_x: number;
+  offsetX?: number;
+  offset_y: number;
+  offsetY?: number;
+  pixels: Uint8Array;
 }>;
 
-const decodeShapedRunInfo = (bytes: Uint8Array): NativeShapedRunInfo => {
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  return {
-    glyphCount: view.getUint32(0, true),
-    bidiLevel: view.getUint8(4),
-    direction: view.getUint8(5) === 2 ? 'rtl' : 'ltr',
-    scriptTagCode: view.getUint32(8, true),
-    advanceX: view.getFloat32(12, true),
-    advanceY: view.getFloat32(16, true),
-    utf8RangeStart: view.getUint32(20, true),
-    utf8RangeEnd: view.getUint32(24, true),
-  };
+type NativeShapedRun = Readonly<{
+  glyph_count: number;
+  glyphCount?: number;
+  bidi_level: number;
+  bidiLevel?: number;
+  direction: string;
+  script_tag_code: number;
+  scriptTagCode?: number;
+  advance_x: number;
+  advanceX?: number;
+  advance_y: number;
+  advanceY?: number;
+  utf8_range_start: number;
+  utf8RangeStart?: number;
+  utf8_range_end: number;
+  utf8RangeEnd?: number;
+  glyph_ids: readonly number[];
+  glyphIds?: readonly number[];
+  positions: readonly number[];
+  offsets: readonly number[];
+  cluster_indices: readonly number[];
+  clusterIndices?: readonly number[];
+}>;
+
+type TextHostNativeModule = Readonly<{
+  initTextHost: () => boolean;
+  shutdownTextHost: () => void;
+  listFamilies: () => readonly string[];
+  matchTypeface: (family: string) => string | null | undefined;
+  getFontMetrics: (typefaceHandle: string, size: number) => NativeFontMetrics | null;
+  shapeText: (
+    typefaceHandle: string,
+    text: string,
+    size: number,
+    direction: number,
+    language: string,
+    scriptTag: number,
+  ) => NativeShapedRun | null;
+  getGlyphSvgPath: (
+    typefaceHandle: string,
+    glyphId: number,
+    size: number,
+  ) => string | null;
+  getGlyphMask: (
+    typefaceHandle: string,
+    glyphId: number,
+    size: number,
+    subpixelX: number,
+    subpixelY: number,
+  ) => NativeGlyphBitmap | null;
+  getGlyphSdf: (
+    typefaceHandle: string,
+    glyphId: number,
+    size: number,
+    inset: number,
+    radius: number,
+  ) => NativeGlyphBitmap | null;
+}>;
+
+type SharedTextHostState = {
+  refCount: number;
+  families?: readonly string[];
+  typefaceCache: Map<string, TypefaceHandle | null>;
+  glyphPathCache: Map<string, Path2d | null>;
+  glyphMaskCache: Map<string, GlyphMask | null>;
+  glyphSdfCache: Map<string, GlyphMask | null>;
 };
+
+const require = createRequire(import.meta.url);
+const native = require('./native/index.node') as TextHostNativeModule;
 
 const decodeScriptTag = (tag: number): string => {
   if (tag === 0) {
@@ -290,120 +227,53 @@ const parseSvgOutlinePath = (pathData: string) => {
   return createPath2d(...verbs);
 };
 
-type SharedTextHostState = {
-  libraryPath: string;
-  library: TextHostLibrary;
-  refCount: number;
-  families: readonly string[] | null;
-  typefaceCache: Map<string, TypefaceHandle | null>;
-  shapedRunCache: Map<string, ShapedRun>;
-  glyphPathCache: Map<string, Path2d | null>;
-  glyphMaskCache: Map<string, GlyphMask | null>;
-  glyphSdfCache: Map<string, GlyphMask | null>;
+const toTypefaceHandle = (handle: string | null | undefined): TypefaceHandle | null => {
+  if (handle === null || handle === undefined || handle === '' || handle === '0') {
+    return null;
+  }
+  return BigInt(handle);
 };
 
-const sharedTextHostStates = new Map<string, SharedTextHostState>();
-
-const acquireSharedTextHostState = (libraryPath: string): SharedTextHostState => {
-  const existing = sharedTextHostStates.get(libraryPath);
-  if (existing) {
-    existing.refCount += 1;
-    return existing;
+const toGlyphMask = (
+  cacheKey: string,
+  value: NativeGlyphBitmap | null,
+): GlyphMask | null => {
+  if (!value) {
+    return null;
   }
 
-  const library = Deno.dlopen(libraryPath, {
-    text_host_init: {
-      parameters: [],
-      result: 'u8',
-    },
-    text_host_shutdown: {
-      parameters: [],
-      result: 'void',
-    },
-    text_host_get_family_count: {
-      parameters: [],
-      result: 'u32',
-    },
-    text_host_get_family_name: {
-      parameters: ['u32', 'buffer', 'usize'],
-      result: 'usize',
-    },
-    text_host_match_typeface_by_family: {
-      parameters: ['buffer', 'usize'],
-      result: 'u64',
-    },
-    text_host_get_font_metrics: {
-      parameters: ['u64', 'f32', 'buffer'],
-      result: 'u8',
-    },
-    text_host_shape_text: {
-      parameters: ['u64', 'buffer', 'usize', 'f32', 'u8', 'buffer', 'usize', 'u32'],
-      result: 'u64',
-    },
-    text_host_get_glyph_svg_path: {
-      parameters: ['u64', 'u32', 'f32', 'buffer', 'usize'],
-      result: 'usize',
-    },
-    text_host_get_glyph_mask_info: {
-      parameters: ['u64', 'u32', 'f32', 'f32', 'f32', 'buffer'],
-      result: 'u8',
-    },
-    text_host_copy_glyph_mask_pixels: {
-      parameters: ['u64', 'u32', 'f32', 'f32', 'f32', 'buffer', 'usize'],
-      result: 'usize',
-    },
-    text_host_get_glyph_sdf_info: {
-      parameters: ['u64', 'u32', 'f32', 'u32', 'f32', 'buffer'],
-      result: 'u8',
-    },
-    text_host_copy_glyph_sdf_pixels: {
-      parameters: ['u64', 'u32', 'f32', 'u32', 'f32', 'buffer', 'usize'],
-      result: 'usize',
-    },
-    text_host_shaped_run_get_info: {
-      parameters: ['u64', 'buffer'],
-      result: 'u8',
-    },
-    text_host_shaped_run_copy_glyph_ids: {
-      parameters: ['u64', 'buffer', 'usize'],
-      result: 'u8',
-    },
-    text_host_shaped_run_copy_positions: {
-      parameters: ['u64', 'buffer', 'usize'],
-      result: 'u8',
-    },
-    text_host_shaped_run_copy_offsets: {
-      parameters: ['u64', 'buffer', 'usize'],
-      result: 'u8',
-    },
-    text_host_shaped_run_copy_cluster_indices: {
-      parameters: ['u64', 'buffer', 'usize'],
-      result: 'u8',
-    },
-    text_host_shaped_run_destroy: {
-      parameters: ['u64'],
-      result: 'void',
-    },
-  }) as TextHostLibrary;
+  return {
+    cacheKey,
+    width: value.width,
+    height: value.height,
+    stride: value.stride,
+    format: 'a8',
+    offsetX: value.offset_x ?? value.offsetX ?? 0,
+    offsetY: value.offset_y ?? value.offsetY ?? 0,
+    pixels: new Uint8Array(value.pixels),
+  };
+};
 
-  if (library.symbols.text_host_init() !== textHostInitResultOk) {
-    library.close();
+let sharedState: SharedTextHostState | undefined;
+
+const acquireSharedTextHostState = (): SharedTextHostState => {
+  if (sharedState) {
+    sharedState.refCount += 1;
+    return sharedState;
+  }
+
+  if (!native.initTextHost()) {
     throw new Error('Failed to initialize the goldlight text host');
   }
 
-  const state: SharedTextHostState = {
-    libraryPath,
-    library,
+  sharedState = {
     refCount: 1,
-    families: null,
     typefaceCache: new Map(),
-    shapedRunCache: new Map(),
     glyphPathCache: new Map(),
     glyphMaskCache: new Map(),
     glyphSdfCache: new Map(),
   };
-  sharedTextHostStates.set(libraryPath, state);
-  return state;
+  return sharedState;
 };
 
 const releaseSharedTextHostState = (state: SharedTextHostState): void => {
@@ -411,43 +281,19 @@ const releaseSharedTextHostState = (state: SharedTextHostState): void => {
   if (state.refCount > 0) {
     return;
   }
-  state.library.symbols.text_host_shutdown();
-  state.library.close();
-  sharedTextHostStates.delete(state.libraryPath);
+
+  native.shutdownTextHost();
+  sharedState = undefined;
 };
 
-export const createTextHost = (options: TextHostOptions = {}): TextHost => {
-  const libraryPath = options.libraryPath ?? getDefaultTextHostLibraryPath();
-  const shared = acquireSharedTextHostState(libraryPath);
-  const library = shared.library;
-  let closed = false;
-
-  const textEncoder = new TextEncoder();
-  const textDecoder = new TextDecoder();
+export const createTextHost = (_options: TextHostOptions = {}): TextHost => {
+  const shared = acquireSharedTextHostState();
 
   const listFamilies = (): readonly string[] => {
     if (shared.families) {
       return shared.families;
     }
-    const count = library.symbols.text_host_get_family_count();
-    const families: string[] = [];
-    for (let index = 0; index < count; index += 1) {
-      let buffer = new Uint8Array(textHostFamilyNameBufferMinSize);
-      let length = Number(
-        library.symbols.text_host_get_family_name(index, buffer, BigInt(buffer.byteLength)),
-      );
-      if (length === 0) {
-        continue;
-      }
-      if (length > buffer.byteLength) {
-        buffer = new Uint8Array(length);
-        length = Number(
-          library.symbols.text_host_get_family_name(index, buffer, BigInt(buffer.byteLength)),
-        );
-      }
-      families.push(textDecoder.decode(buffer.subarray(0, length)));
-    }
-    shared.families = Object.freeze(families.slice());
+    shared.families = Object.freeze([...native.listFamilies()]);
     return shared.families;
   };
 
@@ -460,24 +306,28 @@ export const createTextHost = (options: TextHostOptions = {}): TextHost => {
     if (cached !== undefined) {
       return cached;
     }
-    const familyBytes = textEncoder.encode(family);
-    const handle = library.symbols.text_host_match_typeface_by_family(
-      familyBytes,
-      BigInt(familyBytes.byteLength),
-    );
-    const resolved = handle === 0n ? null : handle;
+    const resolved = toTypefaceHandle(native.matchTypeface(family));
     shared.typefaceCache.set(family, resolved);
     return resolved;
   };
 
   const getFontMetrics = (typeface: TypefaceHandle, size: number): FontMetrics => {
-    const buffer = new Uint8Array(ffiFontMetricsBufferSize);
-    if (
-      library.symbols.text_host_get_font_metrics(typeface, size, buffer) !== textHostMetricsResultOk
-    ) {
+    const metrics = native.getFontMetrics(typeface.toString(), size);
+    if (!metrics) {
       throw new Error(`Text host failed to resolve metrics for typeface ${typeface.toString()}`);
     }
-    return decodeMetrics(buffer);
+    return {
+      unitsPerEm: metrics.units_per_em ?? metrics.unitsPerEm ?? 0,
+      ascent: metrics.ascent,
+      descent: metrics.descent,
+      lineGap: metrics.line_gap ?? metrics.lineGap ?? 0,
+      xHeight: metrics.x_height ?? metrics.xHeight ?? 0,
+      capHeight: metrics.cap_height ?? metrics.capHeight ?? 0,
+      underlinePosition: metrics.underline_position ?? metrics.underlinePosition ?? 0,
+      underlineThickness: metrics.underline_thickness ?? metrics.underlineThickness ?? 0,
+      strikeoutPosition: metrics.strikeout_position ?? metrics.strikeoutPosition ?? 0,
+      strikeoutThickness: metrics.strikeout_thickness ?? metrics.strikeoutThickness ?? 0,
+    };
   };
 
   const getGlyphPath = (typeface: TypefaceHandle, glyphID: number, size: number) => {
@@ -486,33 +336,14 @@ export const createTextHost = (options: TextHostOptions = {}): TextHost => {
     if (cached !== undefined) {
       return cached;
     }
-    let buffer = new Uint8Array(ffiGlyphPathBufferMinSize);
-    let length = Number(
-      library.symbols.text_host_get_glyph_svg_path(
-        typeface,
-        glyphID >>> 0,
-        size,
-        buffer,
-        BigInt(buffer.byteLength),
-      ),
-    );
-    if (length === 0) {
+
+    const svgPath = native.getGlyphSvgPath(typeface.toString(), glyphID >>> 0, size);
+    if (!svgPath) {
       shared.glyphPathCache.set(cacheKey, null);
       return null;
     }
-    if (length > buffer.byteLength) {
-      buffer = new Uint8Array(length);
-      length = Number(
-        library.symbols.text_host_get_glyph_svg_path(
-          typeface,
-          glyphID >>> 0,
-          size,
-          buffer,
-          BigInt(buffer.byteLength),
-        ),
-      );
-    }
-    const path = parseSvgOutlinePath(textDecoder.decode(buffer.subarray(0, length)));
+
+    const path = parseSvgOutlinePath(svgPath);
     shared.glyphPathCache.set(cacheKey, path);
     return path;
   };
@@ -522,67 +353,18 @@ export const createTextHost = (options: TextHostOptions = {}): TextHost => {
     glyphID: number,
     size: number,
     subpixelOffset?: GlyphSubpixelOffset,
-  ): GlyphMask | null => {
-    const [phaseX, phaseY] = quantizeDirectMaskSubpixelOffset(subpixelOffset);
-    const cacheKey = `${typeface.toString()}:${glyphID >>> 0}:${size}:${phaseX}:${phaseY}`;
+  ) => {
+    const [subpixelX, subpixelY] = quantizeDirectMaskSubpixelOffset(subpixelOffset);
+    const cacheKey = `${typeface.toString()}:${glyphID >>> 0}:${size}:${subpixelX}:${subpixelY}`;
     const cached = shared.glyphMaskCache.get(cacheKey);
     if (cached !== undefined) {
       return cached;
     }
-    const subpixelX = phaseX / 4;
-    const subpixelY = phaseY / 4;
-    const infoBuffer = new Uint8Array(ffiGlyphMaskInfoBufferSize);
-    if (
-      library.symbols.text_host_get_glyph_mask_info(
-        typeface,
-        glyphID >>> 0,
-        size,
-        subpixelX,
-        subpixelY,
-        infoBuffer,
-      ) !==
-        textHostMetricsResultOk
-    ) {
-      shared.glyphMaskCache.set(cacheKey, null);
-      return null;
-    }
 
-    const info = decodeGlyphMaskInfo(infoBuffer);
-    if (info.formatCode !== 1) {
-      throw new Error(`Unsupported glyph mask format code: ${info.formatCode}`);
-    }
-
-    const pixelLength = Math.max(0, info.stride * info.height);
-    const pixels = new Uint8Array(pixelLength);
-    if (pixelLength > 0) {
-      const copiedLength = Number(
-        library.symbols.text_host_copy_glyph_mask_pixels(
-          typeface,
-          glyphID >>> 0,
-          size,
-          subpixelX,
-          subpixelY,
-          pixels,
-          BigInt(pixels.byteLength),
-        ),
-      );
-      if (copiedLength !== pixelLength) {
-        throw new Error(
-          `Text host copied ${copiedLength} glyph mask bytes, expected ${pixelLength}`,
-        );
-      }
-    }
-
-    const mask = {
+    const mask = toGlyphMask(
       cacheKey,
-      width: info.width,
-      height: info.height,
-      stride: info.stride,
-      format: 'a8',
-      offsetX: info.offsetX,
-      offsetY: info.offsetY,
-      pixels,
-    } as const;
+      native.getGlyphMask(typeface.toString(), glyphID >>> 0, size, subpixelX / 4, subpixelY / 4),
+    );
     shared.glyphMaskCache.set(cacheKey, mask);
     return mask;
   };
@@ -591,7 +373,7 @@ export const createTextHost = (options: TextHostOptions = {}): TextHost => {
     typeface: TypefaceHandle,
     glyphID: number,
     size: number,
-  ): GlyphMask | null => {
+  ) => {
     const inset = skiaDistanceFieldInset;
     const radius = skiaDistanceFieldRadius;
     const cacheKey = `${typeface.toString()}:${glyphID >>> 0}:${size}:${inset}:${radius}`;
@@ -599,161 +381,45 @@ export const createTextHost = (options: TextHostOptions = {}): TextHost => {
     if (cached !== undefined) {
       return cached;
     }
-    const infoBuffer = new Uint8Array(ffiGlyphMaskInfoBufferSize);
-    if (
-      library.symbols.text_host_get_glyph_sdf_info(
-        typeface,
-        glyphID >>> 0,
-        size,
-        inset >>> 0,
-        radius,
-        infoBuffer,
-      ) !== textHostMetricsResultOk
-    ) {
-      shared.glyphSdfCache.set(cacheKey, null);
-      return null;
-    }
 
-    const info = decodeGlyphMaskInfo(infoBuffer);
-    if (info.formatCode !== 1) {
-      throw new Error(`Unsupported glyph sdf format code: ${info.formatCode}`);
-    }
-
-    const pixelLength = Math.max(0, info.stride * info.height);
-    const pixels = new Uint8Array(pixelLength);
-    if (pixelLength > 0) {
-      const copiedLength = Number(
-        library.symbols.text_host_copy_glyph_sdf_pixels(
-          typeface,
-          glyphID >>> 0,
-          size,
-          inset >>> 0,
-          radius,
-          pixels,
-          BigInt(pixels.byteLength),
-        ),
-      );
-      if (copiedLength !== pixelLength) {
-        throw new Error(
-          `Text host copied ${copiedLength} glyph sdf bytes, expected ${pixelLength}`,
-        );
-      }
-    }
-
-    const sdf = {
+    const sdf = toGlyphMask(
       cacheKey,
-      width: info.width,
-      height: info.height,
-      stride: info.stride,
-      format: 'a8',
-      offsetX: info.offsetX,
-      offsetY: info.offsetY,
-      pixels,
-    } as const;
+      native.getGlyphSdf(typeface.toString(), glyphID >>> 0, size, inset, radius),
+    );
     shared.glyphSdfCache.set(cacheKey, sdf);
     return sdf;
   };
 
   const shapeText = (input: ShapeTextInput): ShapedRun => {
-    const cacheKey = JSON.stringify([
+    const run = native.shapeText(
       input.typeface.toString(),
       input.text,
       input.size,
-      input.direction ?? 'ltr',
+      encodeDirection(input.direction),
       input.language ?? '',
-      input.scriptTag ?? '',
-    ]);
-    const cached = shared.shapedRunCache.get(cacheKey);
-    if (cached) {
-      return cached;
-    }
-    const textBytes = textEncoder.encode(input.text);
-    const languageBytes = input.language ? textEncoder.encode(input.language) : new Uint8Array();
-    const direction = encodeDirection(input.direction);
-    const scriptTag = encodeScriptTag(input.scriptTag);
-    const runHandle = library.symbols.text_host_shape_text(
-      input.typeface,
-      textBytes,
-      BigInt(textBytes.byteLength),
-      input.size,
-      direction,
-      languageBytes,
-      BigInt(languageBytes.byteLength),
-      scriptTag,
+      encodeScriptTag(input.scriptTag),
     );
-    if (runHandle === 0n) {
-      throw new Error(`Text host failed to shape "${input.text}"`);
+    if (!run) {
+      throw new Error(`Text host failed to shape text for typeface ${input.typeface.toString()}`);
     }
 
-    try {
-      const infoBuffer = new Uint8Array(ffiShapedRunInfoBufferSize);
-      if (
-        library.symbols.text_host_shaped_run_get_info(runHandle, infoBuffer) !==
-          textHostShapeResultOk
-      ) {
-        throw new Error('Text host failed to inspect shaped run');
-      }
-      const info = decodeShapedRunInfo(infoBuffer);
-      const glyphIDs = new Uint32Array(info.glyphCount);
-      const positions = new Float32Array((info.glyphCount + 1) * 2);
-      const offsets = new Float32Array((info.glyphCount + 1) * 2);
-      const clusterIndices = new Uint32Array(info.glyphCount + 1);
-      if (
-        library.symbols.text_host_shaped_run_copy_glyph_ids(
-            runHandle,
-            glyphIDs,
-            BigInt(glyphIDs.length),
-          ) !== textHostShapeResultOk ||
-        library.symbols.text_host_shaped_run_copy_positions(
-            runHandle,
-            positions,
-            BigInt(positions.length),
-          ) !== textHostShapeResultOk ||
-        library.symbols.text_host_shaped_run_copy_offsets(
-            runHandle,
-            offsets,
-            BigInt(offsets.length),
-          ) !==
-          textHostShapeResultOk ||
-        library.symbols.text_host_shaped_run_copy_cluster_indices(
-            runHandle,
-            clusterIndices,
-            BigInt(clusterIndices.length),
-          ) !== textHostShapeResultOk
-      ) {
-        throw new Error('Text host failed to copy shaped run data');
-      }
-
-      const run = {
-        typeface: input.typeface,
-        text: input.text,
-        size: input.size,
-        direction: info.direction,
-        bidiLevel: info.bidiLevel,
-        scriptTag: input.scriptTag ?? decodeScriptTag(info.scriptTagCode),
-        language: input.language ?? '',
-        glyphIDs,
-        positions,
-        offsets,
-        clusterIndices,
-        advanceX: info.advanceX,
-        advanceY: info.advanceY,
-        utf8RangeStart: info.utf8RangeStart,
-        utf8RangeEnd: info.utf8RangeEnd,
-      } as const;
-      shared.shapedRunCache.set(cacheKey, run);
-      return run;
-    } finally {
-      library.symbols.text_host_shaped_run_destroy(runHandle);
-    }
-  };
-
-  const close = (): void => {
-    if (closed) {
-      return;
-    }
-    closed = true;
-    releaseSharedTextHostState(shared);
+    return {
+      typeface: input.typeface,
+      text: input.text,
+      size: input.size,
+      direction: run.direction === 'rtl' ? 'rtl' : 'ltr',
+      bidiLevel: run.bidi_level ?? run.bidiLevel ?? 0,
+      scriptTag: decodeScriptTag(run.script_tag_code ?? run.scriptTagCode ?? 0),
+      language: input.language ?? '',
+      glyphIDs: Uint32Array.from(run.glyph_ids ?? run.glyphIds ?? []),
+      positions: Float32Array.from(run.positions),
+      offsets: Float32Array.from(run.offsets),
+      clusterIndices: Uint32Array.from(run.cluster_indices ?? run.clusterIndices ?? []),
+      advanceX: run.advance_x ?? run.advanceX ?? 0,
+      advanceY: run.advance_y ?? run.advanceY ?? 0,
+      utf8RangeStart: run.utf8_range_start ?? run.utf8RangeStart ?? 0,
+      utf8RangeEnd: run.utf8_range_end ?? run.utf8RangeEnd ?? input.text.length,
+    };
   };
 
   return {
@@ -764,6 +430,8 @@ export const createTextHost = (options: TextHostOptions = {}): TextHost => {
     getGlyphPath,
     getGlyphMask,
     getGlyphSdf,
-    close,
+    close: () => {
+      releaseSharedTextHostState(shared);
+    },
   };
 };

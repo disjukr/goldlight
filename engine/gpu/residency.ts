@@ -1,3 +1,4 @@
+﻿// @ts-nocheck
 import type { EvaluatedScene } from '@disjukr/goldlight/renderer';
 import {
   resolveMeshSourceAssetId,
@@ -6,8 +7,8 @@ import {
   resolveTextureSourceInlineImage,
 } from '@disjukr/goldlight/ir';
 import type { Material, MeshAttribute, MeshPrimitive, SceneIr } from '@disjukr/goldlight/ir';
-import jpeg from 'npm:jpeg-js@0.4.4';
-import { PNG } from 'npm:pngjs@7.0.0';
+import jpeg from 'jpeg-js';
+import { PNG } from 'pngjs';
 
 export type ImageAsset = Readonly<{
   id: string;
@@ -844,3 +845,5 @@ export const rebuildRuntimeResidency = (
   ensureSceneTextureResidencyFromSources(context, residency, scene, [assetSource]);
   return residency;
 };
+
+

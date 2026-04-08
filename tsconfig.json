@@ -1,0 +1,90 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": [
+      "ES2023"
+    ],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "moduleDetection": "force",
+    "strict": true,
+    "allowImportingTsExtensions": true,
+    "allowArbitraryExtensions": true,
+    "jsx": "react",
+    "jsxFactory": "React.createElement",
+    "jsxFragmentFactory": "React.Fragment",
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "types": [
+      "node",
+      "bun-types"
+    ],
+    "baseUrl": ".",
+    "paths": {
+      "@disjukr/goldlight/ir": [
+        "./engine/ir/mod.ts"
+      ],
+      "@disjukr/goldlight/math": [
+        "./engine/math/mod.ts"
+      ],
+      "@disjukr/goldlight/geometry": [
+        "./engine/geometry/mod.ts"
+      ],
+      "@disjukr/goldlight/drawing": [
+        "./engine/drawing/mod.ts"
+      ],
+      "@disjukr/goldlight/spatial": [
+        "./engine/spatial/mod.ts"
+      ],
+      "@disjukr/goldlight/procedural": [
+        "./engine/procedural/mod.ts"
+      ],
+      "@disjukr/goldlight/raytrace": [
+        "./engine/raytrace/mod.ts"
+      ],
+      "@disjukr/goldlight/gpu": [
+        "./engine/gpu/mod.ts"
+      ],
+      "@disjukr/goldlight/layout": [
+        "./engine/layout/mod.ts"
+      ],
+      "@disjukr/goldlight/renderer": [
+        "./engine/renderer/mod.ts"
+      ],
+      "@disjukr/goldlight/importers": [
+        "./engine/importers/mod.ts"
+      ],
+      "@disjukr/goldlight/exporters": [
+        "./engine/exporters/mod.ts"
+      ],
+      "@disjukr/goldlight/react": [
+        "./engine/react/mod.ts"
+      ],
+      "@disjukr/goldlight/react/reconciler": [
+        "./engine/react/reconciler.ts"
+      ],
+      "@disjukr/goldlight/react/jsx-runtime": [
+        "./engine/react/jsx-runtime.ts"
+      ],
+      "@disjukr/goldlight/react/jsx-dev-runtime": [
+        "./engine/react/jsx-dev-runtime.ts"
+      ],
+      "@disjukr/goldlight/desktop": [
+        "./engine/desktop/mod.ts"
+      ],
+      "@disjukr/goldlight/text": [
+        "./engine/text/mod.ts"
+      ]
+    }
+  },
+  "include": [
+    "engine/**/*.ts",
+    "engine/**/*.tsx",
+    "examples/byow/**/*.ts",
+    "examples/byow/**/*.tsx",
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "types/**/*.d.ts"
+  ]
+}

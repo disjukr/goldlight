@@ -1,21 +1,22 @@
 /** @jsx React.createElement */
 /** @jsxFrag React.Fragment */
-/// <reference lib="deno.unstable" />
 /// <reference lib="dom" />
 
-import React from 'npm:react@19.2.0';
+import React from 'react';
 import { createQuaternionFromEulerDegrees } from '@disjukr/goldlight/math';
 import {
   initializeWindow,
   useSetTimeMs,
   useTimeMs,
   useWindowMetrics,
+  useDesktopWindow,
 } from '@disjukr/goldlight/desktop';
 import { createBoxMesh } from '@disjukr/goldlight/geometry';
 import { G3dDirectionalLight, G3dPerspectiveCamera } from '@disjukr/goldlight/react/reconciler';
 
 const DemoFrameDriver = () => {
   const setTimeMs = useSetTimeMs();
+  const desktopWindow = useDesktopWindow();
 
   React.useEffect(() => {
     const startMs = performance.now();
@@ -23,11 +24,11 @@ const DemoFrameDriver = () => {
 
     const tick = (nowMs: number) => {
       setTimeMs(nowMs - startMs);
-      handle = requestAnimationFrame(tick);
+      handle = desktopWindow.runtime.requestAnimationFrame(tick);
     };
 
-    handle = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(handle);
+    handle = desktopWindow.runtime.requestAnimationFrame(tick);
+    return () => desktopWindow.runtime.cancelAnimationFrame(handle);
   }, [setTimeMs]);
 
   return null;
@@ -283,3 +284,5 @@ const DemoScene = () => {
 };
 
 export default initializeWindow(DemoScene);
+
+

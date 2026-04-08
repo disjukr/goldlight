@@ -1,11 +1,15 @@
-import { dirname, fromFileUrl, join } from '@std/path';
+import { writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { installBunWebGpu } from '../../shared/install_bun_webgpu.ts';
 import { renderA8AtlasTextSnapshot } from './render.ts';
 
-const exampleDir = dirname(fromFileUrl(import.meta.url));
-const outputPath = join(exampleDir, 'out.png');
+await installBunWebGpu();
+const exampleDir = path.dirname(fileURLToPath(import.meta.url));
+const outputPath = path.join(exampleDir, 'out.png');
 const snapshot = renderA8AtlasTextSnapshot();
 
-await Deno.writeFile(outputPath, snapshot.png);
+await writeFile(outputPath, snapshot.png);
 
 console.log(`Wrote ${outputPath}`);
 console.log(
@@ -16,3 +20,4 @@ for (const summary of snapshot.summaries) {
     `${summary.label}: family=${summary.family}, glyphs=${summary.glyphCount}, atlasGlyphs=${summary.atlasGlyphCount}`,
   );
 }
+process.exit(0);

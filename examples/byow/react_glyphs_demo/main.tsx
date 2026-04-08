@@ -1,6 +1,5 @@
-/// <reference lib="deno.unstable" />
-
 import { createWindow, disposeMain, initializeMain } from '@disjukr/goldlight/desktop';
+import app from './app.tsx';
 
 await initializeMain();
 try {
@@ -8,8 +7,7 @@ try {
     title: 'goldlight byow react glyphs demo',
     width: 1280,
     height: 720,
-    backgroundColor: [0.09, 0.1, 0.13, 1],
-    module: new URL('./app.tsx', import.meta.url),
+    entry: app,
   });
   await window.whenClosed();
 } finally {

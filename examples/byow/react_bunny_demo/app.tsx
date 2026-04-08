@@ -1,9 +1,10 @@
 /** @jsx React.createElement */
 /** @jsxFrag React.Fragment */
-/// <reference lib="deno.unstable" />
 /// <reference lib="dom" />
 
-import React from 'npm:react@19.2.0';
+import { readFile } from 'node:fs/promises';
+
+import React from 'react';
 import { createMeshNormalsAttribute, getMeshBounds } from '@disjukr/goldlight/geometry';
 import { createQuaternionFromEulerDegrees } from '@disjukr/goldlight/math';
 import { initializeWindow } from '@disjukr/goldlight/desktop';
@@ -11,8 +12,9 @@ import type { MeshPrimitive } from '@disjukr/goldlight/ir';
 import { importPlyFromText } from '@disjukr/goldlight/importers';
 import { G3dDirectionalLight, G3dPerspectiveCamera } from '@disjukr/goldlight/react/reconciler';
 
-const bunnySource = await Deno.readTextFile(
+const bunnySource = await readFile(
   new URL('../../assets/stanford-bunny/bun_zipper.ply', import.meta.url),
+  'utf8',
 );
 const bunnyScene = importPlyFromText(bunnySource, 'stanford-bunny');
 const bunnyMesh = bunnyScene.meshes[0];
@@ -98,3 +100,4 @@ const BunnyScene = () => {
 };
 
 export default initializeWindow(BunnyScene);
+

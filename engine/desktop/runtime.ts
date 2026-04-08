@@ -22,9 +22,8 @@ export type DesktopWindowRuntime = Readonly<{
 type MutableAnimationFrameState = {
   nextHandle: number;
   callbacks: Map<number, DesktopAnimationFrameCallback>;
-  timerHandle: number | null;
+  timerHandle: ReturnType<typeof setTimeout> | null;
   lastTimeMs: number;
-  hostClockOffsetMs: number | null;
 };
 
 const queueMessageEvent = (
@@ -60,7 +59,6 @@ export const createDesktopWindowRuntime = (
     callbacks: new Map(),
     timerHandle: null,
     lastTimeMs: 0,
-    hostClockOffsetMs: null,
   };
   let onMessage: MessageListener = null;
 
@@ -71,14 +69,6 @@ export const createDesktopWindowRuntime = (
   };
 
   const getLocalAnimationFrameTime = (): number => normalizeAnimationFrameTime(performance.now());
-
-  const getHostAnimationFrameTime = (hostTimeMs: number): number => {
-    if (animationFrameState.hostClockOffsetMs === null) {
-      animationFrameState.hostClockOffsetMs = performance.now() - hostTimeMs;
-    }
-
-    return normalizeAnimationFrameTime(hostTimeMs + animationFrameState.hostClockOffsetMs);
-  };
 
   const scheduleLocalFrame = (): void => {
     if (animationFrameState.timerHandle !== null || animationFrameState.callbacks.size === 0) {
@@ -136,9 +126,6 @@ export const createDesktopWindowRuntime = (
 
   const dispatchHostEvent = (event: DesktopWindowEvent): void => {
     switch (event.kind) {
-      case 'frame':
-        flushAnimationFrameCallbacks(getHostAnimationFrameTime(event.timeMs));
-        return;
       case 'resized':
         dispatchTypedEvent(target, 'resize', {
           width: event.width,

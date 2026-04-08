@@ -1,4 +1,4 @@
-import CanvasKitModule from 'npm:canvaskit-wasm@^0.40.0';
+import CanvasKitModule from 'canvaskit-wasm';
 
 const cellSize = 50;
 const numColumns = 2;
@@ -183,3 +183,4 @@ export const renderFillrectGradientCanvasKitSnapshot = async (): Promise<
   paint.delete();
   return { png };
 };
+

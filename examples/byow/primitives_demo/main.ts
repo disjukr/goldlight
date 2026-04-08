@@ -1,14 +1,13 @@
-/// <reference lib="deno.unstable" />
-
 import { createWindow, disposeMain, initializeMain } from '@disjukr/goldlight/desktop';
+import app from './app.ts';
 
 await initializeMain();
 try {
   const window = createWindow({
     title: 'goldlight byow primitives demo',
-    width: 1200,
+    width: 1280,
     height: 720,
-    module: new URL('./app.ts', import.meta.url),
+    entry: app,
   });
   await window.whenClosed();
 } finally {

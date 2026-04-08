@@ -65,8 +65,8 @@ Use this page as the main navigation hub.
 
 - Repository entry point: [`../README.md`](../README.md)
 - Code style and repository conventions: [`specs/coding-style.md`](./specs/coding-style.md)
-- Verification task bundle: `deno task check`
-- Docs and formatting verification: `deno task docs:check`
+- Runtime verification: `bun run build:text:native && bun run typecheck`
+- Example entrypoints: `bun run example:byow:run` and related `example:byow:*:run` scripts
 
 ## Directory Guide
 

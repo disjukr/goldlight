@@ -1,37 +1,27 @@
-# BYOW Layout 3D Demo
+﻿# BYOW Layout 3D Demo
 
-This demo applies the current `g2l-*` layout substrate to a 3D scene.
-
-It exercises:
-
-- `g2l-root`, `g2l-box`, and `g2l-text` inside a `g3d-scene`
-- Taffy-style box layout driving multiple panel sizes
-- nested `g2d-scene` text surfaces rendered into textures
-- textured front faces mapped onto rounded 3D cards
-- a slightly angled camera and lit panel bodies so the composition reads clearly as 3D
+Layout and nested scene composition demo that places g2l and g2d content inside a 3D scene.
 
 Run with:
 
 ```sh
-deno task desktop:host:build
-deno task text:host:build
-deno task example:byow:layout-3d:run
+bun run example:byow:layout-3d:run
 ```
 
-Type-check with:
+Build the text host first when the demo renders glyphs or layout text:
 
 ```sh
-deno task example:byow:layout-3d:check
+bun run build:text:native
 ```
 
-Compile to a single executable with:
+Verify the migrated runtime surface with:
 
 ```sh
-deno task compile examples/byow/layout_3d_demo
+bun run typecheck
 ```
 
-Build a release executable with:
+Requirements:
 
-```sh
-deno task compile examples/byow/layout_3d_demo --release
-```
+- Bun dependencies installed through `bun install`
+- a successful native text build for text-heavy demos
+- a WebGPU-capable desktop environment

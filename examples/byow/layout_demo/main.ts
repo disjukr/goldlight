@@ -1,6 +1,5 @@
-/// <reference lib="deno.unstable" />
-
 import { createWindow, disposeMain, initializeMain } from '@disjukr/goldlight/desktop';
+import app from './app.tsx';
 
 await initializeMain();
 try {
@@ -9,7 +8,7 @@ try {
     width: 1024,
     height: 768,
     backgroundColor: [0.08, 0.09, 0.11, 1],
-    module: new URL('./app.tsx', import.meta.url),
+    entry: app,
   });
   await window.whenClosed();
 } finally {

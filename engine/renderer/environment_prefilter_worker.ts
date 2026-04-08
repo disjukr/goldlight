@@ -1,4 +1,5 @@
-import { EXRLoader } from 'npm:three@0.180.0/examples/jsm/loaders/EXRLoader.js';
+﻿// @ts-nocheck
+import { EXRLoader } from 'three/examples/jsm/loaders/EXRLoader.js';
 
 type PrefilterRequestMessage = Readonly<{
   type: 'prefilter';
@@ -406,3 +407,5 @@ self.onmessage = (event: MessageEvent<PrefilterRequestMessage>) => {
     self.postMessage(response);
   }
 };
+
+

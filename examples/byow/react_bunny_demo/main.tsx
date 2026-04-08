@@ -1,6 +1,5 @@
-/// <reference lib="deno.unstable" />
-
 import { createWindow, disposeMain, initializeMain } from '@disjukr/goldlight/desktop';
+import app from './app.tsx';
 
 await initializeMain();
 try {
@@ -8,7 +7,7 @@ try {
     title: 'goldlight byow react bunny demo',
     width: 1280,
     height: 720,
-    module: new URL('./app.tsx', import.meta.url),
+    entry: app,
   });
   await window.whenClosed();
 } finally {

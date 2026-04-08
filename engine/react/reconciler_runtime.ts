@@ -1,4 +1,4 @@
-import React, { type ReactNode } from 'npm:react@19.2.0';
+import React, { type ReactNode } from 'react';
 import type { DrawingBlendMode } from '@disjukr/goldlight/drawing';
 import type { Matrix2d, Path2d } from '@disjukr/goldlight/geometry';
 import type {
@@ -380,3 +380,4 @@ declare global {
     }
   }
 }
+

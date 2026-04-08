@@ -1,0 +1,21 @@
+{
+  "name": "goldlight",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "goldlight": "./src/cli.ts"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "goldlight": "bun run ./src/cli.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^24.6.0",
+    "bun-types": "^1.3.9",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.7"
+  }
+}

@@ -1,0 +1,17 @@
+[package]
+name = "goldlight-runtime"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+deno_core = "0.356"
+deno_error = "0.7"
+winit = "0.30"
+wgpu = "25"
+pollster = "0.4"
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["rt", "macros"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }

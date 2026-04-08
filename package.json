@@ -1,0 +1,10 @@
+{
+  "name": "goldlight-workspace",
+  "private": true,
+  "dependencies": {
+    "goldlight": "workspace:sdk"
+  },
+  "workspaces": [
+    "sdk"
+  ]
+}

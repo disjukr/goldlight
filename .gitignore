@@ -1,4 +1,7 @@
 .goldlight/
 build/
+dist/
 node_modules/
+runtime/target/
+target/
 tmp/

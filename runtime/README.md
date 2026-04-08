@@ -15,6 +15,8 @@ when user JavaScript imports `"goldlight"` and calls `createWindow(...)`.
 
 `goldlight build` is expected to place a native app layout in `dist/<target-os>/`.
 On Windows that means a double-clickable `.exe` next to the bundled app files.
+The SDK also writes [`goldlight.manifest.json`](./goldlight.manifest.json) beside the
+binary, and the prod runtime reads that manifest to find the bundle entrypoint.
 
 ## Run
 
@@ -23,11 +25,6 @@ bun run goldlight dev
 ```
 
 The project entrypoint is resolved from `./goldlight.json`.
-
-## Entrypoint
-
-The runtime bootstraps a TypeScript module and exposes a built-in `goldlight`
-module. By default it loads [`examples/window/basic_window/main.ts`](../examples/window/basic_window/main.ts).
 
 ```js
 import { createWindow } from "goldlight";

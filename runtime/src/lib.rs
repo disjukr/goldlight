@@ -24,8 +24,7 @@ use winit::{
 };
 
 pub const GOLDLIGHT_MODULE_SPECIFIER: &str = "ext:goldlight/mod.js";
-pub const DEFAULT_ENTRYPOINT: &str = "examples/window/basic_window/main.ts";
-pub const DEFAULT_BUNDLE_ENTRYPOINT: &str = "app/main.js";
+pub const GOLDLIGHT_APP_MANIFEST: &str = "goldlight.manifest.json";
 
 const GOLDLIGHT_MODULE_SOURCE: &str = r#"
 function normalizeWindowOptions(options = {}) {
@@ -54,6 +53,11 @@ pub enum RuntimeMode {
 pub struct RuntimeConfig {
     pub mode: RuntimeMode,
     pub entrypoint_specifier: ModuleSpecifier,
+}
+
+#[derive(Debug, Deserialize)]
+struct AppManifest {
+    entrypoint: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -306,7 +310,9 @@ pub fn init_logging() {
 
 pub fn resolve_dev_config(vite_origin: &str, entrypoint: Option<&str>) -> Result<RuntimeConfig> {
     let normalized_origin = vite_origin.trim_end_matches('/');
-    let selected_entrypoint = entrypoint.unwrap_or(DEFAULT_ENTRYPOINT).replace('\\', "/");
+    let selected_entrypoint = entrypoint
+        .context("dev runtime requires an explicit entrypoint")?
+        .replace('\\', "/");
     let entrypoint_url = format!("{normalized_origin}/{selected_entrypoint}");
     let entrypoint_specifier = ModuleSpecifier::parse(&entrypoint_url)?;
 
@@ -323,7 +329,10 @@ pub fn resolve_prod_config(bundle_root: Option<&str>, entrypoint: Option<&str>) 
         Some(bundle_root) => absolutize_path(bundle_root)?,
         None => current_executable_dir()?,
     };
-    let selected_entrypoint = entrypoint.unwrap_or(DEFAULT_BUNDLE_ENTRYPOINT);
+    let selected_entrypoint = match entrypoint {
+        Some(entrypoint) => entrypoint.to_string(),
+        None => load_app_manifest(&root_path)?.entrypoint,
+    };
     let entrypoint_path = root_path.join(selected_entrypoint);
     let entrypoint_specifier = resolve_path(
         entrypoint_path
@@ -338,6 +347,14 @@ pub fn resolve_prod_config(bundle_root: Option<&str>, entrypoint: Option<&str>) 
         },
         entrypoint_specifier,
     })
+}
+
+fn load_app_manifest(bundle_root: &Path) -> Result<AppManifest> {
+    let manifest_path = bundle_root.join(GOLDLIGHT_APP_MANIFEST);
+    let manifest_text = std::fs::read_to_string(&manifest_path)
+        .with_context(|| format!("failed to read app manifest: {}", manifest_path.display()))?;
+    serde_json::from_str(&manifest_text)
+        .with_context(|| format!("failed to parse app manifest: {}", manifest_path.display()))
 }
 
 pub fn run_runtime(config: RuntimeConfig) -> Result<()> {

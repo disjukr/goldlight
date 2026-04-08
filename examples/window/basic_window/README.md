@@ -20,12 +20,6 @@ Vite dev server, and runs the local Rust dev runtime against that server.
 The entrypoint comes from [`goldlight.json`](./goldlight.json) in the
 current project directory.
 
-If no entrypoint is provided, the same example boots by default:
-
-```sh
-bun run goldlight dev
-```
-
 ## Direct runtime run
 
 If you want to skip the dev server and run the file directly:
@@ -49,4 +43,5 @@ bun run goldlight run
 ```
 
 This writes output to `dist/<target-os>/`. On Windows that includes a
-double-clickable `goldlight.exe` next to the bundled `app/main.js`.
+double-clickable `goldlight.exe` next to the bundled `app/main.js` and
+`goldlight.manifest.json`.

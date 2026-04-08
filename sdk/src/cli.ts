@@ -11,6 +11,10 @@ interface GoldlightProjectConfig {
   entrypoint: string;
 }
 
+interface GoldlightAppManifest {
+  entrypoint: string;
+}
+
 const sdkDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const repoRoot = resolve(sdkDir, '..');
 const viteDevServerHost = '127.0.0.1';
@@ -88,7 +92,7 @@ function loadProjectConfig(projectRoot: string): GoldlightProjectConfig {
 async function runProject() {
   const projectRoot = currentProjectRoot();
   const distRoot = resolve(projectRoot, 'dist', currentTargetOsDir());
-  const command = [resolve(distRoot, runtimeBinaryName())];
+  const command = [resolve(distRoot, runtimeBinaryName()), '--bundle-root', distRoot];
 
   const child = spawn(command, {
     cwd: distRoot,
@@ -107,6 +111,7 @@ async function buildProject() {
   const targetOsDir = currentTargetOsDir();
   const distRoot = resolve(projectRoot, 'dist', targetOsDir);
   const distAppRoot = resolve(distRoot, 'app');
+  const manifestPath = resolve(distRoot, 'goldlight.manifest.json');
   const runtimeBuildName =
     process.platform === 'win32' ? 'goldlight-runtime-prod.exe' : 'goldlight-runtime-prod';
   const runtimeSource = resolve(repoRoot, 'target', 'release', runtimeBuildName);
@@ -136,6 +141,16 @@ async function buildProject() {
   );
 
   await Bun.write(runtimeTarget, Bun.file(runtimeSource));
+  await Bun.write(
+    manifestPath,
+    JSON.stringify(
+      {
+        entrypoint: 'app/main.js',
+      } satisfies GoldlightAppManifest,
+      null,
+      2,
+    ) + '\n',
+  );
   console.log(`Built goldlight app at ${join('dist', targetOsDir)}`);
 }
 

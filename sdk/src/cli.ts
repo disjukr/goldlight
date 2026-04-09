@@ -35,6 +35,15 @@ const GOLDLIGHT_BANNER = [
   ' |___/                    |___/',
 ].join('\n');
 
+const ANSI = {
+  reset: '\x1b[0m',
+  brightWhite: '\x1b[97m',
+  brightMagenta: '\x1b[95m',
+  brightYellow: '\x1b[93m',
+  yellow: '\x1b[33m',
+  dim: '\x1b[2m',
+} as const;
+
 function printHelp() {
   console.log(`goldlight
 
@@ -58,12 +67,55 @@ function clearTerminalIfInteractive() {
   process.stdout.write('\x1Bc');
 }
 
+function supportsColor() {
+  return process.stdout.isTTY;
+}
+
+function colorize(text: string, color: string) {
+  if (!supportsColor()) {
+    return text;
+  }
+
+  return `${color}${text}${ANSI.reset}`;
+}
+
+function formatBanner() {
+  if (!supportsColor()) {
+    return GOLDLIGHT_BANNER;
+  }
+
+  const lines = GOLDLIGHT_BANNER.split('\n');
+  return lines
+    .map((line, index) => {
+      const color =
+        index < 2
+          ? ANSI.brightMagenta
+          : index < 4
+            ? ANSI.brightYellow
+            : ANSI.brightWhite;
+      return `${color}${line}${ANSI.reset}`;
+    })
+    .join('\n');
+}
+
+function formatDevLine(line: string) {
+  const separatorIndex = line.indexOf(': ');
+  if (separatorIndex === -1) {
+    return line;
+  }
+
+  const label = line.slice(0, separatorIndex + 1);
+  const value = line.slice(separatorIndex + 2);
+  return `${colorize(label, ANSI.brightMagenta)} ${colorize(value, ANSI.brightYellow)}`;
+}
+
 function printDevHeader(lines: string[]) {
-  console.log(GOLDLIGHT_BANNER);
+  console.log(formatBanner());
   console.log('');
   for (const line of lines) {
-    console.log(line);
+    console.log(formatDevLine(line));
   }
+  console.log('');
 }
 
 function cargoColorEnv() {
@@ -363,6 +415,7 @@ async function devProject() {
   );
 
   let lastInspectorSignature = '';
+  let keepWatchingInspector = true;
   const renderInspectorTargets = (inspectorTargets: InspectorTargetInfo[] | null) => {
     const signature = JSON.stringify(inspectorTargets ?? []);
     if (signature === lastInspectorSignature) {
@@ -377,6 +430,9 @@ async function devProject() {
 
   const inspectorWatcher = (async () => {
     for (let index = 0; index < 100; index += 1) {
+      if (!keepWatchingInspector) {
+        return;
+      }
       const inspectorTargets = await fetchInspectorTargets(inspectorListUrl);
       if (inspectorTargets) {
         renderInspectorTargets(inspectorTargets);
@@ -389,6 +445,7 @@ async function devProject() {
   })();
 
   const exitCode = await runtime.exited;
+  keepWatchingInspector = false;
   await inspectorWatcher;
   await server.close();
   process.exit(exitCode);

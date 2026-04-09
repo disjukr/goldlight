@@ -1,6 +1,7 @@
 # basic window
 
-Minimal example that opens a single native window through:
+Minimal example that opens a single native window and renders a moving 2D rect
+from its window worker through:
 
 ```ts
 import { createWindow } from "goldlight";
@@ -33,6 +34,17 @@ Use the main DevTools target for:
 1. the app entry runtime
 2. the window worker source
 3. worker breakpoints and paused expression evaluation
+
+The worker side uses the built-in rendering object model:
+
+- `new Scene2d()`
+- `new Rect2d()`
+- `scene.add(rect)`
+- `scene.get()`
+- `scene.set(...)`
+- `rect.get()`
+- `rect.set(...)`
+- `setWindowScene(scene)`
 
 ## VS Code attach
 

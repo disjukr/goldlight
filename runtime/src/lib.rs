@@ -1,3 +1,5 @@
+mod render;
+
 use std::collections::HashMap;
 use std::future::Future;
 use std::net::{SocketAddr, TcpListener};
@@ -20,10 +22,10 @@ use axum::{Json, Router};
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine;
 use deno_core::{
-    resolve_import, resolve_path, InspectorMsg, InspectorSessionKind, InspectorSessionOptions,
+    resolve_import, resolve_path, v8, InspectorMsg, InspectorSessionKind, InspectorSessionOptions,
     InspectorSessionProxy, JsRuntime, ModuleLoadResponse, ModuleLoader, ModuleSource,
     ModuleSourceCode, ModuleSpecifier, ModuleType, OpState, PollEventLoopOptions,
-    RequestedModuleType, ResolutionKind, RuntimeOptions, v8,
+    RequestedModuleType, ResolutionKind, RuntimeOptions,
 };
 use deno_error::JsErrorBox;
 use futures::channel::mpsc;
@@ -41,11 +43,19 @@ use winit::{
     window::{Window, WindowAttributes, WindowId},
 };
 
+use crate::render::{
+    Rect2DHandle, Rect2DOptions, Rect2DUpdate, RenderModel, RendererState, Scene2DHandle,
+    Scene2DOptions, Scene3DHandle, Scene3DOptions, SceneCameraUpdate, SceneClearColorOptions,
+    Triangle3DHandle, Triangle3DOptions, Triangle3DUpdate,
+};
+
 pub const GOLDLIGHT_MODULE_SPECIFIER: &str = "ext:goldlight/mod.js";
 pub const GOLDLIGHT_APP_MANIFEST: &str = "goldlight.manifest.json";
 const INSPECTOR_PROTOCOL_JSON: &str = include_str!("../inspector_protocol.json");
 const GOLDLIGHT_MODULE_SOURCE: &str = include_str!("../js/goldlight_module.js");
 const GOLDLIGHT_WORKER_CONSOLE_SOURCE: &str = include_str!("../js/worker_console.js");
+const GOLDLIGHT_TIMERS_SOURCE: &str = include_str!("../js/timers.js");
+const RUNTIME_POLL_INTERVAL_MS: u64 = 16;
 
 fn rewrite_inline_source_map(
     code: String,
@@ -112,7 +122,9 @@ pub enum RuntimeMode {
         vite_origin: String,
         project_root: PathBuf,
     },
-    Prod { bundle_root: PathBuf },
+    Prod {
+        bundle_root: PathBuf,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -153,6 +165,17 @@ struct RuntimeState {
     pending_windows: Vec<PendingWindow>,
 }
 
+#[derive(Default)]
+struct TimerHostState {
+    next_timer_id: u32,
+    timers: HashMap<u32, TimerEntry>,
+}
+
+struct TimerEntry {
+    next_fire_at: std::time::Instant,
+    interval: Option<Duration>,
+}
+
 #[derive(Clone, Debug)]
 struct PendingWindow {
     id: u32,
@@ -165,14 +188,22 @@ struct PendingWindow {
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 enum WorkerEventPayload {
-    Resize { width: u32, height: u32 },
-    AnimationFrame { timestamp_ms: f64 },
+    Resize {
+        width: u32,
+        height: u32,
+    },
+    AnimationFrame {
+        #[serde(rename = "timestampMs")]
+        timestamp_ms: f64,
+    },
 }
 
 #[derive(Default)]
 struct WorkerHostState {
     pending_events: Vec<WorkerEventPayload>,
     animation_frame_requested: bool,
+    redraw_requested: bool,
+    render_model: RenderModel,
 }
 
 type WorkerHostStateHandle = Arc<Mutex<WorkerHostState>>;
@@ -206,6 +237,16 @@ impl WindowWorkerHandle {
         false
     }
 
+    fn take_redraw_request(&self) -> bool {
+        if let Ok(mut state) = self.state.lock() {
+            let requested = state.redraw_requested;
+            state.redraw_requested = false;
+            return requested;
+        }
+
+        false
+    }
+
     fn shutdown(mut self) {
         let _ = self.control_tx.send(WindowWorkerControl::Shutdown);
         if let Some(thread_handle) = self.thread_handle.take() {
@@ -215,8 +256,9 @@ impl WindowWorkerHandle {
 }
 
 struct WindowRecord {
-    window: Window,
+    window: Arc<Window>,
     worker: Option<WindowWorkerHandle>,
+    renderer: RendererState,
 }
 
 #[derive(Clone)]
@@ -224,13 +266,38 @@ struct RuntimeOpContext {
     state: RuntimeStateHandle,
     event_proxy: Option<EventLoopProxy<RuntimeUserEvent>>,
     worker_state: Option<WorkerHostStateHandle>,
+    timer_state: TimerHostStateHandle,
 }
 
 type RuntimeStateHandle = Arc<Mutex<RuntimeState>>;
+type TimerHostStateHandle = Arc<Mutex<TimerHostState>>;
 
 #[derive(Clone, Debug)]
 enum RuntimeUserEvent {
     Wake,
+}
+
+fn with_worker_host_state<R>(
+    state: &mut OpState,
+    mutate: impl FnOnce(&mut WorkerHostState) -> Result<R>,
+) -> Result<R, JsErrorBox> {
+    let op_context = state.borrow::<RuntimeOpContext>().clone();
+    let worker_state = op_context
+        .worker_state
+        .ok_or_else(|| JsErrorBox::generic("this API is only available in a window worker"))?;
+    let result = {
+        let mut worker_state = worker_state
+            .lock()
+            .map_err(|_| JsErrorBox::generic("worker state mutex poisoned"))?;
+        let result =
+            mutate(&mut worker_state).map_err(|error| JsErrorBox::generic(error.to_string()))?;
+        worker_state.redraw_requested = true;
+        result
+    };
+    if let Some(event_proxy) = op_context.event_proxy {
+        let _ = event_proxy.send_event(RuntimeUserEvent::Wake);
+    }
+    Ok(result)
 }
 
 #[deno_core::op2]
@@ -267,9 +334,9 @@ fn op_goldlight_create_window(
 #[deno_core::op2(fast)]
 fn op_goldlight_worker_request_animation_frame(state: &mut OpState) -> Result<(), JsErrorBox> {
     let op_context = state.borrow::<RuntimeOpContext>().clone();
-    let worker_state = op_context
-        .worker_state
-        .ok_or_else(|| JsErrorBox::generic("requestAnimationFrame is only available in a window worker"))?;
+    let worker_state = op_context.worker_state.ok_or_else(|| {
+        JsErrorBox::generic("requestAnimationFrame is only available in a window worker")
+    })?;
     let mut worker_state = worker_state
         .lock()
         .map_err(|_| JsErrorBox::generic("worker state mutex poisoned"))?;
@@ -283,21 +350,231 @@ fn op_goldlight_worker_drain_events(
     state: &mut OpState,
 ) -> Result<Vec<WorkerEventPayload>, JsErrorBox> {
     let op_context = state.borrow::<RuntimeOpContext>().clone();
-    let worker_state = op_context
-        .worker_state
-        .ok_or_else(|| JsErrorBox::generic("window events are only available in a window worker"))?;
+    let worker_state = op_context.worker_state.ok_or_else(|| {
+        JsErrorBox::generic("window events are only available in a window worker")
+    })?;
     let mut worker_state = worker_state
         .lock()
         .map_err(|_| JsErrorBox::generic("worker state mutex poisoned"))?;
     Ok(std::mem::take(&mut worker_state.pending_events))
 }
 
+#[deno_core::op2(fast)]
+fn op_goldlight_timer_schedule(
+    state: &mut OpState,
+    delay_ms: f64,
+    repeat: bool,
+) -> Result<u32, JsErrorBox> {
+    let op_context = state.borrow::<RuntimeOpContext>().clone();
+    let timer_id = {
+        let mut timer_state = op_context
+            .timer_state
+            .lock()
+            .map_err(|_| JsErrorBox::generic("timer state mutex poisoned"))?;
+        let timer_id = timer_state.next_timer_id;
+        timer_state.next_timer_id = timer_state.next_timer_id.wrapping_add(1).max(1);
+        let delay = Duration::from_secs_f64((delay_ms.max(0.0)) / 1000.0);
+        timer_state.timers.insert(
+            timer_id,
+            TimerEntry {
+                next_fire_at: std::time::Instant::now() + delay,
+                interval: repeat.then_some(delay),
+            },
+        );
+        timer_id
+    };
+    if let Some(event_proxy) = op_context.event_proxy {
+        let _ = event_proxy.send_event(RuntimeUserEvent::Wake);
+    }
+    Ok(timer_id)
+}
+
+#[deno_core::op2(fast)]
+fn op_goldlight_timer_cancel(state: &mut OpState, timer_id: u32) -> Result<(), JsErrorBox> {
+    let op_context = state.borrow::<RuntimeOpContext>().clone();
+    let mut timer_state = op_context
+        .timer_state
+        .lock()
+        .map_err(|_| JsErrorBox::generic("timer state mutex poisoned"))?;
+    timer_state.timers.remove(&timer_id);
+    Ok(())
+}
+
+#[deno_core::op2]
+#[serde]
+fn op_goldlight_timer_drain_ready(state: &mut OpState) -> Result<Vec<u32>, JsErrorBox> {
+    let op_context = state.borrow::<RuntimeOpContext>().clone();
+    let mut timer_state = op_context
+        .timer_state
+        .lock()
+        .map_err(|_| JsErrorBox::generic("timer state mutex poisoned"))?;
+    let now = std::time::Instant::now();
+    let mut ready = Vec::new();
+    let timer_ids: Vec<u32> = timer_state.timers.keys().copied().collect();
+    for timer_id in timer_ids {
+        let Some(entry) = timer_state.timers.get_mut(&timer_id) else {
+            continue;
+        };
+        if entry.next_fire_at > now {
+            continue;
+        }
+        ready.push(timer_id);
+        if let Some(interval) = entry.interval {
+            entry.next_fire_at = now + interval;
+        } else {
+            timer_state.timers.remove(&timer_id);
+        }
+    }
+    Ok(ready)
+}
+
+#[deno_core::op2]
+#[serde]
+fn op_goldlight_create_scene_2d(
+    state: &mut OpState,
+    #[serde] options: Scene2DOptions,
+) -> Result<Scene2DHandle, JsErrorBox> {
+    with_worker_host_state(state, |worker_state| {
+        Ok(worker_state.render_model.create_scene_2d(options))
+    })
+}
+
+#[deno_core::op2]
+fn op_goldlight_scene_2d_set_clear_color(
+    state: &mut OpState,
+    scene_id: u32,
+    #[serde] options: SceneClearColorOptions,
+) -> Result<(), JsErrorBox> {
+    with_worker_host_state(state, |worker_state| {
+        worker_state
+            .render_model
+            .scene_2d_set_clear_color(scene_id, options)
+    })
+}
+
+#[deno_core::op2]
+#[serde]
+fn op_goldlight_scene_2d_create_rect(
+    state: &mut OpState,
+    scene_id: u32,
+    #[serde] options: Rect2DOptions,
+) -> Result<Rect2DHandle, JsErrorBox> {
+    with_worker_host_state(state, |worker_state| {
+        worker_state
+            .render_model
+            .scene_2d_create_rect(scene_id, options)
+    })
+}
+
+#[deno_core::op2]
+fn op_goldlight_rect_2d_update(
+    state: &mut OpState,
+    rect_id: u32,
+    #[serde] options: Rect2DUpdate,
+) -> Result<(), JsErrorBox> {
+    with_worker_host_state(state, |worker_state| {
+        worker_state.render_model.rect_2d_update(rect_id, options)
+    })
+}
+
+#[deno_core::op2(fast)]
+fn op_goldlight_present_scene_2d(state: &mut OpState, scene_id: u32) -> Result<(), JsErrorBox> {
+    with_worker_host_state(state, |worker_state| {
+        worker_state.render_model.present_scene_2d(scene_id)
+    })
+}
+
+#[deno_core::op2]
+#[serde]
+fn op_goldlight_create_scene_3d(
+    state: &mut OpState,
+    #[serde] options: Scene3DOptions,
+) -> Result<Scene3DHandle, JsErrorBox> {
+    with_worker_host_state(state, |worker_state| {
+        Ok(worker_state.render_model.create_scene_3d(options))
+    })
+}
+
+#[deno_core::op2]
+fn op_goldlight_scene_3d_set_clear_color(
+    state: &mut OpState,
+    scene_id: u32,
+    #[serde] options: SceneClearColorOptions,
+) -> Result<(), JsErrorBox> {
+    with_worker_host_state(state, |worker_state| {
+        worker_state
+            .render_model
+            .scene_3d_set_clear_color(scene_id, options)
+    })
+}
+
+#[deno_core::op2]
+fn op_goldlight_scene_3d_set_camera(
+    state: &mut OpState,
+    scene_id: u32,
+    #[serde] options: SceneCameraUpdate,
+) -> Result<(), JsErrorBox> {
+    with_worker_host_state(state, |worker_state| {
+        worker_state
+            .render_model
+            .scene_3d_set_camera(scene_id, options)
+    })
+}
+
+#[deno_core::op2]
+#[serde]
+fn op_goldlight_scene_3d_create_triangle(
+    state: &mut OpState,
+    scene_id: u32,
+    #[serde] options: Triangle3DOptions,
+) -> Result<Triangle3DHandle, JsErrorBox> {
+    with_worker_host_state(state, |worker_state| {
+        worker_state
+            .render_model
+            .scene_3d_create_triangle(scene_id, options)
+    })
+}
+
+#[deno_core::op2]
+fn op_goldlight_triangle_3d_update(
+    state: &mut OpState,
+    triangle_id: u32,
+    #[serde] options: Triangle3DUpdate,
+) -> Result<(), JsErrorBox> {
+    with_worker_host_state(state, |worker_state| {
+        worker_state
+            .render_model
+            .triangle_3d_update(triangle_id, options)
+    })
+}
+
+#[deno_core::op2(fast)]
+fn op_goldlight_present_scene_3d(state: &mut OpState, scene_id: u32) -> Result<(), JsErrorBox> {
+    with_worker_host_state(state, |worker_state| {
+        worker_state.render_model.present_scene_3d(scene_id)
+    })
+}
+
 deno_core::extension!(
     goldlight_runtime,
     ops = [
         op_goldlight_create_window,
+        op_goldlight_timer_schedule,
+        op_goldlight_timer_cancel,
+        op_goldlight_timer_drain_ready,
         op_goldlight_worker_request_animation_frame,
-        op_goldlight_worker_drain_events
+        op_goldlight_worker_drain_events,
+        op_goldlight_create_scene_2d,
+        op_goldlight_scene_2d_set_clear_color,
+        op_goldlight_scene_2d_create_rect,
+        op_goldlight_rect_2d_update,
+        op_goldlight_present_scene_2d,
+        op_goldlight_create_scene_3d,
+        op_goldlight_scene_3d_set_clear_color,
+        op_goldlight_scene_3d_set_camera,
+        op_goldlight_scene_3d_create_triangle,
+        op_goldlight_triangle_3d_update,
+        op_goldlight_present_scene_3d
     ],
     options = {
         runtime_op_context: RuntimeOpContext,
@@ -325,18 +602,16 @@ fn dev_original_specifier_from_relative(
         Some((path, query)) => (path, Some(query)),
         None => (relative_specifier, None),
     };
-    let mut specifier = ModuleSpecifier::from_file_path(project_root.join(path_part.trim_start_matches('/')))
-        .map_err(|_| JsErrorBox::generic("invalid dev module path"))?;
+    let mut specifier =
+        ModuleSpecifier::from_file_path(project_root.join(path_part.trim_start_matches('/')))
+            .map_err(|_| JsErrorBox::generic("invalid dev module path"))?;
     if let Some(query) = query_part {
         specifier.set_query(Some(query));
     }
     Ok(specifier)
 }
 
-fn get_global_function(
-    js_runtime: &mut JsRuntime,
-    name: &str,
-) -> Result<v8::Global<v8::Function>> {
+fn get_global_function(js_runtime: &mut JsRuntime, name: &str) -> Result<v8::Global<v8::Function>> {
     let scope = &mut js_runtime.handle_scope();
     let context = scope.get_current_context();
     let global = context.global(scope);
@@ -349,6 +624,13 @@ fn get_global_function(
     Ok(v8::Global::new(scope, function))
 }
 
+fn install_runtime_globals(js_runtime: &mut JsRuntime) -> Result<()> {
+    js_runtime
+        .execute_script("ext:goldlight/timers.js", GOLDLIGHT_TIMERS_SOURCE)
+        .context("failed to install timer globals")?;
+    Ok(())
+}
+
 impl ModuleLoader for GoldlightModuleLoader {
     fn resolve(
         &self,
@@ -357,14 +639,20 @@ impl ModuleLoader for GoldlightModuleLoader {
         _kind: ResolutionKind,
     ) -> Result<ModuleSpecifier, JsErrorBox> {
         if specifier == "goldlight" || specifier == "/__goldlight/runtime" {
-            return ModuleSpecifier::parse(GOLDLIGHT_MODULE_SPECIFIER).map_err(JsErrorBox::from_err);
+            return ModuleSpecifier::parse(GOLDLIGHT_MODULE_SPECIFIER)
+                .map_err(JsErrorBox::from_err);
         }
 
         if referrer == GOLDLIGHT_MODULE_SPECIFIER && specifier.starts_with("./") {
-            return ModuleSpecifier::parse(GOLDLIGHT_MODULE_SPECIFIER).map_err(JsErrorBox::from_err);
+            return ModuleSpecifier::parse(GOLDLIGHT_MODULE_SPECIFIER)
+                .map_err(JsErrorBox::from_err);
         }
 
-        if let RuntimeMode::Dev { vite_origin, project_root: _ } = &self.mode {
+        if let RuntimeMode::Dev {
+            vite_origin,
+            project_root: _,
+        } = &self.mode
+        {
             if specifier.starts_with("/@") {
                 return ModuleSpecifier::parse(&format!("{vite_origin}{specifier}"))
                     .map_err(JsErrorBox::from_err);
@@ -404,12 +692,18 @@ impl ModuleLoader for GoldlightModuleLoader {
                     )));
                 }
 
-                let original_specifier = if let RuntimeMode::Dev { vite_origin, project_root } = &mode {
-                    if let Some(relative_specifier) =
-                        module_specifier.as_str().strip_prefix(&format!("{vite_origin}/"))
+                let original_specifier = if let RuntimeMode::Dev {
+                    vite_origin,
+                    project_root,
+                } = &mode
+                {
+                    if let Some(relative_specifier) = module_specifier
+                        .as_str()
+                        .strip_prefix(&format!("{vite_origin}/"))
                     {
                         if !relative_specifier.starts_with("@") {
-                            dev_original_specifier_from_relative(project_root, relative_specifier).ok()
+                            dev_original_specifier_from_relative(project_root, relative_specifier)
+                                .ok()
                         } else {
                             None
                         }
@@ -477,11 +771,14 @@ impl ModuleLoader for GoldlightModuleLoader {
 
 struct GoldlightRuntime {
     state: RuntimeStateHandle,
+    main_timer_state: TimerHostStateHandle,
     mode: RuntimeMode,
     entrypoint_specifier: ModuleSpecifier,
+    event_proxy: EventLoopProxy<RuntimeUserEvent>,
     windows: HashMap<WindowId, WindowRecord>,
     startup_complete: Arc<AtomicBool>,
     main_runtime_idle: Arc<AtomicBool>,
+    main_shutdown_tx: Option<Sender<()>>,
     inspector_registry: Option<InspectorRegistryHandle>,
     frame_time_origin: std::time::Instant,
 }
@@ -509,19 +806,12 @@ impl InspectorServerHandle {
 }
 
 struct MainRuntimeThreadHandle {
-    shutdown_tx: Option<Sender<()>>,
-    thread_handle: Option<thread::JoinHandle<()>>,
+    shutdown_tx: Sender<()>,
 }
 
 impl MainRuntimeThreadHandle {
-    fn shutdown(mut self) {
-        if let Some(shutdown_tx) = self.shutdown_tx.take() {
-            let _ = shutdown_tx.send(());
-        }
-
-        if let Some(thread_handle) = self.thread_handle.take() {
-            let _ = thread_handle.join();
-        }
+    fn shutdown(self) {
+        let _ = self.shutdown_tx.send(());
     }
 }
 
@@ -586,10 +876,7 @@ fn inspector_devtools_frontend_url(socket_addr: SocketAddr, target_id: &str) -> 
     )
 }
 
-fn inspector_worker_info(
-    record: &InspectorTargetRecord,
-    session_id: &str,
-) -> serde_json::Value {
+fn inspector_worker_info(record: &InspectorTargetRecord, session_id: &str) -> serde_json::Value {
     json!({
         "sessionId": session_id,
         "workerInfo": {
@@ -605,19 +892,25 @@ fn inspector_worker_info(
 impl GoldlightRuntime {
     fn new(
         state: RuntimeStateHandle,
+        main_timer_state: TimerHostStateHandle,
         mode: RuntimeMode,
         entrypoint_specifier: ModuleSpecifier,
+        event_proxy: EventLoopProxy<RuntimeUserEvent>,
         startup_complete: Arc<AtomicBool>,
         main_runtime_idle: Arc<AtomicBool>,
+        main_shutdown_tx: Option<Sender<()>>,
         inspector_registry: Option<InspectorRegistryHandle>,
     ) -> Self {
         Self {
             state,
+            main_timer_state,
             mode,
             entrypoint_specifier,
+            event_proxy,
             windows: HashMap::new(),
             startup_complete,
             main_runtime_idle,
+            main_shutdown_tx,
             inspector_registry,
             frame_time_origin: std::time::Instant::now(),
         }
@@ -625,10 +918,7 @@ impl GoldlightRuntime {
 
     fn drain_pending_windows(&mut self, event_loop: &ActiveEventLoop) {
         let pending = {
-            let mut state = self
-                .state
-                .lock()
-                .expect("runtime state mutex poisoned");
+            let mut state = self.state.lock().expect("runtime state mutex poisoned");
             std::mem::take(&mut state.pending_windows)
         };
 
@@ -639,40 +929,62 @@ impl GoldlightRuntime {
                     pending_window.width,
                     pending_window.height,
                 ));
-            let window = event_loop
-                .create_window(attributes)
-                .expect("failed to create runtime window");
-            debug!(id = pending_window.id, title = pending_window.title, "runtime window created");
-            let worker = pending_window.worker_entrypoint.clone().map(|worker_entrypoint| {
-                let worker = spawn_window_worker(
-                    self.mode.clone(),
-                    self.entrypoint_specifier.clone(),
-                    pending_window.id,
-                    worker_entrypoint,
-                    self.inspector_registry.clone(),
-                );
-                worker.push_event(WorkerEventPayload::Resize {
-                    width: pending_window.width,
-                    height: pending_window.height,
+            let window = Arc::new(
+                event_loop
+                    .create_window(attributes)
+                    .expect("failed to create runtime window"),
+            );
+            let renderer =
+                RendererState::new(window.clone()).expect("failed to initialize window renderer");
+            debug!(
+                id = pending_window.id,
+                title = pending_window.title,
+                "runtime window created"
+            );
+            let worker = pending_window
+                .worker_entrypoint
+                .clone()
+                .map(|worker_entrypoint| {
+                    let worker = spawn_window_worker(
+                        self.mode.clone(),
+                        self.entrypoint_specifier.clone(),
+                        pending_window.id,
+                        worker_entrypoint,
+                        self.event_proxy.clone(),
+                        self.inspector_registry.clone(),
+                    );
+                    worker.push_event(WorkerEventPayload::Resize {
+                        width: pending_window.width,
+                        height: pending_window.height,
+                    });
+                    worker
                 });
-                worker
-            });
             let window_id = window.id();
             self.windows.insert(
                 window_id,
                 WindowRecord {
                     window,
                     worker,
+                    renderer,
                 },
             );
         }
     }
 
     fn maybe_exit(&self, event_loop: &ActiveEventLoop) {
+        let has_pending_timers = self
+            .main_timer_state
+            .lock()
+            .map(|timer_state| !timer_state.timers.is_empty())
+            .unwrap_or(true);
         if self.startup_complete.load(Ordering::SeqCst)
-            && self.main_runtime_idle.load(Ordering::SeqCst)
             && self.windows.is_empty()
+            && !has_pending_timers
+            && self.main_runtime_idle.load(Ordering::SeqCst)
         {
+            if let Some(main_shutdown_tx) = &self.main_shutdown_tx {
+                let _ = main_shutdown_tx.send(());
+            }
             event_loop.exit();
         }
     }
@@ -706,6 +1018,7 @@ impl ApplicationHandler<RuntimeUserEvent> for GoldlightRuntime {
 
         match event {
             WindowEvent::Resized(size) => {
+                record.renderer.resize(size);
                 if let Some(worker) = record.worker.as_ref() {
                     worker.push_event(WorkerEventPayload::Resize {
                         width: size.width,
@@ -714,6 +1027,13 @@ impl ApplicationHandler<RuntimeUserEvent> for GoldlightRuntime {
                 }
             }
             WindowEvent::RedrawRequested => {
+                if let Some(worker) = record.worker.as_ref() {
+                    if let Ok(worker_state) = worker.state.lock() {
+                        if let Err(error) = record.renderer.render(&worker_state.render_model) {
+                            eprintln!("goldlight render failed: {error:?}");
+                        }
+                    }
+                }
                 if let Some(worker) = record.worker.as_ref() {
                     worker.push_event(WorkerEventPayload::AnimationFrame {
                         timestamp_ms: self.frame_time_origin.elapsed().as_secs_f64() * 1000.0,
@@ -728,7 +1048,7 @@ impl ApplicationHandler<RuntimeUserEvent> for GoldlightRuntime {
         self.drain_pending_windows(event_loop);
         for record in self.windows.values() {
             if let Some(worker) = record.worker.as_ref() {
-                if worker.take_animation_frame_request() {
+                if worker.take_redraw_request() || worker.take_animation_frame_request() {
                     record.window.request_redraw();
                 }
             }
@@ -743,11 +1063,9 @@ impl ApplicationHandler<RuntimeUserEvent> for GoldlightRuntime {
 }
 
 pub fn init_logging() {
-    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| "warn".into());
-    tracing_subscriber::fmt()
-        .with_env_filter(env_filter)
-        .init();
+    let env_filter =
+        tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "warn".into());
+    tracing_subscriber::fmt().with_env_filter(env_filter).init();
 }
 
 pub fn resolve_dev_config(vite_origin: &str, entrypoint: Option<&str>) -> Result<RuntimeConfig> {
@@ -756,9 +1074,8 @@ pub fn resolve_dev_config(vite_origin: &str, entrypoint: Option<&str>) -> Result
         .context("dev runtime requires an explicit entrypoint")?
         .replace('\\', "/");
     let project_root = std::env::current_dir().context("failed to resolve current project root")?;
-    let entrypoint_specifier = ModuleSpecifier::parse(&format!(
-        "{normalized_origin}/{selected_entrypoint}"
-    ))?;
+    let entrypoint_specifier =
+        ModuleSpecifier::parse(&format!("{normalized_origin}/{selected_entrypoint}"))?;
 
     Ok(RuntimeConfig {
         mode: RuntimeMode::Dev {
@@ -770,7 +1087,10 @@ pub fn resolve_dev_config(vite_origin: &str, entrypoint: Option<&str>) -> Result
     })
 }
 
-pub fn resolve_prod_config(bundle_root: Option<&str>, entrypoint: Option<&str>) -> Result<RuntimeConfig> {
+pub fn resolve_prod_config(
+    bundle_root: Option<&str>,
+    entrypoint: Option<&str>,
+) -> Result<RuntimeConfig> {
     let root_path = match bundle_root {
         Some(bundle_root) => absolutize_path(bundle_root)?,
         None => current_executable_dir()?,
@@ -816,6 +1136,7 @@ pub fn run_runtime(config: RuntimeConfig) -> Result<()> {
     let event_loop = EventLoop::<RuntimeUserEvent>::with_user_event().build()?;
     let event_proxy = event_loop.create_proxy();
     let runtime_state = Arc::new(Mutex::new(RuntimeState::default()));
+    let main_timer_state = Arc::new(Mutex::new(TimerHostState::default()));
     let startup_complete = Arc::new(AtomicBool::new(false));
     let main_runtime_idle = Arc::new(AtomicBool::new(false));
     let inspector_server = config
@@ -826,9 +1147,10 @@ pub fn run_runtime(config: RuntimeConfig) -> Result<()> {
     let inspector_registry = inspector_server.as_ref().map(|server| server.registry());
     let runtime_thread = spawn_main_runtime_thread(
         runtime_state.clone(),
+        main_timer_state.clone(),
         config.mode.clone(),
         config.entrypoint_specifier.clone(),
-        event_proxy,
+        event_proxy.clone(),
         startup_complete.clone(),
         main_runtime_idle.clone(),
         inspector_registry.clone(),
@@ -836,10 +1158,13 @@ pub fn run_runtime(config: RuntimeConfig) -> Result<()> {
 
     let mut app = GoldlightRuntime::new(
         runtime_state,
+        main_timer_state,
         config.mode,
         config.entrypoint_specifier,
+        event_proxy,
         startup_complete,
         main_runtime_idle,
+        Some(runtime_thread.shutdown_tx.clone()),
         inspector_registry,
     );
     event_loop.run_app(&mut app)?;
@@ -855,15 +1180,18 @@ fn spawn_window_worker(
     base_specifier: ModuleSpecifier,
     window_id: u32,
     worker_entrypoint: String,
+    event_proxy: EventLoopProxy<RuntimeUserEvent>,
     inspector_registry: Option<InspectorRegistryHandle>,
 ) -> WindowWorkerHandle {
     let worker_state = Arc::new(Mutex::new(WorkerHostState::default()));
+    let timer_state = Arc::new(Mutex::new(TimerHostState::default()));
     let (control_tx, control_rx) = std_mpsc::channel::<WindowWorkerControl>();
     let thread_worker_state = worker_state.clone();
     let thread_handle = thread::spawn(move || {
-        let worker_specifier = match ModuleSpecifier::parse(&worker_entrypoint)
-            .or_else(|_| resolve_import(&worker_entrypoint, base_specifier.as_str()).map_err(JsErrorBox::from_err))
-        {
+        let worker_specifier = match ModuleSpecifier::parse(&worker_entrypoint).or_else(|_| {
+            resolve_import(&worker_entrypoint, base_specifier.as_str())
+                .map_err(JsErrorBox::from_err)
+        }) {
             Ok(specifier) => specifier,
             Err(error) => {
                 eprintln!(
@@ -877,8 +1205,10 @@ fn spawn_window_worker(
         if let Err(error) = run_window_worker_thread(
             runtime_state,
             thread_worker_state,
+            timer_state,
             mode,
             &worker_specifier,
+            event_proxy.clone(),
             &control_rx,
             inspector_registry,
             window_id,
@@ -896,6 +1226,7 @@ fn spawn_window_worker(
 
 fn spawn_main_runtime_thread(
     runtime_state: RuntimeStateHandle,
+    timer_state: TimerHostStateHandle,
     mode: RuntimeMode,
     main_module: ModuleSpecifier,
     event_proxy: EventLoopProxy<RuntimeUserEvent>,
@@ -904,9 +1235,11 @@ fn spawn_main_runtime_thread(
     inspector_registry: Option<InspectorRegistryHandle>,
 ) -> MainRuntimeThreadHandle {
     let (shutdown_tx, shutdown_rx) = std_mpsc::channel::<()>();
-    let thread_handle = thread::spawn(move || {
+    let shutdown_tx_for_thread = shutdown_tx.clone();
+    let _thread_handle = thread::spawn(move || {
         let result = run_main_runtime_thread(
             runtime_state,
+            timer_state,
             mode,
             main_module,
             event_proxy.clone(),
@@ -919,19 +1252,16 @@ fn spawn_main_runtime_thread(
         if let Err(error) = result {
             eprintln!("goldlight main runtime failed: {error:?}");
         }
-
-        main_runtime_idle.store(true, Ordering::SeqCst);
+        let _ = shutdown_tx_for_thread.send(());
         let _ = event_proxy.send_event(RuntimeUserEvent::Wake);
     });
 
-    MainRuntimeThreadHandle {
-        shutdown_tx: Some(shutdown_tx),
-        thread_handle: Some(thread_handle),
-    }
+    MainRuntimeThreadHandle { shutdown_tx }
 }
 
 fn run_main_runtime_thread(
     runtime_state: RuntimeStateHandle,
+    timer_state: TimerHostStateHandle,
     mode: RuntimeMode,
     main_module: ModuleSpecifier,
     event_proxy: EventLoopProxy<RuntimeUserEvent>,
@@ -946,11 +1276,13 @@ fn run_main_runtime_thread(
             state: runtime_state,
             event_proxy: Some(event_proxy.clone()),
             worker_state: None,
+            timer_state,
         })],
         inspector: inspector_registry.is_some(),
         is_main: true,
         ..Default::default()
     });
+    install_runtime_globals(&mut js_runtime)?;
 
     let main_target_id = if let Some(inspector_registry) = inspector_registry.as_ref() {
         let target_id = register_inspector_target(
@@ -986,6 +1318,8 @@ fn run_main_runtime_thread(
     if inspector_registry.is_some() {
         let _ = js_runtime.inspector().borrow().poll_sessions(None);
     }
+    let timer_pump = get_global_function(&mut js_runtime, "__goldlightPumpTimers")
+        .context("failed to capture main timer pump function")?;
     startup_complete.store(true, Ordering::SeqCst);
     main_runtime_idle.store(true, Ordering::SeqCst);
     let _ = event_proxy.send_event(RuntimeUserEvent::Wake);
@@ -993,6 +1327,16 @@ fn run_main_runtime_thread(
     while shutdown_rx.try_recv().is_err() {
         main_runtime_idle.store(false, Ordering::SeqCst);
         tokio_runtime.block_on(async {
+            let timer_pump_call = js_runtime.call(&timer_pump);
+            js_runtime
+                .with_event_loop_future(
+                    timer_pump_call,
+                    PollEventLoopOptions {
+                        wait_for_inspector: false,
+                        pump_v8_message_loop: true,
+                    },
+                )
+                .await?;
             js_runtime
                 .run_event_loop(PollEventLoopOptions {
                     wait_for_inspector: false,
@@ -1007,10 +1351,11 @@ fn run_main_runtime_thread(
         main_runtime_idle.store(true, Ordering::SeqCst);
         let _ = event_proxy.send_event(RuntimeUserEvent::Wake);
 
-        thread::sleep(Duration::from_millis(16));
+        thread::sleep(Duration::from_millis(RUNTIME_POLL_INTERVAL_MS));
     }
 
-    if let (Some(inspector_registry), Some(main_target_id)) = (&inspector_registry, &main_target_id) {
+    if let (Some(inspector_registry), Some(main_target_id)) = (&inspector_registry, &main_target_id)
+    {
         unregister_inspector_target(inspector_registry, main_target_id);
     }
 
@@ -1020,8 +1365,10 @@ fn run_main_runtime_thread(
 fn run_window_worker_thread(
     runtime_state: RuntimeStateHandle,
     worker_state: WorkerHostStateHandle,
+    timer_state: TimerHostStateHandle,
     mode: RuntimeMode,
     main_module: &ModuleSpecifier,
+    event_proxy: EventLoopProxy<RuntimeUserEvent>,
     control_rx: &std_mpsc::Receiver<WindowWorkerControl>,
     inspector_registry: Option<InspectorRegistryHandle>,
     window_id: u32,
@@ -1030,13 +1377,15 @@ fn run_window_worker_thread(
         module_loader: Some(Rc::new(GoldlightModuleLoader::new(mode))),
         extensions: vec![goldlight_runtime::init(RuntimeOpContext {
             state: runtime_state,
-            event_proxy: None,
+            event_proxy: Some(event_proxy),
             worker_state: Some(worker_state),
+            timer_state,
         })],
         inspector: inspector_registry.is_some(),
         is_main: false,
         ..Default::default()
     });
+    install_runtime_globals(&mut js_runtime)?;
 
     let worker_target_id = if let Some(inspector_registry) = inspector_registry.as_ref() {
         Some(register_inspector_target(
@@ -1080,12 +1429,24 @@ fn run_window_worker_thread(
 
     let worker_pump = get_global_function(&mut js_runtime, "__goldlightPump")
         .context("failed to capture window worker pump function")?;
+    let timer_pump = get_global_function(&mut js_runtime, "__goldlightPumpTimers")
+        .context("failed to capture window worker timer pump function")?;
 
     loop {
-        match control_rx.recv_timeout(Duration::from_millis(16)) {
+        match control_rx.recv_timeout(Duration::from_millis(RUNTIME_POLL_INTERVAL_MS)) {
             Ok(WindowWorkerControl::Shutdown) => break,
             Ok(WindowWorkerControl::Wake) | Err(std_mpsc::RecvTimeoutError::Timeout) => {
                 tokio_runtime.block_on(async {
+                    let timer_pump_call = js_runtime.call(&timer_pump);
+                    js_runtime
+                        .with_event_loop_future(
+                            timer_pump_call,
+                            PollEventLoopOptions {
+                                wait_for_inspector: false,
+                                pump_v8_message_loop: true,
+                            },
+                        )
+                        .await?;
                     let worker_pump_call = js_runtime.call(&worker_pump);
                     js_runtime
                         .with_event_loop_future(
@@ -1112,7 +1473,9 @@ fn run_window_worker_thread(
         }
     }
 
-    if let (Some(inspector_registry), Some(worker_target_id)) = (&inspector_registry, &worker_target_id) {
+    if let (Some(inspector_registry), Some(worker_target_id)) =
+        (&inspector_registry, &worker_target_id)
+    {
         unregister_inspector_target(inspector_registry, worker_target_id);
     }
 
@@ -1129,7 +1492,8 @@ fn absolutize_path(path: &str) -> Result<PathBuf> {
 }
 
 fn current_executable_dir() -> Result<PathBuf> {
-    let executable = std::env::current_exe().context("failed to resolve current executable path")?;
+    let executable =
+        std::env::current_exe().context("failed to resolve current executable path")?;
     executable
         .parent()
         .map(Path::to_path_buf)
@@ -1146,9 +1510,7 @@ pub fn required_value<'a>(args: &'a [String], flag: &str) -> Result<&'a str> {
         .ok_or_else(|| anyhow!("missing value for flag: {flag}"))
 }
 
-fn spawn_inspector_server(
-    socket_addr: SocketAddr,
-) -> Result<InspectorServerHandle> {
+fn spawn_inspector_server(socket_addr: SocketAddr) -> Result<InspectorServerHandle> {
     let listener = TcpListener::bind(socket_addr)
         .with_context(|| format!("failed to bind inspector server at {socket_addr}"))?;
     listener
@@ -1197,9 +1559,7 @@ fn spawn_inspector_server(
     })
 }
 
-async fn inspector_json_version(
-    _state: State<InspectorServerState>,
-) -> Json<serde_json::Value> {
+async fn inspector_json_version(_state: State<InspectorServerState>) -> Json<serde_json::Value> {
     Json(json!({
         "Browser": "goldlight",
         "Protocol-Version": "1.3",
@@ -1285,11 +1645,7 @@ fn attach_worker_session(
             },
         },
     };
-    record
-        .session_sender
-        .clone()
-        .unbounded_send(proxy)
-        .ok()?;
+    record.session_sender.clone().unbounded_send(proxy).ok()?;
     for message in bootstrap_messages {
         let _ = frontend_to_worker_tx.unbounded_send(message.clone());
     }
@@ -1332,12 +1688,14 @@ async fn maybe_attach_main_worker_sessions(
         .collect::<Vec<_>>();
 
     for record in worker_records {
-        let worker = attached_workers.entry(record.target_id.clone()).or_insert_with(|| {
-            let namespace = *next_worker_context_namespace;
-            *next_worker_context_namespace += 1;
-            attach_worker_session(&record, namespace, worker_bootstrap_messages)
-                .expect("failed to attach worker inspector session")
-        });
+        let worker = attached_workers
+            .entry(record.target_id.clone())
+            .or_insert_with(|| {
+                let namespace = *next_worker_context_namespace;
+                *next_worker_context_namespace += 1;
+                attach_worker_session(&record, namespace, worker_bootstrap_messages)
+                    .expect("failed to attach worker inspector session")
+            });
         worker.record = record.clone();
 
         if nodeworker_enabled && !worker.attached_announced {
@@ -1430,7 +1788,11 @@ enum WorkerRouteKey {
     ContextNamespace(i64),
 }
 
-fn rewrite_worker_outbound_value(value: &mut serde_json::Value, namespace: &str, context_namespace: i64) {
+fn rewrite_worker_outbound_value(
+    value: &mut serde_json::Value,
+    namespace: &str,
+    context_namespace: i64,
+) {
     match value {
         serde_json::Value::Object(object) => {
             for (key, child) in object.iter_mut() {
@@ -1440,16 +1802,20 @@ fn rewrite_worker_outbound_value(value: &mut serde_json::Value, namespace: &str,
                             rewrite_worker_outbound_value(child, namespace, context_namespace);
                             continue;
                         };
-                        *child =
-                            serde_json::Value::String(worker_script_id(context_namespace, script_id));
+                        *child = serde_json::Value::String(worker_script_id(
+                            context_namespace,
+                            script_id,
+                        ));
                     }
                     "callFrameId" => {
                         let Some(call_frame_id) = child.as_str() else {
                             rewrite_worker_outbound_value(child, namespace, context_namespace);
                             continue;
                         };
-                        *child =
-                            serde_json::Value::String(worker_call_frame_id(namespace, call_frame_id));
+                        *child = serde_json::Value::String(worker_call_frame_id(
+                            namespace,
+                            call_frame_id,
+                        ));
                     }
                     "objectId" => {
                         let Some(object_id) = child.as_str() else {
@@ -1480,9 +1846,7 @@ fn rewrite_worker_outbound_value(value: &mut serde_json::Value, namespace: &str,
     }
 }
 
-fn rewrite_worker_inbound_value(
-    value: &mut serde_json::Value,
-) -> Option<WorkerRouteKey> {
+fn rewrite_worker_inbound_value(value: &mut serde_json::Value) -> Option<WorkerRouteKey> {
     match value {
         serde_json::Value::Object(object) => {
             if let Some(serde_json::Value::String(script_id)) = object.get_mut("scriptId") {
@@ -2040,8 +2404,14 @@ fn patch_get_script_source_response(message: &str) -> Option<String> {
         .and_then(|result| result.get_mut("scriptSource"))
         .and_then(|script_source| script_source.as_str())
         .map(strip_inline_source_map)?;
-    if let Some(result) = value.get_mut("result").and_then(|result| result.as_object_mut()) {
-        result.insert("scriptSource".to_string(), serde_json::Value::String(script_source));
+    if let Some(result) = value
+        .get_mut("result")
+        .and_then(|result| result.as_object_mut())
+    {
+        result.insert(
+            "scriptSource".to_string(),
+            serde_json::Value::String(script_source),
+        );
         return serde_json::to_string(&value).ok();
     }
     None
@@ -2064,7 +2434,10 @@ fn patch_inspector_protocol_message(
             let Some(params) = value.get("params") else {
                 return BackendProtocolAction::Passthrough;
             };
-            let Some(script_id) = params.get("scriptId").and_then(|script_id| script_id.as_str()) else {
+            let Some(script_id) = params
+                .get("scriptId")
+                .and_then(|script_id| script_id.as_str())
+            else {
                 return BackendProtocolAction::Passthrough;
             };
             let Some(url) = params.get("url").and_then(|url| url.as_str()) else {
@@ -2195,7 +2568,10 @@ fn patch_frontend_protocol_message(
             .and_then(|params| params.as_object())
             .cloned()
             .unwrap_or_default();
-        let Some(script_id) = params.get("scriptId").and_then(|script_id| script_id.as_str()) else {
+        let Some(script_id) = params
+            .get("scriptId")
+            .and_then(|script_id| script_id.as_str())
+        else {
             return FrontendProtocolAction::Forward(message.to_string());
         };
         let Some(expression) = compiled_scripts.remove(script_id) else {
@@ -2243,7 +2619,9 @@ fn patch_frontend_protocol_message(
 
     if method == "Debugger.evaluateOnCallFrame" {
         let mut rewritten = value;
-        let Some(params) = rewritten.get_mut("params").and_then(|params| params.as_object_mut())
+        let Some(params) = rewritten
+            .get_mut("params")
+            .and_then(|params| params.as_object_mut())
         else {
             return FrontendProtocolAction::Forward(message.to_string());
         };
@@ -2298,10 +2676,7 @@ fn patch_frontend_protocol_message(
     FrontendProtocolAction::Forward(rewritten.to_string())
 }
 
-fn remember_inspector_request_method(
-    message: &str,
-    request_methods: &mut HashMap<i64, String>,
-) {
+fn remember_inspector_request_method(message: &str, request_methods: &mut HashMap<i64, String>) {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(message) else {
         return;
     };

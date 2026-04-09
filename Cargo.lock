@@ -981,6 +981,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "glam"
+version = "0.30.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "19fc433e8437a212d1b6f1e68c7824af3aed907da60afa994e7f542d18d12aa9"
+
+[[package]]
 name = "glob"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1014,10 +1020,12 @@ dependencies = [
  "anyhow",
  "axum",
  "base64",
+ "bytemuck",
  "deno_core",
  "deno_error",
  "futures",
  "futures-util",
+ "glam",
  "pollster",
  "reqwest",
  "serde",

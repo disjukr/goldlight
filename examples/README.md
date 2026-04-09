@@ -21,6 +21,11 @@ Each example directory is a goldlight project root with its own `goldlight.json`
 `goldlight dev` reads that file, starts the local Vite dev server, and runs the
 local Rust dev runtime.
 
+## Rendering examples
+
+- [`examples/2d/basic_rect`](./2d/basic_rect): animated 2D rectangles
+- [`examples/3d/basic_triangle`](./3d/basic_triangle): animated 3D triangle
+
 ## Build a production bundle
 
 From [`examples/window/basic_window`](./window/basic_window):

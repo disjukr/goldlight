@@ -39,6 +39,31 @@ Use the main DevTools target for:
 - worker sources
 - worker breakpoints and paused expression evaluation
 
+## Rendering model
+
+Each native window is owned by the Rust event loop, and each window can have a
+long-lived JS worker that mutates a render model. The Rust side owns the actual
+`wgpu` renderer and draws the current model on redraw.
+
+Current built-in scene APIs:
+
+- `new Scene2d()`
+- `new Rect2d()`
+- `scene.add(rect)`
+- `scene.get()`
+- `scene.set(...)`
+- `rect.get()`
+- `rect.set(...)`
+- `setWindowScene(scene)`
+- `new Scene3d()`
+- `new Triangle3d()`
+- `scene.add(triangle)`
+- `scene.get()`
+- `scene.set(...)`
+- `triangle.get()`
+- `triangle.set(...)`
+- `setWindowScene(scene)`
+
 ```js
 import { createWindow } from "goldlight";
 

@@ -32,6 +32,11 @@ use futures::channel::mpsc;
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use taffy::prelude::{
+    AlignItems, AvailableSpace, Dimension, Display, FlexDirection, FromLength, JustifyContent,
+    Layout as TaffyLayout, LengthPercentage, LengthPercentageAuto, Position, Rect, Size,
+    Style as TaffyStyle, TaffyTree,
+};
 use tokio::runtime::Builder as TokioRuntimeBuilder;
 use tokio::sync::oneshot;
 use tracing::debug;
@@ -210,6 +215,7 @@ type WorkerHostStateHandle = Arc<Mutex<WorkerHostState>>;
 
 enum WindowWorkerControl {
     Wake,
+    FlushLayout(std_mpsc::Sender<Result<()>>),
     Shutdown,
 }
 
@@ -247,6 +253,15 @@ impl WindowWorkerHandle {
         false
     }
 
+    fn flush_layout(&self) -> Result<()> {
+        let (tx, rx) = std_mpsc::channel();
+        self.control_tx
+            .send(WindowWorkerControl::FlushLayout(tx))
+            .map_err(|error| anyhow!("failed to request worker layout flush: {error}"))?;
+        rx.recv()
+            .map_err(|error| anyhow!("worker layout flush response failed: {error}"))?
+    }
+
     fn shutdown(mut self) {
         let _ = self.control_tx.send(WindowWorkerControl::Shutdown);
         if let Some(thread_handle) = self.thread_handle.take() {
@@ -271,6 +286,253 @@ struct RuntimeOpContext {
 
 type RuntimeStateHandle = Arc<Mutex<RuntimeState>>;
 type TimerHostStateHandle = Arc<Mutex<TimerHostState>>;
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LayoutStyleInput {
+    #[serde(default)]
+    position: Option<String>,
+    #[serde(default)]
+    x: Option<f32>,
+    #[serde(default)]
+    y: Option<f32>,
+    #[serde(default)]
+    width: Option<f32>,
+    #[serde(default)]
+    height: Option<f32>,
+    #[serde(default)]
+    min_width: Option<f32>,
+    #[serde(default)]
+    min_height: Option<f32>,
+    #[serde(default)]
+    max_width: Option<f32>,
+    #[serde(default)]
+    max_height: Option<f32>,
+    #[serde(default)]
+    display: Option<String>,
+    #[serde(default)]
+    flex_direction: Option<String>,
+    #[serde(default)]
+    justify_content: Option<String>,
+    #[serde(default)]
+    align_items: Option<String>,
+    #[serde(default)]
+    gap: Option<f32>,
+    #[serde(default)]
+    padding: Option<f32>,
+    #[serde(default)]
+    padding_x: Option<f32>,
+    #[serde(default)]
+    padding_y: Option<f32>,
+    #[serde(default)]
+    padding_top: Option<f32>,
+    #[serde(default)]
+    padding_right: Option<f32>,
+    #[serde(default)]
+    padding_bottom: Option<f32>,
+    #[serde(default)]
+    padding_left: Option<f32>,
+    #[serde(default)]
+    margin: Option<f32>,
+    #[serde(default)]
+    margin_x: Option<f32>,
+    #[serde(default)]
+    margin_y: Option<f32>,
+    #[serde(default)]
+    margin_top: Option<f32>,
+    #[serde(default)]
+    margin_right: Option<f32>,
+    #[serde(default)]
+    margin_bottom: Option<f32>,
+    #[serde(default)]
+    margin_left: Option<f32>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LayoutNodeInput {
+    id: u32,
+    #[serde(default)]
+    style: LayoutStyleInput,
+    #[serde(default)]
+    children: Vec<LayoutNodeInput>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ComputedLayoutOutput {
+    id: u32,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+}
+
+fn point_dimension(value: Option<f32>) -> Dimension {
+    value.map(Dimension::from_length).unwrap_or(Dimension::Auto)
+}
+
+fn length(value: Option<f32>) -> LengthPercentage {
+    LengthPercentage::from_length(value.unwrap_or(0.0))
+}
+
+fn length_auto(value: Option<f32>) -> LengthPercentageAuto {
+    value
+        .map(LengthPercentageAuto::from_length)
+        .unwrap_or(LengthPercentageAuto::Length(0.0))
+}
+
+fn build_padding_rect(style: &LayoutStyleInput) -> Rect<LengthPercentage> {
+    let horizontal = style.padding_x.or(style.padding);
+    let vertical = style.padding_y.or(style.padding);
+    Rect {
+        left: length(style.padding_left.or(horizontal)),
+        right: length(style.padding_right.or(horizontal)),
+        top: length(style.padding_top.or(vertical)),
+        bottom: length(style.padding_bottom.or(vertical)),
+    }
+}
+
+fn build_margin_rect(style: &LayoutStyleInput) -> Rect<LengthPercentageAuto> {
+    let horizontal = style.margin_x.or(style.margin);
+    let vertical = style.margin_y.or(style.margin);
+    Rect {
+        left: length_auto(style.margin_left.or(horizontal)),
+        right: length_auto(style.margin_right.or(horizontal)),
+        top: length_auto(style.margin_top.or(vertical)),
+        bottom: length_auto(style.margin_bottom.or(vertical)),
+    }
+}
+
+fn position_from_input(value: Option<&str>) -> Position {
+    match value {
+        Some("absolute") => Position::Absolute,
+        _ => Position::Relative,
+    }
+}
+
+fn display_from_input(value: Option<&str>) -> Display {
+    match value {
+        Some("flex") => Display::Flex,
+        _ => Display::Block,
+    }
+}
+
+fn flex_direction_from_input(value: Option<&str>) -> FlexDirection {
+    match value {
+        Some("column") => FlexDirection::Column,
+        _ => FlexDirection::Row,
+    }
+}
+
+fn justify_content_from_input(value: Option<&str>) -> Option<JustifyContent> {
+    match value {
+        Some("start") => Some(JustifyContent::Start),
+        Some("center") => Some(JustifyContent::Center),
+        Some("end") => Some(JustifyContent::End),
+        Some("spaceBetween") => Some(JustifyContent::SpaceBetween),
+        _ => None,
+    }
+}
+
+fn align_items_from_input(value: Option<&str>) -> Option<AlignItems> {
+    match value {
+        Some("start") => Some(AlignItems::Start),
+        Some("center") => Some(AlignItems::Center),
+        Some("end") => Some(AlignItems::End),
+        Some("stretch") => Some(AlignItems::Stretch),
+        _ => None,
+    }
+}
+
+fn build_taffy_style(style: &LayoutStyleInput) -> TaffyStyle {
+    TaffyStyle {
+        display: display_from_input(style.display.as_deref()),
+        position: position_from_input(style.position.as_deref()),
+        flex_direction: flex_direction_from_input(style.flex_direction.as_deref()),
+        justify_content: justify_content_from_input(style.justify_content.as_deref()),
+        align_items: align_items_from_input(style.align_items.as_deref()),
+        size: Size {
+            width: point_dimension(style.width),
+            height: point_dimension(style.height),
+        },
+        min_size: Size {
+            width: point_dimension(style.min_width),
+            height: point_dimension(style.min_height),
+        },
+        max_size: Size {
+            width: point_dimension(style.max_width),
+            height: point_dimension(style.max_height),
+        },
+        inset: Rect {
+            left: length_auto(style.x),
+            right: LengthPercentageAuto::Auto,
+            top: length_auto(style.y),
+            bottom: LengthPercentageAuto::Auto,
+        },
+        padding: build_padding_rect(style),
+        margin: build_margin_rect(style),
+        gap: Size {
+            width: LengthPercentage::from_length(style.gap.unwrap_or(0.0)),
+            height: LengthPercentage::from_length(style.gap.unwrap_or(0.0)),
+        },
+        ..Default::default()
+    }
+}
+
+fn add_layout_node(
+    taffy: &mut TaffyTree<()>,
+    node: &LayoutNodeInput,
+    computed: &mut Vec<(u32, taffy::prelude::NodeId)>,
+) -> Result<taffy::prelude::NodeId> {
+    let child_ids = node
+        .children
+        .iter()
+        .map(|child| add_layout_node(taffy, child, computed))
+        .collect::<Result<Vec<_>>>()?;
+    let style = build_taffy_style(&node.style);
+    let node_id = taffy
+        .new_with_children(style, &child_ids)
+        .map_err(|error| anyhow!("failed to create taffy node: {error}"))?;
+    computed.push((node.id, node_id));
+    Ok(node_id)
+}
+
+#[deno_core::op2]
+#[serde]
+fn op_goldlight_compute_layout(
+    #[serde] root: LayoutNodeInput,
+) -> Result<Vec<ComputedLayoutOutput>, JsErrorBox> {
+    let mut taffy = TaffyTree::<()>::new();
+    let mut nodes = Vec::new();
+    let root_id = add_layout_node(&mut taffy, &root, &mut nodes)
+        .map_err(|error| JsErrorBox::generic(error.to_string()))?;
+    taffy
+        .compute_layout(
+            root_id,
+            Size {
+                width: AvailableSpace::MaxContent,
+                height: AvailableSpace::MaxContent,
+            },
+        )
+        .map_err(|error| JsErrorBox::generic(format!("failed to compute layout: {error}")))?;
+
+    nodes.sort_by_key(|(id, _)| *id);
+    let mut results = Vec::with_capacity(nodes.len());
+    for (id, node_id) in nodes {
+        let TaffyLayout { size, location, .. } = taffy
+            .layout(node_id)
+            .map_err(|error| JsErrorBox::generic(format!("failed to read layout: {error}")))?;
+        results.push(ComputedLayoutOutput {
+            id,
+            x: location.x,
+            y: location.y,
+            width: size.width,
+            height: size.height,
+        });
+    }
+    Ok(results)
+}
 
 #[derive(Clone, Debug)]
 enum RuntimeUserEvent {
@@ -564,6 +826,7 @@ deno_core::extension!(
         op_goldlight_timer_drain_ready,
         op_goldlight_worker_request_animation_frame,
         op_goldlight_worker_drain_events,
+        op_goldlight_compute_layout,
         op_goldlight_create_scene_2d,
         op_goldlight_scene_2d_set_clear_color,
         op_goldlight_scene_2d_create_rect,
@@ -1028,6 +1291,11 @@ impl ApplicationHandler<RuntimeUserEvent> for GoldlightRuntime {
             }
             WindowEvent::RedrawRequested => {
                 if let Some(worker) = record.worker.as_ref() {
+                    if let Err(error) = worker.flush_layout() {
+                        eprintln!("goldlight layout flush failed: {error:?}");
+                    }
+                }
+                if let Some(worker) = record.worker.as_ref() {
                     if let Ok(worker_state) = worker.state.lock() {
                         if let Err(error) = record.renderer.render(&worker_state.render_model) {
                             eprintln!("goldlight render failed: {error:?}");
@@ -1427,6 +1695,8 @@ fn run_window_worker_thread(
         let _ = js_runtime.inspector().borrow().poll_sessions(None);
     }
 
+    let layout_flush = get_global_function(&mut js_runtime, "__goldlightFlushLayout")
+        .context("failed to capture window worker layout flush function")?;
     let worker_pump = get_global_function(&mut js_runtime, "__goldlightPump")
         .context("failed to capture window worker pump function")?;
     let timer_pump = get_global_function(&mut js_runtime, "__goldlightPumpTimers")
@@ -1435,6 +1705,31 @@ fn run_window_worker_thread(
     loop {
         match control_rx.recv_timeout(Duration::from_millis(RUNTIME_POLL_INTERVAL_MS)) {
             Ok(WindowWorkerControl::Shutdown) => break,
+            Ok(WindowWorkerControl::FlushLayout(response_tx)) => {
+                let result = tokio_runtime.block_on(async {
+                    let layout_flush_call = js_runtime.call(&layout_flush);
+                    js_runtime
+                        .with_event_loop_future(
+                            layout_flush_call,
+                            PollEventLoopOptions {
+                                wait_for_inspector: false,
+                                pump_v8_message_loop: true,
+                            },
+                        )
+                        .await?;
+                    js_runtime
+                        .run_event_loop(PollEventLoopOptions {
+                            wait_for_inspector: false,
+                            pump_v8_message_loop: true,
+                        })
+                        .await?;
+                    Ok::<(), anyhow::Error>(())
+                });
+                let _ = response_tx.send(result);
+                if inspector_registry.is_some() {
+                    let _ = js_runtime.inspector().borrow().poll_sessions(None);
+                }
+            }
             Ok(WindowWorkerControl::Wake) | Err(std_mpsc::RecvTimeoutError::Timeout) => {
                 tokio_runtime.block_on(async {
                     let timer_pump_call = js_runtime.call(&timer_pump);

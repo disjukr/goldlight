@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
 use bytemuck::{Pod, Zeroable};
-use glam::{Mat4, Vec3, Vec4};
+use glam::{Mat4, Vec4};
 use serde::{Deserialize, Serialize};
 use wgpu::util::DeviceExt;
 use winit::{dpi::PhysicalSize, window::Window};
@@ -65,9 +65,9 @@ fn default_alpha() -> f32 {
 impl Default for ColorValue {
     fn default() -> Self {
         Self {
-            r: 0.10,
-            g: 0.12,
-            b: 0.16,
+            r: 0.0,
+            g: 0.0,
+            b: 0.0,
             a: 1.0,
         }
     }
@@ -131,18 +131,18 @@ pub struct Rect2DOptions {
 }
 
 fn default_rect_width() -> f32 {
-    120.0
+    100.0
 }
 
 fn default_rect_height() -> f32 {
-    120.0
+    100.0
 }
 
 fn default_rect_color() -> ColorValue {
     ColorValue {
-        r: 0.25,
-        g: 0.65,
-        b: 0.95,
+        r: 1.0,
+        g: 1.0,
+        b: 1.0,
         a: 1.0,
     }
 }
@@ -169,53 +169,18 @@ pub struct Scene3DOptions {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Camera3DOptions {
-    #[serde(default = "default_camera_position")]
-    pub position: [f32; 3],
-    #[serde(default = "default_camera_target")]
-    pub target: [f32; 3],
-    #[serde(default = "default_camera_up")]
-    pub up: [f32; 3],
-    #[serde(default = "default_camera_fov_y_degrees")]
-    pub fov_y_degrees: f32,
-    #[serde(default = "default_camera_near")]
-    pub near: f32,
-    #[serde(default = "default_camera_far")]
-    pub far: f32,
+    #[serde(default = "default_camera_view_projection_matrix")]
+    pub view_projection_matrix: [f32; 16],
 }
 
-fn default_camera_position() -> [f32; 3] {
-    [0.0, 0.0, 3.0]
-}
-
-fn default_camera_target() -> [f32; 3] {
-    [0.0, 0.0, 0.0]
-}
-
-fn default_camera_up() -> [f32; 3] {
-    [0.0, 1.0, 0.0]
-}
-
-fn default_camera_fov_y_degrees() -> f32 {
-    50.0
-}
-
-fn default_camera_near() -> f32 {
-    0.1
-}
-
-fn default_camera_far() -> f32 {
-    100.0
+fn default_camera_view_projection_matrix() -> [f32; 16] {
+    Mat4::IDENTITY.to_cols_array()
 }
 
 impl Default for Camera3DOptions {
     fn default() -> Self {
         Self {
-            position: default_camera_position(),
-            target: default_camera_target(),
-            up: default_camera_up(),
-            fov_y_degrees: default_camera_fov_y_degrees(),
-            near: default_camera_near(),
-            far: default_camera_far(),
+            view_projection_matrix: default_camera_view_projection_matrix(),
         }
     }
 }
@@ -230,14 +195,14 @@ pub struct Triangle3DOptions {
 }
 
 fn default_triangle_positions() -> [[f32; 3]; 3] {
-    [[-0.7, -0.6, 0.0], [0.7, -0.6, 0.0], [0.0, 0.7, 0.0]]
+    [[0.0, 100.0, 0.0], [100.0, 100.0, 0.0], [50.0, 0.0, 0.0]]
 }
 
 fn default_triangle_color() -> ColorValue {
     ColorValue {
-        r: 0.95,
-        g: 0.45,
-        b: 0.25,
+        r: 1.0,
+        g: 1.0,
+        b: 1.0,
         a: 1.0,
     }
 }
@@ -258,12 +223,7 @@ pub struct SceneClearColorOptions {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SceneCameraUpdate {
-    pub position: Option<[f32; 3]>,
-    pub target: Option<[f32; 3]>,
-    pub up: Option<[f32; 3]>,
-    pub fov_y_degrees: Option<f32>,
-    pub near: Option<f32>,
-    pub far: Option<f32>,
+    pub view_projection_matrix: Option<[f32; 16]>,
 }
 
 #[derive(Clone, Debug)]
@@ -291,12 +251,7 @@ struct Scene2D {
 
 #[derive(Clone, Debug)]
 struct Camera3D {
-    position: [f32; 3],
-    target: [f32; 3],
-    up: [f32; 3],
-    fov_y_degrees: f32,
-    near: f32,
-    far: f32,
+    view_projection_matrix: [f32; 16],
 }
 
 #[derive(Clone, Debug)]
@@ -420,12 +375,7 @@ impl RenderModel {
             Scene3D {
                 clear_color: options.clear_color,
                 camera: Camera3D {
-                    position: options.camera.position,
-                    target: options.camera.target,
-                    up: options.camera.up,
-                    fov_y_degrees: options.camera.fov_y_degrees,
-                    near: options.camera.near,
-                    far: options.camera.far,
+                    view_projection_matrix: options.camera.view_projection_matrix,
                 },
                 triangle_ids: Vec::new(),
             },
@@ -451,23 +401,8 @@ impl RenderModel {
             .scenes_3d
             .get_mut(&scene_id)
             .ok_or_else(|| anyhow!("unknown 3D scene {scene_id}"))?;
-        if let Some(position) = options.position {
-            scene.camera.position = position;
-        }
-        if let Some(target) = options.target {
-            scene.camera.target = target;
-        }
-        if let Some(up) = options.up {
-            scene.camera.up = up;
-        }
-        if let Some(fov_y_degrees) = options.fov_y_degrees {
-            scene.camera.fov_y_degrees = fov_y_degrees;
-        }
-        if let Some(near) = options.near {
-            scene.camera.near = near;
-        }
-        if let Some(far) = options.far {
-            scene.camera.far = far;
+        if let Some(view_projection_matrix) = options.view_projection_matrix {
+            scene.camera.view_projection_matrix = view_projection_matrix;
         }
         Ok(())
     }
@@ -814,20 +749,7 @@ impl RendererState {
     }
 
     fn build_scene_3d_vertices(&self, model: &RenderModel, scene: &Scene3D) -> Vec<Vertex> {
-        let width = self.config.width.max(1) as f32;
-        let height = self.config.height.max(1) as f32;
-        let aspect = width / height;
-        let eye = Vec3::from_array(scene.camera.position);
-        let target = Vec3::from_array(scene.camera.target);
-        let up = Vec3::from_array(scene.camera.up);
-        let view = Mat4::look_at_rh(eye, target, up);
-        let projection = Mat4::perspective_rh(
-            scene.camera.fov_y_degrees.to_radians(),
-            aspect,
-            scene.camera.near.max(0.001),
-            scene.camera.far.max(scene.camera.near + 0.001),
-        );
-        let view_projection = projection * view;
+        let view_projection = Mat4::from_cols_array(&scene.camera.view_projection_matrix);
 
         let mut vertices = Vec::new();
         for triangle_id in &scene.triangle_ids {

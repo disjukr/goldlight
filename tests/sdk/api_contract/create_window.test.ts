@@ -2,6 +2,9 @@ import { describe, expect, it } from 'bun:test';
 
 import type {
   Camera3dState,
+  Mat4Value,
+  OrthographicCamera3dInit,
+  PerspectiveCamera3dInit,
   Rect2d,
   Rect2dInit,
   Rect2dPatch,
@@ -19,7 +22,8 @@ import type {
   WindowHandle,
   WindowInit,
 } from 'goldlight';
-import { Rect2d as Rect2dClass, Scene2d as Scene2dClass, Scene3d as Scene3dClass, Triangle3d as Triangle3dClass, createWindow, setWindowScene } from 'goldlight';
+import { Rect2d as Rect2dClass, Scene2d as Scene2dClass, Scene3d as Scene3dClass, Triangle3d as Triangle3dClass, createOrthographicCamera3d, createPerspectiveCamera3d, createWindow, setWindowScene } from 'goldlight';
+import { Group2d as Group2dClass, Group3d as Group3dClass, LayoutGroup2d as LayoutGroup2dClass, LayoutGroup3d as LayoutGroup3dClass, LayoutItem2d as LayoutItem2dClass, LayoutItem3d as LayoutItem3dClass } from 'goldlight';
 
 describe('goldlight sdk contract', () => {
   it('exports createWindow as a function', () => {
@@ -70,6 +74,9 @@ describe('goldlight sdk contract', () => {
     expect(rect.id).toBe(1);
     expect(typeof Scene2dClass).toBe('function');
     expect(typeof Rect2dClass).toBe('function');
+    expect(typeof Group2dClass).toBe('function');
+    expect(typeof LayoutGroup2dClass).toBe('function');
+    expect(typeof LayoutItem2dClass).toBe('function');
     expect(typeof scene.set).toBe('function');
     expect(typeof scene.get).toBe('function');
     expect(scene.get().clearColor.a).toBe(1);
@@ -82,14 +89,17 @@ describe('goldlight sdk contract', () => {
     const sceneInit: Scene3dInit = {};
     const triangleInit: Triangle3dInit = {};
     const trianglePatch: Triangle3dPatch = { color: { r: 1, g: 0, b: 0, a: 1 } };
+    const matrix: Mat4Value = [
+      1, 0, 0, 0,
+      0, 1, 0, 0,
+      0, 0, 1, 0,
+      0, 0, 0, 1,
+    ];
     const cameraState: Camera3dState = {
-      position: [0, 0, 3],
-      target: [0, 0, 0],
-      up: [0, 1, 0],
-      fovYDegrees: 50,
-      near: 0.1,
-      far: 100,
+      viewProjectionMatrix: matrix,
     };
+    const orthographicCameraInit: OrthographicCamera3dInit = { width: 640, height: 480 };
+    const perspectiveCameraInit: PerspectiveCamera3dInit = { width: 640, height: 480 };
     const sceneState: Scene3dState = {
       clearColor: { r: 0.1, g: 0.12, b: 0.16, a: 1 },
       camera: cameraState,
@@ -117,10 +127,17 @@ describe('goldlight sdk contract', () => {
     expect(triangle.id).toBe(1);
     expect(typeof Scene3dClass).toBe('function');
     expect(typeof Triangle3dClass).toBe('function');
+    expect(typeof Group3dClass).toBe('function');
+    expect(typeof LayoutGroup3dClass).toBe('function');
+    expect(typeof LayoutItem3dClass).toBe('function');
     expect(typeof scene.set).toBe('function');
     expect(typeof scene.get).toBe('function');
-    expect(scene.get().camera.fovYDegrees).toBe(50);
+    expect(scene.get().camera.viewProjectionMatrix[0]).toBe(1);
     expect(triangle.get().positions[0][0]).toBe(-0.7);
+    expect(orthographicCameraInit.width).toBe(640);
+    expect(perspectiveCameraInit.height).toBe(480);
+    expect(typeof createOrthographicCamera3d).toBe('function');
+    expect(typeof createPerspectiveCamera3d).toBe('function');
   });
 
   it('throws outside the runtime', () => {

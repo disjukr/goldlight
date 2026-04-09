@@ -2,7 +2,6 @@ mod render;
 
 use std::collections::HashMap;
 use std::future::Future;
-use std::net::{SocketAddr, TcpListener};
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::rc::Rc;
@@ -13,24 +12,14 @@ use std::thread;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
-use axum::extract::ws::{Message as WebSocketMessage, WebSocket, WebSocketUpgrade};
-use axum::extract::{Path as AxumPath, State};
-use axum::http::header;
-use axum::response::{IntoResponse, Response};
-use axum::routing::get;
-use axum::{Json, Router};
-use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-use base64::Engine;
 use deno_core::{
-    resolve_import, resolve_path, v8, InspectorMsg, InspectorSessionKind, InspectorSessionOptions,
-    InspectorSessionProxy, JsRuntime, ModuleLoadResponse, ModuleLoader, ModuleSource,
-    ModuleSourceCode, ModuleSpecifier, ModuleType, OpState, PollEventLoopOptions,
-    RequestedModuleType, ResolutionKind, RuntimeOptions,
+    resolve_import, resolve_path, v8, JsRuntime, ModuleLoadResponse, ModuleLoader, ModuleSource,
+    ModuleSourceCode, ModuleSpecifier, ModuleType, OpState, PollEventLoopOptions, RequestedModuleType,
+    ResolutionKind, RuntimeOptions,
 };
 use deno_error::JsErrorBox;
-use futures::channel::mpsc;
-use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "dev-runtime")]
 use serde_json::json;
 use taffy::prelude::{
     AlignItems, AvailableSpace, Dimension, Display, FlexDirection, FromLength, JustifyContent,
@@ -38,8 +27,40 @@ use taffy::prelude::{
     Style as TaffyStyle, TaffyTree,
 };
 use tokio::runtime::Builder as TokioRuntimeBuilder;
-use tokio::sync::oneshot;
 use tracing::debug;
+#[cfg(feature = "dev-runtime")]
+use std::net::{SocketAddr, TcpListener};
+#[cfg(feature = "dev-runtime")]
+use axum::extract::ws::{Message as WebSocketMessage, WebSocket, WebSocketUpgrade};
+#[cfg(feature = "dev-runtime")]
+use axum::extract::{Path as AxumPath, State};
+#[cfg(feature = "dev-runtime")]
+use axum::http::header;
+#[cfg(feature = "dev-runtime")]
+use axum::response::{IntoResponse, Response};
+#[cfg(feature = "dev-runtime")]
+use axum::routing::get;
+#[cfg(feature = "dev-runtime")]
+use axum::{Json, Router};
+#[cfg(feature = "dev-runtime")]
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+#[cfg(feature = "dev-runtime")]
+use base64::Engine;
+#[cfg(feature = "dev-runtime")]
+use deno_core::{
+    InspectorMsg, InspectorSessionKind, InspectorSessionOptions, InspectorSessionProxy,
+};
+#[cfg(feature = "dev-runtime")]
+use futures::channel::mpsc;
+#[cfg(feature = "dev-runtime")]
+use futures_util::{SinkExt, StreamExt};
+#[cfg(feature = "dev-runtime")]
+use tokio::sync::oneshot;
+#[cfg(feature = "dev-runtime")]
+use tungstenite::client::IntoClientRequest;
+#[cfg(feature = "dev-runtime")]
+use tungstenite::{connect, Message as TungsteniteMessage};
+#[cfg(feature = "dev-runtime")]
 use uuid::Uuid;
 use winit::{
     application::ApplicationHandler,
@@ -56,12 +77,21 @@ use crate::render::{
 
 pub const GOLDLIGHT_MODULE_SPECIFIER: &str = "ext:goldlight/mod.js";
 pub const GOLDLIGHT_APP_MANIFEST: &str = "goldlight.manifest.json";
+#[cfg(feature = "dev-runtime")]
 const INSPECTOR_PROTOCOL_JSON: &str = include_str!("../inspector_protocol.json");
 const GOLDLIGHT_MODULE_SOURCE: &str = include_str!("../js/goldlight_module.js");
+#[cfg(feature = "dev-runtime")]
+const GOLDLIGHT_HMR_SOURCE: &str = include_str!("../js/hmr.js");
 const GOLDLIGHT_WORKER_CONSOLE_SOURCE: &str = include_str!("../js/worker_console.js");
 const GOLDLIGHT_TIMERS_SOURCE: &str = include_str!("../js/timers.js");
+#[cfg(feature = "dev-runtime")]
+const GOLDLIGHT_VITE_CLIENT_SPECIFIER: &str = "ext:goldlight/vite_client.js";
+#[cfg(feature = "dev-runtime")]
+const GOLDLIGHT_VITE_CLIENT_SOURCE: &str =
+    "export function createHotContext(ownerPath) { return globalThis.__goldlightCreateHotContext(ownerPath); }\n";
 const RUNTIME_POLL_INTERVAL_MS: u64 = 16;
 
+#[cfg(feature = "dev-runtime")]
 fn rewrite_inline_source_map(
     code: String,
     _compiled_specifier: &ModuleSpecifier,
@@ -112,6 +142,7 @@ fn rewrite_inline_source_map(
     format!("{prefix}{}", BASE64_STANDARD.encode(reencoded))
 }
 
+#[cfg(feature = "dev-runtime")]
 fn strip_inline_source_map(code: &str) -> String {
     let marker = "\n//# sourceMappingURL=data:application/json;base64,";
     if let Some(index) = code.rfind(marker) {
@@ -119,6 +150,48 @@ fn strip_inline_source_map(code: &str) -> String {
     } else {
         code.to_string()
     }
+}
+
+#[cfg(feature = "dev-runtime")]
+fn register_hmr_runtime(
+    registry: &HmrRegistryHandle,
+    runtime_state: HmrRuntimeStateHandle,
+) -> String {
+    let runtime_id = Uuid::new_v4().to_string();
+    registry
+        .lock()
+        .expect("hmr registry mutex poisoned")
+        .insert(runtime_id.clone(), runtime_state);
+    runtime_id
+}
+
+#[cfg(feature = "dev-runtime")]
+fn unregister_hmr_runtime(registry: &HmrRegistryHandle, runtime_id: &str) {
+    let _ = registry
+        .lock()
+        .expect("hmr registry mutex poisoned")
+        .remove(runtime_id);
+}
+
+#[cfg(feature = "dev-runtime")]
+fn broadcast_hmr_update(registry: &HmrRegistryHandle, update: HmrUpdatePayload) {
+    let runtime_states = registry
+        .lock()
+        .expect("hmr registry mutex poisoned")
+        .values()
+        .cloned()
+        .collect::<Vec<_>>();
+    for runtime_state in runtime_states {
+        if let Ok(mut runtime_state) = runtime_state.lock() {
+            runtime_state.pending_updates.push(update.clone());
+        }
+    }
+}
+
+#[cfg(feature = "dev-runtime")]
+fn inject_hot_context_prelude(code: String) -> String {
+    let prelude = "globalThis.__goldlightRegisterModule(import.meta.url);import.meta.hot ??= globalThis.__goldlightCreateHotContext(import.meta.url);";
+    format!("{prelude}{code}")
 }
 
 #[derive(Clone, Debug)]
@@ -136,6 +209,7 @@ pub enum RuntimeMode {
 pub struct RuntimeConfig {
     pub mode: RuntimeMode,
     pub entrypoint_specifier: ModuleSpecifier,
+    #[cfg(feature = "dev-runtime")]
     pub inspector: Option<InspectorConfig>,
 }
 
@@ -144,6 +218,7 @@ struct AppManifest {
     entrypoint: String,
 }
 
+#[cfg(feature = "dev-runtime")]
 #[derive(Clone, Debug)]
 pub struct InspectorConfig {
     pub socket_addr: SocketAddr,
@@ -174,6 +249,31 @@ struct RuntimeState {
 struct TimerHostState {
     next_timer_id: u32,
     timers: HashMap<u32, TimerEntry>,
+}
+
+#[cfg(feature = "dev-runtime")]
+#[derive(Default)]
+struct HmrRuntimeState {
+    pending_updates: Vec<HmrUpdatePayload>,
+}
+
+#[cfg(feature = "dev-runtime")]
+type HmrRuntimeStateHandle = Arc<Mutex<HmrRuntimeState>>;
+#[cfg(feature = "dev-runtime")]
+type HmrRegistryHandle = Arc<Mutex<HashMap<String, HmrRuntimeStateHandle>>>;
+#[cfg(not(feature = "dev-runtime"))]
+type HmrRuntimeStateHandle = ();
+#[cfg(not(feature = "dev-runtime"))]
+type HmrRegistryHandle = ();
+
+#[cfg(feature = "dev-runtime")]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct HmrUpdatePayload {
+    path: String,
+    #[serde(default)]
+    accepted_path: Option<String>,
+    timestamp: u64,
 }
 
 struct TimerEntry {
@@ -265,7 +365,9 @@ impl WindowWorkerHandle {
     fn shutdown(mut self) {
         let _ = self.control_tx.send(WindowWorkerControl::Shutdown);
         if let Some(thread_handle) = self.thread_handle.take() {
-            let _ = thread_handle.join();
+            thread::spawn(move || {
+                let _ = thread_handle.join();
+            });
         }
     }
 }
@@ -282,6 +384,8 @@ struct RuntimeOpContext {
     event_proxy: Option<EventLoopProxy<RuntimeUserEvent>>,
     worker_state: Option<WorkerHostStateHandle>,
     timer_state: TimerHostStateHandle,
+    #[cfg(feature = "dev-runtime")]
+    hmr_state: Option<HmrRuntimeStateHandle>,
 }
 
 type RuntimeStateHandle = Arc<Mutex<RuntimeState>>;
@@ -537,6 +641,13 @@ fn op_goldlight_compute_layout(
 #[derive(Clone, Debug)]
 enum RuntimeUserEvent {
     Wake,
+    #[cfg(feature = "dev-runtime")]
+    HotReload,
+}
+
+pub enum RuntimeRunResult {
+    Completed,
+    RestartRequested,
 }
 
 fn with_worker_host_state<R>(
@@ -619,6 +730,32 @@ fn op_goldlight_worker_drain_events(
         .lock()
         .map_err(|_| JsErrorBox::generic("worker state mutex poisoned"))?;
     Ok(std::mem::take(&mut worker_state.pending_events))
+}
+
+#[cfg(feature = "dev-runtime")]
+#[deno_core::op2]
+#[serde]
+fn op_goldlight_hmr_drain_updates(
+    state: &mut OpState,
+) -> Result<Vec<HmrUpdatePayload>, JsErrorBox> {
+    let op_context = state.borrow::<RuntimeOpContext>().clone();
+    let hmr_state = op_context
+        .hmr_state
+        .ok_or_else(|| JsErrorBox::generic("HMR is only available in the dev runtime"))?;
+    let mut hmr_state = hmr_state
+        .lock()
+        .map_err(|_| JsErrorBox::generic("hmr state mutex poisoned"))?;
+    Ok(std::mem::take(&mut hmr_state.pending_updates))
+}
+
+#[cfg(feature = "dev-runtime")]
+#[deno_core::op2(fast)]
+fn op_goldlight_hmr_request_restart(state: &mut OpState) -> Result<(), JsErrorBox> {
+    let op_context = state.borrow::<RuntimeOpContext>().clone();
+    if let Some(event_proxy) = op_context.event_proxy {
+        let _ = event_proxy.send_event(RuntimeUserEvent::HotReload);
+    }
+    Ok(())
 }
 
 #[deno_core::op2(fast)]
@@ -817,6 +954,40 @@ fn op_goldlight_present_scene_3d(state: &mut OpState, scene_id: u32) -> Result<(
     })
 }
 
+#[cfg(feature = "dev-runtime")]
+deno_core::extension!(
+    goldlight_runtime,
+    ops = [
+        op_goldlight_create_window,
+        op_goldlight_timer_schedule,
+        op_goldlight_timer_cancel,
+        op_goldlight_timer_drain_ready,
+        op_goldlight_hmr_drain_updates,
+        op_goldlight_hmr_request_restart,
+        op_goldlight_worker_request_animation_frame,
+        op_goldlight_worker_drain_events,
+        op_goldlight_compute_layout,
+        op_goldlight_create_scene_2d,
+        op_goldlight_scene_2d_set_clear_color,
+        op_goldlight_scene_2d_create_rect,
+        op_goldlight_rect_2d_update,
+        op_goldlight_present_scene_2d,
+        op_goldlight_create_scene_3d,
+        op_goldlight_scene_3d_set_clear_color,
+        op_goldlight_scene_3d_set_camera,
+        op_goldlight_scene_3d_create_triangle,
+        op_goldlight_triangle_3d_update,
+        op_goldlight_present_scene_3d
+    ],
+    options = {
+        runtime_op_context: RuntimeOpContext,
+    },
+    state = |state, options| {
+        state.put(options.runtime_op_context);
+    }
+);
+
+#[cfg(not(feature = "dev-runtime"))]
 deno_core::extension!(
     goldlight_runtime,
     ops = [
@@ -857,6 +1028,7 @@ impl GoldlightModuleLoader {
     }
 }
 
+#[cfg(feature = "dev-runtime")]
 fn dev_original_specifier_from_relative(
     project_root: &Path,
     relative_specifier: &str,
@@ -888,6 +1060,10 @@ fn get_global_function(js_runtime: &mut JsRuntime, name: &str) -> Result<v8::Glo
 }
 
 fn install_runtime_globals(js_runtime: &mut JsRuntime) -> Result<()> {
+    #[cfg(feature = "dev-runtime")]
+    js_runtime
+        .execute_script("ext:goldlight/hmr.js", GOLDLIGHT_HMR_SOURCE)
+        .context("failed to install hmr globals")?;
     js_runtime
         .execute_script("ext:goldlight/timers.js", GOLDLIGHT_TIMERS_SOURCE)
         .context("failed to install timer globals")?;
@@ -903,6 +1079,11 @@ impl ModuleLoader for GoldlightModuleLoader {
     ) -> Result<ModuleSpecifier, JsErrorBox> {
         if specifier == "goldlight" || specifier == "/__goldlight/runtime" {
             return ModuleSpecifier::parse(GOLDLIGHT_MODULE_SPECIFIER)
+                .map_err(JsErrorBox::from_err);
+        }
+        #[cfg(feature = "dev-runtime")]
+        if specifier == "/@vite/client" {
+            return ModuleSpecifier::parse(GOLDLIGHT_VITE_CLIENT_SPECIFIER)
                 .map_err(JsErrorBox::from_err);
         }
 
@@ -944,10 +1125,27 @@ impl ModuleLoader for GoldlightModuleLoader {
                 None,
             )));
         }
+        #[cfg(feature = "dev-runtime")]
+        if module_specifier.as_str() == GOLDLIGHT_VITE_CLIENT_SPECIFIER {
+            return ModuleLoadResponse::Sync(Ok(ModuleSource::new(
+                ModuleType::JavaScript,
+                ModuleSourceCode::String(String::from(GOLDLIGHT_VITE_CLIENT_SOURCE).into()),
+                module_specifier,
+                None,
+            )));
+        }
 
         let module_specifier = module_specifier.clone();
+        #[cfg(feature = "dev-runtime")]
         let mode = self.mode.clone();
         let fut = async move {
+            #[cfg(not(feature = "dev-runtime"))]
+            if matches!(module_specifier.scheme(), "http" | "https") {
+                return Err(JsErrorBox::generic(format!(
+                    "HTTP modules require the dev-runtime feature: {module_specifier}"
+                )));
+            }
+            #[cfg(feature = "dev-runtime")]
             if matches!(module_specifier.scheme(), "http" | "https") {
                 if !matches!(mode, RuntimeMode::Dev { .. }) {
                     return Err(JsErrorBox::generic(format!(
@@ -991,7 +1189,7 @@ impl ModuleLoader for GoldlightModuleLoader {
                     ModuleSourceCode::String(
                         match original_specifier {
                             Some(original_specifier) => rewrite_inline_source_map(
-                                code,
+                                inject_hot_context_prelude(code),
                                 &module_specifier,
                                 &original_specifier,
                             ),
@@ -1043,15 +1241,37 @@ struct GoldlightRuntime {
     main_runtime_idle: Arc<AtomicBool>,
     main_shutdown_tx: Option<Sender<()>>,
     inspector_registry: Option<InspectorRegistryHandle>,
+    hmr_registry: Option<HmrRegistryHandle>,
     frame_time_origin: std::time::Instant,
+    restart_requested: bool,
 }
 
+#[cfg(feature = "dev-runtime")]
 struct InspectorServerHandle {
     shutdown_tx: Option<oneshot::Sender<()>>,
     thread_handle: Option<thread::JoinHandle<()>>,
     registry: InspectorRegistryHandle,
 }
 
+struct HmrClientHandle {
+    shutdown_tx: Option<std_mpsc::Sender<()>>,
+    thread_handle: Option<thread::JoinHandle<()>>,
+}
+
+impl HmrClientHandle {
+    fn shutdown(mut self) {
+        if let Some(shutdown_tx) = self.shutdown_tx.take() {
+            let _ = shutdown_tx.send(());
+        }
+        if let Some(thread_handle) = self.thread_handle.take() {
+            thread::spawn(move || {
+                let _ = thread_handle.join();
+            });
+        }
+    }
+}
+
+#[cfg(feature = "dev-runtime")]
 impl InspectorServerHandle {
     fn shutdown(mut self) {
         if let Some(shutdown_tx) = self.shutdown_tx.take() {
@@ -1078,20 +1298,26 @@ impl MainRuntimeThreadHandle {
     }
 }
 
+#[cfg(feature = "dev-runtime")]
 type InspectorRegistryHandle = Arc<Mutex<HashMap<String, InspectorTargetRecord>>>;
+#[cfg(not(feature = "dev-runtime"))]
+type InspectorRegistryHandle = ();
 
+#[cfg(feature = "dev-runtime")]
 #[derive(Clone)]
 struct InspectorServerState {
     registry: InspectorRegistryHandle,
     socket_addr: SocketAddr,
 }
 
+#[cfg(feature = "dev-runtime")]
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum InspectorTargetKind {
     Main,
     Worker,
 }
 
+#[cfg(feature = "dev-runtime")]
 #[derive(Clone)]
 struct InspectorTargetRecord {
     target_id: String,
@@ -1102,6 +1328,7 @@ struct InspectorTargetRecord {
     session_sender: mpsc::UnboundedSender<InspectorSessionProxy>,
 }
 
+#[cfg(feature = "dev-runtime")]
 fn register_inspector_target(
     registry: &InspectorRegistryHandle,
     title: String,
@@ -1125,6 +1352,7 @@ fn register_inspector_target(
     target_id
 }
 
+#[cfg(feature = "dev-runtime")]
 fn unregister_inspector_target(registry: &InspectorRegistryHandle, target_id: &str) {
     let _ = registry
         .lock()
@@ -1132,6 +1360,7 @@ fn unregister_inspector_target(registry: &InspectorRegistryHandle, target_id: &s
         .remove(target_id);
 }
 
+#[cfg(feature = "dev-runtime")]
 fn inspector_devtools_frontend_url(socket_addr: SocketAddr, target_id: &str) -> String {
     format!(
         "devtools://devtools/bundled/js_app.html?ws={}/ws/{}&experiments=true&v8only=true",
@@ -1139,6 +1368,7 @@ fn inspector_devtools_frontend_url(socket_addr: SocketAddr, target_id: &str) -> 
     )
 }
 
+#[cfg(feature = "dev-runtime")]
 fn inspector_worker_info(record: &InspectorTargetRecord, session_id: &str) -> serde_json::Value {
     json!({
         "sessionId": session_id,
@@ -1163,6 +1393,7 @@ impl GoldlightRuntime {
         main_runtime_idle: Arc<AtomicBool>,
         main_shutdown_tx: Option<Sender<()>>,
         inspector_registry: Option<InspectorRegistryHandle>,
+        hmr_registry: Option<HmrRegistryHandle>,
     ) -> Self {
         Self {
             state,
@@ -1175,7 +1406,9 @@ impl GoldlightRuntime {
             main_runtime_idle,
             main_shutdown_tx,
             inspector_registry,
+            hmr_registry,
             frame_time_origin: std::time::Instant::now(),
+            restart_requested: false,
         }
     }
 
@@ -1215,6 +1448,7 @@ impl GoldlightRuntime {
                         worker_entrypoint,
                         self.event_proxy.clone(),
                         self.inspector_registry.clone(),
+                        self.hmr_registry.clone(),
                     );
                     worker.push_event(WorkerEventPayload::Resize {
                         width: pending_window.width,
@@ -1229,8 +1463,9 @@ impl GoldlightRuntime {
                     window,
                     worker,
                     renderer,
-                },
-            );
+    },
+);
+
         }
     }
 
@@ -1249,6 +1484,18 @@ impl GoldlightRuntime {
                 let _ = main_shutdown_tx.send(());
             }
             event_loop.exit();
+        }
+    }
+
+    #[cfg(feature = "dev-runtime")]
+    fn shutdown_all_windows(&mut self) {
+        let window_ids = self.windows.keys().copied().collect::<Vec<_>>();
+        for window_id in window_ids {
+            if let Some(mut record) = self.windows.remove(&window_id) {
+                if let Some(worker) = record.worker.take() {
+                    worker.shutdown();
+                }
+            }
         }
     }
 }
@@ -1325,8 +1572,21 @@ impl ApplicationHandler<RuntimeUserEvent> for GoldlightRuntime {
     }
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, _event: RuntimeUserEvent) {
-        self.drain_pending_windows(event_loop);
-        self.maybe_exit(event_loop);
+        match _event {
+            RuntimeUserEvent::Wake => {
+                self.drain_pending_windows(event_loop);
+                self.maybe_exit(event_loop);
+            }
+            #[cfg(feature = "dev-runtime")]
+            RuntimeUserEvent::HotReload => {
+                self.restart_requested = true;
+                self.shutdown_all_windows();
+                if let Some(main_shutdown_tx) = &self.main_shutdown_tx {
+                    let _ = main_shutdown_tx.send(());
+                }
+                event_loop.exit();
+            }
+        }
     }
 }
 
@@ -1351,6 +1611,7 @@ pub fn resolve_dev_config(vite_origin: &str, entrypoint: Option<&str>) -> Result
             project_root,
         },
         entrypoint_specifier,
+        #[cfg(feature = "dev-runtime")]
         inspector: None,
     })
 }
@@ -1380,6 +1641,7 @@ pub fn resolve_prod_config(
             bundle_root: root_path,
         },
         entrypoint_specifier,
+        #[cfg(feature = "dev-runtime")]
         inspector: None,
     })
 }
@@ -1392,7 +1654,158 @@ fn load_app_manifest(bundle_root: &Path) -> Result<AppManifest> {
         .with_context(|| format!("failed to parse app manifest: {}", manifest_path.display()))
 }
 
-pub fn run_runtime(config: RuntimeConfig) -> Result<()> {
+#[cfg(feature = "dev-runtime")]
+fn vite_hmr_ws_url(vite_origin: &str) -> Result<String> {
+    if let Some(rest) = vite_origin.strip_prefix("http://") {
+        return Ok(format!("ws://{rest}"));
+    }
+    if let Some(rest) = vite_origin.strip_prefix("https://") {
+        return Ok(format!("wss://{rest}"));
+    }
+    Err(anyhow!("unsupported vite origin for hmr websocket: {vite_origin}"))
+}
+
+#[cfg(feature = "dev-runtime")]
+fn spawn_hmr_client(
+    vite_origin: String,
+    event_proxy: EventLoopProxy<RuntimeUserEvent>,
+    hmr_registry: HmrRegistryHandle,
+) -> HmrClientHandle {
+    let (shutdown_tx, shutdown_rx) = std_mpsc::channel::<()>();
+    let thread_handle = thread::spawn(move || {
+        let websocket_url = match vite_hmr_ws_url(&vite_origin) {
+            Ok(url) => url,
+            Err(error) => {
+                eprintln!("goldlight hmr setup failed: {error:?}");
+                return;
+            }
+        };
+
+        loop {
+            if shutdown_rx.try_recv().is_ok() {
+                break;
+            }
+
+            let mut request = match websocket_url.clone().into_client_request() {
+                Ok(request) => request,
+                Err(error) => {
+                    eprintln!("goldlight hmr request failed: {error:?}");
+                    break;
+                }
+            };
+            request.headers_mut().insert(
+                "sec-websocket-protocol",
+                header::HeaderValue::from_static("vite-hmr"),
+            );
+
+            match connect(request) {
+                Ok((mut socket, _response)) => loop {
+                    if shutdown_rx.try_recv().is_ok() {
+                        let _ = socket.close(None);
+                        return;
+                    }
+                    match socket.read() {
+                        Ok(TungsteniteMessage::Text(text)) => {
+                            let Ok(payload) = serde_json::from_str::<serde_json::Value>(&text) else {
+                                continue;
+                            };
+                            let message_type = payload.get("type").and_then(|value| value.as_str());
+                            if matches!(message_type, Some("full-reload")) {
+                                let _ = event_proxy.send_event(RuntimeUserEvent::HotReload);
+                                continue;
+                            }
+                            if matches!(message_type, Some("custom"))
+                                && matches!(
+                                    payload.get("event").and_then(|value| value.as_str()),
+                                    Some("goldlight:hmr-update")
+                                )
+                            {
+                                let updates = payload
+                                    .get("data")
+                                    .and_then(|value| value.get("updates"))
+                                    .and_then(|value| value.as_array())
+                                    .cloned()
+                                    .unwrap_or_default();
+                                for update in updates {
+                                    let Some(path) =
+                                        update.get("path").and_then(|value| value.as_str())
+                                    else {
+                                        continue;
+                                    };
+                                    let accepted_path = update
+                                        .get("acceptedPath")
+                                        .and_then(|value| value.as_str())
+                                        .map(ToOwned::to_owned);
+                                    let timestamp = update
+                                        .get("timestamp")
+                                        .and_then(|value| value.as_u64())
+                                        .unwrap_or(0);
+                                    broadcast_hmr_update(
+                                        &hmr_registry,
+                                        HmrUpdatePayload {
+                                            path: path.to_string(),
+                                            accepted_path,
+                                            timestamp,
+                                        },
+                                    );
+                                }
+                                let _ = event_proxy.send_event(RuntimeUserEvent::Wake);
+                                continue;
+                            }
+                            if matches!(message_type, Some("update")) {
+                                let updates = payload
+                                    .get("updates")
+                                    .and_then(|value| value.as_array())
+                                    .cloned()
+                                    .unwrap_or_default();
+                                for update in updates {
+                                    let Some(path) =
+                                        update.get("path").and_then(|value| value.as_str())
+                                    else {
+                                        continue;
+                                    };
+                                    let accepted_path = update
+                                        .get("acceptedPath")
+                                        .and_then(|value| value.as_str())
+                                        .map(ToOwned::to_owned);
+                                    let timestamp = update
+                                        .get("timestamp")
+                                        .and_then(|value| value.as_u64())
+                                        .unwrap_or(0);
+                                    broadcast_hmr_update(
+                                        &hmr_registry,
+                                        HmrUpdatePayload {
+                                            path: path.to_string(),
+                                            accepted_path,
+                                            timestamp,
+                                        },
+                                    );
+                                }
+                                let _ = event_proxy.send_event(RuntimeUserEvent::Wake);
+                            }
+                        }
+                        Ok(TungsteniteMessage::Ping(payload)) => {
+                            let _ = socket.send(TungsteniteMessage::Pong(payload));
+                        }
+                        Ok(TungsteniteMessage::Close(_)) => break,
+                        Ok(_) => {}
+                        Err(_) => break,
+                    }
+                },
+                Err(_) => {
+                    thread::sleep(Duration::from_millis(250));
+                }
+            }
+        }
+    });
+
+    HmrClientHandle {
+        shutdown_tx: Some(shutdown_tx),
+        thread_handle: Some(thread_handle),
+    }
+}
+
+pub fn run_runtime(config: RuntimeConfig) -> Result<RuntimeRunResult> {
     let backend = wgpu::Backends::all();
     debug!(
         ?backend,
@@ -1403,16 +1816,44 @@ pub fn run_runtime(config: RuntimeConfig) -> Result<()> {
 
     let event_loop = EventLoop::<RuntimeUserEvent>::with_user_event().build()?;
     let event_proxy = event_loop.create_proxy();
+    #[cfg(feature = "dev-runtime")]
+    let hmr_registry = matches!(config.mode, RuntimeMode::Dev { .. })
+        .then(|| Arc::new(Mutex::new(HashMap::new())));
+    #[cfg(not(feature = "dev-runtime"))]
+    let hmr_registry: Option<HmrRegistryHandle> = None;
+
+    #[cfg(feature = "dev-runtime")]
+    let hmr_client = match &config.mode {
+        RuntimeMode::Dev { vite_origin, .. } => {
+            Some(spawn_hmr_client(
+                vite_origin.clone(),
+                event_proxy.clone(),
+                hmr_registry
+                    .as_ref()
+                    .expect("dev runtime should have an hmr registry")
+                    .clone(),
+            ))
+        }
+        RuntimeMode::Prod { .. } => None,
+    };
+    #[cfg(not(feature = "dev-runtime"))]
+    let hmr_client: Option<HmrClientHandle> = None;
     let runtime_state = Arc::new(Mutex::new(RuntimeState::default()));
     let main_timer_state = Arc::new(Mutex::new(TimerHostState::default()));
     let startup_complete = Arc::new(AtomicBool::new(false));
     let main_runtime_idle = Arc::new(AtomicBool::new(false));
+    #[cfg(feature = "dev-runtime")]
     let inspector_server = config
         .inspector
         .clone()
         .map(|inspector_config| spawn_inspector_server(inspector_config.socket_addr))
         .transpose()?;
+    #[cfg(not(feature = "dev-runtime"))]
+    let _inspector_server: Option<()> = None;
+    #[cfg(feature = "dev-runtime")]
     let inspector_registry = inspector_server.as_ref().map(|server| server.registry());
+    #[cfg(not(feature = "dev-runtime"))]
+    let inspector_registry: Option<InspectorRegistryHandle> = None;
     let runtime_thread = spawn_main_runtime_thread(
         runtime_state.clone(),
         main_timer_state.clone(),
@@ -1422,6 +1863,7 @@ pub fn run_runtime(config: RuntimeConfig) -> Result<()> {
         startup_complete.clone(),
         main_runtime_idle.clone(),
         inspector_registry.clone(),
+        hmr_registry.clone(),
     );
 
     let mut app = GoldlightRuntime::new(
@@ -1434,13 +1876,22 @@ pub fn run_runtime(config: RuntimeConfig) -> Result<()> {
         main_runtime_idle,
         Some(runtime_thread.shutdown_tx.clone()),
         inspector_registry,
+        hmr_registry,
     );
     event_loop.run_app(&mut app)?;
     runtime_thread.shutdown();
+    if let Some(hmr_client) = hmr_client {
+        hmr_client.shutdown();
+    }
+    #[cfg(feature = "dev-runtime")]
     if let Some(inspector_server) = inspector_server {
         inspector_server.shutdown();
     }
-    Ok(())
+    Ok(if app.restart_requested {
+        RuntimeRunResult::RestartRequested
+    } else {
+        RuntimeRunResult::Completed
+    })
 }
 
 fn spawn_window_worker(
@@ -1450,7 +1901,10 @@ fn spawn_window_worker(
     worker_entrypoint: String,
     event_proxy: EventLoopProxy<RuntimeUserEvent>,
     inspector_registry: Option<InspectorRegistryHandle>,
+    hmr_registry: Option<HmrRegistryHandle>,
 ) -> WindowWorkerHandle {
+    #[cfg(not(feature = "dev-runtime"))]
+    let _ = window_id;
     let worker_state = Arc::new(Mutex::new(WorkerHostState::default()));
     let timer_state = Arc::new(Mutex::new(TimerHostState::default()));
     let (control_tx, control_rx) = std_mpsc::channel::<WindowWorkerControl>();
@@ -1479,6 +1933,7 @@ fn spawn_window_worker(
             event_proxy.clone(),
             &control_rx,
             inspector_registry,
+            hmr_registry,
             window_id,
         ) {
             eprintln!("goldlight window worker {window_id} failed: {error:?}");
@@ -1501,6 +1956,7 @@ fn spawn_main_runtime_thread(
     startup_complete: Arc<AtomicBool>,
     main_runtime_idle: Arc<AtomicBool>,
     inspector_registry: Option<InspectorRegistryHandle>,
+    hmr_registry: Option<HmrRegistryHandle>,
 ) -> MainRuntimeThreadHandle {
     let (shutdown_tx, shutdown_rx) = std_mpsc::channel::<()>();
     let shutdown_tx_for_thread = shutdown_tx.clone();
@@ -1515,6 +1971,7 @@ fn spawn_main_runtime_thread(
             startup_complete.clone(),
             main_runtime_idle.clone(),
             inspector_registry,
+            hmr_registry,
         );
 
         if let Err(error) = result {
@@ -1537,7 +1994,16 @@ fn run_main_runtime_thread(
     startup_complete: Arc<AtomicBool>,
     main_runtime_idle: Arc<AtomicBool>,
     inspector_registry: Option<InspectorRegistryHandle>,
+    hmr_registry: Option<HmrRegistryHandle>,
 ) -> Result<()> {
+    #[cfg(not(feature = "dev-runtime"))]
+    let _ = &hmr_registry;
+    #[cfg(feature = "dev-runtime")]
+    let hmr_state = hmr_registry
+        .as_ref()
+        .map(|_| Arc::new(Mutex::new(HmrRuntimeState::default())));
+    #[cfg(not(feature = "dev-runtime"))]
+    let _hmr_state: Option<HmrRuntimeStateHandle> = None;
     let mut js_runtime = JsRuntime::new(RuntimeOptions {
         module_loader: Some(Rc::new(GoldlightModuleLoader::new(mode.clone()))),
         extensions: vec![goldlight_runtime::init(RuntimeOpContext {
@@ -1545,6 +2011,8 @@ fn run_main_runtime_thread(
             event_proxy: Some(event_proxy.clone()),
             worker_state: None,
             timer_state,
+            #[cfg(feature = "dev-runtime")]
+            hmr_state: hmr_state.clone(),
         })],
         inspector: inspector_registry.is_some(),
         is_main: true,
@@ -1552,6 +2020,7 @@ fn run_main_runtime_thread(
     });
     install_runtime_globals(&mut js_runtime)?;
 
+    #[cfg(feature = "dev-runtime")]
     let main_target_id = if let Some(inspector_registry) = inspector_registry.as_ref() {
         let target_id = register_inspector_target(
             inspector_registry,
@@ -1561,6 +2030,16 @@ fn run_main_runtime_thread(
             js_runtime.inspector().borrow().get_session_sender(),
         );
         Some(target_id)
+    } else {
+        None
+    };
+    #[cfg(not(feature = "dev-runtime"))]
+    let _main_target_id: Option<String> = None;
+    #[cfg(feature = "dev-runtime")]
+    let main_hmr_runtime_id = if let (Some(hmr_registry), Some(hmr_state)) =
+        (hmr_registry.as_ref(), hmr_state.as_ref())
+    {
+        Some(register_hmr_runtime(hmr_registry, hmr_state.clone()))
     } else {
         None
     };
@@ -1588,6 +2067,9 @@ fn run_main_runtime_thread(
     }
     let timer_pump = get_global_function(&mut js_runtime, "__goldlightPumpTimers")
         .context("failed to capture main timer pump function")?;
+    #[cfg(feature = "dev-runtime")]
+    let hmr_pump = get_global_function(&mut js_runtime, "__goldlightPumpHmr")
+        .context("failed to capture main hmr pump function")?;
     startup_complete.store(true, Ordering::SeqCst);
     main_runtime_idle.store(true, Ordering::SeqCst);
     let _ = event_proxy.send_event(RuntimeUserEvent::Wake);
@@ -1605,6 +2087,19 @@ fn run_main_runtime_thread(
                     },
                 )
                 .await?;
+            #[cfg(feature = "dev-runtime")]
+            {
+                let hmr_pump_call = js_runtime.call(&hmr_pump);
+                js_runtime
+                    .with_event_loop_future(
+                        hmr_pump_call,
+                        PollEventLoopOptions {
+                            wait_for_inspector: false,
+                            pump_v8_message_loop: true,
+                        },
+                    )
+                    .await?;
+            }
             js_runtime
                 .run_event_loop(PollEventLoopOptions {
                     wait_for_inspector: false,
@@ -1622,9 +2117,14 @@ fn run_main_runtime_thread(
         thread::sleep(Duration::from_millis(RUNTIME_POLL_INTERVAL_MS));
     }
 
+    #[cfg(feature = "dev-runtime")]
     if let (Some(inspector_registry), Some(main_target_id)) = (&inspector_registry, &main_target_id)
     {
         unregister_inspector_target(inspector_registry, main_target_id);
+    }
+    #[cfg(feature = "dev-runtime")]
+    if let (Some(hmr_registry), Some(main_hmr_runtime_id)) = (&hmr_registry, &main_hmr_runtime_id) {
+        unregister_hmr_runtime(hmr_registry, main_hmr_runtime_id);
     }
 
     Ok(())
@@ -1639,8 +2139,19 @@ fn run_window_worker_thread(
     event_proxy: EventLoopProxy<RuntimeUserEvent>,
     control_rx: &std_mpsc::Receiver<WindowWorkerControl>,
     inspector_registry: Option<InspectorRegistryHandle>,
+    hmr_registry: Option<HmrRegistryHandle>,
     window_id: u32,
 ) -> Result<()> {
+    #[cfg(not(feature = "dev-runtime"))]
+    let _ = &hmr_registry;
+    #[cfg(not(feature = "dev-runtime"))]
+    let _ = window_id;
+    #[cfg(feature = "dev-runtime")]
+    let hmr_state = hmr_registry
+        .as_ref()
+        .map(|_| Arc::new(Mutex::new(HmrRuntimeState::default())));
+    #[cfg(not(feature = "dev-runtime"))]
+    let _hmr_state: Option<HmrRuntimeStateHandle> = None;
     let mut js_runtime = JsRuntime::new(RuntimeOptions {
         module_loader: Some(Rc::new(GoldlightModuleLoader::new(mode))),
         extensions: vec![goldlight_runtime::init(RuntimeOpContext {
@@ -1648,6 +2159,8 @@ fn run_window_worker_thread(
             event_proxy: Some(event_proxy),
             worker_state: Some(worker_state),
             timer_state,
+            #[cfg(feature = "dev-runtime")]
+            hmr_state: hmr_state.clone(),
         })],
         inspector: inspector_registry.is_some(),
         is_main: false,
@@ -1655,6 +2168,7 @@ fn run_window_worker_thread(
     });
     install_runtime_globals(&mut js_runtime)?;
 
+    #[cfg(feature = "dev-runtime")]
     let worker_target_id = if let Some(inspector_registry) = inspector_registry.as_ref() {
         Some(register_inspector_target(
             inspector_registry,
@@ -1663,6 +2177,16 @@ fn run_window_worker_thread(
             InspectorTargetKind::Worker,
             js_runtime.inspector().borrow().get_session_sender(),
         ))
+    } else {
+        None
+    };
+    #[cfg(not(feature = "dev-runtime"))]
+    let _worker_target_id: Option<String> = None;
+    #[cfg(feature = "dev-runtime")]
+    let worker_hmr_runtime_id = if let (Some(hmr_registry), Some(hmr_state)) =
+        (hmr_registry.as_ref(), hmr_state.as_ref())
+    {
+        Some(register_hmr_runtime(hmr_registry, hmr_state.clone()))
     } else {
         None
     };
@@ -1701,6 +2225,9 @@ fn run_window_worker_thread(
         .context("failed to capture window worker pump function")?;
     let timer_pump = get_global_function(&mut js_runtime, "__goldlightPumpTimers")
         .context("failed to capture window worker timer pump function")?;
+    #[cfg(feature = "dev-runtime")]
+    let hmr_pump = get_global_function(&mut js_runtime, "__goldlightPumpHmr")
+        .context("failed to capture window worker hmr pump function")?;
 
     loop {
         match control_rx.recv_timeout(Duration::from_millis(RUNTIME_POLL_INTERVAL_MS)) {
@@ -1742,6 +2269,19 @@ fn run_window_worker_thread(
                             },
                         )
                         .await?;
+                    #[cfg(feature = "dev-runtime")]
+                    {
+                        let hmr_pump_call = js_runtime.call(&hmr_pump);
+                        js_runtime
+                            .with_event_loop_future(
+                                hmr_pump_call,
+                                PollEventLoopOptions {
+                                    wait_for_inspector: false,
+                                    pump_v8_message_loop: true,
+                                },
+                            )
+                            .await?;
+                    }
                     let worker_pump_call = js_runtime.call(&worker_pump);
                     js_runtime
                         .with_event_loop_future(
@@ -1768,10 +2308,17 @@ fn run_window_worker_thread(
         }
     }
 
+    #[cfg(feature = "dev-runtime")]
     if let (Some(inspector_registry), Some(worker_target_id)) =
         (&inspector_registry, &worker_target_id)
     {
         unregister_inspector_target(inspector_registry, worker_target_id);
+    }
+    #[cfg(feature = "dev-runtime")]
+    if let (Some(hmr_registry), Some(worker_hmr_runtime_id)) =
+        (&hmr_registry, &worker_hmr_runtime_id)
+    {
+        unregister_hmr_runtime(hmr_registry, worker_hmr_runtime_id);
     }
 
     Ok(())
@@ -1805,6 +2352,7 @@ pub fn required_value<'a>(args: &'a [String], flag: &str) -> Result<&'a str> {
         .ok_or_else(|| anyhow!("missing value for flag: {flag}"))
 }
 
+#[cfg(feature = "dev-runtime")]
 fn spawn_inspector_server(socket_addr: SocketAddr) -> Result<InspectorServerHandle> {
     let listener = TcpListener::bind(socket_addr)
         .with_context(|| format!("failed to bind inspector server at {socket_addr}"))?;
@@ -1854,6 +2402,7 @@ fn spawn_inspector_server(socket_addr: SocketAddr) -> Result<InspectorServerHand
     })
 }
 
+#[cfg(feature = "dev-runtime")]
 async fn inspector_json_version(_state: State<InspectorServerState>) -> Json<serde_json::Value> {
     Json(json!({
         "Browser": "goldlight",
@@ -1862,6 +2411,7 @@ async fn inspector_json_version(_state: State<InspectorServerState>) -> Json<ser
     }))
 }
 
+#[cfg(feature = "dev-runtime")]
 async fn inspector_json_protocol() -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "application/json; charset=UTF-8")],
@@ -1869,6 +2419,7 @@ async fn inspector_json_protocol() -> impl IntoResponse {
     )
 }
 
+#[cfg(feature = "dev-runtime")]
 async fn inspector_json_list(
     State(state): State<InspectorServerState>,
 ) -> Json<Vec<serde_json::Value>> {
@@ -1906,6 +2457,7 @@ async fn inspector_json_list(
     )
 }
 
+#[cfg(feature = "dev-runtime")]
 async fn inspector_websocket(
     websocket: WebSocketUpgrade,
     AxumPath(target_id): AxumPath<String>,
@@ -1914,6 +2466,7 @@ async fn inspector_websocket(
     websocket.on_upgrade(move |socket| handle_inspector_websocket(socket, state, target_id))
 }
 
+#[cfg(feature = "dev-runtime")]
 struct AttachedWorkerSession {
     record: InspectorTargetRecord,
     session_id: String,
@@ -1924,6 +2477,7 @@ struct AttachedWorkerSession {
     attached_announced: bool,
 }
 
+#[cfg(feature = "dev-runtime")]
 fn attach_worker_session(
     record: &InspectorTargetRecord,
     context_namespace: i64,
@@ -1955,6 +2509,7 @@ fn attach_worker_session(
     })
 }
 
+#[cfg(feature = "dev-runtime")]
 async fn send_worker_session_message(
     websocket_sender: &mut futures_util::stream::SplitSink<WebSocket, WebSocketMessage>,
     message: String,
@@ -1965,6 +2520,7 @@ async fn send_worker_session_message(
         .is_ok()
 }
 
+#[cfg(feature = "dev-runtime")]
 async fn maybe_attach_main_worker_sessions(
     websocket_sender: &mut futures_util::stream::SplitSink<WebSocket, WebSocketMessage>,
     state: &InspectorServerState,
@@ -2009,6 +2565,7 @@ async fn maybe_attach_main_worker_sessions(
     true
 }
 
+#[cfg(feature = "dev-runtime")]
 fn strip_session_id(message: &str) -> Option<(String, String)> {
     let mut value = serde_json::from_str::<serde_json::Value>(message).ok()?;
     let session_id = value.get("sessionId")?.as_str()?.to_string();
@@ -2016,6 +2573,7 @@ fn strip_session_id(message: &str) -> Option<(String, String)> {
     Some((session_id, value.to_string()))
 }
 
+#[cfg(feature = "dev-runtime")]
 fn is_worker_bootstrap_method(method: &str) -> bool {
     matches!(
         method,
@@ -2030,28 +2588,34 @@ fn is_worker_bootstrap_method(method: &str) -> bool {
     )
 }
 
+#[cfg(feature = "dev-runtime")]
 fn worker_call_frame_id(namespace: &str, raw: &str) -> String {
     format!("gl-worker-callframe:{namespace}:{raw}")
 }
 
+#[cfg(feature = "dev-runtime")]
 fn parse_worker_call_frame_id(value: &str) -> Option<(&str, &str)> {
     let rest = value.strip_prefix("gl-worker-callframe:")?;
     rest.split_once(':')
 }
 
+#[cfg(feature = "dev-runtime")]
 fn worker_object_id(namespace: &str, raw: &str) -> String {
     format!("gl-worker-object:{namespace}:{raw}")
 }
 
+#[cfg(feature = "dev-runtime")]
 fn parse_worker_object_id(value: &str) -> Option<(&str, &str)> {
     let rest = value.strip_prefix("gl-worker-object:")?;
     rest.split_once(':')
 }
 
+#[cfg(feature = "dev-runtime")]
 fn encode_worker_execution_context_id(namespace: i64, raw: i64) -> i64 {
     namespace * 1_000_000 + raw
 }
 
+#[cfg(feature = "dev-runtime")]
 fn decode_worker_execution_context_id(value: i64) -> Option<(i64, i64)> {
     if value < 1_000_000 {
         return None;
@@ -2059,30 +2623,36 @@ fn decode_worker_execution_context_id(value: i64) -> Option<(i64, i64)> {
     Some((value / 1_000_000, value % 1_000_000))
 }
 
+#[cfg(feature = "dev-runtime")]
 fn worker_script_id(context_namespace: i64, raw: &str) -> String {
     let raw = raw.parse::<i64>().ok().unwrap_or_default();
     encode_worker_script_id(context_namespace, raw).to_string()
 }
 
+#[cfg(feature = "dev-runtime")]
 fn parse_worker_script_id(value: &str) -> Option<(i64, String)> {
     decode_worker_script_id(value)
 }
 
+#[cfg(feature = "dev-runtime")]
 fn encode_worker_script_id(namespace: i64, raw: i64) -> i64 {
     namespace * 1_000_000 + raw
 }
 
+#[cfg(feature = "dev-runtime")]
 fn decode_worker_script_id(value: &str) -> Option<(i64, String)> {
     let encoded = value.parse::<i64>().ok()?;
     let (namespace, raw) = decode_worker_execution_context_id(encoded)?;
     Some((namespace, raw.to_string()))
 }
 
+#[cfg(feature = "dev-runtime")]
 enum WorkerRouteKey {
     TargetId(String),
     ContextNamespace(i64),
 }
 
+#[cfg(feature = "dev-runtime")]
 fn rewrite_worker_outbound_value(
     value: &mut serde_json::Value,
     namespace: &str,
@@ -2141,6 +2711,7 @@ fn rewrite_worker_outbound_value(
     }
 }
 
+#[cfg(feature = "dev-runtime")]
 fn rewrite_worker_inbound_value(value: &mut serde_json::Value) -> Option<WorkerRouteKey> {
     match value {
         serde_json::Value::Object(object) => {
@@ -2187,6 +2758,7 @@ fn rewrite_worker_inbound_value(value: &mut serde_json::Value) -> Option<WorkerR
     None
 }
 
+#[cfg(feature = "dev-runtime")]
 fn get_worker_command_route(message: &str) -> Option<(String, serde_json::Value)> {
     let value = serde_json::from_str::<serde_json::Value>(message).ok()?;
     let method = value.get("method")?.as_str()?;
@@ -2201,6 +2773,7 @@ fn get_worker_command_route(message: &str) -> Option<(String, serde_json::Value)
     }
 }
 
+#[cfg(feature = "dev-runtime")]
 async fn handle_inspector_websocket(
     socket: WebSocket,
     state: InspectorServerState,
@@ -2686,12 +3259,14 @@ async fn handle_inspector_websocket(
     let _ = websocket_sender.close().await;
 }
 
+#[cfg(feature = "dev-runtime")]
 enum BackendProtocolAction {
     Passthrough,
     Rewrite(String),
     Suppress,
 }
 
+#[cfg(feature = "dev-runtime")]
 fn patch_get_script_source_response(message: &str) -> Option<String> {
     let mut value = serde_json::from_str::<serde_json::Value>(message).ok()?;
     let script_source = value
@@ -2712,6 +3287,7 @@ fn patch_get_script_source_response(message: &str) -> Option<String> {
     None
 }
 
+#[cfg(feature = "dev-runtime")]
 fn patch_inspector_protocol_message(
     message: &str,
     script_urls: &mut HashMap<String, String>,
@@ -2810,11 +3386,13 @@ fn patch_inspector_protocol_message(
     }
 }
 
+#[cfg(feature = "dev-runtime")]
 enum FrontendProtocolAction {
     Forward(String),
     Respond(String),
 }
 
+#[cfg(feature = "dev-runtime")]
 fn patch_frontend_protocol_message(
     message: &str,
     paused_call_frame_id: Option<&str>,
@@ -2971,6 +3549,7 @@ fn patch_frontend_protocol_message(
     FrontendProtocolAction::Forward(rewritten.to_string())
 }
 
+#[cfg(feature = "dev-runtime")]
 fn remember_inspector_request_method(message: &str, request_methods: &mut HashMap<i64, String>) {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(message) else {
         return;

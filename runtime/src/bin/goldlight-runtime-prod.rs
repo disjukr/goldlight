@@ -1,3 +1,5 @@
+#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
+
 use anyhow::Result;
 use goldlight_runtime::{init_logging, resolve_prod_config, run_runtime};
 
@@ -17,5 +19,6 @@ fn main() -> Result<()> {
         .map(String::as_str);
 
     let config = resolve_prod_config(bundle_root, entrypoint)?;
-    run_runtime(config)
+    let _ = run_runtime(config)?;
+    Ok(())
 }

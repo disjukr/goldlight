@@ -17,6 +17,7 @@
   },
   "include": [
     "./**/*.ts",
-    "../sdk/src/worker-modules.d.ts"
+    "../sdk/src/worker-modules.d.ts",
+    "../sdk/src/hmr.d.ts"
   ]
 }

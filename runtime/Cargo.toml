@@ -3,6 +3,19 @@ name = "goldlight-runtime"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = []
+dev-runtime = ["dep:tungstenite"]
+
+[[bin]]
+name = "goldlight-runtime-dev"
+path = "src/bin/goldlight-runtime-dev.rs"
+required-features = ["dev-runtime"]
+
+[[bin]]
+name = "goldlight-runtime-prod"
+path = "src/bin/goldlight-runtime-prod.rs"
+
 [dependencies]
 deno_core = "0.356"
 deno_error = "0.7"
@@ -24,3 +37,4 @@ base64 = "0.22"
 bytemuck = { version = "1", features = ["derive"] }
 glam = "0.30"
 taffy = "0.7"
+tungstenite = { version = "0.24", optional = true }

@@ -1,11 +1,13 @@
 use std::net::SocketAddr;
+use std::process::ExitCode;
 
 use anyhow::Result;
 use goldlight_runtime::{
     init_logging, required_value, resolve_dev_config, run_runtime, InspectorConfig,
+    RuntimeRunResult,
 };
 
-fn main() -> Result<()> {
+fn main() -> Result<ExitCode> {
     init_logging();
 
     let args = std::env::args().skip(1).collect::<Vec<_>>();
@@ -30,5 +32,8 @@ fn main() -> Result<()> {
 
     let mut config = resolve_dev_config(vite_origin, entrypoint)?;
     config.inspector = inspect.map(|socket_addr| InspectorConfig { socket_addr });
-    run_runtime(config)
+    Ok(match run_runtime(config)? {
+        RuntimeRunResult::Completed => ExitCode::SUCCESS,
+        RuntimeRunResult::RestartRequested => ExitCode::from(75),
+    })
 }

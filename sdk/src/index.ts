@@ -470,6 +470,10 @@ export function requestAnimationFrame(_callback: (timestampMs: number) => void):
   throw new Error(RUNTIME_ONLY_ERROR);
 }
 
+export function cancelAnimationFrame(_handle: number): void {
+  throw new Error(RUNTIME_ONLY_ERROR);
+}
+
 export function addWindowEventListener<T extends keyof WindowEventMap>(
   _type: T,
   _listener: (event: WindowEventMap[T]) => void,

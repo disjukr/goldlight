@@ -1122,6 +1122,10 @@ export function requestAnimationFrame(callback) {
   return handle;
 }
 
+export function cancelAnimationFrame(handle) {
+  animationFrameCallbacks = animationFrameCallbacks.filter((entry) => entry.handle !== handle);
+}
+
 export function addWindowEventListener(type, listener) {
   ensureFunction(listener, "addWindowEventListener");
   const listeners = windowEventListeners.get(type) ?? [];
@@ -1143,6 +1147,10 @@ function dispatchWindowEvent(event) {
     listener(event);
   }
 }
+
+globalThis.__goldlightFlushLayout = function () {
+  flushDirtyLayouts();
+};
 
 globalThis.__goldlightPump = function () {
   const events = Deno.core.ops.op_goldlight_worker_drain_events();

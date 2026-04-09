@@ -14,6 +14,130 @@ let isBuild = false;
 let devServerOrigin = 'http://127.0.0.1:9016';
 let resolvedRoot = resolve(import.meta.dirname, '..');
 
+function isGoldlightHmrFile(file: string) {
+  return /\.(?:[cm]?[jt]sx?)$/i.test(file);
+}
+
+type HotModuleNode = {
+  url: string;
+  id: string | null;
+  importers: Set<HotModuleNode>;
+  acceptedHmrDeps: Set<HotModuleNode>;
+  acceptedHmrExports: Set<string> | null;
+  importedBindings: Map<string, Set<string>> | null;
+  isSelfAccepting?: boolean;
+};
+
+function normalizeHmrPath(url: string) {
+  try {
+    const parsed = new URL(url, 'https://0xabcdef.com');
+    const searchParams = new URLSearchParams(parsed.search);
+    searchParams.delete('t');
+    const search = searchParams.toString();
+    return `${parsed.pathname}${search ? `?${search}` : ''}`;
+  } catch {
+    return url;
+  }
+}
+
+function areAllImportsAccepted(
+  importedBindings: Set<string>,
+  acceptedExports: Set<string> | null,
+) {
+  if (!acceptedExports) {
+    return false;
+  }
+
+  for (const binding of importedBindings) {
+    if (!acceptedExports.has(binding)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function propagateGoldlightBoundary(
+  node: HotModuleNode,
+  traversed: Set<HotModuleNode>,
+  boundaries: Array<{ path: string; acceptedPath: string }>,
+): boolean {
+  if (traversed.has(node)) {
+    return false;
+  }
+  traversed.add(node);
+
+  if (node.isSelfAccepting) {
+    const path = normalizeHmrPath(node.url);
+    boundaries.push({ path, acceptedPath: path });
+    return false;
+  }
+
+  if (node.acceptedHmrExports) {
+    const path = normalizeHmrPath(node.url);
+    boundaries.push({ path, acceptedPath: path });
+  } else if (node.importers.size === 0) {
+    return true;
+  }
+
+  for (const importer of node.importers) {
+    if (importer.acceptedHmrDeps.has(node)) {
+      boundaries.push({
+        path: normalizeHmrPath(importer.url),
+        acceptedPath: normalizeHmrPath(node.url),
+      });
+      continue;
+    }
+
+    if (node.id && node.acceptedHmrExports && importer.importedBindings) {
+      const importedBindings = importer.importedBindings.get(node.id);
+      if (importedBindings && areAllImportsAccepted(importedBindings, node.acceptedHmrExports)) {
+        continue;
+      }
+    }
+
+    if (propagateGoldlightBoundary(importer, traversed, boundaries)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function collectGoldlightBoundaries(
+  modules: readonly HotModuleNode[],
+  timestamp: number,
+  changedPath: string,
+) {
+  const updates: Array<{ path: string; acceptedPath: string; timestamp: number }> = [
+    {
+      path: changedPath,
+      acceptedPath: changedPath,
+      timestamp,
+    },
+  ];
+
+  for (const module of modules) {
+    const boundaries: Array<{ path: string; acceptedPath: string }> = [];
+    const hasDeadEnd = propagateGoldlightBoundary(module, new Set<HotModuleNode>(), boundaries);
+    if (hasDeadEnd) {
+      continue;
+    }
+    for (const boundary of boundaries) {
+      updates.push({
+        ...boundary,
+        timestamp,
+      });
+    }
+  }
+
+  const deduped = new Map<string, { path: string; acceptedPath: string; timestamp: number }>();
+  for (const update of updates) {
+    deduped.set(`${update.path}::${update.acceptedPath}`, update);
+  }
+  return [...deduped.values()];
+}
+
 export default defineConfig({
   root: resolve(import.meta.dirname, '..'),
   plugins: [
@@ -86,6 +210,41 @@ export default defineConfig({
       },
       resolveFileUrl({ fileName }) {
         return JSON.stringify(`./${normalizePath(fileName)}`);
+      },
+    },
+    {
+      name: 'goldlight-hmr-bridge',
+      apply: 'serve',
+      handleHotUpdate(context) {
+        const normalizedFile = normalizePath(context.file);
+        if (!isGoldlightHmrFile(normalizedFile)) {
+          return;
+        }
+
+        const relativePath = normalizePath(relative(context.server.config.root, normalizedFile));
+        if (relativePath.startsWith('..')) {
+          return;
+        }
+
+        const timestamp = Date.now();
+        const updates = collectGoldlightBoundaries(
+          context.modules as readonly HotModuleNode[],
+          timestamp,
+          `/${relativePath}`,
+        );
+
+        if (updates.length > 0) {
+          context.server.ws.send({
+            type: 'custom',
+            event: 'goldlight:hmr-update',
+            data: {
+              file: `/${relativePath}`,
+              updates,
+            },
+          });
+        }
+
+        return [];
       },
     },
   ],

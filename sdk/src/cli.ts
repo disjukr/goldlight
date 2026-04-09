@@ -363,7 +363,7 @@ async function devProject() {
 
   console.log('building goldlight runtime...');
   await runCommand(
-    ['cargo', 'build', '-p', 'goldlight-runtime', '--bin', 'goldlight-runtime-dev'],
+    ['cargo', 'build', '-p', 'goldlight-runtime', '--bin', 'goldlight-runtime-dev', '--features', 'dev-runtime'],
     repoRoot,
     { CARGO_TERM_COLOR: cargoColorEnv() },
   );
@@ -396,57 +396,65 @@ async function devProject() {
     throw error;
   }
 
-  const runtime = spawn(
-    [
-      runtimeBinary,
-      '--vite',
-      devServerOrigin,
-      '--inspect',
-      inspectorAddress,
-      normalizedEntrypoint,
-    ],
-    {
-      cwd: projectRoot,
-      env: process.env,
-      stdin: 'inherit',
-      stdout: 'inherit',
-      stderr: 'inherit',
-    },
-  );
+  let exitCode = 0;
+  let shouldRestart = false;
 
-  let lastInspectorSignature = '';
-  let keepWatchingInspector = true;
-  const renderInspectorTargets = (inspectorTargets: InspectorTargetInfo[] | null) => {
-    const signature = JSON.stringify(inspectorTargets ?? []);
-    if (signature === lastInspectorSignature) {
-      return;
-    }
-    lastInspectorSignature = signature;
-    clearTerminalIfInteractive();
-    printDevHeader(inspectorLines(devServerOrigin, inspectorTargets));
-  };
-
-  renderInspectorTargets(null);
-
-  const inspectorWatcher = (async () => {
-    for (let index = 0; index < 100; index += 1) {
-      if (!keepWatchingInspector) {
+  do {
+    shouldRestart = false;
+    let lastInspectorSignature = '';
+    let keepWatchingInspector = true;
+    const renderInspectorTargets = (inspectorTargets: InspectorTargetInfo[] | null) => {
+      const signature = JSON.stringify(inspectorTargets ?? []);
+      if (signature === lastInspectorSignature) {
         return;
       }
-      const inspectorTargets = await fetchInspectorTargets(inspectorListUrl);
-      if (inspectorTargets) {
-        renderInspectorTargets(inspectorTargets);
-        if (inspectorTargets.some((target) => (target.title ?? '').startsWith('window-'))) {
+      lastInspectorSignature = signature;
+      clearTerminalIfInteractive();
+      printDevHeader(inspectorLines(devServerOrigin, inspectorTargets));
+    };
+
+    renderInspectorTargets(null);
+
+    const runtime = spawn(
+      [
+        runtimeBinary,
+        '--vite',
+        devServerOrigin,
+        '--inspect',
+        inspectorAddress,
+        normalizedEntrypoint,
+      ],
+      {
+        cwd: projectRoot,
+        env: process.env,
+        stdin: 'inherit',
+        stdout: 'inherit',
+        stderr: 'inherit',
+      },
+    );
+
+    const inspectorWatcher = (async () => {
+      for (let index = 0; index < 100; index += 1) {
+        if (!keepWatchingInspector) {
           return;
         }
+        const inspectorTargets = await fetchInspectorTargets(inspectorListUrl);
+        if (inspectorTargets) {
+          renderInspectorTargets(inspectorTargets);
+          if (inspectorTargets.some((target) => (target.title ?? '').startsWith('window-'))) {
+            return;
+          }
+        }
+        await Bun.sleep(100);
       }
-      await Bun.sleep(100);
-    }
-  })();
+    })();
 
-  const exitCode = await runtime.exited;
-  keepWatchingInspector = false;
-  await inspectorWatcher;
+    exitCode = await runtime.exited;
+    keepWatchingInspector = false;
+    await inspectorWatcher;
+    shouldRestart = exitCode === 75;
+  } while (shouldRestart);
+
   await server.close();
   process.exit(exitCode);
 }

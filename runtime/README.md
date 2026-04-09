@@ -15,19 +15,32 @@ when user JavaScript imports `"goldlight"` and calls `createWindow(...)`.
 
 `goldlight build` is expected to place a native app layout in `dist/<target-os>/`.
 On Windows that means a double-clickable `.exe` next to the bundled app files.
-The SDK also writes [`goldlight.manifest.json`](./goldlight.manifest.json) beside the
-binary, and the prod runtime reads that manifest to find the bundle entrypoint.
+The SDK also writes `goldlight.manifest.json` beside the binary, and the prod
+runtime reads that manifest to find the bundle entrypoint.
 
-## Run
+## Dev
 
 ```sh
 bun run goldlight dev
 ```
 
-The project entrypoint is resolved from `./goldlight.json`.
+Run this from a project directory that contains `goldlight.json`.
+
+The entrypoint is resolved from that file, and startup prints:
+
+- `dev server: http://127.0.0.1:9016`
+- `devtools: devtools://...`
+
+Open the printed `devtools://...` link.
+
+Use the main DevTools target for:
+
+- the app entry runtime
+- worker sources
+- worker breakpoints and paused expression evaluation
 
 ```js
 import { createWindow } from "goldlight";
 
-createWindow({ title: "goldlight runtime", width: 640, height: 480 });
+createWindow({ width: 640, height: 480 });
 ```

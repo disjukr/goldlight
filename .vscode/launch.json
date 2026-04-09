@@ -1,0 +1,41 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Attach goldlight main runtime",
+      "type": "pwa-node",
+      "request": "attach",
+      "address": "127.0.0.1",
+      "port": 9229,
+      "cwd": "${workspaceFolder}",
+      "protocol": "inspector",
+      "restart": true,
+      "sourceMaps": true,
+      "sourceMapPathOverrides": {
+        "http://127.0.0.1:9016/*": "${workspaceFolder}/*",
+        "http://127.0.0.1:9017/*": "${workspaceFolder}/*",
+        "http://127.0.0.1:9018/*": "${workspaceFolder}/*",
+        "http://127.0.0.1:9019/*": "${workspaceFolder}/*",
+        "http://127.0.0.1:9020/*": "${workspaceFolder}/*",
+        "http://127.0.0.1:9021/*": "${workspaceFolder}/*",
+        "http://127.0.0.1:9022/*": "${workspaceFolder}/*",
+        "http://127.0.0.1:9023/*": "${workspaceFolder}/*",
+        "http://127.0.0.1:9024/*": "${workspaceFolder}/*",
+        "http://127.0.0.1:9025/*": "${workspaceFolder}/*",
+        "http://127.0.0.1:9026/*": "${workspaceFolder}/*",
+        "http://127.0.0.1:9027/*": "${workspaceFolder}/*",
+        "http://127.0.0.1:9028/*": "${workspaceFolder}/*",
+        "http://127.0.0.1:9029/*": "${workspaceFolder}/*",
+        "http://127.0.0.1:9030/*": "${workspaceFolder}/*",
+        "http://127.0.0.1:*/*": "${workspaceFolder}/*"
+      },
+      "skipFiles": [
+        "<node_internals>/**"
+      ],
+      "resolveSourceMapLocations": [
+        "${workspaceFolder}/**",
+        "!**/node_modules/**"
+      ]
+    }
+  ]
+}

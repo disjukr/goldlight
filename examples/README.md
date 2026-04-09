@@ -14,16 +14,17 @@ Examples for the new goldlight runtime live here.
 From [`examples/window/basic_window`](./window/basic_window):
 
 ```sh
-bun run ../../../sdk/src/cli.ts dev
+bun run goldlight dev
 ```
 
-This goes through the local workspace `sdk` entrypoint, starts the local Vite
-dev server, and runs against the local Rust dev runtime.
+Each example directory is a goldlight project root with its own `goldlight.json`.
+`goldlight dev` reads that file, starts the local Vite dev server, and runs the
+local Rust dev runtime.
 
 ## Build a production bundle
 
 From [`examples/window/basic_window`](./window/basic_window):
 
 ```sh
-bun run ../../../sdk/src/cli.ts build
+bun run goldlight build
 ```

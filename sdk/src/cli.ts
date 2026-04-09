@@ -15,10 +15,25 @@ interface GoldlightAppManifest {
   entrypoint: string;
 }
 
+interface InspectorTargetInfo {
+  title?: string;
+  devtoolsFrontendUrl?: string;
+  webSocketDebuggerUrl?: string;
+}
+
 const sdkDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const repoRoot = resolve(sdkDir, '..');
 const viteDevServerHost = '127.0.0.1';
 const viteDefaultPort = 9016;
+const inspectorDefaultPort = 9229;
+const GOLDLIGHT_BANNER = [
+  '             _     _ _ _       _     _',
+  '  __ _  ___ | | __| | (_) __ _| |__ | |_',
+  " / _` |/ _ \\| |/ _` | | |/ _` | '_ \\| __|",
+  '| (_| | (_) | | (_| | | | (_| | | | | |_',
+  ' \\__, |\\___/|_|\\__,_|_|_|\\__, |_| |_|\\__|',
+  ' |___/                    |___/',
+].join('\n');
 
 function printHelp() {
   console.log(`goldlight
@@ -33,6 +48,52 @@ Commands:
   dev    Read ./goldlight.json and run the project with Vite + the dev runtime
   build  Read ./goldlight.json and build into dist/<target-os>
 `);
+}
+
+function clearTerminalIfInteractive() {
+  if (!process.stdout.isTTY) {
+    return;
+  }
+
+  process.stdout.write('\x1Bc');
+}
+
+function printDevHeader(lines: string[]) {
+  console.log(GOLDLIGHT_BANNER);
+  console.log('');
+  for (const line of lines) {
+    console.log(line);
+  }
+}
+
+function cargoColorEnv() {
+  if (process.env.CARGO_TERM_COLOR) {
+    return process.env.CARGO_TERM_COLOR;
+  }
+
+  return process.stdout.isTTY ? 'always' : 'never';
+}
+
+async function runCommand(
+  command: string[],
+  cwd: string,
+  extraEnv: Record<string, string> = {},
+) {
+  const child = spawn(command, {
+    cwd,
+    stdin: 'inherit',
+    stdout: 'inherit',
+    stderr: 'inherit',
+    env: {
+      ...process.env,
+      ...extraEnv,
+    },
+  });
+
+  const exitCode = await child.exited;
+  if (exitCode !== 0) {
+    process.exit(exitCode);
+  }
 }
 
 function currentTargetOsDir() {
@@ -118,7 +179,11 @@ async function buildProject() {
   const runtimeTarget = resolve(distRoot, runtimeBinaryName());
   const { default: baseConfig } = await import('../vite.config.ts');
 
-  await Bun.$`cargo build -p goldlight-runtime --bin goldlight-runtime-prod --release`.cwd(repoRoot);
+  await runCommand(
+    ['cargo', 'build', '-p', 'goldlight-runtime', '--bin', 'goldlight-runtime-prod', '--release'],
+    repoRoot,
+    { CARGO_TERM_COLOR: cargoColorEnv() },
+  );
 
   await viteBuild(
     mergeConfig(baseConfig, {
@@ -171,6 +236,41 @@ async function waitForServer(url: string) {
   throw new Error(`Timed out waiting for dev server: ${url}`);
 }
 
+async function fetchInspectorTargets(url: string) {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      return null;
+    }
+
+    const payload = (await response.json()) as InspectorTargetInfo[];
+    return Array.isArray(payload) && payload.length > 0 ? payload : null;
+  } catch {
+    return null;
+  }
+}
+
+function inspectorLines(
+  devServerOrigin: string,
+  inspectorTargets: InspectorTargetInfo[] | null,
+) {
+  const lines = [`dev server: ${devServerOrigin}`];
+  if (inspectorTargets?.length) {
+    const mainTarget =
+      inspectorTargets.find((target) => target.title === 'main' && target.devtoolsFrontendUrl) ??
+      inspectorTargets.find((target) => target.devtoolsFrontendUrl);
+    if (mainTarget?.devtoolsFrontendUrl) {
+      lines.push(`devtools: ${mainTarget.devtoolsFrontendUrl}`);
+    } else {
+      lines.push('devtools: starting...');
+    }
+  } else {
+    lines.push('devtools: starting...');
+  }
+
+  return lines;
+}
+
 async function isPortAvailable(port: number) {
   return await new Promise<boolean>((resolveAvailability) => {
     const server = createNetServer();
@@ -187,14 +287,14 @@ async function isPortAvailable(port: number) {
   });
 }
 
-async function pickDevPort() {
-  for (let port = viteDefaultPort; port < viteDefaultPort + 20; port += 1) {
+async function pickAvailablePort(startPort: number) {
+  for (let port = startPort; port < startPort + 20; port += 1) {
     if (await isPortAvailable(port)) {
       return port;
     }
   }
 
-  throw new Error(`Could not find an available dev port starting at ${viteDefaultPort}`);
+  throw new Error(`Could not find an available port starting at ${startPort}`);
 }
 
 async function devProject() {
@@ -202,7 +302,20 @@ async function devProject() {
   const projectConfig = loadProjectConfig(projectRoot);
   const normalizedEntrypoint = projectConfig.entrypoint.replaceAll('\\', '/');
   const { default: baseConfig } = await import('../vite.config.ts');
-  const port = await pickDevPort();
+  const port = await pickAvailablePort(viteDefaultPort);
+  const inspectorPort = await pickAvailablePort(inspectorDefaultPort);
+  const inspectorAddress = `${viteDevServerHost}:${inspectorPort}`;
+  const runtimeBuildName =
+    process.platform === 'win32' ? 'goldlight-runtime-dev.exe' : 'goldlight-runtime-dev';
+  const runtimeBinary = resolve(repoRoot, 'target', 'debug', runtimeBuildName);
+
+  console.log('building goldlight runtime...');
+  await runCommand(
+    ['cargo', 'build', '-p', 'goldlight-runtime', '--bin', 'goldlight-runtime-dev'],
+    repoRoot,
+    { CARGO_TERM_COLOR: cargoColorEnv() },
+  );
+  clearTerminalIfInteractive();
 
   const server = await createViteServer(
     mergeConfig(baseConfig, {
@@ -222,6 +335,7 @@ async function devProject() {
   await server.listen();
   const devServerOrigin = `http://${viteDevServerHost}:${port}`;
   const devEntrypointUrl = `${devServerOrigin}/${normalizedEntrypoint}`;
+  const inspectorListUrl = `http://${inspectorAddress}/json/list`;
 
   try {
     await waitForServer(devEntrypointUrl);
@@ -232,26 +346,50 @@ async function devProject() {
 
   const runtime = spawn(
     [
-      'cargo',
-      'run',
-      '-p',
-      'goldlight-runtime',
-      '--bin',
-      'goldlight-runtime-dev',
-      '--',
+      runtimeBinary,
       '--vite',
       devServerOrigin,
+      '--inspect',
+      inspectorAddress,
       normalizedEntrypoint,
     ],
     {
       cwd: projectRoot,
+      env: process.env,
       stdin: 'inherit',
       stdout: 'inherit',
       stderr: 'inherit',
     },
   );
 
+  let lastInspectorSignature = '';
+  const renderInspectorTargets = (inspectorTargets: InspectorTargetInfo[] | null) => {
+    const signature = JSON.stringify(inspectorTargets ?? []);
+    if (signature === lastInspectorSignature) {
+      return;
+    }
+    lastInspectorSignature = signature;
+    clearTerminalIfInteractive();
+    printDevHeader(inspectorLines(devServerOrigin, inspectorTargets));
+  };
+
+  renderInspectorTargets(null);
+
+  const inspectorWatcher = (async () => {
+    for (let index = 0; index < 100; index += 1) {
+      const inspectorTargets = await fetchInspectorTargets(inspectorListUrl);
+      if (inspectorTargets) {
+        renderInspectorTargets(inspectorTargets);
+        if (inspectorTargets.some((target) => (target.title ?? '').startsWith('window-'))) {
+          return;
+        }
+      }
+      await Bun.sleep(100);
+    }
+  })();
+
   const exitCode = await runtime.exited;
+  await inspectorWatcher;
   await server.close();
   process.exit(exitCode);
 }

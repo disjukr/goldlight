@@ -12,6 +12,7 @@ use std::thread;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
+use bytes::Bytes;
 use deno_core::{
     resolve_import, resolve_path, v8, JsRuntime, ModuleLoadResponse, ModuleLoader, ModuleSource,
     ModuleSourceCode, ModuleSpecifier, ModuleType, OpState, PollEventLoopOptions, RequestedModuleType,
@@ -30,8 +31,6 @@ use tokio::runtime::Builder as TokioRuntimeBuilder;
 use tracing::debug;
 #[cfg(feature = "dev-runtime")]
 use std::net::{SocketAddr, TcpListener};
-#[cfg(feature = "dev-runtime")]
-use axum::extract::ws::{Message as WebSocketMessage, WebSocket, WebSocketUpgrade};
 #[cfg(feature = "dev-runtime")]
 use axum::extract::{Path as AxumPath, State};
 #[cfg(feature = "dev-runtime")]
@@ -52,14 +51,26 @@ use deno_core::{
 };
 #[cfg(feature = "dev-runtime")]
 use futures::channel::mpsc;
+use fastwebsockets::{FragmentCollector, Frame as FastWebSocketFrame, OpCode as FastOpCode};
 #[cfg(feature = "dev-runtime")]
-use futures_util::{SinkExt, StreamExt};
+use fastwebsockets::{
+    upgrade::IncomingUpgrade, WebSocket as FastWebSocket, WebSocketWrite as FastWebSocketWrite,
+};
+use futures_util::StreamExt;
+use http_body_util::Empty;
+use hyper::Request;
+use hyper::upgrade::Upgraded;
+use hyper_util::rt::TokioIo;
+#[cfg(feature = "dev-runtime")]
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 #[cfg(feature = "dev-runtime")]
 use tokio::sync::oneshot;
-#[cfg(feature = "dev-runtime")]
-use tungstenite::client::IntoClientRequest;
-#[cfg(feature = "dev-runtime")]
-use tungstenite::{connect, Message as TungsteniteMessage};
+use tokio::sync::mpsc::{self as tokio_mpsc, UnboundedSender as TokioUnboundedSender};
+use tokio::net::TcpStream;
+use tokio_rustls::TlsConnector;
+use tokio_rustls::rustls::ClientConfig;
+use tokio_rustls::rustls::RootCertStore;
+use tokio_rustls::rustls::pki_types::ServerName;
 #[cfg(feature = "dev-runtime")]
 use uuid::Uuid;
 use winit::{
@@ -83,7 +94,12 @@ const GOLDLIGHT_MODULE_SOURCE: &str = include_str!("../js/goldlight_module.js");
 #[cfg(feature = "dev-runtime")]
 const GOLDLIGHT_HMR_SOURCE: &str = include_str!("../js/hmr.js");
 const GOLDLIGHT_WORKER_CONSOLE_SOURCE: &str = include_str!("../js/worker_console.js");
+const GOLDLIGHT_ABORT_SOURCE: &str = include_str!("../js/abort.js");
+const GOLDLIGHT_BLOB_SOURCE: &str = include_str!("../js/blob.js");
+const GOLDLIGHT_STREAMS_SOURCE: &str = include_str!("../js/streams.js");
 const GOLDLIGHT_TIMERS_SOURCE: &str = include_str!("../js/timers.js");
+const GOLDLIGHT_FETCH_SOURCE: &str = include_str!("../js/fetch.js");
+const GOLDLIGHT_WEBSOCKET_SOURCE: &str = include_str!("../js/websocket.js");
 #[cfg(feature = "dev-runtime")]
 const GOLDLIGHT_VITE_CLIENT_SPECIFIER: &str = "ext:goldlight/vite_client.js";
 #[cfg(feature = "dev-runtime")]
@@ -251,6 +267,21 @@ struct TimerHostState {
     timers: HashMap<u32, TimerEntry>,
 }
 
+#[derive(Default)]
+struct WebSocketHostState {
+    next_socket_id: u32,
+    sockets: HashMap<u32, WebSocketConnectionHandle>,
+    buffered_amounts: HashMap<u32, u32>,
+    pending_events: Vec<WebSocketEventPayload>,
+}
+
+#[derive(Default)]
+struct FetchHostState {
+    next_request_id: u32,
+    requests: HashMap<u32, FetchRequestHandle>,
+    pending_events: Vec<FetchEventPayload>,
+}
+
 #[cfg(feature = "dev-runtime")]
 #[derive(Default)]
 struct HmrRuntimeState {
@@ -281,6 +312,54 @@ struct TimerEntry {
     interval: Option<Duration>,
 }
 
+struct FetchRequestHandle {
+    abort_tx: tokio::sync::watch::Sender<bool>,
+    body_tx: Option<TokioUnboundedSender<FetchBodyCommand>>,
+    thread_handle: Option<thread::JoinHandle<()>>,
+}
+
+impl FetchRequestHandle {
+    fn shutdown(mut self) {
+        let _ = self.abort_tx.send(true);
+        if let Some(thread_handle) = self.thread_handle.take() {
+            thread::spawn(move || {
+                let _ = thread_handle.join();
+            });
+        }
+    }
+}
+
+enum WebSocketCommand {
+    SendText { payload: String, queued_bytes: u32 },
+    SendBinary { payload: Vec<u8>, queued_bytes: u32 },
+    Close {
+        code: Option<u16>,
+        reason: Option<String>,
+    },
+    Shutdown,
+}
+
+enum FetchBodyCommand {
+    Chunk(Vec<u8>),
+    Done,
+}
+
+struct WebSocketConnectionHandle {
+    command_tx: TokioUnboundedSender<WebSocketCommand>,
+    thread_handle: Option<thread::JoinHandle<()>>,
+}
+
+impl WebSocketConnectionHandle {
+    fn shutdown(mut self) {
+        let _ = self.command_tx.send(WebSocketCommand::Shutdown);
+        if let Some(thread_handle) = self.thread_handle.take() {
+            thread::spawn(move || {
+                let _ = thread_handle.join();
+            });
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 struct PendingWindow {
     id: u32,
@@ -300,6 +379,33 @@ enum WorkerEventPayload {
     AnimationFrame {
         #[serde(rename = "timestampMs")]
         timestamp_ms: f64,
+    },
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+enum WebSocketEventPayload {
+    Open {
+        socket_id: u32,
+        protocol: Option<String>,
+        extensions: Option<String>,
+    },
+    Message {
+        socket_id: u32,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        data_text: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        data_binary: Option<Vec<u8>>,
+    },
+    Error {
+        socket_id: u32,
+        message: String,
+    },
+    Close {
+        socket_id: u32,
+        code: Option<u16>,
+        reason: Option<String>,
+        was_clean: bool,
     },
 }
 
@@ -384,12 +490,63 @@ struct RuntimeOpContext {
     event_proxy: Option<EventLoopProxy<RuntimeUserEvent>>,
     worker_state: Option<WorkerHostStateHandle>,
     timer_state: TimerHostStateHandle,
+    fetch_state: FetchHostStateHandle,
+    websocket_state: WebSocketHostStateHandle,
     #[cfg(feature = "dev-runtime")]
     hmr_state: Option<HmrRuntimeStateHandle>,
 }
 
 type RuntimeStateHandle = Arc<Mutex<RuntimeState>>;
 type TimerHostStateHandle = Arc<Mutex<TimerHostState>>;
+type FetchHostStateHandle = Arc<Mutex<FetchHostState>>;
+type WebSocketHostStateHandle = Arc<Mutex<WebSocketHostState>>;
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FetchRequestInput {
+    url: String,
+    method: String,
+    #[serde(default)]
+    headers: Vec<(String, String)>,
+    #[serde(default)]
+    body: Option<Vec<u8>>,
+    #[serde(default)]
+    streaming_body: bool,
+    #[serde(default)]
+    redirect: Option<String>,
+    #[serde(default)]
+    credentials: Option<String>,
+    #[serde(default)]
+    cache: Option<String>,
+    #[serde(default)]
+    referrer: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum FetchEventPayload {
+    Response {
+        request_id: u32,
+        url: String,
+        status: u16,
+        status_text: String,
+        headers: Vec<(String, String)>,
+    },
+    Chunk {
+        request_id: u32,
+        chunk: Vec<u8>,
+    },
+    Done {
+        request_id: u32,
+    },
+    Error {
+        request_id: u32,
+        message: String,
+    },
+    Aborted {
+        request_id: u32,
+    },
+}
 
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -827,6 +984,1039 @@ fn op_goldlight_timer_drain_ready(state: &mut OpState) -> Result<Vec<u32>, JsErr
     Ok(ready)
 }
 
+fn push_fetch_event(
+    fetch_state: &FetchHostStateHandle,
+    event_proxy: &Option<EventLoopProxy<RuntimeUserEvent>>,
+    event: FetchEventPayload,
+) {
+    if let Ok(mut fetch_state) = fetch_state.lock() {
+        fetch_state.pending_events.push(event);
+    }
+    if let Some(event_proxy) = event_proxy {
+        let _ = event_proxy.send_event(RuntimeUserEvent::Wake);
+    }
+}
+
+fn spawn_fetch_request(
+    request_id: u32,
+    request: FetchRequestInput,
+    fetch_state: FetchHostStateHandle,
+    event_proxy: Option<EventLoopProxy<RuntimeUserEvent>>,
+) -> Result<FetchRequestHandle, JsErrorBox> {
+    let (abort_tx, abort_rx) = tokio::sync::watch::channel(false);
+    let (body_tx, body_rx) = if request.streaming_body {
+        let (tx, rx) = tokio_mpsc::unbounded_channel::<FetchBodyCommand>();
+        (Some(tx), Some(rx))
+    } else {
+        (None, None)
+    };
+    let thread_handle = thread::Builder::new()
+        .name(format!("goldlight-fetch-{request_id}"))
+        .spawn(move || {
+            let runtime = match TokioRuntimeBuilder::new_current_thread().enable_all().build() {
+                Ok(runtime) => runtime,
+                Err(error) => {
+                    push_fetch_event(
+                        &fetch_state,
+                        &event_proxy,
+                        FetchEventPayload::Error {
+                            request_id,
+                            message: format!("failed to create fetch runtime: {error}"),
+                        },
+                    );
+                    return;
+                }
+            };
+
+            runtime.block_on(async move {
+                let mut abort_rx = abort_rx;
+                let redirect_mode = request.redirect.as_deref().unwrap_or("follow");
+                let redirect_policy = match redirect_mode {
+                    "error" | "manual" => reqwest::redirect::Policy::none(),
+                    _ => reqwest::redirect::Policy::limited(20),
+                };
+                let client = match reqwest::Client::builder()
+                    .redirect(redirect_policy)
+                    .build()
+                {
+                    Ok(client) => client,
+                    Err(error) => {
+                        push_fetch_event(
+                            &fetch_state,
+                            &event_proxy,
+                            FetchEventPayload::Error {
+                                request_id,
+                                message: format!("failed to create fetch client: {error}"),
+                            },
+                        );
+                        return;
+                    }
+                };
+                let method = match reqwest::Method::from_bytes(request.method.as_bytes()) {
+                    Ok(method) => method,
+                    Err(error) => {
+                        push_fetch_event(
+                            &fetch_state,
+                            &event_proxy,
+                            FetchEventPayload::Error {
+                                request_id,
+                                message: format!("invalid request method: {error}"),
+                            },
+                        );
+                        return;
+                    }
+                };
+                let mut builder = client.request(method, &request.url);
+                for (name, value) in request.headers {
+                    builder = builder.header(&name, &value);
+                }
+                let credentials_mode = request.credentials.as_deref().unwrap_or("same-origin");
+                if credentials_mode == "omit" {
+                    builder = builder.header(reqwest::header::COOKIE, "");
+                    builder = builder.header(reqwest::header::AUTHORIZATION, "");
+                    builder = builder.header("proxy-authorization", "");
+                }
+                let cache_mode = request.cache.as_deref().unwrap_or("default");
+                match cache_mode {
+                    "no-store" => {
+                        builder = builder.header(reqwest::header::CACHE_CONTROL, "no-store");
+                        builder = builder.header(reqwest::header::PRAGMA, "no-cache");
+                    }
+                    "reload" => {
+                        builder = builder.header(reqwest::header::CACHE_CONTROL, "no-cache");
+                        builder = builder.header(reqwest::header::PRAGMA, "no-cache");
+                    }
+                    "no-cache" => {
+                        builder = builder.header(reqwest::header::CACHE_CONTROL, "no-cache");
+                    }
+                    "force-cache" => {
+                        builder = builder.header(reqwest::header::CACHE_CONTROL, "only-if-cached, max-age=2147483647");
+                    }
+                    "only-if-cached" => {
+                        builder = builder.header(reqwest::header::CACHE_CONTROL, "only-if-cached");
+                    }
+                    _ => {}
+                }
+                if let Some(referrer) = &request.referrer {
+                    if !referrer.is_empty() {
+                        builder = builder.header(reqwest::header::REFERER, referrer);
+                    }
+                }
+                if request.streaming_body {
+                    let mut body_rx = body_rx.expect("streaming body receiver missing");
+                    let mut body_abort_rx = abort_rx.clone();
+                    let body_stream = async_stream::stream! {
+                        loop {
+                            tokio::select! {
+                                changed = body_abort_rx.changed() => {
+                                    match changed {
+                                        Ok(()) if *body_abort_rx.borrow() => {
+                                            yield Err(std::io::Error::other("fetch aborted"));
+                                            return;
+                                        }
+                                        _ => return,
+                                    }
+                                }
+                                command = body_rx.recv() => {
+                                    match command {
+                                        Some(FetchBodyCommand::Chunk(chunk)) => {
+                                            yield Ok::<bytes::Bytes, std::io::Error>(bytes::Bytes::from(chunk));
+                                        }
+                                        Some(FetchBodyCommand::Done) | None => {
+                                            return;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    };
+                    builder = builder.body(reqwest::Body::wrap_stream(body_stream));
+                } else if let Some(body) = request.body {
+                    builder = builder.body(body);
+                }
+
+                let send_result = tokio::select! {
+                    changed = abort_rx.changed() => {
+                        match changed {
+                            Ok(()) if *abort_rx.borrow() => {
+                                push_fetch_event(&fetch_state, &event_proxy, FetchEventPayload::Aborted { request_id });
+                                return;
+                            }
+                            _ => return,
+                        }
+                    }
+                    response = builder.send() => response,
+                };
+
+                let response = match send_result {
+                    Ok(response) => response,
+                    Err(error) => {
+                        if *abort_rx.borrow() {
+                            push_fetch_event(&fetch_state, &event_proxy, FetchEventPayload::Aborted { request_id });
+                            return;
+                        }
+                        push_fetch_event(
+                            &fetch_state,
+                            &event_proxy,
+                            FetchEventPayload::Error {
+                                request_id,
+                                message: format!("fetch failed: {error}"),
+                            },
+                        );
+                        return;
+                    }
+                };
+
+                if redirect_mode == "error" && response.status().is_redirection() {
+                    push_fetch_event(
+                        &fetch_state,
+                        &event_proxy,
+                        FetchEventPayload::Error {
+                            request_id,
+                            message: "redirects are not allowed for this request".to_string(),
+                        },
+                    );
+                    return;
+                }
+
+                let status = response.status();
+                let url = response.url().to_string();
+                let status_text = status.canonical_reason().unwrap_or("").to_string();
+                let headers = response
+                    .headers()
+                    .iter()
+                    .filter_map(|(name, value)| {
+                        value
+                            .to_str()
+                            .ok()
+                            .map(|value| (name.as_str().to_string(), value.to_string()))
+                    })
+                    .collect::<Vec<_>>();
+                push_fetch_event(
+                    &fetch_state,
+                    &event_proxy,
+                    FetchEventPayload::Response {
+                        request_id,
+                        url,
+                        status: status.as_u16(),
+                        status_text,
+                        headers,
+                    },
+                );
+
+                let mut stream = response.bytes_stream();
+                loop {
+                    tokio::select! {
+                        changed = abort_rx.changed() => {
+                            match changed {
+                                Ok(()) if *abort_rx.borrow() => {
+                                    push_fetch_event(&fetch_state, &event_proxy, FetchEventPayload::Aborted { request_id });
+                                    return;
+                                }
+                                _ => break,
+                            }
+                        }
+                        next_chunk = stream.next() => {
+                            match next_chunk {
+                                Some(Ok(chunk)) => {
+                                    push_fetch_event(
+                                        &fetch_state,
+                                        &event_proxy,
+                                        FetchEventPayload::Chunk {
+                                            request_id,
+                                            chunk: chunk.to_vec(),
+                                        },
+                                    );
+                                }
+                                Some(Err(error)) => {
+                                    push_fetch_event(
+                                        &fetch_state,
+                                        &event_proxy,
+                                        FetchEventPayload::Error {
+                                            request_id,
+                                            message: format!("failed to read response body: {error}"),
+                                        },
+                                    );
+                                    return;
+                                }
+                                None => {
+                                    push_fetch_event(&fetch_state, &event_proxy, FetchEventPayload::Done { request_id });
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        })
+        .map_err(|error| JsErrorBox::generic(format!("failed to spawn fetch thread: {error}")))?;
+
+    Ok(FetchRequestHandle {
+        abort_tx,
+        body_tx,
+        thread_handle: Some(thread_handle),
+    })
+}
+
+fn shutdown_all_fetch_requests(fetch_state: &FetchHostStateHandle) {
+    let requests = if let Ok(mut fetch_state) = fetch_state.lock() {
+        std::mem::take(&mut fetch_state.requests)
+    } else {
+        HashMap::new()
+    };
+    for (_, request) in requests {
+        request.shutdown();
+    }
+}
+
+fn push_websocket_event(
+    websocket_state: &WebSocketHostStateHandle,
+    event_proxy: &Option<EventLoopProxy<RuntimeUserEvent>>,
+    event: WebSocketEventPayload,
+) {
+    if let Ok(mut websocket_state) = websocket_state.lock() {
+        websocket_state.pending_events.push(event);
+    }
+    if let Some(event_proxy) = event_proxy {
+        let _ = event_proxy.send_event(RuntimeUserEvent::Wake);
+    }
+}
+
+trait AsyncReadWrite: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {}
+impl<T> AsyncReadWrite for T where T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {}
+
+struct TokioSpawnExecutor;
+
+impl hyper::rt::Executor<std::pin::Pin<Box<dyn Future<Output = ()> + Send>>> for TokioSpawnExecutor {
+    fn execute(&self, fut: std::pin::Pin<Box<dyn Future<Output = ()> + Send>>) {
+        tokio::task::spawn(fut);
+    }
+}
+
+fn websocket_tls_connector() -> TlsConnector {
+    let mut root_store = RootCertStore::empty();
+    root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+
+    let config = ClientConfig::builder()
+        .with_root_certificates(root_store)
+        .with_no_client_auth();
+
+    TlsConnector::from(Arc::new(config))
+}
+
+async fn connect_fastwebsocket(
+    url: &str,
+    protocols: &[String],
+) -> Result<(
+    FragmentCollector<TokioIo<Upgraded>>,
+    hyper::HeaderMap,
+)> {
+    let parsed =
+        reqwest::Url::parse(url).with_context(|| format!("invalid websocket url: {url}"))?;
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| anyhow!("websocket url missing host: {url}"))?;
+    let port = parsed
+        .port_or_known_default()
+        .ok_or_else(|| anyhow!("websocket url missing port: {url}"))?;
+    let authority = if parsed.port().is_some() {
+        format!("{host}:{port}")
+    } else {
+        host.to_string()
+    };
+
+    let mut path = parsed.path().to_string();
+    if let Some(query) = parsed.query() {
+        path.push('?');
+        path.push_str(query);
+    }
+    if path.is_empty() {
+        path.push('/');
+    }
+
+    let tcp_stream = TcpStream::connect((host, port)).await?;
+    let request_url = format!(
+        "{}://{}{}",
+        if parsed.scheme() == "wss" { "https" } else { "http" },
+        authority,
+        path
+    );
+    let stream: Box<dyn AsyncReadWrite> = match parsed.scheme() {
+        "ws" => Box::new(tcp_stream),
+        "wss" => {
+            let connector = websocket_tls_connector();
+            let server_name = ServerName::try_from(host.to_string())
+                .map_err(|_| anyhow!("invalid websocket hostname: {host}"))?;
+            Box::new(connector.connect(server_name, tcp_stream).await?)
+        }
+        scheme => return Err(anyhow!("unsupported websocket scheme: {scheme}")),
+    };
+
+    let mut request = Request::builder()
+        .method("GET")
+        .uri(request_url)
+        .header(hyper::header::HOST, authority)
+        .header(hyper::header::UPGRADE, "websocket")
+        .header(hyper::header::CONNECTION, "upgrade")
+        .header(
+            hyper::header::SEC_WEBSOCKET_KEY,
+            fastwebsockets::handshake::generate_key(),
+        )
+        .header(hyper::header::SEC_WEBSOCKET_VERSION, "13");
+
+    if !protocols.is_empty() {
+        request = request.header(hyper::header::SEC_WEBSOCKET_PROTOCOL, protocols.join(", "));
+    }
+
+    let request = request.body(Empty::<Bytes>::new())?;
+    let (mut websocket, response) =
+        fastwebsockets::handshake::client(&TokioSpawnExecutor, request, stream).await?;
+    websocket.set_auto_close(true);
+    websocket.set_auto_pong(true);
+    let websocket = FragmentCollector::new(websocket);
+    Ok((websocket, response.headers().clone()))
+}
+
+#[cfg(feature = "dev-runtime")]
+async fn connect_hmr_fastwebsocket(
+    url: &str,
+    protocols: &[String],
+) -> Result<FragmentCollector<Box<dyn AsyncReadWrite>>> {
+    let parsed =
+        reqwest::Url::parse(url).with_context(|| format!("invalid websocket url: {url}"))?;
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| anyhow!("websocket url missing host: {url}"))?;
+    let port = parsed
+        .port_or_known_default()
+        .ok_or_else(|| anyhow!("websocket url missing port: {url}"))?;
+    let authority = if parsed.port().is_some() {
+        format!("{host}:{port}")
+    } else {
+        host.to_string()
+    };
+
+    let mut path = parsed.path().to_string();
+    if let Some(query) = parsed.query() {
+        path.push('?');
+        path.push_str(query);
+    }
+    if path.is_empty() {
+        path.push('/');
+    }
+
+    let tcp_stream = TcpStream::connect((host, port)).await?;
+    let mut stream: Box<dyn AsyncReadWrite> = match parsed.scheme() {
+        "ws" => Box::new(tcp_stream),
+        "wss" => {
+            let connector = websocket_tls_connector();
+            let server_name = ServerName::try_from(host.to_string())
+                .map_err(|_| anyhow!("invalid websocket hostname: {host}"))?;
+            Box::new(connector.connect(server_name, tcp_stream).await?)
+        }
+        scheme => return Err(anyhow!("unsupported websocket scheme: {scheme}")),
+    };
+
+    let mut request = format!(
+        "GET {path} HTTP/1.1\r\nHost: {authority}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {}\r\nSec-WebSocket-Version: 13\r\n",
+        fastwebsockets::handshake::generate_key()
+    );
+    if !protocols.is_empty() {
+        request.push_str("Sec-WebSocket-Protocol: ");
+        request.push_str(&protocols.join(", "));
+        request.push_str("\r\n");
+    }
+    request.push_str("\r\n");
+    stream.write_all(request.as_bytes()).await?;
+    stream.flush().await?;
+
+    let mut response_bytes = Vec::new();
+    let mut byte = [0_u8; 1];
+    loop {
+        stream.read_exact(&mut byte).await?;
+        response_bytes.push(byte[0]);
+        if response_bytes.ends_with(b"\r\n\r\n") {
+            break;
+        }
+    }
+
+    let response = String::from_utf8(response_bytes)
+        .map_err(|error| anyhow!("invalid websocket upgrade response: {error}"))?;
+    let mut lines = response.split("\r\n");
+    let status_line = lines
+        .next()
+        .ok_or_else(|| anyhow!("missing websocket upgrade status line"))?;
+    if !status_line.starts_with("HTTP/1.1 101") && !status_line.starts_with("HTTP/1.0 101") {
+        return Err(anyhow!("unexpected websocket upgrade status: {status_line}"));
+    }
+
+    let mut has_upgrade = false;
+    let mut has_connection_upgrade = false;
+    for line in lines {
+        if line.is_empty() {
+            continue;
+        }
+        let Some((name, value)) = line.split_once(':') else {
+            continue;
+        };
+        let name = name.trim();
+        let value = value.trim();
+        if name.eq_ignore_ascii_case("Upgrade") && value.eq_ignore_ascii_case("websocket") {
+            has_upgrade = true;
+        }
+        if name.eq_ignore_ascii_case("Connection")
+            && value
+                .split(',')
+                .any(|token| token.trim().eq_ignore_ascii_case("upgrade"))
+        {
+            has_connection_upgrade = true;
+        }
+    }
+
+    if !has_upgrade || !has_connection_upgrade {
+        return Err(anyhow!("invalid websocket upgrade response headers"));
+    }
+
+    let mut websocket = FastWebSocket::after_handshake(stream, fastwebsockets::Role::Client);
+    websocket.set_auto_close(true);
+    websocket.set_auto_pong(true);
+    Ok(FragmentCollector::new(websocket))
+}
+
+fn websocket_buffered_amount_add(
+    websocket_state: &WebSocketHostStateHandle,
+    socket_id: u32,
+    amount: u32,
+) {
+    if let Ok(mut websocket_state) = websocket_state.lock() {
+        let entry = websocket_state.buffered_amounts.entry(socket_id).or_insert(0);
+        *entry = entry.saturating_add(amount);
+    }
+}
+
+fn websocket_buffered_amount_sub(
+    websocket_state: &WebSocketHostStateHandle,
+    socket_id: u32,
+    amount: u32,
+) {
+    if let Ok(mut websocket_state) = websocket_state.lock() {
+        if let Some(entry) = websocket_state.buffered_amounts.get_mut(&socket_id) {
+            *entry = entry.saturating_sub(amount);
+        }
+    }
+}
+
+fn spawn_websocket_connection(
+    socket_id: u32,
+    url: String,
+    protocols: Vec<String>,
+    websocket_state: WebSocketHostStateHandle,
+    event_proxy: Option<EventLoopProxy<RuntimeUserEvent>>,
+) -> Result<WebSocketConnectionHandle, JsErrorBox> {
+    let (command_tx, mut command_rx) = tokio_mpsc::unbounded_channel::<WebSocketCommand>();
+    let thread_handle = thread::Builder::new()
+        .name(format!("goldlight-websocket-{socket_id}"))
+        .spawn(move || {
+            let runtime = match TokioRuntimeBuilder::new_current_thread().enable_all().build() {
+                Ok(runtime) => runtime,
+                Err(error) => {
+                    push_websocket_event(
+                        &websocket_state,
+                        &event_proxy,
+                        WebSocketEventPayload::Error {
+                            socket_id,
+                            message: format!("failed to create websocket runtime: {error}"),
+                        },
+                    );
+                    push_websocket_event(
+                        &websocket_state,
+                        &event_proxy,
+                        WebSocketEventPayload::Close {
+                            socket_id,
+                            code: None,
+                            reason: Some("failed to initialize websocket".to_string()),
+                            was_clean: false,
+                        },
+                    );
+                    return;
+                }
+            };
+
+            runtime.block_on(async move {
+                let (mut websocket, response_headers) = match connect_fastwebsocket(&url, &protocols).await {
+                    Ok(connection) => connection,
+                    Err(error) => {
+                        push_websocket_event(
+                            &websocket_state,
+                            &event_proxy,
+                            WebSocketEventPayload::Error {
+                                socket_id,
+                                message: error.to_string(),
+                            },
+                        );
+                        push_websocket_event(
+                            &websocket_state,
+                            &event_proxy,
+                            WebSocketEventPayload::Close {
+                                socket_id,
+                                code: None,
+                                reason: Some(error.to_string()),
+                                was_clean: false,
+                            },
+                        );
+                        return;
+                    }
+                };
+
+                let protocol = response_headers
+                    .get("Sec-WebSocket-Protocol")
+                    .and_then(|value| value.to_str().ok())
+                    .map(|value| value.to_string());
+                let extensions = response_headers
+                    .get("Sec-WebSocket-Extensions")
+                    .and_then(|value| value.to_str().ok())
+                    .map(|value| value.to_string());
+                push_websocket_event(
+                    &websocket_state,
+                    &event_proxy,
+                    WebSocketEventPayload::Open {
+                        socket_id,
+                        protocol,
+                        extensions,
+                    },
+                );
+
+                loop {
+                    tokio::select! {
+                        maybe_command = command_rx.recv() => {
+                            let Some(command) = maybe_command else {
+                                break;
+                            };
+                            match command {
+                                WebSocketCommand::SendText { payload, queued_bytes } => {
+                                    if let Err(error) = websocket.write_frame(FastWebSocketFrame::text(payload.into_bytes().into())).await {
+                                        push_websocket_event(
+                                            &websocket_state,
+                                            &event_proxy,
+                                            WebSocketEventPayload::Error {
+                                                socket_id,
+                                                message: error.to_string(),
+                                            },
+                                        );
+                                        break;
+                                    }
+                                    websocket_buffered_amount_sub(&websocket_state, socket_id, queued_bytes);
+                                }
+                                WebSocketCommand::SendBinary { payload, queued_bytes } => {
+                                    if let Err(error) = websocket.write_frame(FastWebSocketFrame::binary(payload.into())).await {
+                                        push_websocket_event(
+                                            &websocket_state,
+                                            &event_proxy,
+                                            WebSocketEventPayload::Error {
+                                                socket_id,
+                                                message: error.to_string(),
+                                            },
+                                        );
+                                        break;
+                                    }
+                                    websocket_buffered_amount_sub(&websocket_state, socket_id, queued_bytes);
+                                }
+                                WebSocketCommand::Close { code, reason } => {
+                                    let close_frame = match code {
+                                        Some(code) => FastWebSocketFrame::close(
+                                            code,
+                                            reason.clone().unwrap_or_default().as_bytes(),
+                                        ),
+                                        None => FastWebSocketFrame::close_raw(vec![].into()),
+                                    };
+                                    let _ = websocket.write_frame(close_frame).await;
+                                    push_websocket_event(
+                                        &websocket_state,
+                                        &event_proxy,
+                                        WebSocketEventPayload::Close {
+                                            socket_id,
+                                            code,
+                                            reason,
+                                            was_clean: true,
+                                        },
+                                    );
+                                    break;
+                                }
+                                WebSocketCommand::Shutdown => {
+                                    let _ = websocket.write_frame(FastWebSocketFrame::close_raw(vec![].into())).await;
+                                    break;
+                                }
+                            }
+                        }
+                        message = websocket.read_frame() => {
+                            match message {
+                                Ok(frame) if frame.opcode == FastOpCode::Text => {
+                                    push_websocket_event(
+                                        &websocket_state,
+                                        &event_proxy,
+                                        WebSocketEventPayload::Message {
+                                            socket_id,
+                                            data_text: Some(String::from_utf8_lossy(&frame.payload).into_owned()),
+                                            data_binary: None,
+                                        },
+                                    );
+                                }
+                                Ok(frame) if frame.opcode == FastOpCode::Binary => {
+                                    push_websocket_event(
+                                        &websocket_state,
+                                        &event_proxy,
+                                        WebSocketEventPayload::Message {
+                                            socket_id,
+                                            data_text: None,
+                                            data_binary: Some(frame.payload.to_vec()),
+                                        },
+                                    );
+                                }
+                                Ok(frame) if frame.opcode == FastOpCode::Close => {
+                                    let code = if frame.payload.len() >= 2 {
+                                        Some(u16::from_be_bytes([frame.payload[0], frame.payload[1]]))
+                                    } else {
+                                        None
+                                    };
+                                    let reason = if frame.payload.len() > 2 {
+                                        Some(String::from_utf8_lossy(&frame.payload[2..]).into_owned())
+                                    } else {
+                                        None
+                                    };
+                                    push_websocket_event(
+                                        &websocket_state,
+                                        &event_proxy,
+                                        WebSocketEventPayload::Close {
+                                            socket_id,
+                                            code,
+                                            reason,
+                                            was_clean: true,
+                                        },
+                                    );
+                                    break;
+                                }
+                                Ok(frame) if frame.opcode == FastOpCode::Pong => {}
+                                Ok(frame) if frame.opcode == FastOpCode::Ping => {
+                                    let _ = websocket.write_frame(FastWebSocketFrame::pong(frame.payload)).await;
+                                }
+                                Ok(_) => {}
+                                Err(error) => {
+                                    push_websocket_event(
+                                        &websocket_state,
+                                        &event_proxy,
+                                        WebSocketEventPayload::Error {
+                                            socket_id,
+                                            message: error.to_string(),
+                                        },
+                                    );
+                                    push_websocket_event(
+                                        &websocket_state,
+                                        &event_proxy,
+                                        WebSocketEventPayload::Close {
+                                            socket_id,
+                                            code: None,
+                                            reason: Some(error.to_string()),
+                                            was_clean: false,
+                                        },
+                                    );
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        })
+        .map_err(|error| JsErrorBox::generic(format!("failed to spawn websocket thread: {error}")))?;
+
+    Ok(WebSocketConnectionHandle {
+        command_tx,
+        thread_handle: Some(thread_handle),
+    })
+}
+
+fn shutdown_all_websockets(websocket_state: &WebSocketHostStateHandle) {
+    let sockets = if let Ok(mut websocket_state) = websocket_state.lock() {
+        websocket_state.buffered_amounts.clear();
+        std::mem::take(&mut websocket_state.sockets)
+    } else {
+        HashMap::new()
+    };
+    for (_, socket) in sockets {
+        socket.shutdown();
+    }
+}
+
+#[deno_core::op2]
+fn op_goldlight_fetch_start(
+    state: &mut OpState,
+    #[serde] request: FetchRequestInput,
+) -> Result<u32, JsErrorBox> {
+    let op_context = state.borrow::<RuntimeOpContext>().clone();
+    let request_id = {
+        let mut fetch_state = op_context
+            .fetch_state
+            .lock()
+            .map_err(|_| JsErrorBox::generic("fetch state mutex poisoned"))?;
+        let request_id = fetch_state.next_request_id;
+        fetch_state.next_request_id = fetch_state.next_request_id.wrapping_add(1).max(1);
+        request_id
+    };
+    let request_handle = spawn_fetch_request(
+        request_id,
+        request,
+        op_context.fetch_state.clone(),
+        op_context.event_proxy.clone(),
+    )?;
+    let mut fetch_state = op_context
+        .fetch_state
+        .lock()
+        .map_err(|_| JsErrorBox::generic("fetch state mutex poisoned"))?;
+    fetch_state.requests.insert(request_id, request_handle);
+    Ok(request_id)
+}
+
+#[deno_core::op2(fast)]
+fn op_goldlight_fetch_abort(state: &mut OpState, request_id: u32) -> Result<(), JsErrorBox> {
+    let op_context = state.borrow::<RuntimeOpContext>().clone();
+    let fetch_state = op_context
+        .fetch_state
+        .lock()
+        .map_err(|_| JsErrorBox::generic("fetch state mutex poisoned"))?;
+    let request = fetch_state
+        .requests
+        .get(&request_id)
+        .ok_or_else(|| JsErrorBox::generic("unknown fetch request id"))?;
+    request
+        .abort_tx
+        .send(true)
+        .map_err(|_| JsErrorBox::generic("failed to abort fetch request"))?;
+    Ok(())
+}
+
+#[deno_core::op2(fast)]
+fn op_goldlight_fetch_write_chunk(
+    state: &mut OpState,
+    request_id: u32,
+    #[buffer(copy)] chunk: Vec<u8>,
+) -> Result<(), JsErrorBox> {
+    let op_context = state.borrow::<RuntimeOpContext>().clone();
+    let fetch_state = op_context
+        .fetch_state
+        .lock()
+        .map_err(|_| JsErrorBox::generic("fetch state mutex poisoned"))?;
+    let request = fetch_state
+        .requests
+        .get(&request_id)
+        .ok_or_else(|| JsErrorBox::generic("unknown fetch request id"))?;
+    let body_tx = request
+        .body_tx
+        .as_ref()
+        .ok_or_else(|| JsErrorBox::generic("fetch request is not streaming"))?;
+    body_tx
+        .send(FetchBodyCommand::Chunk(chunk))
+        .map_err(|_| JsErrorBox::generic("failed to write fetch body chunk"))?;
+    Ok(())
+}
+
+#[deno_core::op2(fast)]
+fn op_goldlight_fetch_close_body(state: &mut OpState, request_id: u32) -> Result<(), JsErrorBox> {
+    let op_context = state.borrow::<RuntimeOpContext>().clone();
+    let fetch_state = op_context
+        .fetch_state
+        .lock()
+        .map_err(|_| JsErrorBox::generic("fetch state mutex poisoned"))?;
+    let request = fetch_state
+        .requests
+        .get(&request_id)
+        .ok_or_else(|| JsErrorBox::generic("unknown fetch request id"))?;
+    let body_tx = request
+        .body_tx
+        .as_ref()
+        .ok_or_else(|| JsErrorBox::generic("fetch request is not streaming"))?;
+    body_tx
+        .send(FetchBodyCommand::Done)
+        .map_err(|_| JsErrorBox::generic("failed to close fetch request body"))?;
+    Ok(())
+}
+
+#[deno_core::op2]
+#[serde]
+fn op_goldlight_fetch_drain_events(
+    state: &mut OpState,
+) -> Result<Vec<FetchEventPayload>, JsErrorBox> {
+    let op_context = state.borrow::<RuntimeOpContext>().clone();
+    let mut fetch_state = op_context
+        .fetch_state
+        .lock()
+        .map_err(|_| JsErrorBox::generic("fetch state mutex poisoned"))?;
+    let events = std::mem::take(&mut fetch_state.pending_events);
+    for event in &events {
+        match event {
+            FetchEventPayload::Done { request_id }
+            | FetchEventPayload::Error { request_id, .. }
+            | FetchEventPayload::Aborted { request_id } => {
+                if let Some(request) = fetch_state.requests.remove(request_id) {
+                    request.shutdown();
+                }
+            }
+            FetchEventPayload::Response { .. } | FetchEventPayload::Chunk { .. } => {}
+        }
+    }
+    Ok(events)
+}
+
+#[deno_core::op2]
+fn op_goldlight_websocket_create(
+    state: &mut OpState,
+    #[string] url: String,
+    #[serde] protocols: Vec<String>,
+) -> Result<u32, JsErrorBox> {
+    let op_context = state.borrow::<RuntimeOpContext>().clone();
+    let socket_id = {
+        let mut websocket_state = op_context
+            .websocket_state
+            .lock()
+            .map_err(|_| JsErrorBox::generic("websocket state mutex poisoned"))?;
+        let socket_id = websocket_state.next_socket_id;
+        websocket_state.next_socket_id = websocket_state.next_socket_id.wrapping_add(1).max(1);
+        socket_id
+    };
+    let connection = spawn_websocket_connection(
+        socket_id,
+        url,
+        protocols,
+        op_context.websocket_state.clone(),
+        op_context.event_proxy.clone(),
+    )?;
+    let mut websocket_state = op_context
+        .websocket_state
+        .lock()
+        .map_err(|_| JsErrorBox::generic("websocket state mutex poisoned"))?;
+    websocket_state.buffered_amounts.insert(socket_id, 0);
+    websocket_state.sockets.insert(socket_id, connection);
+    Ok(socket_id)
+}
+
+#[deno_core::op2(fast)]
+fn op_goldlight_websocket_send_text(
+    state: &mut OpState,
+    socket_id: u32,
+    #[string] text: String,
+) -> Result<(), JsErrorBox> {
+    let op_context = state.borrow::<RuntimeOpContext>().clone();
+    let queued_bytes = text.len() as u32;
+    let websocket_state = op_context
+        .websocket_state
+        .lock()
+        .map_err(|_| JsErrorBox::generic("websocket state mutex poisoned"))?;
+    let socket = websocket_state
+        .sockets
+        .get(&socket_id)
+        .ok_or_else(|| JsErrorBox::generic("unknown websocket id"))?;
+    socket
+        .command_tx
+        .send(WebSocketCommand::SendText {
+            queued_bytes,
+            payload: text,
+        })
+        .map_err(|_| JsErrorBox::generic("failed to send websocket text payload"))?;
+    drop(websocket_state);
+    websocket_buffered_amount_add(&op_context.websocket_state, socket_id, queued_bytes);
+    Ok(())
+}
+
+#[deno_core::op2]
+fn op_goldlight_websocket_send_binary(
+    state: &mut OpState,
+    socket_id: u32,
+    #[serde] data: Vec<u8>,
+) -> Result<(), JsErrorBox> {
+    let op_context = state.borrow::<RuntimeOpContext>().clone();
+    let queued_bytes = data.len() as u32;
+    let websocket_state = op_context
+        .websocket_state
+        .lock()
+        .map_err(|_| JsErrorBox::generic("websocket state mutex poisoned"))?;
+    let socket = websocket_state
+        .sockets
+        .get(&socket_id)
+        .ok_or_else(|| JsErrorBox::generic("unknown websocket id"))?;
+    socket
+        .command_tx
+        .send(WebSocketCommand::SendBinary {
+            queued_bytes,
+            payload: data,
+        })
+        .map_err(|_| JsErrorBox::generic("failed to send websocket binary payload"))?;
+    drop(websocket_state);
+    websocket_buffered_amount_add(&op_context.websocket_state, socket_id, queued_bytes);
+    Ok(())
+}
+
+#[deno_core::op2(fast)]
+fn op_goldlight_websocket_get_buffered_amount(
+    state: &mut OpState,
+    socket_id: u32,
+) -> Result<u32, JsErrorBox> {
+    let op_context = state.borrow::<RuntimeOpContext>().clone();
+    let websocket_state = op_context
+        .websocket_state
+        .lock()
+        .map_err(|_| JsErrorBox::generic("websocket state mutex poisoned"))?;
+    Ok(*websocket_state.buffered_amounts.get(&socket_id).unwrap_or(&0))
+}
+
+#[deno_core::op2]
+fn op_goldlight_websocket_close(
+    state: &mut OpState,
+    socket_id: u32,
+    code: Option<u16>,
+    #[string] reason: Option<String>,
+) -> Result<(), JsErrorBox> {
+    let op_context = state.borrow::<RuntimeOpContext>().clone();
+    let websocket_state = op_context
+        .websocket_state
+        .lock()
+        .map_err(|_| JsErrorBox::generic("websocket state mutex poisoned"))?;
+    let socket = websocket_state
+        .sockets
+        .get(&socket_id)
+        .ok_or_else(|| JsErrorBox::generic("unknown websocket id"))?;
+    socket
+        .command_tx
+        .send(WebSocketCommand::Close { code, reason })
+        .map_err(|_| JsErrorBox::generic("failed to close websocket"))?;
+    Ok(())
+}
+
+#[deno_core::op2]
+#[serde]
+fn op_goldlight_websocket_drain_events(
+    state: &mut OpState,
+) -> Result<Vec<WebSocketEventPayload>, JsErrorBox> {
+    let op_context = state.borrow::<RuntimeOpContext>().clone();
+    let mut websocket_state = op_context
+        .websocket_state
+        .lock()
+        .map_err(|_| JsErrorBox::generic("websocket state mutex poisoned"))?;
+    let events = std::mem::take(&mut websocket_state.pending_events);
+    for event in &events {
+        match event {
+            WebSocketEventPayload::Close { socket_id, .. } => {
+                if let Some(socket) = websocket_state.sockets.remove(socket_id) {
+                    socket.shutdown();
+                }
+                websocket_state.buffered_amounts.remove(socket_id);
+            }
+            WebSocketEventPayload::Open { .. }
+            | WebSocketEventPayload::Message { .. }
+            | WebSocketEventPayload::Error { .. } => {}
+        }
+    }
+    Ok(events)
+}
+
 #[deno_core::op2]
 #[serde]
 fn op_goldlight_create_scene_2d(
@@ -962,6 +2152,17 @@ deno_core::extension!(
         op_goldlight_timer_schedule,
         op_goldlight_timer_cancel,
         op_goldlight_timer_drain_ready,
+        op_goldlight_fetch_start,
+        op_goldlight_fetch_abort,
+        op_goldlight_fetch_write_chunk,
+        op_goldlight_fetch_close_body,
+        op_goldlight_fetch_drain_events,
+        op_goldlight_websocket_create,
+        op_goldlight_websocket_get_buffered_amount,
+        op_goldlight_websocket_send_text,
+        op_goldlight_websocket_send_binary,
+        op_goldlight_websocket_close,
+        op_goldlight_websocket_drain_events,
         op_goldlight_hmr_drain_updates,
         op_goldlight_hmr_request_restart,
         op_goldlight_worker_request_animation_frame,
@@ -995,6 +2196,17 @@ deno_core::extension!(
         op_goldlight_timer_schedule,
         op_goldlight_timer_cancel,
         op_goldlight_timer_drain_ready,
+        op_goldlight_fetch_start,
+        op_goldlight_fetch_abort,
+        op_goldlight_fetch_write_chunk,
+        op_goldlight_fetch_close_body,
+        op_goldlight_fetch_drain_events,
+        op_goldlight_websocket_create,
+        op_goldlight_websocket_get_buffered_amount,
+        op_goldlight_websocket_send_text,
+        op_goldlight_websocket_send_binary,
+        op_goldlight_websocket_close,
+        op_goldlight_websocket_drain_events,
         op_goldlight_worker_request_animation_frame,
         op_goldlight_worker_drain_events,
         op_goldlight_compute_layout,
@@ -1064,6 +2276,21 @@ fn install_runtime_globals(js_runtime: &mut JsRuntime) -> Result<()> {
     js_runtime
         .execute_script("ext:goldlight/hmr.js", GOLDLIGHT_HMR_SOURCE)
         .context("failed to install hmr globals")?;
+    js_runtime
+        .execute_script("ext:goldlight/blob.js", GOLDLIGHT_BLOB_SOURCE)
+        .context("failed to install blob globals")?;
+    js_runtime
+        .execute_script("ext:goldlight/streams.js", GOLDLIGHT_STREAMS_SOURCE)
+        .context("failed to install stream globals")?;
+    js_runtime
+        .execute_script("ext:goldlight/abort.js", GOLDLIGHT_ABORT_SOURCE)
+        .context("failed to install abort globals")?;
+    js_runtime
+        .execute_script("ext:goldlight/fetch.js", GOLDLIGHT_FETCH_SOURCE)
+        .context("failed to install fetch globals")?;
+    js_runtime
+        .execute_script("ext:goldlight/websocket.js", GOLDLIGHT_WEBSOCKET_SOURCE)
+        .context("failed to install websocket globals")?;
     js_runtime
         .execute_script("ext:goldlight/timers.js", GOLDLIGHT_TIMERS_SOURCE)
         .context("failed to install timer globals")?;
@@ -1254,15 +2481,13 @@ struct InspectorServerHandle {
 }
 
 struct HmrClientHandle {
-    shutdown_tx: Option<std_mpsc::Sender<()>>,
+    shutdown_flag: Arc<AtomicBool>,
     thread_handle: Option<thread::JoinHandle<()>>,
 }
 
 impl HmrClientHandle {
     fn shutdown(mut self) {
-        if let Some(shutdown_tx) = self.shutdown_tx.take() {
-            let _ = shutdown_tx.send(());
-        }
+        self.shutdown_flag.store(true, Ordering::SeqCst);
         if let Some(thread_handle) = self.thread_handle.take() {
             thread::spawn(move || {
                 let _ = thread_handle.join();
@@ -1671,136 +2896,125 @@ fn spawn_hmr_client(
     event_proxy: EventLoopProxy<RuntimeUserEvent>,
     hmr_registry: HmrRegistryHandle,
 ) -> HmrClientHandle {
-    let (shutdown_tx, shutdown_rx) = std_mpsc::channel::<()>();
+    let shutdown_flag = Arc::new(AtomicBool::new(false));
+    let shutdown_flag_for_thread = shutdown_flag.clone();
     let thread_handle = thread::spawn(move || {
         let websocket_url = match vite_hmr_ws_url(&vite_origin) {
             Ok(url) => url,
-            Err(error) => {
-                eprintln!("goldlight hmr setup failed: {error:?}");
+            Err(_) => {
                 return;
             }
         };
 
-        loop {
-            if shutdown_rx.try_recv().is_ok() {
-                break;
+        let runtime = match TokioRuntimeBuilder::new_current_thread().enable_all().build() {
+            Ok(runtime) => runtime,
+            Err(_) => {
+                return;
             }
+        };
 
-            let mut request = match websocket_url.clone().into_client_request() {
-                Ok(request) => request,
-                Err(error) => {
-                    eprintln!("goldlight hmr request failed: {error:?}");
-                    break;
-                }
-            };
-            request.headers_mut().insert(
-                "sec-websocket-protocol",
-                header::HeaderValue::from_static("vite-hmr"),
-            );
-
-            match connect(request) {
-                Ok((mut socket, _response)) => loop {
-                    if shutdown_rx.try_recv().is_ok() {
-                        let _ = socket.close(None);
-                        return;
-                    }
-                    match socket.read() {
-                        Ok(TungsteniteMessage::Text(text)) => {
-                            let Ok(payload) = serde_json::from_str::<serde_json::Value>(&text) else {
-                                continue;
-                            };
-                            let message_type = payload.get("type").and_then(|value| value.as_str());
-                            if matches!(message_type, Some("full-reload")) {
-                                let _ = event_proxy.send_event(RuntimeUserEvent::HotReload);
-                                continue;
-                            }
-                            if matches!(message_type, Some("custom"))
-                                && matches!(
-                                    payload.get("event").and_then(|value| value.as_str()),
-                                    Some("goldlight:hmr-update")
-                                )
-                            {
-                                let updates = payload
-                                    .get("data")
-                                    .and_then(|value| value.get("updates"))
-                                    .and_then(|value| value.as_array())
-                                    .cloned()
-                                    .unwrap_or_default();
-                                for update in updates {
-                                    let Some(path) =
-                                        update.get("path").and_then(|value| value.as_str())
-                                    else {
+        runtime.block_on(async move {
+            while !shutdown_flag_for_thread.load(Ordering::SeqCst) {
+                match connect_hmr_fastwebsocket(&websocket_url, &[String::from("vite-hmr")]).await {
+                    Ok(mut socket) => {
+                        while !shutdown_flag_for_thread.load(Ordering::SeqCst) {
+                            match socket.read_frame().await {
+                                Ok(frame) if frame.opcode == FastOpCode::Text => {
+                                    let text = String::from_utf8_lossy(&frame.payload).into_owned();
+                                    let Ok(payload) = serde_json::from_str::<serde_json::Value>(&text) else {
                                         continue;
                                     };
-                                    let accepted_path = update
-                                        .get("acceptedPath")
-                                        .and_then(|value| value.as_str())
-                                        .map(ToOwned::to_owned);
-                                    let timestamp = update
-                                        .get("timestamp")
-                                        .and_then(|value| value.as_u64())
-                                        .unwrap_or(0);
-                                    broadcast_hmr_update(
-                                        &hmr_registry,
-                                        HmrUpdatePayload {
-                                            path: path.to_string(),
-                                            accepted_path,
-                                            timestamp,
-                                        },
-                                    );
-                                }
-                                let _ = event_proxy.send_event(RuntimeUserEvent::Wake);
-                                continue;
-                            }
-                            if matches!(message_type, Some("update")) {
-                                let updates = payload
-                                    .get("updates")
-                                    .and_then(|value| value.as_array())
-                                    .cloned()
-                                    .unwrap_or_default();
-                                for update in updates {
-                                    let Some(path) =
-                                        update.get("path").and_then(|value| value.as_str())
-                                    else {
+                                    let message_type = payload.get("type").and_then(|value| value.as_str());
+                                    if matches!(message_type, Some("full-reload")) {
+                                        let _ = event_proxy.send_event(RuntimeUserEvent::HotReload);
                                         continue;
-                                    };
-                                    let accepted_path = update
-                                        .get("acceptedPath")
-                                        .and_then(|value| value.as_str())
-                                        .map(ToOwned::to_owned);
-                                    let timestamp = update
-                                        .get("timestamp")
-                                        .and_then(|value| value.as_u64())
-                                        .unwrap_or(0);
-                                    broadcast_hmr_update(
-                                        &hmr_registry,
-                                        HmrUpdatePayload {
-                                            path: path.to_string(),
-                                            accepted_path,
-                                            timestamp,
-                                        },
-                                    );
+                                    }
+                                    if matches!(message_type, Some("custom"))
+                                        && matches!(
+                                            payload.get("event").and_then(|value| value.as_str()),
+                                            Some("goldlight:hmr-update")
+                                        )
+                                    {
+                                        let updates = payload
+                                            .get("data")
+                                            .and_then(|value| value.get("updates"))
+                                            .and_then(|value| value.as_array())
+                                            .cloned()
+                                            .unwrap_or_default();
+                                        for update in updates {
+                                            let Some(path) = update.get("path").and_then(|value| value.as_str()) else {
+                                                continue;
+                                            };
+                                            let accepted_path = update
+                                                .get("acceptedPath")
+                                                .and_then(|value| value.as_str())
+                                                .map(ToOwned::to_owned);
+                                            let timestamp = update
+                                                .get("timestamp")
+                                                .and_then(|value| value.as_u64())
+                                                .unwrap_or(0);
+                                            broadcast_hmr_update(
+                                                &hmr_registry,
+                                                HmrUpdatePayload {
+                                                    path: path.to_string(),
+                                                    accepted_path,
+                                                    timestamp,
+                                                },
+                                            );
+                                        }
+                                        let _ = event_proxy.send_event(RuntimeUserEvent::Wake);
+                                        continue;
+                                    }
+                                    if matches!(message_type, Some("update")) {
+                                        let updates = payload
+                                            .get("updates")
+                                            .and_then(|value| value.as_array())
+                                            .cloned()
+                                            .unwrap_or_default();
+                                        for update in updates {
+                                            let Some(path) = update.get("path").and_then(|value| value.as_str()) else {
+                                                continue;
+                                            };
+                                            let accepted_path = update
+                                                .get("acceptedPath")
+                                                .and_then(|value| value.as_str())
+                                                .map(ToOwned::to_owned);
+                                            let timestamp = update
+                                                .get("timestamp")
+                                                .and_then(|value| value.as_u64())
+                                                .unwrap_or(0);
+                                            broadcast_hmr_update(
+                                                &hmr_registry,
+                                                HmrUpdatePayload {
+                                                    path: path.to_string(),
+                                                    accepted_path,
+                                                    timestamp,
+                                                },
+                                            );
+                                        }
+                                        let _ = event_proxy.send_event(RuntimeUserEvent::Wake);
+                                    }
                                 }
-                                let _ = event_proxy.send_event(RuntimeUserEvent::Wake);
+                                Ok(frame) if frame.opcode == FastOpCode::Ping => {
+                                    let _ = socket.write_frame(FastWebSocketFrame::pong(frame.payload)).await;
+                                }
+                                Ok(frame) if frame.opcode == FastOpCode::Close => break,
+                                Ok(_) => {}
+                                Err(_) => break,
                             }
                         }
-                        Ok(TungsteniteMessage::Ping(payload)) => {
-                            let _ = socket.send(TungsteniteMessage::Pong(payload));
-                        }
-                        Ok(TungsteniteMessage::Close(_)) => break,
-                        Ok(_) => {}
-                        Err(_) => break,
+                        let _ = socket.write_frame(FastWebSocketFrame::close_raw(vec![].into())).await;
                     }
-                },
-                Err(_) => {
-                    thread::sleep(Duration::from_millis(250));
+                    Err(_) => {
+                        tokio::time::sleep(Duration::from_millis(250)).await;
+                    }
                 }
             }
-        }
+        });
     });
 
     HmrClientHandle {
-        shutdown_tx: Some(shutdown_tx),
+        shutdown_flag,
         thread_handle: Some(thread_handle),
     }
 }
@@ -2004,6 +3218,8 @@ fn run_main_runtime_thread(
         .map(|_| Arc::new(Mutex::new(HmrRuntimeState::default())));
     #[cfg(not(feature = "dev-runtime"))]
     let _hmr_state: Option<HmrRuntimeStateHandle> = None;
+    let fetch_state = Arc::new(Mutex::new(FetchHostState::default()));
+    let websocket_state = Arc::new(Mutex::new(WebSocketHostState::default()));
     let mut js_runtime = JsRuntime::new(RuntimeOptions {
         module_loader: Some(Rc::new(GoldlightModuleLoader::new(mode.clone()))),
         extensions: vec![goldlight_runtime::init(RuntimeOpContext {
@@ -2011,6 +3227,8 @@ fn run_main_runtime_thread(
             event_proxy: Some(event_proxy.clone()),
             worker_state: None,
             timer_state,
+            fetch_state: fetch_state.clone(),
+            websocket_state: websocket_state.clone(),
             #[cfg(feature = "dev-runtime")]
             hmr_state: hmr_state.clone(),
         })],
@@ -2067,6 +3285,10 @@ fn run_main_runtime_thread(
     }
     let timer_pump = get_global_function(&mut js_runtime, "__goldlightPumpTimers")
         .context("failed to capture main timer pump function")?;
+    let fetch_pump = get_global_function(&mut js_runtime, "__goldlightPumpFetch")
+        .context("failed to capture main fetch pump function")?;
+    let websocket_pump = get_global_function(&mut js_runtime, "__goldlightPumpWebSockets")
+        .context("failed to capture main websocket pump function")?;
     #[cfg(feature = "dev-runtime")]
     let hmr_pump = get_global_function(&mut js_runtime, "__goldlightPumpHmr")
         .context("failed to capture main hmr pump function")?;
@@ -2081,6 +3303,26 @@ fn run_main_runtime_thread(
             js_runtime
                 .with_event_loop_future(
                     timer_pump_call,
+                    PollEventLoopOptions {
+                        wait_for_inspector: false,
+                        pump_v8_message_loop: true,
+                    },
+                )
+                .await?;
+            let fetch_pump_call = js_runtime.call(&fetch_pump);
+            js_runtime
+                .with_event_loop_future(
+                    fetch_pump_call,
+                    PollEventLoopOptions {
+                        wait_for_inspector: false,
+                        pump_v8_message_loop: true,
+                    },
+                )
+                .await?;
+            let websocket_pump_call = js_runtime.call(&websocket_pump);
+            js_runtime
+                .with_event_loop_future(
+                    websocket_pump_call,
                     PollEventLoopOptions {
                         wait_for_inspector: false,
                         pump_v8_message_loop: true,
@@ -2126,6 +3368,8 @@ fn run_main_runtime_thread(
     if let (Some(hmr_registry), Some(main_hmr_runtime_id)) = (&hmr_registry, &main_hmr_runtime_id) {
         unregister_hmr_runtime(hmr_registry, main_hmr_runtime_id);
     }
+    shutdown_all_fetch_requests(&fetch_state);
+    shutdown_all_websockets(&websocket_state);
 
     Ok(())
 }
@@ -2152,6 +3396,8 @@ fn run_window_worker_thread(
         .map(|_| Arc::new(Mutex::new(HmrRuntimeState::default())));
     #[cfg(not(feature = "dev-runtime"))]
     let _hmr_state: Option<HmrRuntimeStateHandle> = None;
+    let fetch_state = Arc::new(Mutex::new(FetchHostState::default()));
+    let websocket_state = Arc::new(Mutex::new(WebSocketHostState::default()));
     let mut js_runtime = JsRuntime::new(RuntimeOptions {
         module_loader: Some(Rc::new(GoldlightModuleLoader::new(mode))),
         extensions: vec![goldlight_runtime::init(RuntimeOpContext {
@@ -2159,6 +3405,8 @@ fn run_window_worker_thread(
             event_proxy: Some(event_proxy),
             worker_state: Some(worker_state),
             timer_state,
+            fetch_state: fetch_state.clone(),
+            websocket_state: websocket_state.clone(),
             #[cfg(feature = "dev-runtime")]
             hmr_state: hmr_state.clone(),
         })],
@@ -2225,6 +3473,10 @@ fn run_window_worker_thread(
         .context("failed to capture window worker pump function")?;
     let timer_pump = get_global_function(&mut js_runtime, "__goldlightPumpTimers")
         .context("failed to capture window worker timer pump function")?;
+    let fetch_pump = get_global_function(&mut js_runtime, "__goldlightPumpFetch")
+        .context("failed to capture window worker fetch pump function")?;
+    let websocket_pump = get_global_function(&mut js_runtime, "__goldlightPumpWebSockets")
+        .context("failed to capture window worker websocket pump function")?;
     #[cfg(feature = "dev-runtime")]
     let hmr_pump = get_global_function(&mut js_runtime, "__goldlightPumpHmr")
         .context("failed to capture window worker hmr pump function")?;
@@ -2263,6 +3515,26 @@ fn run_window_worker_thread(
                     js_runtime
                         .with_event_loop_future(
                             timer_pump_call,
+                            PollEventLoopOptions {
+                                wait_for_inspector: false,
+                                pump_v8_message_loop: true,
+                            },
+                        )
+                        .await?;
+                    let fetch_pump_call = js_runtime.call(&fetch_pump);
+                    js_runtime
+                        .with_event_loop_future(
+                            fetch_pump_call,
+                            PollEventLoopOptions {
+                                wait_for_inspector: false,
+                                pump_v8_message_loop: true,
+                            },
+                        )
+                        .await?;
+                    let websocket_pump_call = js_runtime.call(&websocket_pump);
+                    js_runtime
+                        .with_event_loop_future(
+                            websocket_pump_call,
                             PollEventLoopOptions {
                                 wait_for_inspector: false,
                                 pump_v8_message_loop: true,
@@ -2320,6 +3592,8 @@ fn run_window_worker_thread(
     {
         unregister_hmr_runtime(hmr_registry, worker_hmr_runtime_id);
     }
+    shutdown_all_fetch_requests(&fetch_state);
+    shutdown_all_websockets(&websocket_state);
 
     Ok(())
 }
@@ -2459,11 +3733,20 @@ async fn inspector_json_list(
 
 #[cfg(feature = "dev-runtime")]
 async fn inspector_websocket(
-    websocket: WebSocketUpgrade,
+    websocket: IncomingUpgrade,
     AxumPath(target_id): AxumPath<String>,
     State(state): State<InspectorServerState>,
 ) -> Response {
-    websocket.on_upgrade(move |socket| handle_inspector_websocket(socket, state, target_id))
+    let Ok((response, upgrade_fut)) = websocket.upgrade() else {
+        return axum::http::StatusCode::BAD_REQUEST.into_response();
+    };
+    tokio::spawn(async move {
+        match upgrade_fut.await {
+            Ok(socket) => handle_inspector_websocket(socket, state, target_id).await,
+            Err(error) => eprintln!("goldlight inspector websocket upgrade failed: {error}"),
+        }
+    });
+    response.into_response()
 }
 
 #[cfg(feature = "dev-runtime")]
@@ -2510,19 +3793,31 @@ fn attach_worker_session(
 }
 
 #[cfg(feature = "dev-runtime")]
+fn websocket_text_frame(message: String) -> FastWebSocketFrame<'static> {
+    FastWebSocketFrame::text(message.into_bytes().into())
+}
+
+#[cfg(feature = "dev-runtime")]
+fn ignore_websocket_obligation<'a>(
+    _: FastWebSocketFrame<'a>,
+) -> std::future::Ready<Result<(), std::io::Error>> {
+    std::future::ready(Ok(()))
+}
+
+#[cfg(feature = "dev-runtime")]
 async fn send_worker_session_message(
-    websocket_sender: &mut futures_util::stream::SplitSink<WebSocket, WebSocketMessage>,
+    websocket_sender: &mut FastWebSocketWrite<tokio::io::WriteHalf<TokioIo<Upgraded>>>,
     message: String,
 ) -> bool {
     websocket_sender
-        .send(WebSocketMessage::Text(message.into()))
+        .write_frame(websocket_text_frame(message))
         .await
         .is_ok()
 }
 
 #[cfg(feature = "dev-runtime")]
 async fn maybe_attach_main_worker_sessions(
-    websocket_sender: &mut futures_util::stream::SplitSink<WebSocket, WebSocketMessage>,
+    websocket_sender: &mut FastWebSocketWrite<tokio::io::WriteHalf<TokioIo<Upgraded>>>,
     state: &InspectorServerState,
     attached_workers: &mut HashMap<String, AttachedWorkerSession>,
     worker_bootstrap_messages: &[String],
@@ -2775,11 +4070,11 @@ fn get_worker_command_route(message: &str) -> Option<(String, serde_json::Value)
 
 #[cfg(feature = "dev-runtime")]
 async fn handle_inspector_websocket(
-    socket: WebSocket,
+    socket: FastWebSocket<TokioIo<Upgraded>>,
     state: InspectorServerState,
     target_id: String,
 ) {
-    let (mut websocket_sender, mut websocket_receiver) = socket.split();
+    let (mut websocket_receiver, mut websocket_sender) = socket.split(tokio::io::split);
     let target_record = state
         .registry
         .lock()
@@ -2787,7 +4082,9 @@ async fn handle_inspector_websocket(
         .get(&target_id)
         .cloned();
     let Some(target_record) = target_record else {
-        let _ = websocket_sender.close().await;
+        let _ = websocket_sender
+            .write_frame(FastWebSocketFrame::close(1000, b""))
+            .await;
         return;
     };
     let is_main_target = target_record.kind == InspectorTargetKind::Main;
@@ -2820,6 +4117,7 @@ async fn handle_inspector_websocket(
     let mut nodeworker_enabled = false;
     let mut compiled_scripts = HashMap::<String, String>::new();
     let mut next_compiled_script_id = 1_u64;
+    let mut ignore_obligation = ignore_websocket_obligation;
 
     loop {
         if is_main_target
@@ -2837,13 +4135,16 @@ async fn handle_inspector_websocket(
         }
 
         tokio::select! {
-            Some(message) = websocket_receiver.next() => {
+            message = websocket_receiver.read_frame(&mut ignore_obligation) => {
                 let Ok(message) = message else {
                     break;
                 };
 
-                match message {
-                    WebSocketMessage::Text(text) => {
+                match message.opcode {
+                    FastOpCode::Text => {
+                        let Ok(text) = std::str::from_utf8(&message.payload).map(str::to_string) else {
+                            continue;
+                        };
                         if is_main_target {
                             if let Some((session_id, inner_message)) = strip_session_id(&text) {
                                 if let Some(worker) = attached_workers.values().find(|worker| worker.session_id == session_id) {
@@ -2864,7 +4165,7 @@ async fn handle_inspector_websocket(
                                     if let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) {
                                         if let Some(id) = value.get("id") {
                                             let response = json!({ "id": id, "result": {} }).to_string();
-                                            if websocket_sender.send(WebSocketMessage::Text(response.into())).await.is_err() {
+                                            if websocket_sender.write_frame(websocket_text_frame(response)).await.is_err() {
                                                 break;
                                             }
                                         }
@@ -2880,7 +4181,7 @@ async fn handle_inspector_websocket(
                                             nodeworker_enabled = true;
                                             if let Some(id) = value.get("id") {
                                                 let response = json!({ "id": id, "result": {} }).to_string();
-                                                if websocket_sender.send(WebSocketMessage::Text(response.into())).await.is_err() {
+                                                if websocket_sender.write_frame(websocket_text_frame(response)).await.is_err() {
                                                     break;
                                                 }
                                             }
@@ -2890,7 +4191,7 @@ async fn handle_inspector_websocket(
                                             nodeworker_enabled = false;
                                             if let Some(id) = value.get("id") {
                                                 let response = json!({ "id": id, "result": {} }).to_string();
-                                                if websocket_sender.send(WebSocketMessage::Text(response.into())).await.is_err() {
+                                                if websocket_sender.write_frame(websocket_text_frame(response)).await.is_err() {
                                                     break;
                                                 }
                                             }
@@ -2899,7 +4200,7 @@ async fn handle_inspector_websocket(
                                         "NodeWorker.detach" => {
                                             if let Some(id) = value.get("id") {
                                                 let response = json!({ "id": id, "result": {} }).to_string();
-                                                if websocket_sender.send(WebSocketMessage::Text(response.into())).await.is_err() {
+                                                if websocket_sender.write_frame(websocket_text_frame(response)).await.is_err() {
                                                     break;
                                                 }
                                             }
@@ -2985,7 +4286,7 @@ async fn handle_inspector_websocket(
                             }
                             FrontendProtocolAction::Respond(response) => {
                                 if websocket_sender
-                                    .send(WebSocketMessage::Text(response.into()))
+                                    .write_frame(websocket_text_frame(response))
                                     .await
                                     .is_err()
                                 {
@@ -2994,8 +4295,8 @@ async fn handle_inspector_websocket(
                             }
                         }
                     }
-                    WebSocketMessage::Binary(bytes) => {
-                        if let Ok(text) = String::from_utf8(bytes.to_vec()) {
+                    FastOpCode::Binary => {
+                        if let Ok(text) = String::from_utf8(message.payload.to_vec()) {
                             match patch_frontend_protocol_message(
                                 &text,
                                 paused_call_frame_id.as_deref(),
@@ -3010,7 +4311,7 @@ async fn handle_inspector_websocket(
                                 }
                                 FrontendProtocolAction::Respond(response) => {
                                     if websocket_sender
-                                        .send(WebSocketMessage::Text(response.into()))
+                                        .write_frame(websocket_text_frame(response))
                                         .await
                                         .is_err()
                                     {
@@ -3020,13 +4321,14 @@ async fn handle_inspector_websocket(
                             }
                         }
                     }
-                    WebSocketMessage::Close(_) => break,
-                    WebSocketMessage::Ping(payload) => {
-                        if websocket_sender.send(WebSocketMessage::Pong(payload)).await.is_err() {
+                    FastOpCode::Close => break,
+                    FastOpCode::Ping => {
+                        if websocket_sender.write_frame(FastWebSocketFrame::pong(message.payload.to_vec().into())).await.is_err() {
                             break;
                         }
                     }
-                    WebSocketMessage::Pong(_) => {}
+                    FastOpCode::Pong => {}
+                    _ => {}
                 }
             }
             Some(message) = runtime_to_frontend_rx.next() => {
@@ -3059,7 +4361,7 @@ async fn handle_inspector_websocket(
                 ) {
                     BackendProtocolAction::Passthrough => {
                         if websocket_sender
-                            .send(WebSocketMessage::Text(backend_message.into()))
+                            .write_frame(websocket_text_frame(backend_message))
                             .await
                             .is_err()
                         {
@@ -3067,7 +4369,7 @@ async fn handle_inspector_websocket(
                         }
                     }
                     BackendProtocolAction::Rewrite(outbound) => {
-                        if websocket_sender.send(WebSocketMessage::Text(outbound.into())).await.is_err() {
+                        if websocket_sender.write_frame(websocket_text_frame(outbound)).await.is_err() {
                             break;
                         }
                     }
@@ -3207,7 +4509,7 @@ async fn handle_inspector_websocket(
                                 ) {
                                     BackendProtocolAction::Passthrough => {
                                         if websocket_sender
-                                            .send(WebSocketMessage::Text(outbound.into()))
+                                            .write_frame(websocket_text_frame(outbound))
                                             .await
                                             .is_err()
                                         {
@@ -3216,7 +4518,7 @@ async fn handle_inspector_websocket(
                                     }
                                     BackendProtocolAction::Rewrite(rewritten) => {
                                         if websocket_sender
-                                            .send(WebSocketMessage::Text(rewritten.into()))
+                                            .write_frame(websocket_text_frame(rewritten))
                                             .await
                                             .is_err()
                                         {
@@ -3237,7 +4539,7 @@ async fn handle_inspector_websocket(
                                             "sessionId": worker.session_id
                                         }
                                     }).to_string();
-                                    if websocket_sender.send(WebSocketMessage::Text(notification.into())).await.is_err() {
+                                    if websocket_sender.write_frame(websocket_text_frame(notification)).await.is_err() {
                                         return;
                                     }
                                 }
@@ -3256,7 +4558,9 @@ async fn handle_inspector_websocket(
         }
     }
 
-    let _ = websocket_sender.close().await;
+    let _ = websocket_sender
+        .write_frame(FastWebSocketFrame::close(1000, b""))
+        .await;
 }
 
 #[cfg(feature = "dev-runtime")]

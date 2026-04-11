@@ -14,6 +14,121 @@ function normalizeColor(color = {}) {
   return { r, g, b, a };
 }
 
+function cloneGradientStop(stop) {
+  return {
+    offset: stop.offset,
+    color: cloneColor(stop.color),
+  };
+}
+
+function normalizeGradientStops(stops) {
+  const source = Array.isArray(stops) ? stops : [];
+  if (source.length < 2 || source.length > 8) {
+    throw new TypeError("gradient shader stops must contain between 2 and 8 entries");
+  }
+  return source.map((stop) => ({
+    offset: Number(stop?.offset ?? 0),
+    color: normalizeColor(stop?.color),
+  }));
+}
+
+function clonePathShader(shader) {
+  if (!shader) {
+    return undefined;
+  }
+
+  switch (shader.kind) {
+    case "linear-gradient":
+      return {
+        kind: "linear-gradient",
+        start: [...shader.start],
+        end: [...shader.end],
+        stops: shader.stops.map(cloneGradientStop),
+        tileMode: shader.tileMode,
+      };
+    case "radial-gradient":
+      return {
+        kind: "radial-gradient",
+        center: [...shader.center],
+        radius: shader.radius,
+        stops: shader.stops.map(cloneGradientStop),
+        tileMode: shader.tileMode,
+      };
+    case "two-point-conical-gradient":
+      return {
+        kind: "two-point-conical-gradient",
+        startCenter: [...shader.startCenter],
+        startRadius: shader.startRadius,
+        endCenter: [...shader.endCenter],
+        endRadius: shader.endRadius,
+        stops: shader.stops.map(cloneGradientStop),
+        tileMode: shader.tileMode,
+      };
+    case "sweep-gradient":
+      return {
+        kind: "sweep-gradient",
+        center: [...shader.center],
+        startAngle: shader.startAngle,
+        endAngle: shader.endAngle,
+        stops: shader.stops.map(cloneGradientStop),
+        tileMode: shader.tileMode,
+      };
+    default:
+      throw new TypeError(`Unsupported path shader kind: ${shader.kind}`);
+  }
+}
+
+function normalizePathShader(shader) {
+  if (!shader) {
+    return undefined;
+  }
+
+  const tileMode = shader.tileMode ?? "clamp";
+  const stops = normalizeGradientStops(shader.stops);
+
+  switch (shader.kind) {
+    case "linear-gradient":
+      return {
+        kind: "linear-gradient",
+        start: [...shader.start],
+        end: [...shader.end],
+        stops,
+        tileMode,
+      };
+    case "radial-gradient":
+      return {
+        kind: "radial-gradient",
+        center: [...shader.center],
+        radius: Number(shader.radius ?? 0),
+        stops,
+        tileMode,
+      };
+    case "two-point-conical-gradient":
+      return {
+        kind: "two-point-conical-gradient",
+        startCenter: [...shader.startCenter],
+        startRadius: Number(shader.startRadius ?? 0),
+        endCenter: [...shader.endCenter],
+        endRadius: Number(shader.endRadius ?? 0),
+        stops,
+        tileMode,
+      };
+    case "sweep-gradient": {
+      const startAngle = Number(shader.startAngle ?? 0);
+      return {
+        kind: "sweep-gradient",
+        center: [...shader.center],
+        startAngle,
+        endAngle: Number(shader.endAngle ?? (startAngle + (Math.PI * 2))),
+        stops,
+        tileMode,
+      };
+    }
+    default:
+      throw new TypeError(`Unsupported path shader kind: ${shader?.kind}`);
+  }
+}
+
 function normalizeCameraInit(init = {}) {
   return {
     viewProjectionMatrix: init.viewProjectionMatrix
@@ -231,6 +346,7 @@ function clonePathState(state) {
     fillRule: state.fillRule,
     style: state.style,
     color: cloneColor(state.color),
+    shader: clonePathShader(state.shader),
     strokeWidth: state.strokeWidth,
     strokeJoin: state.strokeJoin,
     strokeCap: state.strokeCap,
@@ -300,6 +416,7 @@ function normalizePathInit(init = {}) {
     color: init.color
       ? normalizeColor(init.color)
       : { r: 1, g: 1, b: 1, a: 1 },
+    shader: normalizePathShader(init.shader),
     strokeWidth: init.strokeWidth ?? 1,
     strokeJoin: init.strokeJoin ?? "miter",
     strokeCap: init.strokeCap ?? "butt",
@@ -952,6 +1069,9 @@ export class Path2d {
     if (patch.fillRule !== undefined) this._state.fillRule = patch.fillRule;
     if (patch.style !== undefined) this._state.style = patch.style;
     if (patch.color !== undefined) this._state.color = normalizeColor(patch.color);
+    if (Object.prototype.hasOwnProperty.call(patch, "shader")) {
+      this._state.shader = normalizePathShader(patch.shader);
+    }
     if (patch.strokeWidth !== undefined) this._state.strokeWidth = patch.strokeWidth;
     if (patch.strokeJoin !== undefined) this._state.strokeJoin = patch.strokeJoin;
     if (patch.strokeCap !== undefined) this._state.strokeCap = patch.strokeCap;
@@ -969,6 +1089,7 @@ export class Path2d {
       ...state,
       verbs: state.verbs.map(normalizePathVerb),
       color: normalizeColor(state.color),
+      shader: normalizePathShader(state.shader),
       dashArray: state.dashArray.map((value) => Number(value)),
     };
     if (this.id !== null) {

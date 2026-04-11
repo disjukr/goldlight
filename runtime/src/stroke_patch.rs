@@ -1989,6 +1989,7 @@ mod tests {
                 b: 1.0,
                 a: 0.5,
             },
+            shader: None,
             stroke_width: 12.0,
             stroke_join: PathStrokeJoin2D::Miter,
             stroke_cap: PathStrokeCap2D::Round,

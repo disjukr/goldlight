@@ -6,44 +6,23 @@ use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 
 use crate::fill_patch::{
-    curve_fill_shader_source, curve_template_vertices, prepare_fill_steps,
-    wedge_fill_shader_source, wedge_template_vertices, CurveFillPatchInstance, FillStencilMode,
-    FillTriangleMode, PatchResolveVertex, PreparedCurveFillStep, PreparedFillStep,
+    curve_fill_shader_source, curve_template_vertices, fill_paint_shader_source,
+    prepare_fill_steps, wedge_fill_shader_source, wedge_template_vertices, CurveFillPatchInstance,
+    FillStencilMode, FillTriangleMode, PatchResolveVertex, PreparedCurveFillStep, PreparedFillStep,
     PreparedFillTriangleStep, PreparedWedgeFillStep, WedgeFillPatchInstance,
 };
 use crate::render::{
-    ColorValue, Path2D, PathFillRule2D, PathStrokeCap2D, PathStrokeJoin2D, PathStyle2D, PathVerb2D,
-    Rect2D, Scene2D,
+    ColorValue, GradientStop2D, GradientTileMode2D, Path2D, PathFillRule2D, PathShader2D,
+    PathStrokeCap2D, PathStrokeJoin2D, PathStyle2D, PathVerb2D, Rect2D, Scene2D,
 };
 use crate::stroke_patch::{
     prepare_stroke_patch_step, stroke_patch_shader_source, PreparedStrokePatchStep,
     StrokePatchInstance,
 };
 
-const DRAWING_SHADER_SOURCE: &str = r#"
-struct VertexOutput {
-  @builtin(position) position: vec4<f32>,
-  @location(0) color: vec4<f32>,
-};
-
-@vertex
-fn vs_main(
-  @location(0) position: vec4<f32>,
-  @location(1) color: vec4<f32>,
-) -> VertexOutput {
-  var output: VertexOutput;
-  output.position = position;
-  output.color = color;
-  return output;
-}
-
-@fragment
-fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
-  return input.color;
-}
-"#;
-
 const EPSILON: f32 = 1e-5;
+const GRADIENT_EPSILON: f32 = 1e-5;
+const MAX_GRADIENT_STOPS: usize = 8;
 const AA_FRINGE_WIDTH: f32 = 1.0;
 const CURVE_FLATNESS_TOLERANCE: f32 = 0.25;
 const MAX_CURVE_SUBDIVISION_DEPTH: u32 = 8;
@@ -53,6 +32,39 @@ pub(crate) const DRAWING_DEPTH_FORMAT: wgpu::TextureFormat =
     wgpu::TextureFormat::Depth24PlusStencil8;
 
 pub(crate) type Point = [f32; 2];
+
+fn drawing_shader_source() -> String {
+    format!(
+        r#"
+{paint_shader}
+
+struct VertexOutput {{
+  @builtin(position) position: vec4<f32>,
+  @location(0) color: vec4<f32>,
+  @location(1) devicePosition: vec2<f32>,
+}};
+
+@vertex
+fn vs_main(
+  @location(0) position: vec4<f32>,
+  @location(1) color: vec4<f32>,
+  @location(2) devicePosition: vec2<f32>,
+) -> VertexOutput {{
+  var output: VertexOutput;
+  output.position = position;
+  output.color = color;
+  output.devicePosition = devicePosition;
+  return output;
+}}
+
+@fragment
+fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {{
+  return paint_shader_color(input.devicePosition) * input.color;
+}}
+"#,
+        paint_shader = fill_paint_shader_source(0),
+    )
+}
 
 #[derive(Clone)]
 pub struct DawnResourceProvider {
@@ -74,6 +86,7 @@ pub struct DawnResourceProvider {
     curve_template_buffer: wgpu::Buffer,
     curve_template_vertex_count: u32,
     viewport_bind_group_layout: Arc<wgpu::BindGroupLayout>,
+    fill_paint_bind_group_layout: Arc<wgpu::BindGroupLayout>,
 }
 
 #[derive(Clone)]
@@ -110,16 +123,11 @@ enum TrianglePipelineKind {
 
 impl DawnResourceProvider {
     fn new(device: &wgpu::Device, format: wgpu::TextureFormat, msaa_sample_count: u32) -> Self {
+        let triangle_shader_source = drawing_shader_source();
         let triangle_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("goldlight drawing shader"),
-            source: wgpu::ShaderSource::Wgsl(DRAWING_SHADER_SOURCE.into()),
+            source: wgpu::ShaderSource::Wgsl(triangle_shader_source.into()),
         });
-        let triangle_pipeline_layout =
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("goldlight drawing pipeline layout"),
-                bind_group_layouts: &[],
-                push_constant_ranges: &[],
-            });
         let viewport_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("goldlight stroke viewport bind group layout"),
@@ -133,6 +141,26 @@ impl DawnResourceProvider {
                     },
                     count: None,
                 }],
+            });
+        let fill_paint_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("goldlight fill paint bind group layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+        let triangle_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("goldlight drawing pipeline layout"),
+                bind_group_layouts: &[&fill_paint_bind_group_layout],
+                push_constant_ranges: &[],
             });
         let wedge_shader_source = wedge_fill_shader_source();
         let wedge_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -149,9 +177,15 @@ impl DawnResourceProvider {
             label: Some("goldlight stroke patch shader"),
             source: wgpu::ShaderSource::Wgsl(stroke_shader_source.into()),
         });
-        let patch_pipeline_layout =
+        let fill_patch_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("goldlight patch pipeline layout"),
+                label: Some("goldlight fill patch pipeline layout"),
+                bind_group_layouts: &[&viewport_bind_group_layout, &fill_paint_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+        let stroke_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("goldlight stroke patch pipeline layout"),
                 bind_group_layouts: &[&viewport_bind_group_layout],
                 push_constant_ranges: &[],
             });
@@ -190,7 +224,7 @@ impl DawnResourceProvider {
             let (depth_stencil, write_mask) = patch_pipeline_state(stencil_mode);
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("goldlight wedge fill patch pipeline"),
-                layout: Some(&patch_pipeline_layout),
+                layout: Some(&fill_patch_pipeline_layout),
                 vertex: wgpu::VertexState {
                     module: &wedge_shader,
                     entry_point: Some("vs_main"),
@@ -224,7 +258,7 @@ impl DawnResourceProvider {
             let (depth_stencil, write_mask) = patch_pipeline_state(Some(stencil_mode));
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("goldlight curve fill patch pipeline"),
-                layout: Some(&patch_pipeline_layout),
+                layout: Some(&fill_patch_pipeline_layout),
                 vertex: wgpu::VertexState {
                     module: &curve_shader,
                     entry_point: Some("vs_main"),
@@ -257,7 +291,7 @@ impl DawnResourceProvider {
         let create_stroke_pipeline = |sample_count: u32| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("goldlight stroke patch pipeline"),
-                layout: Some(&patch_pipeline_layout),
+                layout: Some(&stroke_pipeline_layout),
                 vertex: wgpu::VertexState {
                     module: &stroke_shader,
                     entry_point: Some("vs_main"),
@@ -362,6 +396,7 @@ impl DawnResourceProvider {
             curve_template_buffer,
             curve_template_vertex_count: curve_template_vertices.len() as u32,
             viewport_bind_group_layout: Arc::new(viewport_bind_group_layout),
+            fill_paint_bind_group_layout: Arc::new(fill_paint_bind_group_layout),
         }
     }
 
@@ -451,6 +486,28 @@ impl DawnResourceProvider {
         let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("goldlight stroke viewport bind group"),
             layout: &self.viewport_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: buffer.as_entire_binding(),
+            }],
+        });
+        (buffer, bind_group)
+    }
+
+    fn create_fill_paint_bind_group(
+        &self,
+        uniform: &PaintUniform,
+    ) -> (wgpu::Buffer, wgpu::BindGroup) {
+        let buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("goldlight fill paint buffer"),
+                contents: bytemuck::bytes_of(uniform),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("goldlight fill paint bind group"),
+            layout: &self.fill_paint_bind_group_layout,
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
                 resource: buffer.as_entire_binding(),
@@ -697,6 +754,7 @@ pub struct PathDrawCommand {
     pub fill_rule: PathFillRule2D,
     pub style: PathStyle2D,
     pub color: ColorValue,
+    pub shader: Option<PathShader2D>,
     pub stroke_width: f32,
     pub stroke_join: PathStrokeJoin2D,
     pub stroke_cap: PathStrokeCap2D,
@@ -709,9 +767,16 @@ pub enum DrawingPreparedStep {
     Triangles {
         vertices: Vec<DrawingVertex>,
         mode: TriangleStepMode,
+        paint: PaintUniform,
     },
-    WedgeFillPatches(PreparedWedgeFillStep),
-    CurveFillPatches(PreparedCurveFillStep),
+    WedgeFillPatches {
+        step: PreparedWedgeFillStep,
+        paint: PaintUniform,
+    },
+    CurveFillPatches {
+        step: PreparedCurveFillStep,
+        paint: PaintUniform,
+    },
     StrokePatches(PreparedStrokePatchStep),
 }
 
@@ -743,8 +808,8 @@ impl DrawingPreparedStep {
     fn requires_msaa(&self) -> bool {
         matches!(
             self,
-            Self::WedgeFillPatches(_)
-                | Self::CurveFillPatches(_)
+            Self::WedgeFillPatches { .. }
+                | Self::CurveFillPatches { .. }
                 | Self::Triangles {
                     mode: TriangleStepMode::StencilEvenodd
                         | TriangleStepMode::StencilNonzero
@@ -764,8 +829,8 @@ impl DrawingPreparedStep {
                     | TriangleStepMode::StencilNonzero
                     | TriangleStepMode::StencilCover,
                 ..
-            } | Self::WedgeFillPatches(_)
-                | Self::CurveFillPatches(_)
+            } | Self::WedgeFillPatches { .. }
+                | Self::CurveFillPatches { .. }
                 | Self::StrokePatches(_)
         )
     }
@@ -780,9 +845,23 @@ struct ViewportUniform {
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable, Debug)]
+pub(crate) struct PaintUniform {
+    info: [f32; 4],
+    params0: [f32; 4],
+    local_matrix0: [f32; 4],
+    local_matrix1: [f32; 4],
+    solid_color: [f32; 4],
+    stop_offsets0: [f32; 4],
+    stop_offsets1: [f32; 4],
+    stop_colors: [[f32; 4]; MAX_GRADIENT_STOPS],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable, Debug)]
 pub struct DrawingVertex {
     position: [f32; 4],
     color: [f32; 4],
+    device_position: [f32; 2],
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -827,8 +906,8 @@ pub(crate) struct StrokeStyle {
 }
 
 impl DrawingVertex {
-    const ATTRIBUTES: [wgpu::VertexAttribute; 2] =
-        wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4];
+    const ATTRIBUTES: [wgpu::VertexAttribute; 3] =
+        wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x2];
 
     fn layout() -> wgpu::VertexBufferLayout<'static> {
         wgpu::VertexBufferLayout {
@@ -859,6 +938,7 @@ pub fn record_scene_2d(scene: &Scene2D, rects: &[Rect2D], paths: &[Path2D]) -> D
             fill_rule: path.fill_rule,
             style: path.style,
             color: path.color,
+            shader: path.shader.clone(),
             stroke_width: path.stroke_width,
             stroke_join: path.stroke_join,
             stroke_cap: path.stroke_cap,
@@ -909,6 +989,7 @@ pub fn prepare_drawing_recording(
                         painter_depth,
                     ),
                     mode: TriangleStepMode::DirectDepth,
+                    paint: vertex_colored_paint(),
                 });
             }
             DrawingCommand::DrawPath(path) => {
@@ -951,6 +1032,360 @@ fn with_vertex_depth(mut vertices: Vec<DrawingVertex>, painter_depth: f32) -> Ve
     vertices
 }
 
+impl PaintUniform {
+    fn solid(color: [f32; 4]) -> Self {
+        Self {
+            info: [0.0, 0.0, 0.0, 0.0],
+            params0: [0.0; 4],
+            local_matrix0: [1.0, 0.0, 0.0, 1.0],
+            local_matrix1: [0.0; 4],
+            solid_color: color,
+            stop_offsets0: [0.0; 4],
+            stop_offsets1: [0.0; 4],
+            stop_colors: [[0.0; 4]; MAX_GRADIENT_STOPS],
+        }
+    }
+}
+
+fn multiply_affine_matrices(left: [f32; 6], right: [f32; 6]) -> [f32; 6] {
+    [
+        (left[0] * right[0]) + (left[2] * right[1]),
+        (left[1] * right[0]) + (left[3] * right[1]),
+        (left[0] * right[2]) + (left[2] * right[3]),
+        (left[1] * right[2]) + (left[3] * right[3]),
+        (left[0] * right[4]) + (left[2] * right[5]) + left[4],
+        (left[1] * right[4]) + (left[3] * right[5]) + left[5],
+    ]
+}
+
+fn create_linear_gradient_matrix(start: Point, end: Point) -> [f32; 6] {
+    let dx = end[0] - start[0];
+    let dy = end[1] - start[1];
+    let denom = ((dx * dx) + (dy * dy)).max(GRADIENT_EPSILON);
+    let a = dx / denom;
+    let b = -dy / denom;
+    let c = dy / denom;
+    let d = dx / denom;
+    [
+        a,
+        b,
+        c,
+        d,
+        -((a * start[0]) + (c * start[1])),
+        -((b * start[0]) + (d * start[1])),
+    ]
+}
+
+fn create_radial_gradient_matrix(center: Point, radius: f32) -> [f32; 6] {
+    let scale = 1.0 / radius.max(GRADIENT_EPSILON);
+    [
+        scale,
+        0.0,
+        0.0,
+        scale,
+        -center[0] * scale,
+        -center[1] * scale,
+    ]
+}
+
+fn create_sweep_gradient_matrix(center: Point) -> [f32; 6] {
+    [1.0, 0.0, 0.0, 1.0, -center[0], -center[1]]
+}
+
+fn create_conical_gradient_matrix(
+    start_center: Point,
+    end_center: Point,
+    start_radius: f32,
+    end_radius: f32,
+) -> [f32; 6] {
+    let dx = end_center[0] - start_center[0];
+    let dy = end_center[1] - start_center[1];
+    let len = dx.hypot(dy);
+    if len <= GRADIENT_EPSILON {
+        let diff_radius = end_radius - start_radius;
+        let scale = 1.0 / diff_radius.abs().max(GRADIENT_EPSILON);
+        return [
+            scale,
+            0.0,
+            0.0,
+            scale,
+            -start_center[0] * scale,
+            -start_center[1] * scale,
+        ];
+    }
+    let inv_len_sq = 1.0 / (len * len);
+    let a = dx * inv_len_sq;
+    let b = -dy * inv_len_sq;
+    let c = dy * inv_len_sq;
+    let d = dx * inv_len_sq;
+    [
+        a,
+        b,
+        c,
+        d,
+        -((a * start_center[0]) + (c * start_center[1])),
+        -((b * start_center[0]) + (d * start_center[1])),
+    ]
+}
+
+fn clamp01(value: f32) -> f32 {
+    value.clamp(0.0, 1.0)
+}
+
+fn gradient_tile_mode_code(tile_mode: GradientTileMode2D) -> f32 {
+    match tile_mode {
+        GradientTileMode2D::Clamp => 0.0,
+        GradientTileMode2D::Repeat => 1.0,
+        GradientTileMode2D::Mirror => 2.0,
+        GradientTileMode2D::Decal => 3.0,
+    }
+}
+
+fn normalize_gradient_stops(
+    stops: &[GradientStop2D],
+    tile_mode: GradientTileMode2D,
+) -> Vec<GradientStop2D> {
+    let mut clamped = if stops.is_empty() {
+        vec![GradientStop2D {
+            offset: 0.0,
+            color: ColorValue::default(),
+        }]
+    } else {
+        stops
+            .iter()
+            .map(|stop| GradientStop2D {
+                offset: clamp01(stop.offset),
+                color: stop.color,
+            })
+            .collect::<Vec<_>>()
+    };
+
+    let mut normalized = Vec::new();
+    let mut previous_offset = 0.0;
+    if clamped[0].offset > 0.0 {
+        normalized.push(GradientStop2D {
+            offset: 0.0,
+            color: clamped[0].color,
+        });
+    }
+    for stop in clamped.drain(..) {
+        let offset = stop.offset.max(previous_offset);
+        normalized.push(GradientStop2D {
+            offset,
+            color: stop.color,
+        });
+        previous_offset = offset;
+    }
+
+    if normalized.len() == 1 {
+        normalized.push(GradientStop2D {
+            offset: 1.0,
+            color: normalized[0].color,
+        });
+    } else if normalized
+        .last()
+        .map(|stop| stop.offset < 1.0)
+        .unwrap_or(false)
+    {
+        let color = normalized.last().map(|stop| stop.color).unwrap_or_default();
+        normalized.push(GradientStop2D { offset: 1.0, color });
+    }
+
+    let mut deduped = Vec::new();
+    let mut index = 0usize;
+    while index < normalized.len() {
+        let mut run_end = index + 1;
+        while run_end < normalized.len()
+            && (normalized[run_end].offset - normalized[index].offset).abs() <= GRADIENT_EPSILON
+        {
+            run_end += 1;
+        }
+        let duplicate = run_end - index > 1;
+        let offset = normalized[index].offset;
+        let ignore_leftmost =
+            duplicate && !matches!(tile_mode, GradientTileMode2D::Clamp) && offset == 0.0;
+        let ignore_rightmost = !matches!(tile_mode, GradientTileMode2D::Clamp) && offset == 1.0;
+        if !ignore_leftmost {
+            deduped.push(normalized[index].clone());
+        }
+        if duplicate && !ignore_rightmost {
+            deduped.push(normalized[run_end - 1].clone());
+        }
+        index = run_end;
+    }
+
+    if deduped.len() == 1 {
+        deduped.push(GradientStop2D {
+            offset: 1.0,
+            color: deduped[0].color,
+        });
+    }
+
+    if deduped.len() > MAX_GRADIENT_STOPS {
+        let last = deduped.last().cloned().unwrap_or(GradientStop2D {
+            offset: 1.0,
+            color: ColorValue::default(),
+        });
+        deduped.truncate(MAX_GRADIENT_STOPS);
+        deduped[MAX_GRADIENT_STOPS - 1] = last;
+    }
+
+    deduped
+}
+
+fn build_path_paint(path: &PathDrawCommand) -> PaintUniform {
+    let Some(shader) = &path.shader else {
+        return PaintUniform::solid(path.color.to_array());
+    };
+
+    let inverse_draw_transform = [1.0, 0.0, 0.0, 1.0, -path.x, -path.y];
+    let (kind, tile_mode, stops, params0, gradient_matrix) = match shader {
+        PathShader2D::LinearGradient {
+            start,
+            end,
+            stops,
+            tile_mode,
+        } => (
+            1.0,
+            *tile_mode,
+            stops.as_slice(),
+            [0.0; 4],
+            create_linear_gradient_matrix(*start, *end),
+        ),
+        PathShader2D::RadialGradient {
+            center,
+            radius,
+            stops,
+            tile_mode,
+        } => (
+            2.0,
+            *tile_mode,
+            stops.as_slice(),
+            [0.0; 4],
+            create_radial_gradient_matrix(*center, *radius),
+        ),
+        PathShader2D::SweepGradient {
+            center,
+            start_angle,
+            end_angle,
+            stops,
+            tile_mode,
+        } => (
+            3.0,
+            *tile_mode,
+            stops.as_slice(),
+            [
+                -*start_angle / (PI * 2.0),
+                1.0 / ((*end_angle - *start_angle) / (PI * 2.0)).max(GRADIENT_EPSILON),
+                0.0,
+                0.0,
+            ],
+            create_sweep_gradient_matrix(*center),
+        ),
+        PathShader2D::TwoPointConicalGradient {
+            start_center,
+            start_radius,
+            end_center,
+            end_radius,
+            stops,
+            tile_mode,
+        } => {
+            let center_distance =
+                (end_center[0] - start_center[0]).hypot(end_center[1] - start_center[1]);
+            let params0 = if center_distance <= GRADIENT_EPSILON {
+                let diff_radius = *end_radius - *start_radius;
+                let scale = if diff_radius.abs() <= GRADIENT_EPSILON {
+                    0.0
+                } else {
+                    1.0 / diff_radius
+                };
+                let radius0 = *start_radius * scale;
+                let d_radius = if radius0 > 0.0 { 1.0 } else { -1.0 };
+                [radius0, d_radius, 0.0, 1.0]
+            } else {
+                let radius0 = *start_radius / center_distance;
+                let radius1 = *end_radius / center_distance;
+                let d_radius = radius1 - radius0;
+                let (a, inv_a) = if (1.0 - (d_radius * d_radius)).abs() > GRADIENT_EPSILON {
+                    let a = 1.0 - (d_radius * d_radius);
+                    (a, 1.0 / (2.0 * a))
+                } else {
+                    (0.0, 0.0)
+                };
+                [radius0, d_radius, a, inv_a]
+            };
+            (
+                4.0,
+                *tile_mode,
+                stops.as_slice(),
+                params0,
+                create_conical_gradient_matrix(
+                    *start_center,
+                    *end_center,
+                    *start_radius,
+                    *end_radius,
+                ),
+            )
+        }
+    };
+
+    let stops = normalize_gradient_stops(stops, tile_mode);
+    let local_matrix = multiply_affine_matrices(gradient_matrix, inverse_draw_transform);
+    let mut stop_offsets = [0.0; MAX_GRADIENT_STOPS];
+    let mut stop_colors = [[0.0; 4]; MAX_GRADIENT_STOPS];
+    for (index, stop) in stops.iter().enumerate() {
+        stop_offsets[index] = stop.offset;
+        stop_colors[index] = stop.color.to_srgb_array();
+    }
+    let last_offset = *stop_offsets
+        .get(stops.len().saturating_sub(1))
+        .unwrap_or(&1.0);
+    let fallback_color = path.color.to_srgb_array();
+    let last_color = stop_colors
+        .get(stops.len().saturating_sub(1))
+        .copied()
+        .unwrap_or(fallback_color);
+    for index in stops.len()..MAX_GRADIENT_STOPS {
+        stop_offsets[index] = last_offset;
+        stop_colors[index] = last_color;
+    }
+
+    PaintUniform {
+        info: [
+            kind,
+            gradient_tile_mode_code(tile_mode),
+            stops.len() as f32,
+            0.0,
+        ],
+        params0,
+        local_matrix0: [
+            local_matrix[0],
+            local_matrix[1],
+            local_matrix[2],
+            local_matrix[3],
+        ],
+        local_matrix1: [local_matrix[4], local_matrix[5], 0.0, 0.0],
+        solid_color: [0.0; 4],
+        stop_offsets0: [
+            stop_offsets[0],
+            stop_offsets[1],
+            stop_offsets[2],
+            stop_offsets[3],
+        ],
+        stop_offsets1: [
+            stop_offsets[4],
+            stop_offsets[5],
+            stop_offsets[6],
+            stop_offsets[7],
+        ],
+        stop_colors,
+    }
+}
+
+fn vertex_colored_paint() -> PaintUniform {
+    PaintUniform::solid([1.0, 1.0, 1.0, 1.0])
+}
+
 fn build_rect_vertices(rect: &RectDrawCommand, width: f32, height: f32) -> Vec<DrawingVertex> {
     let left = (rect.x / width) * 2.0 - 1.0;
     let right = ((rect.x + rect.width) / width) * 2.0 - 1.0;
@@ -960,18 +1395,22 @@ fn build_rect_vertices(rect: &RectDrawCommand, width: f32, height: f32) -> Vec<D
     let top_left = DrawingVertex {
         position: [left, top, 0.0, 1.0],
         color,
+        device_position: [rect.x, rect.y],
     };
     let top_right = DrawingVertex {
         position: [right, top, 0.0, 1.0],
         color,
+        device_position: [rect.x + rect.width, rect.y],
     };
     let bottom_left = DrawingVertex {
         position: [left, bottom, 0.0, 1.0],
         color,
+        device_position: [rect.x, rect.y + rect.height],
     };
     let bottom_right = DrawingVertex {
         position: [right, bottom, 0.0, 1.0],
         color,
+        device_position: [rect.x + rect.width, rect.y + rect.height],
     };
     vec![
         top_left,
@@ -990,6 +1429,7 @@ fn build_path_steps(
     painter_depth: f32,
 ) -> Vec<DrawingPreparedStep> {
     let mut steps = Vec::new();
+    let path_paint = build_path_paint(path);
     match path.style {
         PathStyle2D::Fill => {
             for step in prepare_fill_steps(path, painter_depth) {
@@ -997,7 +1437,7 @@ fn build_path_steps(
                     PreparedFillStep::Triangles(PreparedFillTriangleStep { points, mode }) => {
                         let Some(vertices) = points_to_vertices_with_color(
                             &points,
-                            path.color.to_array(),
+                            [1.0, 1.0, 1.0, 1.0],
                             width,
                             height,
                         ) else {
@@ -1014,13 +1454,20 @@ fn build_path_steps(
                                 }
                                 FillTriangleMode::StencilCover => TriangleStepMode::StencilCover,
                             },
+                            paint: path_paint,
                         });
                     }
                     PreparedFillStep::Wedges(step) => {
-                        steps.push(DrawingPreparedStep::WedgeFillPatches(step));
+                        steps.push(DrawingPreparedStep::WedgeFillPatches {
+                            step,
+                            paint: path_paint,
+                        });
                     }
                     PreparedFillStep::Curves(step) => {
-                        steps.push(DrawingPreparedStep::CurveFillPatches(step));
+                        steps.push(DrawingPreparedStep::CurveFillPatches {
+                            step,
+                            paint: path_paint,
+                        });
                     }
                 }
             }
@@ -1043,12 +1490,14 @@ fn build_path_steps(
                     steps.push(DrawingPreparedStep::Triangles {
                         vertices: with_vertex_depth(vertices, painter_depth),
                         mode: TriangleStepMode::Direct,
+                        paint: vertex_colored_paint(),
                     });
                 }
                 if let Some(vertices) = fringe {
                     steps.push(DrawingPreparedStep::Triangles {
                         vertices: with_vertex_depth(vertices, painter_depth),
                         mode: TriangleStepMode::Direct,
+                        paint: vertex_colored_paint(),
                     });
                 }
             }
@@ -1319,6 +1768,7 @@ fn vertex_from_point(point: Point, color: [f32; 4], width: f32, height: f32) -> 
             1.0,
         ],
         color,
+        device_position: point,
     }
 }
 
@@ -2785,27 +3235,38 @@ pub fn encode_drawing_command_buffer(
         });
         for step in &pass.steps {
             match step {
-                DrawingPreparedStep::Triangles { vertices, mode } => {
+                DrawingPreparedStep::Triangles {
+                    vertices,
+                    mode,
+                    paint,
+                } => {
                     let Some(vertex_buffer) = shared_context
                         .resource_provider
                         .create_triangle_vertex_buffer(vertices)
                     else {
                         continue;
                     };
+                    let (_paint_buffer, paint_bind_group) = shared_context
+                        .resource_provider
+                        .create_fill_paint_bind_group(paint);
                     let pipeline = shared_context
                         .resource_provider
                         .triangle_pipeline(sample_count, *mode);
                     render_pass.set_pipeline(&pipeline);
+                    render_pass.set_bind_group(0, &paint_bind_group, &[]);
                     render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
                     render_pass.draw(0..vertices.len() as u32, 0..1);
                 }
-                DrawingPreparedStep::WedgeFillPatches(step) => {
+                DrawingPreparedStep::WedgeFillPatches { step, paint } => {
                     let Some(instance_buffer) = shared_context
                         .resource_provider
                         .create_wedge_fill_patch_buffer(&step.instances)
                     else {
                         continue;
                     };
+                    let (_paint_buffer, paint_bind_group) = shared_context
+                        .resource_provider
+                        .create_fill_paint_bind_group(paint);
                     let (template_buffer, vertex_count) =
                         shared_context.resource_provider.wedge_template_buffer();
                     let pipeline = shared_context
@@ -2813,17 +3274,21 @@ pub fn encode_drawing_command_buffer(
                         .wedge_pipeline(sample_count, step.stencil_mode);
                     render_pass.set_pipeline(&pipeline);
                     render_pass.set_bind_group(0, &viewport_bind_group, &[]);
+                    render_pass.set_bind_group(1, &paint_bind_group, &[]);
                     render_pass.set_vertex_buffer(0, template_buffer.slice(..));
                     render_pass.set_vertex_buffer(1, instance_buffer.slice(..));
                     render_pass.draw(0..vertex_count, 0..step.instances.len() as u32);
                 }
-                DrawingPreparedStep::CurveFillPatches(step) => {
+                DrawingPreparedStep::CurveFillPatches { step, paint } => {
                     let Some(instance_buffer) = shared_context
                         .resource_provider
                         .create_curve_fill_patch_buffer(&step.instances)
                     else {
                         continue;
                     };
+                    let (_paint_buffer, paint_bind_group) = shared_context
+                        .resource_provider
+                        .create_fill_paint_bind_group(paint);
                     let (template_buffer, vertex_count) =
                         shared_context.resource_provider.curve_template_buffer();
                     let pipeline = shared_context
@@ -2831,6 +3296,7 @@ pub fn encode_drawing_command_buffer(
                         .curve_pipeline(sample_count, step.stencil_mode);
                     render_pass.set_pipeline(&pipeline);
                     render_pass.set_bind_group(0, &viewport_bind_group, &[]);
+                    render_pass.set_bind_group(1, &paint_bind_group, &[]);
                     render_pass.set_vertex_buffer(0, template_buffer.slice(..));
                     render_pass.set_vertex_buffer(1, instance_buffer.slice(..));
                     render_pass.draw(0..vertex_count, 0..step.instances.len() as u32);
@@ -2876,6 +3342,7 @@ mod tests {
                 b: 1.0,
                 a: 0.5,
             },
+            shader: None,
             stroke_width: 12.0,
             stroke_join: PathStrokeJoin2D::Round,
             stroke_cap: PathStrokeCap2D::Round,

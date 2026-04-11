@@ -101,6 +101,84 @@ export type Rect2dPatch = Partial<Rect2dState>;
 
 export type Point2d = [number, number];
 
+export type GradientTileMode2d = 'clamp' | 'repeat' | 'mirror' | 'decal';
+
+export interface GradientStop2d {
+  offset: number;
+  color: ColorValue;
+}
+
+export interface ResolvedGradientStop2d {
+  offset: number;
+  color: ResolvedColorValue;
+}
+
+export type PathShader2d =
+  | {
+    kind: 'linear-gradient';
+    start: Point2d;
+    end: Point2d;
+    stops: GradientStop2d[];
+    tileMode?: GradientTileMode2d;
+  }
+  | {
+    kind: 'radial-gradient';
+    center: Point2d;
+    radius: number;
+    stops: GradientStop2d[];
+    tileMode?: GradientTileMode2d;
+  }
+  | {
+    kind: 'two-point-conical-gradient';
+    startCenter: Point2d;
+    startRadius: number;
+    endCenter: Point2d;
+    endRadius: number;
+    stops: GradientStop2d[];
+    tileMode?: GradientTileMode2d;
+  }
+  | {
+    kind: 'sweep-gradient';
+    center: Point2d;
+    startAngle: number;
+    endAngle?: number;
+    stops: GradientStop2d[];
+    tileMode?: GradientTileMode2d;
+  };
+
+export type ResolvedPathShader2d =
+  | {
+    kind: 'linear-gradient';
+    start: Point2d;
+    end: Point2d;
+    stops: ResolvedGradientStop2d[];
+    tileMode: GradientTileMode2d;
+  }
+  | {
+    kind: 'radial-gradient';
+    center: Point2d;
+    radius: number;
+    stops: ResolvedGradientStop2d[];
+    tileMode: GradientTileMode2d;
+  }
+  | {
+    kind: 'two-point-conical-gradient';
+    startCenter: Point2d;
+    startRadius: number;
+    endCenter: Point2d;
+    endRadius: number;
+    stops: ResolvedGradientStop2d[];
+    tileMode: GradientTileMode2d;
+  }
+  | {
+    kind: 'sweep-gradient';
+    center: Point2d;
+    startAngle: number;
+    endAngle: number;
+    stops: ResolvedGradientStop2d[];
+    tileMode: GradientTileMode2d;
+  };
+
 export type PathFillRule2d = 'nonzero' | 'evenodd';
 
 export type PathStrokeJoin2d = 'miter' | 'bevel' | 'round';
@@ -130,6 +208,7 @@ export interface Path2dInit {
   fillRule?: PathFillRule2d;
   style?: 'fill' | 'stroke';
   color?: ColorValue;
+  shader?: PathShader2d;
   strokeWidth?: number;
   strokeJoin?: PathStrokeJoin2d;
   strokeCap?: PathStrokeCap2d;
@@ -144,6 +223,7 @@ export interface Path2dState {
   fillRule: PathFillRule2d;
   style: 'fill' | 'stroke';
   color: ResolvedColorValue;
+  shader?: ResolvedPathShader2d;
   strokeWidth: number;
   strokeJoin: PathStrokeJoin2d;
   strokeCap: PathStrokeCap2d;

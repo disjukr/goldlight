@@ -72,19 +72,17 @@ pub(crate) struct WedgeFillPatchInstance {
     pub(crate) curve_meta: [f32; 2],
     pub(crate) fan_point: [f32; 2],
     pub(crate) depth: f32,
-    pub(crate) color: [f32; 4],
 }
 
 impl WedgeFillPatchInstance {
-    pub(crate) const ATTRIBUTES: [wgpu::VertexAttribute; 8] = wgpu::vertex_attr_array![
+    pub(crate) const ATTRIBUTES: [wgpu::VertexAttribute; 7] = wgpu::vertex_attr_array![
         1 => Float32x2,
         2 => Float32x2,
         3 => Float32x2,
         4 => Float32x2,
         5 => Float32x2,
         6 => Float32x2,
-        7 => Float32,
-        8 => Float32x4
+        7 => Float32
     ];
 
     pub(crate) fn layout() -> wgpu::VertexBufferLayout<'static> {
@@ -105,18 +103,16 @@ pub(crate) struct CurveFillPatchInstance {
     pub(crate) p3: [f32; 2],
     pub(crate) curve_meta: [f32; 2],
     pub(crate) depth: f32,
-    pub(crate) color: [f32; 4],
 }
 
 impl CurveFillPatchInstance {
-    pub(crate) const ATTRIBUTES: [wgpu::VertexAttribute; 7] = wgpu::vertex_attr_array![
+    pub(crate) const ATTRIBUTES: [wgpu::VertexAttribute; 6] = wgpu::vertex_attr_array![
         1 => Float32x2,
         2 => Float32x2,
         3 => Float32x2,
         4 => Float32x2,
         5 => Float32x2,
-        6 => Float32,
-        7 => Float32x4
+        6 => Float32
     ];
 
     pub(crate) fn layout() -> wgpu::VertexBufferLayout<'static> {
@@ -145,6 +141,231 @@ pub(crate) enum PreparedFillStep {
     Triangles(PreparedFillTriangleStep),
     Wedges(PreparedWedgeFillStep),
     Curves(PreparedCurveFillStep),
+}
+
+pub(crate) fn fill_paint_shader_source(group_index: u32) -> String {
+    r#"
+struct PaintUniform {
+  info: vec4<f32>,
+  params0: vec4<f32>,
+  localMatrix0: vec4<f32>,
+  localMatrix1: vec4<f32>,
+  solidColor: vec4<f32>,
+  stopOffsets0: vec4<f32>,
+  stopOffsets1: vec4<f32>,
+  stopColors: array<vec4<f32>, 8>,
+};
+
+@group(__GROUP_INDEX__) @binding(0) var<uniform> paint: PaintUniform;
+
+fn paint_local_position(devicePosition: vec2<f32>) -> vec2<f32> {
+  return vec2<f32>(
+    (paint.localMatrix0.x * devicePosition.x) +
+      (paint.localMatrix0.z * devicePosition.y) + paint.localMatrix1.x,
+    (paint.localMatrix0.y * devicePosition.x) +
+      (paint.localMatrix0.w * devicePosition.y) + paint.localMatrix1.y,
+  );
+}
+
+fn tile_grad(tileModeCode: f32, tIn: vec2<f32>) -> vec2<f32> {
+  let tileMode = i32(round(tileModeCode));
+  var t = tIn;
+  if (tileMode == 1) {
+    t.x = fract(t.x);
+  } else if (tileMode == 2) {
+    let t1 = t.x - 1.0;
+    t.x = abs(t1 - 2.0 * floor(t1 * 0.5) - 1.0);
+  } else if (tileMode == 3) {
+    if (t.x < 0.0 || t.x > 1.0) {
+      return vec2<f32>(0.0, -1.0);
+    }
+  }
+  return t;
+}
+
+fn gradient_stop_offset(index: i32) -> f32 {
+  if (index <= 0) {
+    return paint.stopOffsets0.x;
+  } else if (index == 1) {
+    return paint.stopOffsets0.y;
+  } else if (index == 2) {
+    return paint.stopOffsets0.z;
+  } else if (index == 3) {
+    return paint.stopOffsets0.w;
+  } else if (index == 4) {
+    return paint.stopOffsets1.x;
+  } else if (index == 5) {
+    return paint.stopOffsets1.y;
+  } else if (index == 6) {
+    return paint.stopOffsets1.z;
+  }
+  return paint.stopOffsets1.w;
+}
+
+fn gradient_stop_color(index: i32) -> vec4<f32> {
+  let clampedIndex = clamp(index, 0, 7);
+  return paint.stopColors[u32(clampedIndex)];
+}
+
+fn srgb_channel_to_linear(value: f32) -> f32 {
+  if (value <= 0.04045) {
+    return value / 12.92;
+  }
+  return pow((value + 0.055) / 1.055, 2.4);
+}
+
+fn srgb_to_linear(color: vec4<f32>) -> vec4<f32> {
+  return vec4<f32>(
+    srgb_channel_to_linear(color.r),
+    srgb_channel_to_linear(color.g),
+    srgb_channel_to_linear(color.b),
+    color.a,
+  );
+}
+
+fn mix_gradient_interval(
+  t: f32,
+  lowOffset: f32,
+  lowColor: vec4<f32>,
+  highOffset: f32,
+  highColor: vec4<f32>,
+) -> vec4<f32> {
+  if (highOffset <= lowOffset) {
+    return select(lowColor, highColor, t >= highOffset);
+  }
+  return mix(lowColor, highColor, (t - lowOffset) / (highOffset - lowOffset));
+}
+
+fn gradient_interpolated_color(numStops: i32, t: f32) -> vec4<f32> {
+  var startIndex = 0;
+  var endIndex = numStops - 1;
+  if (numStops > 1 && gradient_stop_offset(0) == gradient_stop_offset(1)) {
+    startIndex = 1;
+  }
+  if (
+    numStops > 1 &&
+    gradient_stop_offset(numStops - 2) == gradient_stop_offset(numStops - 1)
+  ) {
+    endIndex = numStops - 2;
+  }
+  if (t <= gradient_stop_offset(startIndex)) {
+    return gradient_stop_color(startIndex);
+  }
+  if (t >= gradient_stop_offset(endIndex)) {
+    return gradient_stop_color(endIndex);
+  }
+
+  var lowIndex = startIndex;
+  var highIndex = endIndex;
+  while (highIndex - lowIndex > 1) {
+    let middleIndex = (lowIndex + highIndex) / 2;
+    if (t < gradient_stop_offset(middleIndex)) {
+      highIndex = middleIndex;
+    } else {
+      lowIndex = middleIndex;
+    }
+  }
+
+  let lowOffset = gradient_stop_offset(lowIndex);
+  let lowColor = gradient_stop_color(lowIndex);
+  let highOffset = gradient_stop_offset(highIndex);
+  let highColor = gradient_stop_color(highIndex);
+  return mix_gradient_interval(t, lowOffset, lowColor, highOffset, highColor);
+}
+
+fn colorize_gradient(numStops: i32, tileModeCode: f32, t: vec2<f32>) -> vec4<f32> {
+  if (t.y < 0.0) {
+    return vec4<f32>(0.0);
+  }
+
+  let tileMode = i32(round(tileModeCode));
+  if (tileMode == 0) {
+    if (t.x < 0.0) {
+      return gradient_stop_color(0);
+    }
+    if (t.x > 1.0) {
+      return gradient_stop_color(numStops - 1);
+    }
+    return gradient_interpolated_color(numStops, t.x);
+  }
+
+  let tiled = tile_grad(tileModeCode, t);
+  if (tiled.y < 0.0) {
+    return vec4<f32>(0.0);
+  }
+  return gradient_interpolated_color(numStops, tiled.x);
+}
+
+fn linear_grad_layout(pos: vec2<f32>) -> vec2<f32> {
+  return vec2<f32>(pos.x + 0.00001, 1.0);
+}
+
+fn radial_grad_layout(pos: vec2<f32>) -> vec2<f32> {
+  return vec2<f32>(length(pos), 1.0);
+}
+
+fn sweep_grad_layout(biasParam: f32, scaleParam: f32, pos: vec2<f32>) -> vec2<f32> {
+  let angle = select(atan2(-pos.y, -pos.x), sign(pos.y) * -1.5707963267949, pos.x == 0.0);
+  let t = (angle * 0.1591549430918 + 0.5 + biasParam) * scaleParam;
+  return vec2<f32>(t, 1.0);
+}
+
+fn conical_grad_layout(
+  radius0: f32,
+  dRadius: f32,
+  a: f32,
+  invA: f32,
+  pos: vec2<f32>,
+) -> vec2<f32> {
+  if (a == 0.0 && invA == 1.0) {
+    return vec2<f32>(length(pos) * dRadius - radius0, 1.0);
+  }
+  let c = dot(pos, pos) - radius0 * radius0;
+  let negB = 2.0 * (dRadius * radius0 + pos.x);
+  var t = 0.0;
+  if (a == 0.0) {
+    t = c / negB;
+  } else {
+    let d = negB * negB - 4.0 * a * c;
+    if (d < 0.0) {
+      return vec2<f32>(0.0, -1.0);
+    }
+    t = invA * (negB + sign(1.0 - dRadius) * sqrt(d));
+  }
+  return vec2<f32>(t, sign(t * dRadius + radius0));
+}
+
+fn paint_shader_color(devicePosition: vec2<f32>) -> vec4<f32> {
+  let kind = i32(round(paint.info.x));
+  if (kind == 0) {
+    return paint.solidColor;
+  }
+
+  let numStops = max(i32(round(paint.info.z)), 2);
+  let coords = paint_local_position(devicePosition);
+  let t = select(
+    select(
+      select(
+        radial_grad_layout(coords),
+        linear_grad_layout(coords),
+        kind == 1,
+      ),
+      sweep_grad_layout(paint.params0.x, paint.params0.y, coords),
+      kind == 3,
+    ),
+    conical_grad_layout(
+      paint.params0.x,
+      paint.params0.y,
+      paint.params0.z,
+      paint.params0.w,
+      coords,
+    ),
+    kind == 4,
+  );
+  return srgb_to_linear(colorize_gradient(numStops, paint.info.y, t));
+}
+"#
+    .replace("__GROUP_INDEX__", &group_index.to_string())
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -329,10 +550,11 @@ struct ViewportUniform {{
 }};
 
 @group(0) @binding(0) var<uniform> viewport: ViewportUniform;
+{paint_shader}
 
 struct VertexOut {{
   @builtin(position) position: vec4<f32>,
-  @location(0) color: vec4<f32>,
+  @location(0) devicePosition: vec2<f32>,
 }};
 
 fn device_to_ndc(position: vec2<f32>, depth: f32) -> vec4<f32> {{
@@ -455,7 +677,6 @@ fn vs_main(
   @location(5) curveMeta: vec2<f32>,
   @location(6) fanPoint: vec2<f32>,
   @location(7) depth: f32,
-  @location(8) color: vec4<f32>,
 ) -> VertexOut {{
   var local: vec2<f32>;
   if (resolveLevelAndIdx.x < 0.0) {{
@@ -474,17 +695,18 @@ fn vs_main(
   }}
   var out: VertexOut;
   out.position = device_to_ndc(local, depth);
-  out.color = color;
+  out.devicePosition = local;
   return out;
 }}
 
 @fragment
 fn fs_main(input: VertexOut) -> @location(0) vec4<f32> {{
-  return input.color;
+  return paint_shader_color(input.devicePosition);
 }}
 "#,
         max_resolve_level = MAX_PATCH_RESOLVE_LEVEL,
         patch_precision = PATCH_PRECISION,
+        paint_shader = fill_paint_shader_source(1),
     )
 }
 
@@ -499,10 +721,11 @@ struct ViewportUniform {{
 }};
 
 @group(0) @binding(0) var<uniform> viewport: ViewportUniform;
+{paint_shader}
 
 struct VertexOut {{
   @builtin(position) position: vec4<f32>,
-  @location(0) color: vec4<f32>,
+  @location(0) devicePosition: vec2<f32>,
 }};
 
 fn device_to_ndc(position: vec2<f32>, depth: f32) -> vec4<f32> {{
@@ -624,7 +847,6 @@ fn vs_main(
   @location(4) p3: vec2<f32>,
   @location(5) curveMeta: vec2<f32>,
   @location(6) depth: f32,
-  @location(7) color: vec4<f32>,
 ) -> VertexOut {{
   let local = tessellate_filled_curve(
     resolveLevelAndIdx.x,
@@ -638,17 +860,18 @@ fn vs_main(
   );
   var out: VertexOut;
   out.position = device_to_ndc(local, depth);
-  out.color = color;
+  out.devicePosition = local;
   return out;
 }}
 
 @fragment
 fn fs_main(input: VertexOut) -> @location(0) vec4<f32> {{
-  return input.color;
+  return paint_shader_color(input.devicePosition);
 }}
 "#,
         max_resolve_level = MAX_PATCH_RESOLVE_LEVEL,
         patch_precision = PATCH_PRECISION,
+        paint_shader = fill_paint_shader_source(1),
     )
 }
 
@@ -673,11 +896,9 @@ pub(crate) fn prepare_fill_steps(
     let Some(bounds) = compute_path_bounds(path) else {
         return Vec::new();
     };
-    let fill_color = path.color.to_array();
     let stencil_mode = FillStencilMode::from_fill_rule(path.fill_rule);
     if is_path_convex(path) {
-        let instances =
-            create_wedge_fill_instances(&prepare_wedge_patches(path), painter_depth, fill_color);
+        let instances = create_wedge_fill_instances(&prepare_wedge_patches(path), painter_depth);
         if instances.is_empty() {
             return Vec::new();
         }
@@ -691,8 +912,7 @@ pub(crate) fn prepare_fill_steps(
         || bounds.width * bounds.height <= PREFERRED_WEDGE_AREA_THRESHOLD;
     let mut steps = Vec::new();
     if prefer_wedges {
-        let instances =
-            create_wedge_fill_instances(&prepare_wedge_patches(path), painter_depth, fill_color);
+        let instances = create_wedge_fill_instances(&prepare_wedge_patches(path), painter_depth);
         if !instances.is_empty() {
             steps.push(PreparedFillStep::Wedges(PreparedWedgeFillStep {
                 instances,
@@ -710,8 +930,7 @@ pub(crate) fn prepare_fill_steps(
                 },
             }));
         }
-        let instances =
-            create_curve_fill_instances(&prepare_curve_patches(path), painter_depth, fill_color);
+        let instances = create_curve_fill_instances(&prepare_curve_patches(path), painter_depth);
         if !instances.is_empty() {
             steps.push(PreparedFillStep::Curves(PreparedCurveFillStep {
                 instances,
@@ -777,11 +996,7 @@ fn append_indexed_triangle_vertices(
         .collect()
 }
 
-fn create_wedge_fill_instances(
-    patches: &[WedgePatch],
-    depth: f32,
-    color: [f32; 4],
-) -> Vec<WedgeFillPatchInstance> {
+fn create_wedge_fill_instances(patches: &[WedgePatch], depth: f32) -> Vec<WedgeFillPatchInstance> {
     patches
         .iter()
         .map(|patch| {
@@ -794,7 +1009,6 @@ fn create_wedge_fill_instances(
                 curve_meta: [curve_type, weight],
                 fan_point: patch.fan_point,
                 depth,
-                color,
             }
         })
         .collect()
@@ -803,7 +1017,6 @@ fn create_wedge_fill_instances(
 fn create_curve_fill_instances(
     patches: &[FillPatchDefinition],
     depth: f32,
-    color: [f32; 4],
 ) -> Vec<CurveFillPatchInstance> {
     patches
         .iter()
@@ -817,7 +1030,6 @@ fn create_curve_fill_instances(
                 p3: points[3],
                 curve_meta: [curve_type, weight],
                 depth,
-                color,
             }
         })
         .collect()

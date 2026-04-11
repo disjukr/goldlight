@@ -80,18 +80,103 @@ impl Default for ColorValue {
 }
 
 impl ColorValue {
+    fn srgb_channel_to_linear(value: f32) -> f32 {
+        if value <= 0.04045 {
+            value / 12.92
+        } else {
+            ((value + 0.055) / 1.055).powf(2.4)
+        }
+    }
+
+    pub(crate) fn to_srgb_array(self) -> [f32; 4] {
+        [self.r, self.g, self.b, self.a]
+    }
+
     pub(crate) fn to_wgpu(self) -> wgpu::Color {
         wgpu::Color {
-            r: self.r as f64,
-            g: self.g as f64,
-            b: self.b as f64,
+            r: Self::srgb_channel_to_linear(self.r) as f64,
+            g: Self::srgb_channel_to_linear(self.g) as f64,
+            b: Self::srgb_channel_to_linear(self.b) as f64,
             a: self.a as f64,
         }
     }
 
     pub(crate) fn to_array(self) -> [f32; 4] {
-        [self.r, self.g, self.b, self.a]
+        [
+            Self::srgb_channel_to_linear(self.r),
+            Self::srgb_channel_to_linear(self.g),
+            Self::srgb_channel_to_linear(self.b),
+            self.a,
+        ]
     }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GradientTileMode2D {
+    Clamp,
+    Repeat,
+    Mirror,
+    Decal,
+}
+
+impl Default for GradientTileMode2D {
+    fn default() -> Self {
+        Self::Clamp
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GradientStop2D {
+    pub offset: f32,
+    pub color: ColorValue,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", tag = "kind")]
+pub enum PathShader2D {
+    #[serde(rename = "linear-gradient")]
+    LinearGradient {
+        start: [f32; 2],
+        end: [f32; 2],
+        stops: Vec<GradientStop2D>,
+        #[serde(default)]
+        tile_mode: GradientTileMode2D,
+    },
+    #[serde(rename = "radial-gradient")]
+    RadialGradient {
+        center: [f32; 2],
+        radius: f32,
+        stops: Vec<GradientStop2D>,
+        #[serde(default)]
+        tile_mode: GradientTileMode2D,
+    },
+    #[serde(rename = "two-point-conical-gradient")]
+    TwoPointConicalGradient {
+        #[serde(rename = "startCenter")]
+        start_center: [f32; 2],
+        #[serde(rename = "startRadius")]
+        start_radius: f32,
+        #[serde(rename = "endCenter")]
+        end_center: [f32; 2],
+        #[serde(rename = "endRadius")]
+        end_radius: f32,
+        stops: Vec<GradientStop2D>,
+        #[serde(default)]
+        tile_mode: GradientTileMode2D,
+    },
+    #[serde(rename = "sweep-gradient")]
+    SweepGradient {
+        center: [f32; 2],
+        #[serde(rename = "startAngle")]
+        start_angle: f32,
+        #[serde(rename = "endAngle")]
+        end_angle: f32,
+        stops: Vec<GradientStop2D>,
+        #[serde(default)]
+        tile_mode: GradientTileMode2D,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -273,6 +358,8 @@ pub struct Path2DOptions {
     pub style: PathStyle2D,
     #[serde(default = "default_rect_color")]
     pub color: ColorValue,
+    #[serde(default)]
+    pub shader: Option<PathShader2D>,
     #[serde(default = "default_path_stroke_width")]
     pub stroke_width: f32,
     #[serde(default)]
@@ -379,6 +466,7 @@ pub(crate) struct Path2D {
     pub fill_rule: PathFillRule2D,
     pub style: PathStyle2D,
     pub color: ColorValue,
+    pub shader: Option<PathShader2D>,
     pub stroke_width: f32,
     pub stroke_join: PathStrokeJoin2D,
     pub stroke_cap: PathStrokeCap2D,
@@ -542,6 +630,7 @@ impl RenderModel {
                 fill_rule: options.fill_rule,
                 style: options.style,
                 color: options.color,
+                shader: options.shader,
                 stroke_width: options.stroke_width,
                 stroke_join: options.stroke_join,
                 stroke_cap: options.stroke_cap,
@@ -564,6 +653,7 @@ impl RenderModel {
         path.fill_rule = options.fill_rule;
         path.style = options.style;
         path.color = options.color;
+        path.shader = options.shader;
         path.stroke_width = options.stroke_width;
         path.stroke_join = options.stroke_join;
         path.stroke_cap = options.stroke_cap;

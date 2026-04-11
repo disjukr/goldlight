@@ -3,14 +3,14 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use bytemuck::{Pod, Zeroable};
-use lyon::math::point;
-use lyon::path::Path;
-use lyon::tessellation::{
-    BuffersBuilder, FillOptions, FillRule, FillTessellator, FillVertex, FillVertexConstructor,
-    VertexBuffers,
-};
 use wgpu::util::DeviceExt;
 
+use crate::fill_patch::{
+    curve_fill_shader_source, curve_template_vertices, prepare_fill_steps,
+    wedge_fill_shader_source, wedge_template_vertices, CurveFillPatchInstance, FillStencilMode,
+    FillTriangleMode, PatchResolveVertex, PreparedCurveFillStep, PreparedFillStep,
+    PreparedFillTriangleStep, PreparedWedgeFillStep, WedgeFillPatchInstance,
+};
 use crate::render::{
     ColorValue, Path2D, PathFillRule2D, PathStrokeCap2D, PathStrokeJoin2D, PathStyle2D, PathVerb2D,
     Rect2D, Scene2D,
@@ -49,7 +49,8 @@ const CURVE_FLATNESS_TOLERANCE: f32 = 0.25;
 const MAX_CURVE_SUBDIVISION_DEPTH: u32 = 8;
 const HAIRLINE_COVERAGE_WIDTH: f32 = 1.0;
 const DEFAULT_MITER_LIMIT: f32 = 4.0;
-pub(crate) const DRAWING_DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+pub(crate) const DRAWING_DEPTH_FORMAT: wgpu::TextureFormat =
+    wgpu::TextureFormat::Depth24PlusStencil8;
 
 pub(crate) type Point = [f32; 2];
 
@@ -57,24 +58,68 @@ pub(crate) type Point = [f32; 2];
 pub struct DawnResourceProvider {
     device: wgpu::Device,
     msaa_sample_count: u32,
-    fill_pipeline: Arc<wgpu::RenderPipeline>,
-    fill_pipeline_msaa: Option<Arc<wgpu::RenderPipeline>>,
-    stroke_pipeline: Arc<wgpu::RenderPipeline>,
-    stroke_pipeline_msaa: Option<Arc<wgpu::RenderPipeline>>,
+    triangle_direct_pipeline: PipelinePair,
+    triangle_depth_pipeline: PipelinePair,
+    triangle_stencil_evenodd_pipeline: PipelinePair,
+    triangle_stencil_nonzero_pipeline: PipelinePair,
+    triangle_stencil_cover_pipeline: PipelinePair,
+    wedge_direct_pipeline: PipelinePair,
+    wedge_stencil_evenodd_pipeline: PipelinePair,
+    wedge_stencil_nonzero_pipeline: PipelinePair,
+    curve_stencil_evenodd_pipeline: PipelinePair,
+    curve_stencil_nonzero_pipeline: PipelinePair,
+    stroke_pipeline: PipelinePair,
+    wedge_template_buffer: wgpu::Buffer,
+    wedge_template_vertex_count: u32,
+    curve_template_buffer: wgpu::Buffer,
+    curve_template_vertex_count: u32,
     viewport_bind_group_layout: Arc<wgpu::BindGroupLayout>,
+}
+
+#[derive(Clone)]
+struct PipelinePair {
+    single: Arc<wgpu::RenderPipeline>,
+    msaa: Option<Arc<wgpu::RenderPipeline>>,
+}
+
+impl PipelinePair {
+    fn new(create_pipeline: impl Fn(u32) -> wgpu::RenderPipeline, msaa_sample_count: u32) -> Self {
+        let single = Arc::new(create_pipeline(1));
+        let msaa = (msaa_sample_count > 1).then(|| Arc::new(create_pipeline(msaa_sample_count)));
+        Self { single, msaa }
+    }
+
+    fn get(&self, sample_count: u32) -> Arc<wgpu::RenderPipeline> {
+        if sample_count > 1 {
+            if let Some(pipeline) = &self.msaa {
+                return pipeline.clone();
+            }
+        }
+        self.single.clone()
+    }
+}
+
+#[derive(Clone, Copy)]
+enum TrianglePipelineKind {
+    Direct,
+    DirectDepth,
+    StencilEvenodd,
+    StencilNonzero,
+    StencilCover,
 }
 
 impl DawnResourceProvider {
     fn new(device: &wgpu::Device, format: wgpu::TextureFormat, msaa_sample_count: u32) -> Self {
-        let fill_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        let triangle_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("goldlight drawing shader"),
             source: wgpu::ShaderSource::Wgsl(DRAWING_SHADER_SOURCE.into()),
         });
-        let fill_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("goldlight drawing pipeline layout"),
-            bind_group_layouts: &[],
-            push_constant_ranges: &[],
-        });
+        let triangle_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("goldlight drawing pipeline layout"),
+                bind_group_layouts: &[],
+                push_constant_ranges: &[],
+            });
         let viewport_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("goldlight stroke viewport bind group layout"),
@@ -89,39 +134,118 @@ impl DawnResourceProvider {
                     count: None,
                 }],
             });
+        let wedge_shader_source = wedge_fill_shader_source();
+        let wedge_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("goldlight wedge fill patch shader"),
+            source: wgpu::ShaderSource::Wgsl(wedge_shader_source.into()),
+        });
+        let curve_shader_source = curve_fill_shader_source();
+        let curve_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("goldlight curve fill patch shader"),
+            source: wgpu::ShaderSource::Wgsl(curve_shader_source.into()),
+        });
         let stroke_shader_source = stroke_patch_shader_source();
         let stroke_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("goldlight stroke patch shader"),
             source: wgpu::ShaderSource::Wgsl(stroke_shader_source.into()),
         });
-        let stroke_pipeline_layout =
+        let patch_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("goldlight stroke patch pipeline layout"),
+                label: Some("goldlight patch pipeline layout"),
                 bind_group_layouts: &[&viewport_bind_group_layout],
                 push_constant_ranges: &[],
             });
-        let create_fill_pipeline = |sample_count: u32| {
+        let create_triangle_pipeline = |sample_count: u32, kind: TrianglePipelineKind| {
+            let (depth_stencil, write_mask) = triangle_pipeline_state(kind);
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("goldlight drawing pipeline"),
-                layout: Some(&fill_pipeline_layout),
+                layout: Some(&triangle_pipeline_layout),
                 vertex: wgpu::VertexState {
-                    module: &fill_shader,
+                    module: &triangle_shader,
                     entry_point: Some("vs_main"),
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                     buffers: &[DrawingVertex::layout()],
                 },
                 fragment: Some(wgpu::FragmentState {
-                    module: &fill_shader,
+                    module: &triangle_shader,
                     entry_point: Some("fs_main"),
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                     targets: &[Some(wgpu::ColorTargetState {
                         format,
                         blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                        write_mask: wgpu::ColorWrites::ALL,
+                        write_mask,
                     })],
                 }),
                 primitive: wgpu::PrimitiveState::default(),
-                depth_stencil: None,
+                depth_stencil,
+                multisample: wgpu::MultisampleState {
+                    count: sample_count,
+                    ..wgpu::MultisampleState::default()
+                },
+                multiview: None,
+                cache: None,
+            })
+        };
+        let create_wedge_pipeline = |sample_count: u32, stencil_mode: Option<FillStencilMode>| {
+            let (depth_stencil, write_mask) = patch_pipeline_state(stencil_mode);
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("goldlight wedge fill patch pipeline"),
+                layout: Some(&patch_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &wedge_shader,
+                    entry_point: Some("vs_main"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    buffers: &[
+                        PatchResolveVertex::layout(),
+                        WedgeFillPatchInstance::layout(),
+                    ],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &wedge_shader,
+                    entry_point: Some("fs_main"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask,
+                    })],
+                }),
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil,
+                multisample: wgpu::MultisampleState {
+                    count: sample_count,
+                    ..wgpu::MultisampleState::default()
+                },
+                multiview: None,
+                cache: None,
+            })
+        };
+        let create_curve_pipeline = |sample_count: u32, stencil_mode: FillStencilMode| {
+            let (depth_stencil, write_mask) = patch_pipeline_state(Some(stencil_mode));
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("goldlight curve fill patch pipeline"),
+                layout: Some(&patch_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &curve_shader,
+                    entry_point: Some("vs_main"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    buffers: &[
+                        PatchResolveVertex::layout(),
+                        CurveFillPatchInstance::layout(),
+                    ],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &curve_shader,
+                    entry_point: Some("fs_main"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask,
+                    })],
+                }),
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil,
                 multisample: wgpu::MultisampleState {
                     count: sample_count,
                     ..wgpu::MultisampleState::default()
@@ -133,7 +257,7 @@ impl DawnResourceProvider {
         let create_stroke_pipeline = |sample_count: u32| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("goldlight stroke patch pipeline"),
-                layout: Some(&stroke_pipeline_layout),
+                layout: Some(&patch_pipeline_layout),
                 vertex: wgpu::VertexState {
                     module: &stroke_shader,
                     entry_point: Some("vs_main"),
@@ -169,19 +293,74 @@ impl DawnResourceProvider {
                 cache: None,
             })
         };
-        let fill_pipeline = create_fill_pipeline(1);
-        let fill_pipeline_msaa =
-            (msaa_sample_count > 1).then(|| Arc::new(create_fill_pipeline(msaa_sample_count)));
-        let stroke_pipeline = create_stroke_pipeline(1);
-        let stroke_pipeline_msaa =
-            (msaa_sample_count > 1).then(|| Arc::new(create_stroke_pipeline(msaa_sample_count)));
+        let wedge_template_vertices = wedge_template_vertices();
+        let wedge_template_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("goldlight wedge fill template buffer"),
+            contents: bytemuck::cast_slice(&wedge_template_vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        let curve_template_vertices = curve_template_vertices();
+        let curve_template_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("goldlight curve fill template buffer"),
+            contents: bytemuck::cast_slice(&curve_template_vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
         Self {
             device: device.clone(),
             msaa_sample_count,
-            fill_pipeline: Arc::new(fill_pipeline),
-            fill_pipeline_msaa,
-            stroke_pipeline: Arc::new(stroke_pipeline),
-            stroke_pipeline_msaa,
+            triangle_direct_pipeline: PipelinePair::new(
+                |sample_count| create_triangle_pipeline(sample_count, TrianglePipelineKind::Direct),
+                msaa_sample_count,
+            ),
+            triangle_depth_pipeline: PipelinePair::new(
+                |sample_count| {
+                    create_triangle_pipeline(sample_count, TrianglePipelineKind::DirectDepth)
+                },
+                msaa_sample_count,
+            ),
+            triangle_stencil_evenodd_pipeline: PipelinePair::new(
+                |sample_count| {
+                    create_triangle_pipeline(sample_count, TrianglePipelineKind::StencilEvenodd)
+                },
+                msaa_sample_count,
+            ),
+            triangle_stencil_nonzero_pipeline: PipelinePair::new(
+                |sample_count| {
+                    create_triangle_pipeline(sample_count, TrianglePipelineKind::StencilNonzero)
+                },
+                msaa_sample_count,
+            ),
+            triangle_stencil_cover_pipeline: PipelinePair::new(
+                |sample_count| {
+                    create_triangle_pipeline(sample_count, TrianglePipelineKind::StencilCover)
+                },
+                msaa_sample_count,
+            ),
+            wedge_direct_pipeline: PipelinePair::new(
+                |sample_count| create_wedge_pipeline(sample_count, None),
+                msaa_sample_count,
+            ),
+            wedge_stencil_evenodd_pipeline: PipelinePair::new(
+                |sample_count| create_wedge_pipeline(sample_count, Some(FillStencilMode::Evenodd)),
+                msaa_sample_count,
+            ),
+            wedge_stencil_nonzero_pipeline: PipelinePair::new(
+                |sample_count| create_wedge_pipeline(sample_count, Some(FillStencilMode::Nonzero)),
+                msaa_sample_count,
+            ),
+            curve_stencil_evenodd_pipeline: PipelinePair::new(
+                |sample_count| create_curve_pipeline(sample_count, FillStencilMode::Evenodd),
+                msaa_sample_count,
+            ),
+            curve_stencil_nonzero_pipeline: PipelinePair::new(
+                |sample_count| create_curve_pipeline(sample_count, FillStencilMode::Nonzero),
+                msaa_sample_count,
+            ),
+            stroke_pipeline: PipelinePair::new(create_stroke_pipeline, msaa_sample_count),
+            wedge_template_buffer,
+            wedge_template_vertex_count: wedge_template_vertices.len() as u32,
+            curve_template_buffer,
+            curve_template_vertex_count: curve_template_vertices.len() as u32,
             viewport_bind_group_layout: Arc::new(viewport_bind_group_layout),
         }
     }
@@ -217,6 +396,40 @@ impl DawnResourceProvider {
         )
     }
 
+    fn create_wedge_fill_patch_buffer(
+        &self,
+        instances: &[WedgeFillPatchInstance],
+    ) -> Option<wgpu::Buffer> {
+        if instances.is_empty() {
+            return None;
+        }
+        Some(
+            self.device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("goldlight wedge fill patch buffer"),
+                    contents: bytemuck::cast_slice(instances),
+                    usage: wgpu::BufferUsages::VERTEX,
+                }),
+        )
+    }
+
+    fn create_curve_fill_patch_buffer(
+        &self,
+        instances: &[CurveFillPatchInstance],
+    ) -> Option<wgpu::Buffer> {
+        if instances.is_empty() {
+            return None;
+        }
+        Some(
+            self.device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("goldlight curve fill patch buffer"),
+                    contents: bytemuck::cast_slice(instances),
+                    usage: wgpu::BufferUsages::VERTEX,
+                }),
+        )
+    }
+
     fn create_viewport_bind_group(
         &self,
         surface_width: u32,
@@ -246,26 +459,168 @@ impl DawnResourceProvider {
         (buffer, bind_group)
     }
 
-    fn fill_pipeline(&self, sample_count: u32) -> Arc<wgpu::RenderPipeline> {
-        if sample_count > 1 {
-            if let Some(pipeline) = &self.fill_pipeline_msaa {
-                return pipeline.clone();
+    fn triangle_pipeline(
+        &self,
+        sample_count: u32,
+        mode: TriangleStepMode,
+    ) -> Arc<wgpu::RenderPipeline> {
+        match mode {
+            TriangleStepMode::Direct => self.triangle_direct_pipeline.get(sample_count),
+            TriangleStepMode::DirectDepth => self.triangle_depth_pipeline.get(sample_count),
+            TriangleStepMode::StencilEvenodd => {
+                self.triangle_stencil_evenodd_pipeline.get(sample_count)
+            }
+            TriangleStepMode::StencilNonzero => {
+                self.triangle_stencil_nonzero_pipeline.get(sample_count)
+            }
+            TriangleStepMode::StencilCover => {
+                self.triangle_stencil_cover_pipeline.get(sample_count)
             }
         }
-        self.fill_pipeline.clone()
     }
 
     fn stroke_pipeline(&self, sample_count: u32) -> Arc<wgpu::RenderPipeline> {
-        if sample_count > 1 {
-            if let Some(pipeline) = &self.stroke_pipeline_msaa {
-                return pipeline.clone();
-            }
+        self.stroke_pipeline.get(sample_count)
+    }
+
+    fn wedge_pipeline(
+        &self,
+        sample_count: u32,
+        stencil_mode: Option<FillStencilMode>,
+    ) -> Arc<wgpu::RenderPipeline> {
+        match stencil_mode {
+            None => self.wedge_direct_pipeline.get(sample_count),
+            Some(FillStencilMode::Evenodd) => self.wedge_stencil_evenodd_pipeline.get(sample_count),
+            Some(FillStencilMode::Nonzero) => self.wedge_stencil_nonzero_pipeline.get(sample_count),
         }
-        self.stroke_pipeline.clone()
+    }
+
+    fn curve_pipeline(
+        &self,
+        sample_count: u32,
+        stencil_mode: FillStencilMode,
+    ) -> Arc<wgpu::RenderPipeline> {
+        match stencil_mode {
+            FillStencilMode::Evenodd => self.curve_stencil_evenodd_pipeline.get(sample_count),
+            FillStencilMode::Nonzero => self.curve_stencil_nonzero_pipeline.get(sample_count),
+        }
+    }
+
+    fn wedge_template_buffer(&self) -> (&wgpu::Buffer, u32) {
+        (
+            &self.wedge_template_buffer,
+            self.wedge_template_vertex_count,
+        )
+    }
+
+    fn curve_template_buffer(&self) -> (&wgpu::Buffer, u32) {
+        (
+            &self.curve_template_buffer,
+            self.curve_template_vertex_count,
+        )
     }
 
     pub(crate) fn msaa_sample_count(&self) -> u32 {
         self.msaa_sample_count
+    }
+}
+
+fn fill_stencil_state(stencil_mode: FillStencilMode) -> wgpu::DepthStencilState {
+    let face = match stencil_mode {
+        FillStencilMode::Evenodd => wgpu::StencilFaceState {
+            compare: wgpu::CompareFunction::Always,
+            fail_op: wgpu::StencilOperation::Keep,
+            depth_fail_op: wgpu::StencilOperation::Keep,
+            pass_op: wgpu::StencilOperation::Invert,
+        },
+        FillStencilMode::Nonzero => wgpu::StencilFaceState {
+            compare: wgpu::CompareFunction::Always,
+            fail_op: wgpu::StencilOperation::Keep,
+            depth_fail_op: wgpu::StencilOperation::Keep,
+            pass_op: wgpu::StencilOperation::IncrementWrap,
+        },
+    };
+    let back = match stencil_mode {
+        FillStencilMode::Evenodd => face,
+        FillStencilMode::Nonzero => wgpu::StencilFaceState {
+            compare: wgpu::CompareFunction::Always,
+            fail_op: wgpu::StencilOperation::Keep,
+            depth_fail_op: wgpu::StencilOperation::Keep,
+            pass_op: wgpu::StencilOperation::DecrementWrap,
+        },
+    };
+    wgpu::DepthStencilState {
+        format: DRAWING_DEPTH_FORMAT,
+        depth_write_enabled: false,
+        depth_compare: wgpu::CompareFunction::Less,
+        stencil: wgpu::StencilState {
+            front: face,
+            back,
+            read_mask: 0xff,
+            write_mask: 0xff,
+        },
+        bias: wgpu::DepthBiasState::default(),
+    }
+}
+
+fn stencil_cover_state() -> wgpu::DepthStencilState {
+    let face = wgpu::StencilFaceState {
+        compare: wgpu::CompareFunction::NotEqual,
+        fail_op: wgpu::StencilOperation::Keep,
+        depth_fail_op: wgpu::StencilOperation::Zero,
+        pass_op: wgpu::StencilOperation::Zero,
+    };
+    wgpu::DepthStencilState {
+        format: DRAWING_DEPTH_FORMAT,
+        depth_write_enabled: true,
+        depth_compare: wgpu::CompareFunction::Less,
+        stencil: wgpu::StencilState {
+            front: face,
+            back: face,
+            read_mask: 0xff,
+            write_mask: 0xff,
+        },
+        bias: wgpu::DepthBiasState::default(),
+    }
+}
+
+fn direct_depth_state() -> wgpu::DepthStencilState {
+    wgpu::DepthStencilState {
+        format: DRAWING_DEPTH_FORMAT,
+        depth_write_enabled: true,
+        depth_compare: wgpu::CompareFunction::Less,
+        stencil: wgpu::StencilState::default(),
+        bias: wgpu::DepthBiasState::default(),
+    }
+}
+
+fn triangle_pipeline_state(
+    kind: TrianglePipelineKind,
+) -> (Option<wgpu::DepthStencilState>, wgpu::ColorWrites) {
+    match kind {
+        TrianglePipelineKind::Direct => (None, wgpu::ColorWrites::ALL),
+        TrianglePipelineKind::DirectDepth => (Some(direct_depth_state()), wgpu::ColorWrites::ALL),
+        TrianglePipelineKind::StencilEvenodd => (
+            Some(fill_stencil_state(FillStencilMode::Evenodd)),
+            wgpu::ColorWrites::empty(),
+        ),
+        TrianglePipelineKind::StencilNonzero => (
+            Some(fill_stencil_state(FillStencilMode::Nonzero)),
+            wgpu::ColorWrites::empty(),
+        ),
+        TrianglePipelineKind::StencilCover => (Some(stencil_cover_state()), wgpu::ColorWrites::ALL),
+    }
+}
+
+fn patch_pipeline_state(
+    stencil_mode: Option<FillStencilMode>,
+) -> (Option<wgpu::DepthStencilState>, wgpu::ColorWrites) {
+    match stencil_mode {
+        None => (Some(direct_depth_state()), wgpu::ColorWrites::ALL),
+        Some(stencil_mode) => (
+            Some(fill_stencil_state(stencil_mode)),
+            wgpu::ColorWrites::empty(),
+        ),
     }
 }
 
@@ -351,8 +706,22 @@ pub struct PathDrawCommand {
 
 #[derive(Clone, Debug)]
 pub enum DrawingPreparedStep {
-    Triangles { vertices: Vec<DrawingVertex> },
+    Triangles {
+        vertices: Vec<DrawingVertex>,
+        mode: TriangleStepMode,
+    },
+    WedgeFillPatches(PreparedWedgeFillStep),
+    CurveFillPatches(PreparedCurveFillStep),
     StrokePatches(PreparedStrokePatchStep),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TriangleStepMode {
+    Direct,
+    DirectDepth,
+    StencilEvenodd,
+    StencilNonzero,
+    StencilCover,
 }
 
 #[derive(Clone, Debug)]
@@ -372,11 +741,33 @@ pub struct DrawingPreparedRecording {
 
 impl DrawingPreparedStep {
     fn requires_msaa(&self) -> bool {
-        matches!(self, Self::StrokePatches(_))
+        matches!(
+            self,
+            Self::WedgeFillPatches(_)
+                | Self::CurveFillPatches(_)
+                | Self::Triangles {
+                    mode: TriangleStepMode::StencilEvenodd
+                        | TriangleStepMode::StencilNonzero
+                        | TriangleStepMode::StencilCover,
+                    ..
+                }
+                | Self::StrokePatches(_)
+        )
     }
 
     fn requires_depth(&self) -> bool {
-        matches!(self, Self::StrokePatches(_))
+        matches!(
+            self,
+            Self::Triangles {
+                mode: TriangleStepMode::DirectDepth
+                    | TriangleStepMode::StencilEvenodd
+                    | TriangleStepMode::StencilNonzero
+                    | TriangleStepMode::StencilCover,
+                ..
+            } | Self::WedgeFillPatches(_)
+                | Self::CurveFillPatches(_)
+                | Self::StrokePatches(_)
+        )
     }
 }
 
@@ -517,6 +908,7 @@ pub fn prepare_drawing_recording(
                         build_rect_vertices(rect, width, height),
                         painter_depth,
                     ),
+                    mode: TriangleStepMode::DirectDepth,
                 });
             }
             DrawingCommand::DrawPath(path) => {
@@ -591,16 +983,6 @@ fn build_rect_vertices(rect: &RectDrawCommand, width: f32, height: f32) -> Vec<D
     ]
 }
 
-#[derive(Clone, Copy)]
-struct PositionCtor;
-
-impl FillVertexConstructor<[f32; 2]> for PositionCtor {
-    fn new_vertex(&mut self, vertex: FillVertex<'_>) -> [f32; 2] {
-        let position = vertex.position();
-        [position.x, position.y]
-    }
-}
-
 fn build_path_steps(
     path: &PathDrawCommand,
     width: f32,
@@ -610,15 +992,37 @@ fn build_path_steps(
     let mut steps = Vec::new();
     match path.style {
         PathStyle2D::Fill => {
-            if let Some(vertices) = build_fill_vertices(path, width, height) {
-                steps.push(DrawingPreparedStep::Triangles {
-                    vertices: with_vertex_depth(vertices, painter_depth),
-                });
-            }
-            if let Some(vertices) = build_fill_fringe_vertices(path, width, height) {
-                steps.push(DrawingPreparedStep::Triangles {
-                    vertices: with_vertex_depth(vertices, painter_depth),
-                });
+            for step in prepare_fill_steps(path, painter_depth) {
+                match step {
+                    PreparedFillStep::Triangles(PreparedFillTriangleStep { points, mode }) => {
+                        let Some(vertices) = points_to_vertices_with_color(
+                            &points,
+                            path.color.to_array(),
+                            width,
+                            height,
+                        ) else {
+                            continue;
+                        };
+                        steps.push(DrawingPreparedStep::Triangles {
+                            vertices: with_vertex_depth(vertices, painter_depth),
+                            mode: match mode {
+                                FillTriangleMode::StencilEvenodd => {
+                                    TriangleStepMode::StencilEvenodd
+                                }
+                                FillTriangleMode::StencilNonzero => {
+                                    TriangleStepMode::StencilNonzero
+                                }
+                                FillTriangleMode::StencilCover => TriangleStepMode::StencilCover,
+                            },
+                        });
+                    }
+                    PreparedFillStep::Wedges(step) => {
+                        steps.push(DrawingPreparedStep::WedgeFillPatches(step));
+                    }
+                    PreparedFillStep::Curves(step) => {
+                        steps.push(DrawingPreparedStep::CurveFillPatches(step));
+                    }
+                }
             }
         }
         PathStyle2D::Stroke => {
@@ -638,102 +1042,19 @@ fn build_path_steps(
                 if let Some(vertices) = interior {
                     steps.push(DrawingPreparedStep::Triangles {
                         vertices: with_vertex_depth(vertices, painter_depth),
+                        mode: TriangleStepMode::Direct,
                     });
                 }
                 if let Some(vertices) = fringe {
                     steps.push(DrawingPreparedStep::Triangles {
                         vertices: with_vertex_depth(vertices, painter_depth),
+                        mode: TriangleStepMode::Direct,
                     });
                 }
             }
         }
     }
     steps
-}
-
-fn build_fill_vertices(
-    path: &PathDrawCommand,
-    width: f32,
-    height: f32,
-) -> Option<Vec<DrawingVertex>> {
-    let lyon_path = build_lyon_path(path)?;
-    let mut geometry: VertexBuffers<[f32; 2], u32> = VertexBuffers::new();
-    let mut tessellator = FillTessellator::new();
-    let fill_rule = match path.fill_rule {
-        PathFillRule2D::Nonzero => FillRule::NonZero,
-        PathFillRule2D::Evenodd => FillRule::EvenOdd,
-    };
-    if tessellator
-        .tessellate_path(
-            &lyon_path,
-            &FillOptions::default().with_fill_rule(fill_rule),
-            &mut BuffersBuilder::new(&mut geometry, PositionCtor),
-        )
-        .is_err()
-    {
-        return None;
-    }
-    let vertices = indexed_positions_to_vertices(
-        &geometry.vertices,
-        &geometry.indices,
-        path.color,
-        width,
-        height,
-    );
-    (!vertices.is_empty()).then_some(vertices)
-}
-
-fn build_fill_fringe_vertices(
-    path: &PathDrawCommand,
-    width: f32,
-    height: f32,
-) -> Option<Vec<DrawingVertex>> {
-    let subpaths = close_subpaths_for_fill(flatten_subpaths(path));
-    let mut fringe = Vec::new();
-    let color = path.color.to_array();
-    let transparent = [color[0], color[1], color[2], 0.0];
-    for subpath in subpaths {
-        if !subpath.closed || subpath.points.len() < 2 {
-            continue;
-        }
-        let winding = if polygon_area(&subpath.points) >= 0.0 {
-            1.0
-        } else {
-            -1.0
-        };
-        for index in 0..subpath.points.len() {
-            let start = subpath.points[index];
-            let end = subpath.points[(index + 1) % subpath.points.len()];
-            let Some(direction) = normalize(subtract(end, start)) else {
-                continue;
-            };
-            let outward = scale(
-                perpendicular(direction),
-                if winding > 0.0 {
-                    -AA_FRINGE_WIDTH
-                } else {
-                    AA_FRINGE_WIDTH
-                },
-            );
-            append_colored_quad(
-                &mut fringe,
-                ColoredPoint {
-                    point: start,
-                    color,
-                },
-                ColoredPoint { point: end, color },
-                ColoredPoint {
-                    point: add(end, outward),
-                    color: transparent,
-                },
-                ColoredPoint {
-                    point: add(start, outward),
-                    color: transparent,
-                },
-            );
-        }
-    }
-    colored_points_to_vertices(&fringe, width, height)
 }
 
 fn build_stroke_vertices(
@@ -956,21 +1277,6 @@ fn build_stroke_vertices(
     (interior, fringe)
 }
 
-fn indexed_positions_to_vertices(
-    positions: &[[f32; 2]],
-    indices: &[u32],
-    color: ColorValue,
-    width: f32,
-    height: f32,
-) -> Vec<DrawingVertex> {
-    let color = color.to_array();
-    indices
-        .iter()
-        .filter_map(|index| positions.get(*index as usize))
-        .map(|position| vertex_from_point(*position, color, width, height))
-        .collect()
-}
-
 fn points_to_vertices_with_color(
     points: &[Point],
     color: [f32; 4],
@@ -1013,193 +1319,6 @@ fn vertex_from_point(point: Point, color: [f32; 4], width: f32, height: f32) -> 
             1.0,
         ],
         color,
-    }
-}
-
-fn build_lyon_path(path: &PathDrawCommand) -> Option<Path> {
-    let mut builder = Path::builder();
-    let mut current = [path.x, path.y];
-    let mut contour_start = [path.x, path.y];
-    let mut saw_geometry = false;
-    let mut contour_open = false;
-
-    for verb in &path.verbs {
-        match *verb {
-            PathVerb2D::MoveTo { to } => {
-                if contour_open {
-                    builder.end(false);
-                }
-                let target = [path.x + to[0], path.y + to[1]];
-                builder.begin(point(target[0], target[1]));
-                current = target;
-                contour_start = target;
-                saw_geometry = true;
-                contour_open = true;
-            }
-            PathVerb2D::LineTo { to } => {
-                let target = [path.x + to[0], path.y + to[1]];
-                ensure_path_started(
-                    &mut builder,
-                    current,
-                    &mut contour_start,
-                    &mut saw_geometry,
-                    &mut contour_open,
-                );
-                builder.line_to(point(target[0], target[1]));
-                current = target;
-            }
-            PathVerb2D::QuadTo { control, to } => {
-                let control = [path.x + control[0], path.y + control[1]];
-                let target = [path.x + to[0], path.y + to[1]];
-                ensure_path_started(
-                    &mut builder,
-                    current,
-                    &mut contour_start,
-                    &mut saw_geometry,
-                    &mut contour_open,
-                );
-                builder.quadratic_bezier_to(
-                    point(control[0], control[1]),
-                    point(target[0], target[1]),
-                );
-                current = target;
-            }
-            PathVerb2D::ConicTo {
-                control,
-                to,
-                weight,
-            } => {
-                ensure_path_started(
-                    &mut builder,
-                    current,
-                    &mut contour_start,
-                    &mut saw_geometry,
-                    &mut contour_open,
-                );
-                let control = [path.x + control[0], path.y + control[1]];
-                let target = [path.x + to[0], path.y + to[1]];
-                append_conic_polyline(&mut builder, current, control, target, weight);
-                current = target;
-            }
-            PathVerb2D::CubicTo {
-                control1,
-                control2,
-                to,
-            } => {
-                let control1 = [path.x + control1[0], path.y + control1[1]];
-                let control2 = [path.x + control2[0], path.y + control2[1]];
-                let target = [path.x + to[0], path.y + to[1]];
-                ensure_path_started(
-                    &mut builder,
-                    current,
-                    &mut contour_start,
-                    &mut saw_geometry,
-                    &mut contour_open,
-                );
-                builder.cubic_bezier_to(
-                    point(control1[0], control1[1]),
-                    point(control2[0], control2[1]),
-                    point(target[0], target[1]),
-                );
-                current = target;
-            }
-            PathVerb2D::ArcTo {
-                center,
-                radius,
-                start_angle,
-                end_angle,
-                counter_clockwise,
-            } => {
-                ensure_path_started(
-                    &mut builder,
-                    current,
-                    &mut contour_start,
-                    &mut saw_geometry,
-                    &mut contour_open,
-                );
-                let center = [path.x + center[0], path.y + center[1]];
-                append_arc_polyline(
-                    &mut builder,
-                    center,
-                    radius,
-                    start_angle,
-                    end_angle,
-                    counter_clockwise,
-                );
-                current = arc_endpoint(center, radius, start_angle, end_angle, counter_clockwise);
-            }
-            PathVerb2D::Close => {
-                if contour_open {
-                    builder.close();
-                    current = contour_start;
-                    contour_open = false;
-                }
-            }
-        }
-    }
-
-    if !saw_geometry {
-        return None;
-    }
-
-    if contour_open {
-        builder.end(false);
-    }
-
-    Some(builder.build())
-}
-
-fn ensure_path_started(
-    builder: &mut lyon::path::path::Builder,
-    current: [f32; 2],
-    contour_start: &mut [f32; 2],
-    saw_geometry: &mut bool,
-    contour_open: &mut bool,
-) {
-    if !*saw_geometry {
-        builder.begin(point(current[0], current[1]));
-        *contour_start = current;
-        *saw_geometry = true;
-        *contour_open = true;
-    }
-}
-
-fn append_conic_polyline(
-    builder: &mut lyon::path::path::Builder,
-    p0: [f32; 2],
-    p1: [f32; 2],
-    p2: [f32; 2],
-    weight: f32,
-) {
-    let mut points = vec![p0];
-    let mut corners = vec![true];
-    flatten_conic(p0, p1, p2, weight, &mut points, &mut corners);
-    for current in points.into_iter().skip(1) {
-        builder.line_to(point(current[0], current[1]));
-    }
-}
-
-fn append_arc_polyline(
-    builder: &mut lyon::path::path::Builder,
-    center: [f32; 2],
-    radius: f32,
-    start_angle: f32,
-    end_angle: f32,
-    counter_clockwise: bool,
-) {
-    let mut points = Vec::new();
-    let mut corners = Vec::new();
-    flatten_arc(
-        center,
-        radius,
-        start_angle,
-        end_angle,
-        counter_clockwise,
-        &mut points,
-        &mut corners,
-    );
-    for current in points {
-        builder.line_to(point(current[0], current[1]));
     }
 }
 
@@ -1418,17 +1537,6 @@ fn normalize_subpath_points(points: Vec<Point>, corners: Vec<bool>) -> (Vec<Poin
         normalized_corners.push(corner);
     }
     (normalized, normalized_corners)
-}
-
-fn close_subpaths_for_fill(subpaths: Vec<FlattenedSubpath>) -> Vec<FlattenedSubpath> {
-    subpaths
-        .into_iter()
-        .map(|subpath| FlattenedSubpath {
-            closed: subpath.closed || subpath.points.len() >= 2,
-            corners: subpath.corners,
-            points: subpath.points,
-        })
-        .collect()
 }
 
 fn create_stroke_contours(
@@ -2589,16 +2697,6 @@ fn calc_num_radial_segments_per_radian(approx_stroke_radius: f32) -> f32 {
     0.5 / cos_theta.max(-1.0).acos()
 }
 
-fn polygon_area(points: &[Point]) -> f32 {
-    let mut area = 0.0;
-    for index in 0..points.len() {
-        let current = points[index];
-        let next = points[(index + 1) % points.len()];
-        area += current[0] * next[1] - next[0] * current[1];
-    }
-    area * 0.5
-}
-
 fn line_intersection(p0: Point, d0: Point, p1: Point, d1: Point) -> Option<Point> {
     let det = d0[0] * d1[1] - d0[1] * d1[0];
     if det.abs() <= EPSILON {
@@ -2658,12 +2756,7 @@ pub fn encode_drawing_command_buffer(
     let (_viewport_buffer, viewport_bind_group) = shared_context
         .resource_provider
         .create_viewport_bind_group(prepared.surface_width, prepared.surface_height);
-    for (pass_index, pass) in prepared.passes.iter().enumerate() {
-        let depth_load_op = if pass_index == 0 || matches!(pass.load_op, wgpu::LoadOp::Clear(_)) {
-            wgpu::LoadOp::Clear(1.0)
-        } else {
-            wgpu::LoadOp::Load
-        };
+    for pass in &prepared.passes {
         let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("goldlight drawing draw pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -2678,10 +2771,13 @@ pub fn encode_drawing_command_buffer(
                 wgpu::RenderPassDepthStencilAttachment {
                     view,
                     depth_ops: Some(wgpu::Operations {
-                        load: depth_load_op,
+                        load: wgpu::LoadOp::Clear(1.0),
                         store: wgpu::StoreOp::Store,
                     }),
-                    stencil_ops: None,
+                    stencil_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(0),
+                        store: wgpu::StoreOp::Store,
+                    }),
                 }
             }),
             occlusion_query_set: None,
@@ -2689,17 +2785,55 @@ pub fn encode_drawing_command_buffer(
         });
         for step in &pass.steps {
             match step {
-                DrawingPreparedStep::Triangles { vertices } => {
+                DrawingPreparedStep::Triangles { vertices, mode } => {
                     let Some(vertex_buffer) = shared_context
                         .resource_provider
                         .create_triangle_vertex_buffer(vertices)
                     else {
                         continue;
                     };
-                    let pipeline = shared_context.resource_provider.fill_pipeline(sample_count);
+                    let pipeline = shared_context
+                        .resource_provider
+                        .triangle_pipeline(sample_count, *mode);
                     render_pass.set_pipeline(&pipeline);
                     render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
                     render_pass.draw(0..vertices.len() as u32, 0..1);
+                }
+                DrawingPreparedStep::WedgeFillPatches(step) => {
+                    let Some(instance_buffer) = shared_context
+                        .resource_provider
+                        .create_wedge_fill_patch_buffer(&step.instances)
+                    else {
+                        continue;
+                    };
+                    let (template_buffer, vertex_count) =
+                        shared_context.resource_provider.wedge_template_buffer();
+                    let pipeline = shared_context
+                        .resource_provider
+                        .wedge_pipeline(sample_count, step.stencil_mode);
+                    render_pass.set_pipeline(&pipeline);
+                    render_pass.set_bind_group(0, &viewport_bind_group, &[]);
+                    render_pass.set_vertex_buffer(0, template_buffer.slice(..));
+                    render_pass.set_vertex_buffer(1, instance_buffer.slice(..));
+                    render_pass.draw(0..vertex_count, 0..step.instances.len() as u32);
+                }
+                DrawingPreparedStep::CurveFillPatches(step) => {
+                    let Some(instance_buffer) = shared_context
+                        .resource_provider
+                        .create_curve_fill_patch_buffer(&step.instances)
+                    else {
+                        continue;
+                    };
+                    let (template_buffer, vertex_count) =
+                        shared_context.resource_provider.curve_template_buffer();
+                    let pipeline = shared_context
+                        .resource_provider
+                        .curve_pipeline(sample_count, step.stencil_mode);
+                    render_pass.set_pipeline(&pipeline);
+                    render_pass.set_bind_group(0, &viewport_bind_group, &[]);
+                    render_pass.set_vertex_buffer(0, template_buffer.slice(..));
+                    render_pass.set_vertex_buffer(1, instance_buffer.slice(..));
+                    render_pass.draw(0..vertex_count, 0..step.instances.len() as u32);
                 }
                 DrawingPreparedStep::StrokePatches(step) => {
                     let Some(instance_buffer) = shared_context

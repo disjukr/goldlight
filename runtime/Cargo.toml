@@ -48,4 +48,3 @@ base64 = "0.22"
 bytemuck = { version = "1", features = ["derive"] }
 glam = "0.30"
 taffy = "0.7"
-lyon = "1"

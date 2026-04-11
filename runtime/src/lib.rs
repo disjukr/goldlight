@@ -1,4 +1,5 @@
 mod drawing;
+mod fill_patch;
 mod render;
 mod stroke_patch;
 

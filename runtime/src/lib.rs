@@ -1,5 +1,6 @@
 mod render;
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::future::Future;
 use std::path::{Path, PathBuf};
@@ -22,6 +23,7 @@ use deno_error::JsErrorBox;
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "dev-runtime")]
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use taffy::prelude::{
     AlignItems, AvailableSpace, Dimension, Display, FlexDirection, FromLength, JustifyContent,
     Layout as TaffyLayout, LengthPercentage, LengthPercentageAuto, Position, Rect, Size,
@@ -79,6 +81,7 @@ use winit::{
     event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy},
     window::{Window, WindowAttributes, WindowId},
 };
+use web_transport_proto::{ConnectRequest, ConnectResponse, Settings, SettingsError};
 
 use crate::render::{
     Rect2DHandle, Rect2DOptions, Rect2DUpdate, RenderModel, RendererState, Scene2DHandle,
@@ -100,6 +103,7 @@ const GOLDLIGHT_STREAMS_SOURCE: &str = include_str!("../js/streams.js");
 const GOLDLIGHT_TIMERS_SOURCE: &str = include_str!("../js/timers.js");
 const GOLDLIGHT_FETCH_SOURCE: &str = include_str!("../js/fetch.js");
 const GOLDLIGHT_WEBSOCKET_SOURCE: &str = include_str!("../js/websocket.js");
+const GOLDLIGHT_WEBTRANSPORT_SOURCE: &str = include_str!("../js/webtransport.js");
 #[cfg(feature = "dev-runtime")]
 const GOLDLIGHT_VITE_CLIENT_SPECIFIER: &str = "ext:goldlight/vite_client.js";
 #[cfg(feature = "dev-runtime")]
@@ -282,6 +286,16 @@ struct FetchHostState {
     pending_events: Vec<FetchEventPayload>,
 }
 
+#[derive(Default)]
+struct WebTransportHostState {
+    next_transport_id: u32,
+    transports: HashMap<u32, WebTransportHandle>,
+    next_send_stream_id: u32,
+    send_streams: HashMap<u32, WebTransportSendStreamHandle>,
+    next_recv_stream_id: u32,
+    recv_streams: HashMap<u32, WebTransportRecvStreamHandle>,
+}
+
 #[cfg(feature = "dev-runtime")]
 #[derive(Default)]
 struct HmrRuntimeState {
@@ -358,6 +372,31 @@ impl WebSocketConnectionHandle {
             });
         }
     }
+}
+
+#[derive(Clone)]
+struct WebTransportHandle {
+    _endpoint: quinn::Endpoint,
+    connection: quinn::Connection,
+}
+
+impl WebTransportHandle {
+    fn close(&self, close_code: u32, reason: &str) {
+        let code = quinn::VarInt::from_u32(close_code);
+        self.connection.close(code, reason.as_bytes());
+    }
+}
+
+#[derive(Clone)]
+struct WebTransportSendStreamHandle {
+    transport_id: u32,
+    stream: Arc<tokio::sync::Mutex<quinn::SendStream>>,
+}
+
+#[derive(Clone)]
+struct WebTransportRecvStreamHandle {
+    transport_id: u32,
+    stream: Arc<tokio::sync::Mutex<quinn::RecvStream>>,
 }
 
 #[derive(Clone, Debug)]
@@ -492,6 +531,7 @@ struct RuntimeOpContext {
     timer_state: TimerHostStateHandle,
     fetch_state: FetchHostStateHandle,
     websocket_state: WebSocketHostStateHandle,
+    webtransport_state: WebTransportHostStateHandle,
     #[cfg(feature = "dev-runtime")]
     hmr_state: Option<HmrRuntimeStateHandle>,
 }
@@ -500,6 +540,7 @@ type RuntimeStateHandle = Arc<Mutex<RuntimeState>>;
 type TimerHostStateHandle = Arc<Mutex<TimerHostState>>;
 type FetchHostStateHandle = Arc<Mutex<FetchHostState>>;
 type WebSocketHostStateHandle = Arc<Mutex<WebSocketHostState>>;
+type WebTransportHostStateHandle = Arc<Mutex<WebTransportHostState>>;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -546,6 +587,54 @@ enum FetchEventPayload {
     Aborted {
         request_id: u32,
     },
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WebTransportCertificateHashInput {
+    algorithm: String,
+    value: Vec<u8>,
+}
+
+#[derive(Clone, Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct WebTransportConnectOptionsInput {
+    #[serde(default)]
+    server_certificate_hashes: Vec<WebTransportCertificateHashInput>,
+    #[serde(default)]
+    congestion_control: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WebTransportConnectOutput {
+    transport_id: u32,
+    max_datagram_size: u32,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WebTransportCloseInfoOutput {
+    close_code: u32,
+    reason: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WebTransportBidirectionalStreamOutput {
+    send_stream_id: u32,
+    receive_stream_id: u32,
+}
+
+const GOLDLIGHT_WEBTRANSPORT_ERROR_MARKER: &str = "\n[goldlight-webtransport-error]";
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WebTransportErrorOutput {
+    message: String,
+    source: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stream_error_code: Option<u32>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -1304,6 +1393,274 @@ fn websocket_tls_connector() -> TlsConnector {
     TlsConnector::from(Arc::new(config))
 }
 
+#[derive(Debug)]
+struct WebTransportServerFingerprints {
+    fingerprints: Vec<Vec<u8>>,
+    provider: quinn::rustls::crypto::CryptoProvider,
+}
+
+impl WebTransportServerFingerprints {
+    fn new(fingerprints: Vec<Vec<u8>>) -> Self {
+        Self {
+            fingerprints,
+            provider: quinn::rustls::crypto::aws_lc_rs::default_provider(),
+        }
+    }
+}
+
+impl quinn::rustls::client::danger::ServerCertVerifier for WebTransportServerFingerprints {
+    fn verify_server_cert(
+        &self,
+        end_entity: &quinn::rustls::pki_types::CertificateDer<'_>,
+        _intermediates: &[quinn::rustls::pki_types::CertificateDer<'_>],
+        _server_name: &quinn::rustls::pki_types::ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: quinn::rustls::pki_types::UnixTime,
+    ) -> std::result::Result<
+        quinn::rustls::client::danger::ServerCertVerified,
+        quinn::rustls::Error,
+    > {
+        let cert_hash = Sha256::digest(end_entity.as_ref());
+        if self
+            .fingerprints
+            .iter()
+            .any(|fingerprint| fingerprint.as_slice() == cert_hash.as_slice())
+        {
+            return Ok(quinn::rustls::client::danger::ServerCertVerified::assertion());
+        }
+
+        Err(quinn::rustls::Error::InvalidCertificate(
+            quinn::rustls::CertificateError::UnknownIssuer,
+        ))
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &quinn::rustls::pki_types::CertificateDer<'_>,
+        dss: &quinn::rustls::DigitallySignedStruct,
+    ) -> std::result::Result<
+        quinn::rustls::client::danger::HandshakeSignatureValid,
+        quinn::rustls::Error,
+    > {
+        quinn::rustls::crypto::verify_tls12_signature(
+            message,
+            cert,
+            dss,
+            &self.provider.signature_verification_algorithms,
+        )
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &quinn::rustls::pki_types::CertificateDer<'_>,
+        dss: &quinn::rustls::DigitallySignedStruct,
+    ) -> std::result::Result<
+        quinn::rustls::client::danger::HandshakeSignatureValid,
+        quinn::rustls::Error,
+    > {
+        quinn::rustls::crypto::verify_tls13_signature(
+            message,
+            cert,
+            dss,
+            &self.provider.signature_verification_algorithms,
+        )
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<quinn::rustls::SignatureScheme> {
+        self.provider
+            .signature_verification_algorithms
+            .supported_schemes()
+    }
+}
+
+fn webtransport_root_store() -> RootCertStore {
+    let mut root_store = RootCertStore::empty();
+    root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    root_store
+}
+
+fn webtransport_client_config(
+    options: &WebTransportConnectOptionsInput,
+) -> Result<quinn::ClientConfig, JsErrorBox> {
+    let mut tls_config = if options.server_certificate_hashes.is_empty() {
+        quinn::rustls::ClientConfig::builder()
+            .with_root_certificates(webtransport_root_store())
+            .with_no_client_auth()
+    } else {
+        let hashes = options
+            .server_certificate_hashes
+            .iter()
+            .filter(|hash| hash.algorithm.eq_ignore_ascii_case("sha-256"))
+            .map(|hash| hash.value.clone())
+            .collect::<Vec<_>>();
+        quinn::rustls::ClientConfig::builder()
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(WebTransportServerFingerprints::new(
+                hashes,
+            )))
+            .with_no_client_auth()
+    };
+
+    tls_config.alpn_protocols = vec![b"h3".to_vec()];
+    tls_config.enable_early_data = true;
+
+    let client_crypto = quinn::crypto::rustls::QuicClientConfig::try_from(tls_config)
+        .map_err(|error| webtransport_session_error(format!("failed to create QUIC client config: {error}")))?;
+    let mut client_config = quinn::ClientConfig::new(Arc::new(client_crypto));
+    let mut transport = quinn::TransportConfig::default();
+    if let Some(congestion_control) = options.congestion_control.as_deref() {
+        match congestion_control {
+            "low-latency" => {
+                transport.congestion_controller_factory(Arc::new(
+                    quinn::congestion::BbrConfig::default(),
+                ));
+            }
+            "throughput" => {
+                transport.congestion_controller_factory(Arc::new(
+                    quinn::congestion::CubicConfig::default(),
+                ));
+            }
+            _ => {}
+        }
+    }
+    client_config.transport_config(Arc::new(transport));
+    Ok(client_config)
+}
+
+async fn exchange_webtransport_settings(
+    connection: &quinn::Connection,
+) -> Result<(quinn::SendStream, quinn::RecvStream), JsErrorBox> {
+    let settings_send = async {
+        let mut tx = connection
+            .open_uni()
+            .await
+            .map_err(|error| webtransport_connection_error(error, "session"))?;
+        let mut settings = Settings::default();
+        settings.enable_webtransport(1);
+        let mut buf = Vec::new();
+        settings.encode(&mut buf);
+        tx.write_all(&buf)
+            .await
+            .map_err(|error| webtransport_write_error_with_source(error, "session"))?;
+        Result::<_, JsErrorBox>::Ok(tx)
+    };
+
+    let settings_recv = async {
+        let mut rx = connection
+            .accept_uni()
+            .await
+            .map_err(|error| webtransport_connection_error(error, "session"))?;
+        let mut buf = Vec::new();
+        loop {
+            let chunk = rx
+                .read_chunk(usize::MAX, true)
+                .await
+                .map_err(|error| webtransport_read_error_with_source(error, "session"))?;
+            let chunk = chunk.ok_or_else(|| webtransport_session_error("peer does not support WebTransport"))?;
+            buf.extend_from_slice(&chunk.bytes);
+            let mut cursor = std::io::Cursor::new(&buf);
+            let settings = match Settings::decode(&mut cursor) {
+                Ok(settings) => settings,
+                Err(SettingsError::UnexpectedEnd) => continue,
+                Err(error) => return Err(webtransport_session_error(error.to_string())),
+            };
+            if settings.supports_webtransport() == 0 {
+                return Err(webtransport_session_error("peer does not support WebTransport"));
+            }
+            break;
+        }
+        Result::<_, JsErrorBox>::Ok(rx)
+    };
+
+    tokio::try_join!(settings_send, settings_recv)
+}
+
+async fn connect_webtransport(
+    url: &str,
+    options: &WebTransportConnectOptionsInput,
+) -> Result<(quinn::Endpoint, quinn::Connection), JsErrorBox> {
+    let parsed = reqwest::Url::parse(url)
+        .map_err(|error| webtransport_session_error(format!("invalid WebTransport URL: {error}")))?;
+    if parsed.scheme() != "https" {
+        return Err(webtransport_session_error("WebTransport URL must use https"));
+    }
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| webtransport_session_error(format!("WebTransport URL missing host: {url}")))?;
+    let port = parsed
+        .port_or_known_default()
+        .ok_or_else(|| webtransport_session_error(format!("WebTransport URL missing port: {url}")))?;
+
+    let socket = std::net::UdpSocket::bind((std::net::Ipv6Addr::UNSPECIFIED, 0))
+        .or_else(|_| std::net::UdpSocket::bind((std::net::Ipv4Addr::UNSPECIFIED, 0)))
+        .map_err(|error| webtransport_session_error(error.to_string()))?;
+    let endpoint = quinn::Endpoint::new(
+        quinn::EndpointConfig::default(),
+        None,
+        socket,
+        quinn::default_runtime().ok_or_else(|| webtransport_session_error("missing QUIC runtime"))?,
+    )
+    .map_err(|error| webtransport_session_error(error.to_string()))?;
+    let client_config = webtransport_client_config(options)?;
+    let remote_addr = tokio::net::lookup_host((host, port))
+        .await
+        .map_err(|error| webtransport_session_error(error.to_string()))?
+        .next()
+        .ok_or_else(|| webtransport_session_error("unable to resolve WebTransport host"))?;
+    let connecting = endpoint
+        .connect_with(client_config, remote_addr, host)
+        .map_err(|error| webtransport_session_error(error.to_string()))?;
+    let connection = connecting
+        .await
+        .map_err(|error| webtransport_connection_error(error, "session"))?;
+    let _settings = exchange_webtransport_settings(&connection).await?;
+
+    let (mut connect_tx, mut connect_rx) = connection
+        .open_bi()
+        .await
+        .map_err(|error| webtransport_connection_error(error, "session"))?;
+    let request = ConnectRequest {
+        url: parsed
+            .as_str()
+            .parse()
+            .map_err(|error| webtransport_session_error(format!("invalid WebTransport URL: {error}")))?,
+    };
+    let mut buf = Vec::new();
+    request.encode(&mut buf);
+    connect_tx
+        .write_all(&buf)
+        .await
+        .map_err(|error| webtransport_write_error_with_source(error, "session"))?;
+    buf.clear();
+    loop {
+        let chunk = connect_rx
+            .read_chunk(usize::MAX, true)
+            .await
+            .map_err(|error| webtransport_read_error_with_source(error, "session"))?;
+        let chunk = chunk.ok_or_else(|| webtransport_session_error("peer rejected WebTransport connection"))?;
+        buf.extend_from_slice(&chunk.bytes);
+        let mut cursor = std::io::Cursor::new(&buf);
+        let response = match ConnectResponse::decode(&mut cursor) {
+            Ok(response) => response,
+            Err(web_transport_proto::ConnectError::UnexpectedEnd) => continue,
+            Err(error) => return Err(webtransport_session_error(error.to_string())),
+        };
+        if response.status != 200 {
+            return Err(webtransport_session_error(
+                web_transport_proto::ConnectError::ErrorStatus(response.status).to_string(),
+            ));
+        }
+        break;
+    }
+
+    drop(connect_tx);
+    drop(connect_rx);
+
+    Ok((endpoint, connection))
+}
+
 async fn connect_fastwebsocket(
     url: &str,
     protocols: &[String],
@@ -1747,6 +2104,100 @@ fn shutdown_all_websockets(websocket_state: &WebSocketHostStateHandle) {
     }
 }
 
+fn shutdown_all_webtransports(webtransport_state: &WebTransportHostStateHandle) {
+    let transports = if let Ok(mut webtransport_state) = webtransport_state.lock() {
+        webtransport_state.send_streams.clear();
+        webtransport_state.recv_streams.clear();
+        std::mem::take(&mut webtransport_state.transports)
+    } else {
+        HashMap::new()
+    };
+    for (_, transport) in transports {
+        transport.close(0, "");
+    }
+}
+
+fn webtransport_error_box(
+    message: impl Into<String>,
+    source: &'static str,
+    stream_error_code: Option<u32>,
+) -> JsErrorBox {
+    let message = message.into();
+    let payload = WebTransportErrorOutput {
+        message: message.clone(),
+        source,
+        stream_error_code,
+    };
+    match serde_json::to_string(&payload) {
+        Ok(payload_json) => JsErrorBox::generic(format!(
+            "{message}{GOLDLIGHT_WEBTRANSPORT_ERROR_MARKER}{payload_json}"
+        )),
+        Err(_) => JsErrorBox::generic(message),
+    }
+}
+
+fn webtransport_session_error(message: impl Into<String>) -> JsErrorBox {
+    webtransport_error_box(message, "session", None)
+}
+
+fn webtransport_stream_error(message: impl Into<String>, stream_error_code: Option<u32>) -> JsErrorBox {
+    webtransport_error_box(message, "stream", stream_error_code)
+}
+
+fn webtransport_connection_error(error: quinn::ConnectionError, source: &'static str) -> JsErrorBox {
+    webtransport_error_box(error.to_string(), source, None)
+}
+
+fn webtransport_write_error_with_source(error: quinn::WriteError, source: &'static str) -> JsErrorBox {
+    match error {
+        quinn::WriteError::Stopped(code) => {
+            webtransport_error_box(
+                format!("sending stopped by peer: error {code}"),
+                source,
+                Some(code.into_inner() as u32),
+            )
+        }
+        quinn::WriteError::ConnectionLost(error) => webtransport_connection_error(error, source),
+        quinn::WriteError::ClosedStream => webtransport_error_box("closed stream", source, None),
+        quinn::WriteError::ZeroRttRejected => webtransport_error_box("0-RTT rejected", source, None),
+    }
+}
+
+fn webtransport_write_error(error: quinn::WriteError) -> JsErrorBox {
+    webtransport_write_error_with_source(error, "stream")
+}
+
+fn webtransport_read_error_with_source(error: quinn::ReadError, source: &'static str) -> JsErrorBox {
+    match error {
+        quinn::ReadError::Reset(code) => webtransport_error_box(
+            format!("stream reset by peer: error {code}"),
+            source,
+            Some(code.into_inner() as u32),
+        ),
+        quinn::ReadError::ConnectionLost(error) => webtransport_connection_error(error, source),
+        quinn::ReadError::ClosedStream => webtransport_error_box("closed stream", source, None),
+        quinn::ReadError::IllegalOrderedRead => {
+            webtransport_error_box("ordered read after unordered read", source, None)
+        }
+        quinn::ReadError::ZeroRttRejected => webtransport_error_box("0-RTT rejected", source, None),
+    }
+}
+
+fn webtransport_read_error(error: quinn::ReadError) -> JsErrorBox {
+    webtransport_read_error_with_source(error, "stream")
+}
+
+fn webtransport_send_datagram_error(error: quinn::SendDatagramError) -> JsErrorBox {
+    match error {
+        quinn::SendDatagramError::UnsupportedByPeer => {
+            webtransport_session_error("datagrams not supported by peer")
+        }
+        quinn::SendDatagramError::Disabled => webtransport_session_error("datagram support disabled"),
+        quinn::SendDatagramError::TooLarge => webtransport_session_error("datagram too large"),
+        quinn::SendDatagramError::ConnectionLost(error) => webtransport_connection_error(error, "session"),
+    }
+}
+
 #[deno_core::op2]
 fn op_goldlight_fetch_start(
     state: &mut OpState,
@@ -2017,6 +2468,495 @@ fn op_goldlight_websocket_drain_events(
     Ok(events)
 }
 
+#[deno_core::op2(async)]
+#[serde]
+async fn op_goldlight_webtransport_connect(
+    state: Rc<RefCell<OpState>>,
+    #[string] url: String,
+    #[serde] options: WebTransportConnectOptionsInput,
+) -> Result<WebTransportConnectOutput, JsErrorBox> {
+    let op_context = state.borrow().borrow::<RuntimeOpContext>().clone();
+    let (endpoint, connection) = connect_webtransport(&url, &options)
+        .await
+        .map_err(|error| webtransport_session_error(error.to_string()))?;
+    let max_datagram_size = connection.max_datagram_size().unwrap_or(0) as u32;
+    let mut webtransport_state = op_context
+        .webtransport_state
+        .lock()
+        .map_err(|_| JsErrorBox::generic("webtransport state mutex poisoned"))?;
+    let transport_id = webtransport_state.next_transport_id;
+    webtransport_state.next_transport_id =
+        webtransport_state.next_transport_id.wrapping_add(1).max(1);
+    webtransport_state.transports.insert(
+        transport_id,
+        WebTransportHandle {
+            _endpoint: endpoint,
+            connection,
+        },
+    );
+    Ok(WebTransportConnectOutput {
+        transport_id,
+        max_datagram_size,
+    })
+}
+
+#[deno_core::op2(async)]
+#[serde]
+async fn op_goldlight_webtransport_closed(
+    state: Rc<RefCell<OpState>>,
+    transport_id: u32,
+) -> Result<WebTransportCloseInfoOutput, JsErrorBox> {
+    let op_context = state.borrow().borrow::<RuntimeOpContext>().clone();
+    let transport = {
+        let webtransport_state = op_context
+            .webtransport_state
+            .lock()
+            .map_err(|_| webtransport_session_error("webtransport state mutex poisoned"))?;
+        webtransport_state
+            .transports
+            .get(&transport_id)
+            .cloned()
+            .ok_or_else(|| webtransport_session_error("unknown webtransport id"))?
+    };
+    let close_info = match transport.connection.closed().await {
+        quinn::ConnectionError::ApplicationClosed(reason) => WebTransportCloseInfoOutput {
+            close_code: reason.error_code.into_inner() as u32,
+            reason: String::from_utf8_lossy(&reason.reason).into_owned(),
+        },
+        quinn::ConnectionError::LocallyClosed => WebTransportCloseInfoOutput {
+            close_code: 0,
+            reason: String::new(),
+        },
+        error => WebTransportCloseInfoOutput {
+            close_code: 0,
+            reason: error.to_string(),
+        },
+    };
+    let mut webtransport_state = op_context
+        .webtransport_state
+        .lock()
+        .map_err(|_| webtransport_session_error("webtransport state mutex poisoned"))?;
+    webtransport_state.transports.remove(&transport_id);
+    webtransport_state
+        .send_streams
+        .retain(|_, stream| stream.transport_id != transport_id);
+    webtransport_state
+        .recv_streams
+        .retain(|_, stream| stream.transport_id != transport_id);
+    Ok(close_info)
+}
+
+#[deno_core::op2(async)]
+async fn op_goldlight_webtransport_draining(
+    state: Rc<RefCell<OpState>>,
+    transport_id: u32,
+) -> Result<(), JsErrorBox> {
+    let op_context = state.borrow().borrow::<RuntimeOpContext>().clone();
+    let transport = {
+        let webtransport_state = op_context
+            .webtransport_state
+            .lock()
+            .map_err(|_| webtransport_session_error("webtransport state mutex poisoned"))?;
+        webtransport_state
+            .transports
+            .get(&transport_id)
+            .cloned()
+            .ok_or_else(|| webtransport_session_error("unknown webtransport id"))?
+    };
+    loop {
+        if transport.connection.close_reason().is_some() {
+            return Ok(());
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+#[deno_core::op2(fast)]
+fn op_goldlight_webtransport_close(
+    state: &mut OpState,
+    transport_id: u32,
+    close_code: u32,
+    #[string] reason: String,
+) -> Result<(), JsErrorBox> {
+    let op_context = state.borrow::<RuntimeOpContext>().clone();
+    let webtransport_state = op_context
+        .webtransport_state
+        .lock()
+        .map_err(|_| webtransport_session_error("webtransport state mutex poisoned"))?;
+    let transport = webtransport_state
+        .transports
+        .get(&transport_id)
+        .ok_or_else(|| webtransport_session_error("unknown webtransport id"))?;
+    transport.close(close_code, &reason);
+    Ok(())
+}
+
+#[deno_core::op2(async)]
+#[serde]
+async fn op_goldlight_webtransport_create_bidirectional_stream(
+    state: Rc<RefCell<OpState>>,
+    transport_id: u32,
+) -> Result<WebTransportBidirectionalStreamOutput, JsErrorBox> {
+    let op_context = state.borrow().borrow::<RuntimeOpContext>().clone();
+    let transport = {
+        let webtransport_state = op_context
+            .webtransport_state
+            .lock()
+            .map_err(|_| webtransport_session_error("webtransport state mutex poisoned"))?;
+        webtransport_state
+            .transports
+            .get(&transport_id)
+            .cloned()
+            .ok_or_else(|| webtransport_session_error("unknown webtransport id"))?
+    };
+    let (send_stream, recv_stream) = transport
+        .connection
+        .open_bi()
+        .await
+        .map_err(|error| webtransport_connection_error(error, "stream"))?;
+    let mut webtransport_state = op_context
+        .webtransport_state
+        .lock()
+        .map_err(|_| webtransport_stream_error("webtransport state mutex poisoned", None))?;
+    let send_stream_id = webtransport_state.next_send_stream_id;
+    webtransport_state.next_send_stream_id =
+        webtransport_state.next_send_stream_id.wrapping_add(1).max(1);
+    let receive_stream_id = webtransport_state.next_recv_stream_id;
+    webtransport_state.next_recv_stream_id =
+        webtransport_state.next_recv_stream_id.wrapping_add(1).max(1);
+    webtransport_state.send_streams.insert(
+        send_stream_id,
+        WebTransportSendStreamHandle {
+            transport_id,
+            stream: Arc::new(tokio::sync::Mutex::new(send_stream)),
+        },
+    );
+    webtransport_state.recv_streams.insert(
+        receive_stream_id,
+        WebTransportRecvStreamHandle {
+            transport_id,
+            stream: Arc::new(tokio::sync::Mutex::new(recv_stream)),
+        },
+    );
+    Ok(WebTransportBidirectionalStreamOutput {
+        send_stream_id,
+        receive_stream_id,
+    })
+}
+
+#[deno_core::op2(async)]
+async fn op_goldlight_webtransport_create_unidirectional_stream(
+    state: Rc<RefCell<OpState>>,
+    transport_id: u32,
+) -> Result<u32, JsErrorBox> {
+    let op_context = state.borrow().borrow::<RuntimeOpContext>().clone();
+    let transport = {
+        let webtransport_state = op_context
+            .webtransport_state
+            .lock()
+            .map_err(|_| webtransport_session_error("webtransport state mutex poisoned"))?;
+        webtransport_state
+            .transports
+            .get(&transport_id)
+            .cloned()
+            .ok_or_else(|| webtransport_session_error("unknown webtransport id"))?
+    };
+    let send_stream = transport
+        .connection
+        .open_uni()
+        .await
+        .map_err(|error| webtransport_connection_error(error, "stream"))?;
+    let mut webtransport_state = op_context
+        .webtransport_state
+        .lock()
+        .map_err(|_| webtransport_stream_error("webtransport state mutex poisoned", None))?;
+    let send_stream_id = webtransport_state.next_send_stream_id;
+    webtransport_state.next_send_stream_id =
+        webtransport_state.next_send_stream_id.wrapping_add(1).max(1);
+    webtransport_state.send_streams.insert(
+        send_stream_id,
+        WebTransportSendStreamHandle {
+            transport_id,
+            stream: Arc::new(tokio::sync::Mutex::new(send_stream)),
+        },
+    );
+    Ok(send_stream_id)
+}
+
+#[deno_core::op2(async)]
+#[serde]
+async fn op_goldlight_webtransport_accept_bidirectional_stream(
+    state: Rc<RefCell<OpState>>,
+    transport_id: u32,
+) -> Result<Option<WebTransportBidirectionalStreamOutput>, JsErrorBox> {
+    let op_context = state.borrow().borrow::<RuntimeOpContext>().clone();
+    let transport = {
+        let webtransport_state = op_context
+            .webtransport_state
+            .lock()
+            .map_err(|_| webtransport_session_error("webtransport state mutex poisoned"))?;
+        webtransport_state
+            .transports
+            .get(&transport_id)
+            .cloned()
+            .ok_or_else(|| webtransport_session_error("unknown webtransport id"))?
+    };
+    let (send_stream, recv_stream) = match transport.connection.accept_bi().await {
+        Ok(streams) => streams,
+        Err(
+            quinn::ConnectionError::ApplicationClosed(_)
+            | quinn::ConnectionError::ConnectionClosed(_)
+            | quinn::ConnectionError::LocallyClosed
+            | quinn::ConnectionError::Reset
+            | quinn::ConnectionError::TimedOut,
+        ) => return Ok(None),
+        Err(error) => return Err(webtransport_connection_error(error, "stream")),
+    };
+    let mut webtransport_state = op_context
+        .webtransport_state
+        .lock()
+        .map_err(|_| webtransport_stream_error("webtransport state mutex poisoned", None))?;
+    let send_stream_id = webtransport_state.next_send_stream_id;
+    webtransport_state.next_send_stream_id =
+        webtransport_state.next_send_stream_id.wrapping_add(1).max(1);
+    let receive_stream_id = webtransport_state.next_recv_stream_id;
+    webtransport_state.next_recv_stream_id =
+        webtransport_state.next_recv_stream_id.wrapping_add(1).max(1);
+    webtransport_state.send_streams.insert(
+        send_stream_id,
+        WebTransportSendStreamHandle {
+            transport_id,
+            stream: Arc::new(tokio::sync::Mutex::new(send_stream)),
+        },
+    );
+    webtransport_state.recv_streams.insert(
+        receive_stream_id,
+        WebTransportRecvStreamHandle {
+            transport_id,
+            stream: Arc::new(tokio::sync::Mutex::new(recv_stream)),
+        },
+    );
+    Ok(Some(WebTransportBidirectionalStreamOutput {
+        send_stream_id,
+        receive_stream_id,
+    }))
+}
+
+#[deno_core::op2(async)]
+async fn op_goldlight_webtransport_accept_unidirectional_stream(
+    state: Rc<RefCell<OpState>>,
+    transport_id: u32,
+) -> Result<Option<u32>, JsErrorBox> {
+    let op_context = state.borrow().borrow::<RuntimeOpContext>().clone();
+    let transport = {
+        let webtransport_state = op_context
+            .webtransport_state
+            .lock()
+            .map_err(|_| webtransport_session_error("webtransport state mutex poisoned"))?;
+        webtransport_state
+            .transports
+            .get(&transport_id)
+            .cloned()
+            .ok_or_else(|| webtransport_session_error("unknown webtransport id"))?
+    };
+    let recv_stream = match transport.connection.accept_uni().await {
+        Ok(stream) => stream,
+        Err(
+            quinn::ConnectionError::ApplicationClosed(_)
+            | quinn::ConnectionError::ConnectionClosed(_)
+            | quinn::ConnectionError::LocallyClosed
+            | quinn::ConnectionError::Reset
+            | quinn::ConnectionError::TimedOut,
+        ) => return Ok(None),
+        Err(error) => return Err(webtransport_connection_error(error, "stream")),
+    };
+    let mut webtransport_state = op_context
+        .webtransport_state
+        .lock()
+        .map_err(|_| webtransport_stream_error("webtransport state mutex poisoned", None))?;
+    let receive_stream_id = webtransport_state.next_recv_stream_id;
+    webtransport_state.next_recv_stream_id =
+        webtransport_state.next_recv_stream_id.wrapping_add(1).max(1);
+    webtransport_state.recv_streams.insert(
+        receive_stream_id,
+        WebTransportRecvStreamHandle {
+            transport_id,
+            stream: Arc::new(tokio::sync::Mutex::new(recv_stream)),
+        },
+    );
+    Ok(Some(receive_stream_id))
+}
+
+#[deno_core::op2(async)]
+async fn op_goldlight_webtransport_send_datagram(
+    state: Rc<RefCell<OpState>>,
+    transport_id: u32,
+    #[buffer(copy)] data: Vec<u8>,
+) -> Result<(), JsErrorBox> {
+    let op_context = state.borrow().borrow::<RuntimeOpContext>().clone();
+    let transport = {
+        let webtransport_state = op_context
+            .webtransport_state
+            .lock()
+            .map_err(|_| webtransport_session_error("webtransport state mutex poisoned"))?;
+        webtransport_state
+            .transports
+            .get(&transport_id)
+            .cloned()
+            .ok_or_else(|| webtransport_session_error("unknown webtransport id"))?
+    };
+    transport
+        .connection
+        .send_datagram_wait(Bytes::from(data))
+        .await
+        .map_err(webtransport_send_datagram_error)
+}
+
+#[deno_core::op2(async)]
+#[serde]
+async fn op_goldlight_webtransport_read_datagram(
+    state: Rc<RefCell<OpState>>,
+    transport_id: u32,
+) -> Result<Option<Vec<u8>>, JsErrorBox> {
+    let op_context = state.borrow().borrow::<RuntimeOpContext>().clone();
+    let transport = {
+        let webtransport_state = op_context
+            .webtransport_state
+            .lock()
+            .map_err(|_| webtransport_session_error("webtransport state mutex poisoned"))?;
+        webtransport_state
+            .transports
+            .get(&transport_id)
+            .cloned()
+            .ok_or_else(|| webtransport_session_error("unknown webtransport id"))?
+    };
+    match transport.connection.read_datagram().await {
+        Ok(bytes) => Ok(Some(bytes.to_vec())),
+        Err(
+            quinn::ConnectionError::ApplicationClosed(_)
+            | quinn::ConnectionError::ConnectionClosed(_)
+            | quinn::ConnectionError::LocallyClosed
+            | quinn::ConnectionError::Reset
+            | quinn::ConnectionError::TimedOut,
+        ) => Ok(None),
+        Err(error) => Err(webtransport_connection_error(error, "session")),
+    }
+}
+
+#[deno_core::op2(fast)]
+fn op_goldlight_webtransport_get_max_datagram_size(
+    state: &mut OpState,
+    transport_id: u32,
+) -> Result<u32, JsErrorBox> {
+    let op_context = state.borrow::<RuntimeOpContext>().clone();
+    let webtransport_state = op_context
+        .webtransport_state
+        .lock()
+        .map_err(|_| webtransport_session_error("webtransport state mutex poisoned"))?;
+    let transport = webtransport_state
+        .transports
+        .get(&transport_id)
+        .ok_or_else(|| webtransport_session_error("unknown webtransport id"))?;
+    Ok(transport.connection.max_datagram_size().unwrap_or(0) as u32)
+}
+
+#[deno_core::op2(async)]
+async fn op_goldlight_webtransport_send_stream_write(
+    state: Rc<RefCell<OpState>>,
+    send_stream_id: u32,
+    #[buffer(copy)] data: Vec<u8>,
+) -> Result<(), JsErrorBox> {
+    let op_context = state.borrow().borrow::<RuntimeOpContext>().clone();
+    let stream = {
+        let webtransport_state = op_context
+            .webtransport_state
+            .lock()
+            .map_err(|_| webtransport_stream_error("webtransport state mutex poisoned", None))?;
+        webtransport_state
+            .send_streams
+            .get(&send_stream_id)
+            .cloned()
+            .ok_or_else(|| webtransport_stream_error("unknown webtransport send stream id", None))?
+    };
+    let mut stream = stream.stream.lock().await;
+    stream.write_all(&data).await.map_err(webtransport_write_error)
+}
+
+#[deno_core::op2(async)]
+async fn op_goldlight_webtransport_send_stream_close(
+    state: Rc<RefCell<OpState>>,
+    send_stream_id: u32,
+) -> Result<(), JsErrorBox> {
+    let op_context = state.borrow().borrow::<RuntimeOpContext>().clone();
+    let stream = {
+        let webtransport_state = op_context
+            .webtransport_state
+            .lock()
+            .map_err(|_| webtransport_stream_error("webtransport state mutex poisoned", None))?;
+        webtransport_state
+            .send_streams
+            .get(&send_stream_id)
+            .cloned()
+            .ok_or_else(|| webtransport_stream_error("unknown webtransport send stream id", None))?
+    };
+    let mut stream = stream.stream.lock().await;
+    stream
+        .finish()
+        .map_err(|_| webtransport_stream_error("closed stream", None))
+}
+
+#[deno_core::op2(async)]
+#[serde]
+async fn op_goldlight_webtransport_receive_stream_read(
+    state: Rc<RefCell<OpState>>,
+    receive_stream_id: u32,
+) -> Result<Option<Vec<u8>>, JsErrorBox> {
+    let op_context = state.borrow().borrow::<RuntimeOpContext>().clone();
+    let stream = {
+        let webtransport_state = op_context
+            .webtransport_state
+            .lock()
+            .map_err(|_| webtransport_stream_error("webtransport state mutex poisoned", None))?;
+        webtransport_state
+            .recv_streams
+            .get(&receive_stream_id)
+            .cloned()
+            .ok_or_else(|| webtransport_stream_error("unknown webtransport receive stream id", None))?
+    };
+    let mut buffer = vec![0; 64 * 1024];
+    let mut stream = stream.stream.lock().await;
+    match stream.read(&mut buffer).await.map_err(webtransport_read_error)? {
+        Some(read) => {
+            buffer.truncate(read);
+            Ok(Some(buffer))
+        }
+        None => Ok(None),
+    }
+}
+
+#[deno_core::op2(async)]
+async fn op_goldlight_webtransport_receive_stream_cancel(
+    state: Rc<RefCell<OpState>>,
+    receive_stream_id: u32,
+) -> Result<(), JsErrorBox> {
+    let op_context = state.borrow().borrow::<RuntimeOpContext>().clone();
+    let stream = {
+        let webtransport_state = op_context
+            .webtransport_state
+            .lock()
+            .map_err(|_| webtransport_stream_error("webtransport state mutex poisoned", None))?;
+        webtransport_state
+            .recv_streams
+            .get(&receive_stream_id)
+            .cloned()
+            .ok_or_else(|| webtransport_stream_error("unknown webtransport receive stream id", None))?
+    };
+    let mut stream = stream.stream.lock().await;
+    stream
+        .stop(quinn::VarInt::from_u32(0))
+        .map_err(|_| webtransport_stream_error("closed stream", None))
+}
+
 #[deno_core::op2]
 #[serde]
 fn op_goldlight_create_scene_2d(
@@ -2163,6 +3103,21 @@ deno_core::extension!(
         op_goldlight_websocket_send_binary,
         op_goldlight_websocket_close,
         op_goldlight_websocket_drain_events,
+        op_goldlight_webtransport_connect,
+        op_goldlight_webtransport_draining,
+        op_goldlight_webtransport_closed,
+        op_goldlight_webtransport_close,
+        op_goldlight_webtransport_create_bidirectional_stream,
+        op_goldlight_webtransport_create_unidirectional_stream,
+        op_goldlight_webtransport_accept_bidirectional_stream,
+        op_goldlight_webtransport_accept_unidirectional_stream,
+        op_goldlight_webtransport_send_datagram,
+        op_goldlight_webtransport_read_datagram,
+        op_goldlight_webtransport_get_max_datagram_size,
+        op_goldlight_webtransport_send_stream_write,
+        op_goldlight_webtransport_send_stream_close,
+        op_goldlight_webtransport_receive_stream_read,
+        op_goldlight_webtransport_receive_stream_cancel,
         op_goldlight_hmr_drain_updates,
         op_goldlight_hmr_request_restart,
         op_goldlight_worker_request_animation_frame,
@@ -2207,6 +3162,21 @@ deno_core::extension!(
         op_goldlight_websocket_send_binary,
         op_goldlight_websocket_close,
         op_goldlight_websocket_drain_events,
+        op_goldlight_webtransport_connect,
+        op_goldlight_webtransport_draining,
+        op_goldlight_webtransport_closed,
+        op_goldlight_webtransport_close,
+        op_goldlight_webtransport_create_bidirectional_stream,
+        op_goldlight_webtransport_create_unidirectional_stream,
+        op_goldlight_webtransport_accept_bidirectional_stream,
+        op_goldlight_webtransport_accept_unidirectional_stream,
+        op_goldlight_webtransport_send_datagram,
+        op_goldlight_webtransport_read_datagram,
+        op_goldlight_webtransport_get_max_datagram_size,
+        op_goldlight_webtransport_send_stream_write,
+        op_goldlight_webtransport_send_stream_close,
+        op_goldlight_webtransport_receive_stream_read,
+        op_goldlight_webtransport_receive_stream_cancel,
         op_goldlight_worker_request_animation_frame,
         op_goldlight_worker_drain_events,
         op_goldlight_compute_layout,
@@ -2291,6 +3261,9 @@ fn install_runtime_globals(js_runtime: &mut JsRuntime) -> Result<()> {
     js_runtime
         .execute_script("ext:goldlight/websocket.js", GOLDLIGHT_WEBSOCKET_SOURCE)
         .context("failed to install websocket globals")?;
+    js_runtime
+        .execute_script("ext:goldlight/webtransport.js", GOLDLIGHT_WEBTRANSPORT_SOURCE)
+        .context("failed to install webtransport globals")?;
     js_runtime
         .execute_script("ext:goldlight/timers.js", GOLDLIGHT_TIMERS_SOURCE)
         .context("failed to install timer globals")?;
@@ -3220,6 +4193,7 @@ fn run_main_runtime_thread(
     let _hmr_state: Option<HmrRuntimeStateHandle> = None;
     let fetch_state = Arc::new(Mutex::new(FetchHostState::default()));
     let websocket_state = Arc::new(Mutex::new(WebSocketHostState::default()));
+    let webtransport_state = Arc::new(Mutex::new(WebTransportHostState::default()));
     let mut js_runtime = JsRuntime::new(RuntimeOptions {
         module_loader: Some(Rc::new(GoldlightModuleLoader::new(mode.clone()))),
         extensions: vec![goldlight_runtime::init(RuntimeOpContext {
@@ -3229,6 +4203,7 @@ fn run_main_runtime_thread(
             timer_state,
             fetch_state: fetch_state.clone(),
             websocket_state: websocket_state.clone(),
+            webtransport_state: webtransport_state.clone(),
             #[cfg(feature = "dev-runtime")]
             hmr_state: hmr_state.clone(),
         })],
@@ -3370,6 +4345,7 @@ fn run_main_runtime_thread(
     }
     shutdown_all_fetch_requests(&fetch_state);
     shutdown_all_websockets(&websocket_state);
+    shutdown_all_webtransports(&webtransport_state);
 
     Ok(())
 }
@@ -3398,6 +4374,7 @@ fn run_window_worker_thread(
     let _hmr_state: Option<HmrRuntimeStateHandle> = None;
     let fetch_state = Arc::new(Mutex::new(FetchHostState::default()));
     let websocket_state = Arc::new(Mutex::new(WebSocketHostState::default()));
+    let webtransport_state = Arc::new(Mutex::new(WebTransportHostState::default()));
     let mut js_runtime = JsRuntime::new(RuntimeOptions {
         module_loader: Some(Rc::new(GoldlightModuleLoader::new(mode))),
         extensions: vec![goldlight_runtime::init(RuntimeOpContext {
@@ -3407,6 +4384,7 @@ fn run_window_worker_thread(
             timer_state,
             fetch_state: fetch_state.clone(),
             websocket_state: websocket_state.clone(),
+            webtransport_state: webtransport_state.clone(),
             #[cfg(feature = "dev-runtime")]
             hmr_state: hmr_state.clone(),
         })],
@@ -3594,6 +4572,7 @@ fn run_window_worker_thread(
     }
     shutdown_all_fetch_requests(&fetch_state);
     shutdown_all_websockets(&websocket_state);
+    shutdown_all_webtransports(&webtransport_state);
 
     Ok(())
 }

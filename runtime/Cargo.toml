@@ -25,8 +25,10 @@ pollster = "0.4"
 anyhow = "1"
 async-stream = "0.3"
 bytes = "1"
+quinn = "0.11"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.10"
 axum = { version = "0.8", features = ["http1", "json", "tokio"] }
 fastwebsockets = { version = "0.10", features = ["upgrade", "with_axum", "unstable-split"] }
 futures = "0.3"
@@ -34,12 +36,13 @@ futures-util = "0.3"
 http-body-util = "0.1"
 hyper = { version = "1", features = ["client", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
-tokio = { version = "1", features = ["macros", "net", "rt", "sync"] }
+tokio = { version = "1", features = ["macros", "net", "rt", "sync", "time"] }
 tokio-rustls = "0.26"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 uuid = { version = "1", features = ["v4"] }
+web-transport-proto = "0.2"
 webpki-roots = "0.26"
 base64 = "0.22"
 bytemuck = { version = "1", features = ["derive"] }

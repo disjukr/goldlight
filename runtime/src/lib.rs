@@ -1,3 +1,4 @@
+mod drawing;
 mod render;
 
 use std::cell::RefCell;
@@ -99,6 +100,7 @@ const GOLDLIGHT_HMR_SOURCE: &str = include_str!("../js/hmr.js");
 const GOLDLIGHT_WORKER_CONSOLE_SOURCE: &str = include_str!("../js/worker_console.js");
 const GOLDLIGHT_ABORT_SOURCE: &str = include_str!("../js/abort.js");
 const GOLDLIGHT_BLOB_SOURCE: &str = include_str!("../js/blob.js");
+const GOLDLIGHT_DOM_EXCEPTION_SOURCE: &str = include_str!("../js/dom_exception.js");
 const GOLDLIGHT_STREAMS_SOURCE: &str = include_str!("../js/streams.js");
 const GOLDLIGHT_TIMERS_SOURCE: &str = include_str!("../js/timers.js");
 const GOLDLIGHT_FETCH_SOURCE: &str = include_str!("../js/fetch.js");
@@ -3246,6 +3248,9 @@ fn install_runtime_globals(js_runtime: &mut JsRuntime) -> Result<()> {
     js_runtime
         .execute_script("ext:goldlight/hmr.js", GOLDLIGHT_HMR_SOURCE)
         .context("failed to install hmr globals")?;
+    js_runtime
+        .execute_script("ext:goldlight/dom_exception.js", GOLDLIGHT_DOM_EXCEPTION_SOURCE)
+        .context("failed to install DOMException globals")?;
     js_runtime
         .execute_script("ext:goldlight/blob.js", GOLDLIGHT_BLOB_SOURCE)
         .context("failed to install blob globals")?;

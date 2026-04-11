@@ -8,6 +8,10 @@ use serde::{Deserialize, Serialize};
 use wgpu::util::DeviceExt;
 use winit::{dpi::PhysicalSize, window::Window};
 
+use crate::drawing::{
+    encode_drawing_command_buffer, prepare_drawing_recording, record_scene_2d, DawnSharedContext,
+};
+
 const SHADER_SOURCE: &str = r#"
 struct VertexOutput {
   @builtin(position) position: vec4<f32>,
@@ -74,7 +78,7 @@ impl Default for ColorValue {
 }
 
 impl ColorValue {
-    fn to_wgpu(self) -> wgpu::Color {
+    pub(crate) fn to_wgpu(self) -> wgpu::Color {
         wgpu::Color {
             r: self.r as f64,
             g: self.g as f64,
@@ -83,7 +87,7 @@ impl ColorValue {
         }
     }
 
-    fn to_array(self) -> [f32; 4] {
+    pub(crate) fn to_array(self) -> [f32; 4] {
         [self.r, self.g, self.b, self.a]
     }
 }
@@ -227,13 +231,13 @@ pub struct SceneCameraUpdate {
 }
 
 #[derive(Clone, Debug)]
-struct Rect2D {
-    scene_id: u32,
-    x: f32,
-    y: f32,
-    width: f32,
-    height: f32,
-    color: ColorValue,
+pub(crate) struct Rect2D {
+    pub _scene_id: u32,
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub color: ColorValue,
 }
 
 #[derive(Clone, Debug)]
@@ -244,9 +248,9 @@ struct Triangle3D {
 }
 
 #[derive(Clone, Debug)]
-struct Scene2D {
-    clear_color: ColorValue,
-    rect_ids: Vec<u32>,
+pub(crate) struct Scene2D {
+    pub clear_color: ColorValue,
+    pub rect_ids: Vec<u32>,
 }
 
 #[derive(Clone, Debug)]
@@ -332,7 +336,7 @@ impl RenderModel {
         self.rects_2d.insert(
             id,
             Rect2D {
-                scene_id,
+                _scene_id: scene_id,
                 x: options.x,
                 y: options.y,
                 width: options.width,
@@ -490,8 +494,81 @@ pub struct RendererState {
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
-    pipeline: wgpu::RenderPipeline,
+    drawing_context: DawnSharedContext,
+    geometry_pipeline: wgpu::RenderPipeline,
     size: PhysicalSize<u32>,
+}
+
+struct SceneCommandBuffer<'a> {
+    device: &'a wgpu::Device,
+    encoder: &'a mut wgpu::CommandEncoder,
+    target_view: &'a wgpu::TextureView,
+    drawing_context: &'a DawnSharedContext,
+    geometry_pipeline: &'a wgpu::RenderPipeline,
+}
+
+impl<'a> SceneCommandBuffer<'a> {
+    fn encode_drawing(&mut self, prepared: &crate::drawing::DrawingPreparedRecording) -> Result<()> {
+        encode_drawing_command_buffer(
+            self.drawing_context,
+            prepared,
+            self.encoder,
+            self.target_view,
+        )
+    }
+
+    fn encode_geometry_3d(&mut self, clear_color: ColorValue, vertices: &[Vertex]) {
+        let vertex_buffer = if vertices.is_empty() {
+            None
+        } else {
+            Some(
+                self.device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("goldlight geometry vertex buffer"),
+                        contents: bytemuck::cast_slice(vertices),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    }),
+            )
+        };
+
+        let mut pass = self.encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("goldlight geometry render pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: self.target_view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(clear_color.to_wgpu()),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            occlusion_query_set: None,
+            timestamp_writes: None,
+        });
+
+        if let Some(vertex_buffer) = &vertex_buffer {
+            pass.set_pipeline(self.geometry_pipeline);
+            pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+            pass.draw(0..vertices.len() as u32, 0..1);
+        }
+    }
+
+    fn encode_clear(&mut self, clear_color: ColorValue) {
+        let _ = self.encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("goldlight clear pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: self.target_view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(clear_color.to_wgpu()),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            occlusion_query_set: None,
+            timestamp_writes: None,
+        });
+    }
 }
 
 impl RendererState {
@@ -566,7 +643,7 @@ impl RendererState {
             push_constant_ranges: &[],
         });
 
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        let geometry_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("goldlight pipeline"),
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
@@ -591,13 +668,15 @@ impl RendererState {
             multiview: None,
             cache: None,
         });
+        let drawing_context = DawnSharedContext::new(&device, format);
 
         Ok(Self {
             surface,
             device,
             queue,
             config,
-            pipeline,
+            drawing_context,
+            geometry_pipeline,
             size,
         })
     }
@@ -618,30 +697,6 @@ impl RendererState {
             return Ok(());
         }
 
-        let scene_snapshot = match model.active_scene {
-            Some(ActiveScene::TwoD(scene_id)) => {
-                let scene = model
-                    .scenes_2d
-                    .get(&scene_id)
-                    .ok_or_else(|| anyhow!("missing active 2D scene {scene_id}"))?;
-                (
-                    scene.clear_color,
-                    self.build_scene_2d_vertices(model, scene),
-                )
-            }
-            Some(ActiveScene::ThreeD(scene_id)) => {
-                let scene = model
-                    .scenes_3d
-                    .get(&scene_id)
-                    .ok_or_else(|| anyhow!("missing active 3D scene {scene_id}"))?;
-                (
-                    scene.clear_color,
-                    self.build_scene_3d_vertices(model, scene),
-                )
-            }
-            None => (ColorValue::default(), Vec::new()),
-        };
-
         let frame = match self.surface.get_current_texture() {
             Ok(frame) => frame,
             Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
@@ -660,92 +715,46 @@ impl RendererState {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("goldlight render encoder"),
             });
-
-        let vertex_buffer = if scene_snapshot.1.is_empty() {
-            None
-        } else {
-            Some(
-                self.device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("goldlight vertex buffer"),
-                        contents: bytemuck::cast_slice(&scene_snapshot.1),
-                        usage: wgpu::BufferUsages::VERTEX,
-                    }),
-            )
+        let mut command_buffer = SceneCommandBuffer {
+            device: &self.device,
+            encoder: &mut encoder,
+            target_view: &view,
+            drawing_context: &self.drawing_context,
+            geometry_pipeline: &self.geometry_pipeline,
         };
-
-        {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("goldlight render pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(scene_snapshot.0.to_wgpu()),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                occlusion_query_set: None,
-                timestamp_writes: None,
-            });
-
-            if let Some(vertex_buffer) = &vertex_buffer {
-                pass.set_pipeline(&self.pipeline);
-                pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-                pass.draw(0..scene_snapshot.1.len() as u32, 0..1);
+        match model.active_scene {
+            Some(ActiveScene::TwoD(scene_id)) => {
+                let scene = model
+                    .scenes_2d
+                    .get(&scene_id)
+                    .ok_or_else(|| anyhow!("missing active 2D scene {scene_id}"))?;
+                let rects = scene
+                    .rect_ids
+                    .iter()
+                    .filter_map(|rect_id| model.rects_2d.get(rect_id))
+                    .cloned()
+                    .collect::<Vec<_>>();
+                let recording = record_scene_2d(scene, &rects);
+                let prepared =
+                    prepare_drawing_recording(&recording, self.config.width, self.config.height);
+                command_buffer.encode_drawing(&prepared)?;
+            }
+            Some(ActiveScene::ThreeD(scene_id)) => {
+                let scene = model
+                    .scenes_3d
+                    .get(&scene_id)
+                    .ok_or_else(|| anyhow!("missing active 3D scene {scene_id}"))?;
+                let vertices = self.build_scene_3d_vertices(model, scene);
+                command_buffer.encode_geometry_3d(scene.clear_color, &vertices);
+            }
+            None => {
+                command_buffer.encode_clear(ColorValue::default());
             }
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
         frame.present();
         Ok(())
-    }
-
-    fn build_scene_2d_vertices(&self, model: &RenderModel, scene: &Scene2D) -> Vec<Vertex> {
-        let width = self.config.width.max(1) as f32;
-        let height = self.config.height.max(1) as f32;
-        let mut vertices = Vec::new();
-
-        for rect_id in &scene.rect_ids {
-            let Some(rect) = model.rects_2d.get(rect_id) else {
-                continue;
-            };
-            let _ = rect.scene_id;
-            let left = (rect.x / width) * 2.0 - 1.0;
-            let right = ((rect.x + rect.width) / width) * 2.0 - 1.0;
-            let top = 1.0 - (rect.y / height) * 2.0;
-            let bottom = 1.0 - ((rect.y + rect.height) / height) * 2.0;
-            let color = rect.color.to_array();
-
-            let top_left = Vertex {
-                position: [left, top, 0.0, 1.0],
-                color,
-            };
-            let top_right = Vertex {
-                position: [right, top, 0.0, 1.0],
-                color,
-            };
-            let bottom_left = Vertex {
-                position: [left, bottom, 0.0, 1.0],
-                color,
-            };
-            let bottom_right = Vertex {
-                position: [right, bottom, 0.0, 1.0],
-                color,
-            };
-
-            vertices.extend_from_slice(&[
-                top_left,
-                bottom_left,
-                top_right,
-                top_right,
-                bottom_left,
-                bottom_right,
-            ]);
-        }
-
-        vertices
     }
 
     fn build_scene_3d_vertices(&self, model: &RenderModel, scene: &Scene3D) -> Vec<Vertex> {

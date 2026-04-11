@@ -103,6 +103,11 @@ pub struct Rect2DHandle {
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
+pub struct Path2DHandle {
+    pub id: u32,
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
 pub struct Scene3DHandle {
     pub id: u32,
 }
@@ -160,6 +165,122 @@ pub struct Rect2DUpdate {
     pub height: Option<f32>,
     pub color: Option<ColorValue>,
 }
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", tag = "kind")]
+pub enum PathVerb2D {
+    MoveTo { to: [f32; 2] },
+    LineTo { to: [f32; 2] },
+    QuadTo { control: [f32; 2], to: [f32; 2] },
+    ConicTo {
+        control: [f32; 2],
+        to: [f32; 2],
+        weight: f32,
+    },
+    CubicTo {
+        control1: [f32; 2],
+        control2: [f32; 2],
+        to: [f32; 2],
+    },
+    ArcTo {
+        center: [f32; 2],
+        radius: f32,
+        #[serde(rename = "startAngle")]
+        start_angle: f32,
+        #[serde(rename = "endAngle")]
+        end_angle: f32,
+        #[serde(rename = "counterClockwise", default)]
+        counter_clockwise: bool,
+    },
+    Close,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PathFillRule2D {
+    Nonzero,
+    Evenodd,
+}
+
+impl Default for PathFillRule2D {
+    fn default() -> Self {
+        Self::Nonzero
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PathStyle2D {
+    Fill,
+    Stroke,
+}
+
+impl Default for PathStyle2D {
+    fn default() -> Self {
+        Self::Fill
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PathStrokeJoin2D {
+    Miter,
+    Bevel,
+    Round,
+}
+
+impl Default for PathStrokeJoin2D {
+    fn default() -> Self {
+        Self::Miter
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PathStrokeCap2D {
+    Butt,
+    Square,
+    Round,
+}
+
+impl Default for PathStrokeCap2D {
+    fn default() -> Self {
+        Self::Butt
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Path2DOptions {
+    #[serde(default)]
+    pub x: f32,
+    #[serde(default)]
+    pub y: f32,
+    #[serde(default)]
+    pub verbs: Vec<PathVerb2D>,
+    #[serde(default)]
+    pub fill_rule: PathFillRule2D,
+    #[serde(default)]
+    pub style: PathStyle2D,
+    #[serde(default = "default_rect_color")]
+    pub color: ColorValue,
+    #[serde(default = "default_path_stroke_width")]
+    pub stroke_width: f32,
+    #[serde(default)]
+    pub stroke_join: PathStrokeJoin2D,
+    #[serde(default)]
+    pub stroke_cap: PathStrokeCap2D,
+    #[serde(default)]
+    pub dash_array: Vec<f32>,
+    #[serde(default)]
+    pub dash_offset: f32,
+}
+
+fn default_path_stroke_width() -> f32 {
+    1.0
+}
+
+pub type Path2DUpdate = Path2DOptions;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -241,6 +362,22 @@ pub(crate) struct Rect2D {
 }
 
 #[derive(Clone, Debug)]
+pub(crate) struct Path2D {
+    pub _scene_id: u32,
+    pub x: f32,
+    pub y: f32,
+    pub verbs: Vec<PathVerb2D>,
+    pub fill_rule: PathFillRule2D,
+    pub style: PathStyle2D,
+    pub color: ColorValue,
+    pub stroke_width: f32,
+    pub stroke_join: PathStrokeJoin2D,
+    pub stroke_cap: PathStrokeCap2D,
+    pub dash_array: Vec<f32>,
+    pub dash_offset: f32,
+}
+
+#[derive(Clone, Debug)]
 struct Triangle3D {
     scene_id: u32,
     positions: [[f32; 3]; 3],
@@ -251,6 +388,7 @@ struct Triangle3D {
 pub(crate) struct Scene2D {
     pub clear_color: ColorValue,
     pub rect_ids: Vec<u32>,
+    pub path_ids: Vec<u32>,
 }
 
 #[derive(Clone, Debug)]
@@ -277,6 +415,7 @@ pub struct RenderModel {
     active_scene: Option<ActiveScene>,
     scenes_2d: HashMap<u32, Scene2D>,
     rects_2d: HashMap<u32, Rect2D>,
+    paths_2d: HashMap<u32, Path2D>,
     scenes_3d: HashMap<u32, Scene3D>,
     triangles_3d: HashMap<u32, Triangle3D>,
 }
@@ -289,6 +428,7 @@ impl Default for RenderModel {
             active_scene: None,
             scenes_2d: HashMap::new(),
             rects_2d: HashMap::new(),
+            paths_2d: HashMap::new(),
             scenes_3d: HashMap::new(),
             triangles_3d: HashMap::new(),
         }
@@ -304,6 +444,7 @@ impl RenderModel {
             Scene2D {
                 clear_color: options.clear_color,
                 rect_ids: Vec::new(),
+                path_ids: Vec::new(),
             },
         );
         Scene2DHandle { id }
@@ -368,6 +509,57 @@ impl RenderModel {
         if let Some(color) = options.color {
             rect.color = color;
         }
+        Ok(())
+    }
+
+    pub fn scene_2d_create_path(
+        &mut self,
+        scene_id: u32,
+        options: Path2DOptions,
+    ) -> Result<Path2DHandle> {
+        let scene = self
+            .scenes_2d
+            .get_mut(&scene_id)
+            .ok_or_else(|| anyhow!("unknown 2D scene {scene_id}"))?;
+        let id = self.next_object_id;
+        self.next_object_id += 1;
+        self.paths_2d.insert(
+            id,
+            Path2D {
+                _scene_id: scene_id,
+                x: options.x,
+                y: options.y,
+                verbs: options.verbs,
+                fill_rule: options.fill_rule,
+                style: options.style,
+                color: options.color,
+                stroke_width: options.stroke_width,
+                stroke_join: options.stroke_join,
+                stroke_cap: options.stroke_cap,
+                dash_array: options.dash_array,
+                dash_offset: options.dash_offset,
+            },
+        );
+        scene.path_ids.push(id);
+        Ok(Path2DHandle { id })
+    }
+
+    pub fn path_2d_update(&mut self, path_id: u32, options: Path2DUpdate) -> Result<()> {
+        let path = self
+            .paths_2d
+            .get_mut(&path_id)
+            .ok_or_else(|| anyhow!("unknown 2D path {path_id}"))?;
+        path.x = options.x;
+        path.y = options.y;
+        path.verbs = options.verbs;
+        path.fill_rule = options.fill_rule;
+        path.style = options.style;
+        path.color = options.color;
+        path.stroke_width = options.stroke_width;
+        path.stroke_join = options.stroke_join;
+        path.stroke_cap = options.stroke_cap;
+        path.dash_array = options.dash_array;
+        path.dash_offset = options.dash_offset;
         Ok(())
     }
 
@@ -734,7 +926,13 @@ impl RendererState {
                     .filter_map(|rect_id| model.rects_2d.get(rect_id))
                     .cloned()
                     .collect::<Vec<_>>();
-                let recording = record_scene_2d(scene, &rects);
+                let paths = scene
+                    .path_ids
+                    .iter()
+                    .filter_map(|path_id| model.paths_2d.get(path_id))
+                    .cloned()
+                    .collect::<Vec<_>>();
+                let recording = record_scene_2d(scene, &rects, &paths);
                 let prepared =
                     prepare_drawing_recording(&recording, self.config.width, self.config.height);
                 command_buffer.encode_drawing(&prepared)?;

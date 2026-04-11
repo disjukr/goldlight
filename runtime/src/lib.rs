@@ -85,9 +85,9 @@ use winit::{
 use web_transport_proto::{ConnectRequest, ConnectResponse, Settings, SettingsError};
 
 use crate::render::{
-    Rect2DHandle, Rect2DOptions, Rect2DUpdate, RenderModel, RendererState, Scene2DHandle,
-    Scene2DOptions, Scene3DHandle, Scene3DOptions, SceneCameraUpdate, SceneClearColorOptions,
-    Triangle3DHandle, Triangle3DOptions, Triangle3DUpdate,
+    Path2DHandle, Path2DOptions, Path2DUpdate, Rect2DHandle, Rect2DOptions, Rect2DUpdate,
+    RenderModel, RendererState, Scene2DHandle, Scene2DOptions, Scene3DHandle, Scene3DOptions,
+    SceneCameraUpdate, SceneClearColorOptions, Triangle3DHandle, Triangle3DOptions, Triangle3DUpdate,
 };
 
 pub const GOLDLIGHT_MODULE_SPECIFIER: &str = "ext:goldlight/mod.js";
@@ -3008,6 +3008,31 @@ fn op_goldlight_rect_2d_update(
     })
 }
 
+#[deno_core::op2]
+#[serde]
+fn op_goldlight_scene_2d_create_path(
+    state: &mut OpState,
+    scene_id: u32,
+    #[serde] options: Path2DOptions,
+) -> Result<Path2DHandle, JsErrorBox> {
+    with_worker_host_state(state, |worker_state| {
+        worker_state
+            .render_model
+            .scene_2d_create_path(scene_id, options)
+    })
+}
+
+#[deno_core::op2]
+fn op_goldlight_path_2d_update(
+    state: &mut OpState,
+    path_id: u32,
+    #[serde] options: Path2DUpdate,
+) -> Result<(), JsErrorBox> {
+    with_worker_host_state(state, |worker_state| {
+        worker_state.render_model.path_2d_update(path_id, options)
+    })
+}
+
 #[deno_core::op2(fast)]
 fn op_goldlight_present_scene_2d(state: &mut OpState, scene_id: u32) -> Result<(), JsErrorBox> {
     with_worker_host_state(state, |worker_state| {
@@ -3129,6 +3154,8 @@ deno_core::extension!(
         op_goldlight_scene_2d_set_clear_color,
         op_goldlight_scene_2d_create_rect,
         op_goldlight_rect_2d_update,
+        op_goldlight_scene_2d_create_path,
+        op_goldlight_path_2d_update,
         op_goldlight_present_scene_2d,
         op_goldlight_create_scene_3d,
         op_goldlight_scene_3d_set_clear_color,
@@ -3186,6 +3213,8 @@ deno_core::extension!(
         op_goldlight_scene_2d_set_clear_color,
         op_goldlight_scene_2d_create_rect,
         op_goldlight_rect_2d_update,
+        op_goldlight_scene_2d_create_path,
+        op_goldlight_path_2d_update,
         op_goldlight_present_scene_2d,
         op_goldlight_create_scene_3d,
         op_goldlight_scene_3d_set_clear_color,

@@ -191,6 +191,54 @@ function cloneRectState(state) {
   };
 }
 
+function clonePathVerb(verb) {
+  switch (verb.kind) {
+    case "moveTo":
+    case "lineTo":
+      return { kind: verb.kind, to: [...verb.to] };
+    case "quadTo":
+      return { kind: "quadTo", control: [...verb.control], to: [...verb.to] };
+    case "conicTo":
+      return { kind: "conicTo", control: [...verb.control], to: [...verb.to], weight: verb.weight };
+    case "cubicTo":
+      return {
+        kind: "cubicTo",
+        control1: [...verb.control1],
+        control2: [...verb.control2],
+        to: [...verb.to],
+      };
+    case "arcTo":
+      return {
+        kind: "arcTo",
+        center: [...verb.center],
+        radius: verb.radius,
+        startAngle: verb.startAngle,
+        endAngle: verb.endAngle,
+        counterClockwise: verb.counterClockwise,
+      };
+    case "close":
+      return { kind: "close" };
+    default:
+      throw new TypeError(`Unsupported path verb kind: ${verb.kind}`);
+  }
+}
+
+function clonePathState(state) {
+  return {
+    x: state.x,
+    y: state.y,
+    verbs: state.verbs.map(clonePathVerb),
+    fillRule: state.fillRule,
+    style: state.style,
+    color: cloneColor(state.color),
+    strokeWidth: state.strokeWidth,
+    strokeJoin: state.strokeJoin,
+    strokeCap: state.strokeCap,
+    dashArray: [...state.dashArray],
+    dashOffset: state.dashOffset,
+  };
+}
+
 function cloneTriangleState(state) {
   return {
     positions: state.positions.map((position) => [...position]),
@@ -207,6 +255,56 @@ function normalizeRectInit(init = {}) {
     color: init.color
       ? normalizeColor(init.color)
       : { r: 1, g: 1, b: 1, a: 1 },
+  };
+}
+
+function normalizePathVerb(verb) {
+  switch (verb?.kind) {
+    case "moveTo":
+    case "lineTo":
+      return { kind: verb.kind, to: [...verb.to] };
+    case "quadTo":
+      return { kind: "quadTo", control: [...verb.control], to: [...verb.to] };
+    case "conicTo":
+      return { kind: "conicTo", control: [...verb.control], to: [...verb.to], weight: verb.weight ?? 1 };
+    case "cubicTo":
+      return {
+        kind: "cubicTo",
+        control1: [...verb.control1],
+        control2: [...verb.control2],
+        to: [...verb.to],
+      };
+    case "arcTo":
+      return {
+        kind: "arcTo",
+        center: [...verb.center],
+        radius: verb.radius ?? 0,
+        startAngle: verb.startAngle ?? 0,
+        endAngle: verb.endAngle ?? 0,
+        counterClockwise: verb.counterClockwise ?? false,
+      };
+    case "close":
+      return { kind: "close" };
+    default:
+      throw new TypeError(`Unsupported path verb kind: ${verb?.kind}`);
+  }
+}
+
+function normalizePathInit(init = {}) {
+  return {
+    x: init.x ?? 0,
+    y: init.y ?? 0,
+    verbs: (init.verbs ?? []).map(normalizePathVerb),
+    fillRule: init.fillRule ?? "nonzero",
+    style: init.style ?? "fill",
+    color: init.color
+      ? normalizeColor(init.color)
+      : { r: 1, g: 1, b: 1, a: 1 },
+    strokeWidth: init.strokeWidth ?? 1,
+    strokeJoin: init.strokeJoin ?? "miter",
+    strokeCap: init.strokeCap ?? "butt",
+    dashArray: (init.dashArray ?? []).map((value) => Number(value)),
+    dashOffset: init.dashOffset ?? 0,
   };
 }
 
@@ -261,11 +359,12 @@ function isLayoutNode(node) {
 function ensureNode2d(node) {
   if (
     !(node instanceof Rect2d) &&
+    !(node instanceof Path2d) &&
     !(node instanceof Group2d) &&
     !(node instanceof LayoutGroup2d) &&
     !(node instanceof LayoutItem2d)
   ) {
-    throw new TypeError("Scene2d.add expects a Rect2d, Group2d, LayoutGroup2d, or LayoutItem2d");
+    throw new TypeError("Scene2d.add expects a Rect2d, Path2d, Group2d, LayoutGroup2d, or LayoutItem2d");
   }
 }
 
@@ -406,6 +505,16 @@ function applyOffsetToNode2d(node, offsetX, offsetY) {
     return;
   }
 
+  if (node instanceof Path2d) {
+    const current = node.get();
+    node._applyLayoutState({
+      ...current,
+      x: offsetX,
+      y: offsetY,
+    });
+    return;
+  }
+
   if (node instanceof Group2d) {
     for (const child of node._children) {
       applyOffsetToNode2d(child, offsetX, offsetY);
@@ -450,6 +559,11 @@ function attachNodeToScene2d(scene, node) {
   node._scene = scene;
 
   if (node instanceof Rect2d) {
+    node._attachToScene(scene.id);
+    return;
+  }
+
+  if (node instanceof Path2d) {
     node._attachToScene(scene.id);
     return;
   }
@@ -756,6 +870,15 @@ export class LayoutItem2d {
       });
       return;
     }
+    if (this._content instanceof Path2d) {
+      const current = this._content.get();
+      this._content._applyLayoutState({
+        ...current,
+        x,
+        y,
+      });
+      return;
+    }
     applyOffsetToNode2d(this._content, x, y);
   }
 }
@@ -802,6 +925,59 @@ export class Rect2d {
 
   get() {
     return cloneRectState(this._state);
+  }
+}
+
+export class Path2d {
+  constructor(init = {}) {
+    this.id = null;
+    this._sceneId = null;
+    this._scene = null;
+    this._state = normalizePathInit(init);
+  }
+
+  _attachToScene(sceneId) {
+    if (this.id !== null) {
+      return;
+    }
+    const handle = Deno.core.ops.op_goldlight_scene_2d_create_path(sceneId, this._state);
+    this.id = handle.id;
+    this._sceneId = sceneId;
+  }
+
+  set(patch = {}) {
+    if (patch.x !== undefined) this._state.x = patch.x;
+    if (patch.y !== undefined) this._state.y = patch.y;
+    if (patch.verbs !== undefined) this._state.verbs = patch.verbs.map(normalizePathVerb);
+    if (patch.fillRule !== undefined) this._state.fillRule = patch.fillRule;
+    if (patch.style !== undefined) this._state.style = patch.style;
+    if (patch.color !== undefined) this._state.color = normalizeColor(patch.color);
+    if (patch.strokeWidth !== undefined) this._state.strokeWidth = patch.strokeWidth;
+    if (patch.strokeJoin !== undefined) this._state.strokeJoin = patch.strokeJoin;
+    if (patch.strokeCap !== undefined) this._state.strokeCap = patch.strokeCap;
+    if (patch.dashArray !== undefined) this._state.dashArray = patch.dashArray.map((value) => Number(value));
+    if (patch.dashOffset !== undefined) this._state.dashOffset = patch.dashOffset;
+
+    if (this.id !== null) {
+      Deno.core.ops.op_goldlight_path_2d_update(this.id, this._state);
+    }
+    return this;
+  }
+
+  _applyLayoutState(state) {
+    this._state = {
+      ...state,
+      verbs: state.verbs.map(normalizePathVerb),
+      color: normalizeColor(state.color),
+      dashArray: state.dashArray.map((value) => Number(value)),
+    };
+    if (this.id !== null) {
+      Deno.core.ops.op_goldlight_path_2d_update(this.id, this._state);
+    }
+  }
+
+  get() {
+    return clonePathState(this._state);
   }
 }
 

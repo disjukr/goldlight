@@ -99,6 +99,60 @@ export interface Rect2dState {
 
 export type Rect2dPatch = Partial<Rect2dState>;
 
+export type Point2d = [number, number];
+
+export type PathFillRule2d = 'nonzero' | 'evenodd';
+
+export type PathStrokeJoin2d = 'miter' | 'bevel' | 'round';
+
+export type PathStrokeCap2d = 'butt' | 'square' | 'round';
+
+export type PathVerb2d =
+  | { kind: 'moveTo'; to: Point2d }
+  | { kind: 'lineTo'; to: Point2d }
+  | { kind: 'quadTo'; control: Point2d; to: Point2d }
+  | { kind: 'conicTo'; control: Point2d; to: Point2d; weight: number }
+  | { kind: 'cubicTo'; control1: Point2d; control2: Point2d; to: Point2d }
+  | {
+    kind: 'arcTo';
+    center: Point2d;
+    radius: number;
+    startAngle: number;
+    endAngle: number;
+    counterClockwise?: boolean;
+  }
+  | { kind: 'close' };
+
+export interface Path2dInit {
+  x?: number;
+  y?: number;
+  verbs?: PathVerb2d[];
+  fillRule?: PathFillRule2d;
+  style?: 'fill' | 'stroke';
+  color?: ColorValue;
+  strokeWidth?: number;
+  strokeJoin?: PathStrokeJoin2d;
+  strokeCap?: PathStrokeCap2d;
+  dashArray?: number[];
+  dashOffset?: number;
+}
+
+export interface Path2dState {
+  x: number;
+  y: number;
+  verbs: PathVerb2d[];
+  fillRule: PathFillRule2d;
+  style: 'fill' | 'stroke';
+  color: ResolvedColorValue;
+  strokeWidth: number;
+  strokeJoin: PathStrokeJoin2d;
+  strokeCap: PathStrokeCap2d;
+  dashArray: number[];
+  dashOffset: number;
+}
+
+export type Path2dPatch = Partial<Path2dState>;
+
 export type Mat4Value = [
   number, number, number, number,
   number, number, number, number,
@@ -286,7 +340,23 @@ export class LayoutItem2d {
   }
 }
 
-export type Node2d = Rect2d | Group2d | LayoutGroup2d | LayoutItem2d;
+export class Path2d {
+  readonly id!: number | null;
+
+  constructor(_init: Path2dInit = {}) {
+    throw new Error(RUNTIME_ONLY_ERROR);
+  }
+
+  set(_patch: Path2dPatch = {}): this {
+    throw new Error(RUNTIME_ONLY_ERROR);
+  }
+
+  get(): Path2dState {
+    throw new Error(RUNTIME_ONLY_ERROR);
+  }
+}
+
+export type Node2d = Rect2d | Path2d | Group2d | LayoutGroup2d | LayoutItem2d;
 
 export class Scene2d {
   readonly id!: number;

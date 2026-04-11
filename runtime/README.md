@@ -49,11 +49,15 @@ Current built-in scene APIs:
 
 - `new Scene2d()`
 - `new Rect2d()`
+- `new Path2d()`
 - `scene.add(rect)`
+- `scene.add(path)`
 - `scene.get()`
 - `scene.set(...)`
 - `rect.get()`
 - `rect.set(...)`
+- `path.get()`
+- `path.set(...)`
 - `setWindowScene(scene)`
 - `new Scene3d()`
 - `new Triangle3d()`

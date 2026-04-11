@@ -1,5 +1,6 @@
 mod drawing;
 mod render;
+mod stroke_patch;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -14,26 +15,6 @@ use std::thread;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
-use bytes::Bytes;
-use deno_core::{
-    resolve_import, resolve_path, v8, JsRuntime, ModuleLoadResponse, ModuleLoader, ModuleSource,
-    ModuleSourceCode, ModuleSpecifier, ModuleType, OpState, PollEventLoopOptions, RequestedModuleType,
-    ResolutionKind, RuntimeOptions,
-};
-use deno_error::JsErrorBox;
-use serde::{Deserialize, Serialize};
-#[cfg(feature = "dev-runtime")]
-use serde_json::json;
-use sha2::{Digest, Sha256};
-use taffy::prelude::{
-    AlignItems, AvailableSpace, Dimension, Display, FlexDirection, FromLength, JustifyContent,
-    Layout as TaffyLayout, LengthPercentage, LengthPercentageAuto, Position, Rect, Size,
-    Style as TaffyStyle, TaffyTree,
-};
-use tokio::runtime::Builder as TokioRuntimeBuilder;
-use tracing::debug;
-#[cfg(feature = "dev-runtime")]
-use std::net::{SocketAddr, TcpListener};
 #[cfg(feature = "dev-runtime")]
 use axum::extract::{Path as AxumPath, State};
 #[cfg(feature = "dev-runtime")]
@@ -48,46 +29,67 @@ use axum::{Json, Router};
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 #[cfg(feature = "dev-runtime")]
 use base64::Engine;
+use bytes::Bytes;
+use deno_core::{
+    resolve_import, resolve_path, v8, JsRuntime, ModuleLoadResponse, ModuleLoader, ModuleSource,
+    ModuleSourceCode, ModuleSpecifier, ModuleType, OpState, PollEventLoopOptions,
+    RequestedModuleType, ResolutionKind, RuntimeOptions,
+};
 #[cfg(feature = "dev-runtime")]
 use deno_core::{
     InspectorMsg, InspectorSessionKind, InspectorSessionOptions, InspectorSessionProxy,
 };
-#[cfg(feature = "dev-runtime")]
-use futures::channel::mpsc;
-use fastwebsockets::{FragmentCollector, Frame as FastWebSocketFrame, OpCode as FastOpCode};
+use deno_error::JsErrorBox;
 #[cfg(feature = "dev-runtime")]
 use fastwebsockets::{
     upgrade::IncomingUpgrade, WebSocket as FastWebSocket, WebSocketWrite as FastWebSocketWrite,
 };
+use fastwebsockets::{FragmentCollector, Frame as FastWebSocketFrame, OpCode as FastOpCode};
+#[cfg(feature = "dev-runtime")]
+use futures::channel::mpsc;
 use futures_util::StreamExt;
 use http_body_util::Empty;
-use hyper::Request;
 use hyper::upgrade::Upgraded;
+use hyper::Request;
 use hyper_util::rt::TokioIo;
+use serde::{Deserialize, Serialize};
+#[cfg(feature = "dev-runtime")]
+use serde_json::json;
+use sha2::{Digest, Sha256};
+#[cfg(feature = "dev-runtime")]
+use std::net::{SocketAddr, TcpListener};
+use taffy::prelude::{
+    AlignItems, AvailableSpace, Dimension, Display, FlexDirection, FromLength, JustifyContent,
+    Layout as TaffyLayout, LengthPercentage, LengthPercentageAuto, Position, Rect, Size,
+    Style as TaffyStyle, TaffyTree,
+};
 #[cfg(feature = "dev-runtime")]
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpStream;
+use tokio::runtime::Builder as TokioRuntimeBuilder;
+use tokio::sync::mpsc::{self as tokio_mpsc, UnboundedSender as TokioUnboundedSender};
 #[cfg(feature = "dev-runtime")]
 use tokio::sync::oneshot;
-use tokio::sync::mpsc::{self as tokio_mpsc, UnboundedSender as TokioUnboundedSender};
-use tokio::net::TcpStream;
-use tokio_rustls::TlsConnector;
+use tokio_rustls::rustls::pki_types::ServerName;
 use tokio_rustls::rustls::ClientConfig;
 use tokio_rustls::rustls::RootCertStore;
-use tokio_rustls::rustls::pki_types::ServerName;
+use tokio_rustls::TlsConnector;
+use tracing::debug;
 #[cfg(feature = "dev-runtime")]
 use uuid::Uuid;
+use web_transport_proto::{ConnectRequest, ConnectResponse, Settings, SettingsError};
 use winit::{
     application::ApplicationHandler,
     event::WindowEvent,
     event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy},
     window::{Window, WindowAttributes, WindowId},
 };
-use web_transport_proto::{ConnectRequest, ConnectResponse, Settings, SettingsError};
 
 use crate::render::{
     Path2DHandle, Path2DOptions, Path2DUpdate, Rect2DHandle, Rect2DOptions, Rect2DUpdate,
     RenderModel, RendererState, Scene2DHandle, Scene2DOptions, Scene3DHandle, Scene3DOptions,
-    SceneCameraUpdate, SceneClearColorOptions, Triangle3DHandle, Triangle3DOptions, Triangle3DUpdate,
+    SceneCameraUpdate, SceneClearColorOptions, Triangle3DHandle, Triangle3DOptions,
+    Triangle3DUpdate,
 };
 
 pub const GOLDLIGHT_MODULE_SPECIFIER: &str = "ext:goldlight/mod.js";
@@ -346,8 +348,14 @@ impl FetchRequestHandle {
 }
 
 enum WebSocketCommand {
-    SendText { payload: String, queued_bytes: u32 },
-    SendBinary { payload: Vec<u8>, queued_bytes: u32 },
+    SendText {
+        payload: String,
+        queued_bytes: u32,
+    },
+    SendBinary {
+        payload: Vec<u8>,
+        queued_bytes: u32,
+    },
     Close {
         code: Option<u16>,
         reason: Option<String>,
@@ -1378,7 +1386,9 @@ impl<T> AsyncReadWrite for T where T: tokio::io::AsyncRead + tokio::io::AsyncWri
 
 struct TokioSpawnExecutor;
 
-impl hyper::rt::Executor<std::pin::Pin<Box<dyn Future<Output = ()> + Send>>> for TokioSpawnExecutor {
+impl hyper::rt::Executor<std::pin::Pin<Box<dyn Future<Output = ()> + Send>>>
+    for TokioSpawnExecutor
+{
     fn execute(&self, fut: std::pin::Pin<Box<dyn Future<Output = ()> + Send>>) {
         tokio::task::spawn(fut);
     }
@@ -1418,10 +1428,8 @@ impl quinn::rustls::client::danger::ServerCertVerifier for WebTransportServerFin
         _server_name: &quinn::rustls::pki_types::ServerName<'_>,
         _ocsp_response: &[u8],
         _now: quinn::rustls::pki_types::UnixTime,
-    ) -> std::result::Result<
-        quinn::rustls::client::danger::ServerCertVerified,
-        quinn::rustls::Error,
-    > {
+    ) -> std::result::Result<quinn::rustls::client::danger::ServerCertVerified, quinn::rustls::Error>
+    {
         let cert_hash = Sha256::digest(end_entity.as_ref());
         if self
             .fingerprints
@@ -1499,17 +1507,17 @@ fn webtransport_client_config(
             .collect::<Vec<_>>();
         quinn::rustls::ClientConfig::builder()
             .dangerous()
-            .with_custom_certificate_verifier(Arc::new(WebTransportServerFingerprints::new(
-                hashes,
-            )))
+            .with_custom_certificate_verifier(Arc::new(WebTransportServerFingerprints::new(hashes)))
             .with_no_client_auth()
     };
 
     tls_config.alpn_protocols = vec![b"h3".to_vec()];
     tls_config.enable_early_data = true;
 
-    let client_crypto = quinn::crypto::rustls::QuicClientConfig::try_from(tls_config)
-        .map_err(|error| webtransport_session_error(format!("failed to create QUIC client config: {error}")))?;
+    let client_crypto =
+        quinn::crypto::rustls::QuicClientConfig::try_from(tls_config).map_err(|error| {
+            webtransport_session_error(format!("failed to create QUIC client config: {error}"))
+        })?;
     let mut client_config = quinn::ClientConfig::new(Arc::new(client_crypto));
     let mut transport = quinn::TransportConfig::default();
     if let Some(congestion_control) = options.congestion_control.as_deref() {
@@ -1560,7 +1568,8 @@ async fn exchange_webtransport_settings(
                 .read_chunk(usize::MAX, true)
                 .await
                 .map_err(|error| webtransport_read_error_with_source(error, "session"))?;
-            let chunk = chunk.ok_or_else(|| webtransport_session_error("peer does not support WebTransport"))?;
+            let chunk = chunk
+                .ok_or_else(|| webtransport_session_error("peer does not support WebTransport"))?;
             buf.extend_from_slice(&chunk.bytes);
             let mut cursor = std::io::Cursor::new(&buf);
             let settings = match Settings::decode(&mut cursor) {
@@ -1569,7 +1578,9 @@ async fn exchange_webtransport_settings(
                 Err(error) => return Err(webtransport_session_error(error.to_string())),
             };
             if settings.supports_webtransport() == 0 {
-                return Err(webtransport_session_error("peer does not support WebTransport"));
+                return Err(webtransport_session_error(
+                    "peer does not support WebTransport",
+                ));
             }
             break;
         }
@@ -1583,17 +1594,20 @@ async fn connect_webtransport(
     url: &str,
     options: &WebTransportConnectOptionsInput,
 ) -> Result<(quinn::Endpoint, quinn::Connection), JsErrorBox> {
-    let parsed = reqwest::Url::parse(url)
-        .map_err(|error| webtransport_session_error(format!("invalid WebTransport URL: {error}")))?;
+    let parsed = reqwest::Url::parse(url).map_err(|error| {
+        webtransport_session_error(format!("invalid WebTransport URL: {error}"))
+    })?;
     if parsed.scheme() != "https" {
-        return Err(webtransport_session_error("WebTransport URL must use https"));
+        return Err(webtransport_session_error(
+            "WebTransport URL must use https",
+        ));
     }
-    let host = parsed
-        .host_str()
-        .ok_or_else(|| webtransport_session_error(format!("WebTransport URL missing host: {url}")))?;
-    let port = parsed
-        .port_or_known_default()
-        .ok_or_else(|| webtransport_session_error(format!("WebTransport URL missing port: {url}")))?;
+    let host = parsed.host_str().ok_or_else(|| {
+        webtransport_session_error(format!("WebTransport URL missing host: {url}"))
+    })?;
+    let port = parsed.port_or_known_default().ok_or_else(|| {
+        webtransport_session_error(format!("WebTransport URL missing port: {url}"))
+    })?;
 
     let socket = std::net::UdpSocket::bind((std::net::Ipv6Addr::UNSPECIFIED, 0))
         .or_else(|_| std::net::UdpSocket::bind((std::net::Ipv4Addr::UNSPECIFIED, 0)))
@@ -1602,7 +1616,8 @@ async fn connect_webtransport(
         quinn::EndpointConfig::default(),
         None,
         socket,
-        quinn::default_runtime().ok_or_else(|| webtransport_session_error("missing QUIC runtime"))?,
+        quinn::default_runtime()
+            .ok_or_else(|| webtransport_session_error("missing QUIC runtime"))?,
     )
     .map_err(|error| webtransport_session_error(error.to_string()))?;
     let client_config = webtransport_client_config(options)?;
@@ -1624,10 +1639,9 @@ async fn connect_webtransport(
         .await
         .map_err(|error| webtransport_connection_error(error, "session"))?;
     let request = ConnectRequest {
-        url: parsed
-            .as_str()
-            .parse()
-            .map_err(|error| webtransport_session_error(format!("invalid WebTransport URL: {error}")))?,
+        url: parsed.as_str().parse().map_err(|error| {
+            webtransport_session_error(format!("invalid WebTransport URL: {error}"))
+        })?,
     };
     let mut buf = Vec::new();
     request.encode(&mut buf);
@@ -1641,7 +1655,8 @@ async fn connect_webtransport(
             .read_chunk(usize::MAX, true)
             .await
             .map_err(|error| webtransport_read_error_with_source(error, "session"))?;
-        let chunk = chunk.ok_or_else(|| webtransport_session_error("peer rejected WebTransport connection"))?;
+        let chunk = chunk
+            .ok_or_else(|| webtransport_session_error("peer rejected WebTransport connection"))?;
         buf.extend_from_slice(&chunk.bytes);
         let mut cursor = std::io::Cursor::new(&buf);
         let response = match ConnectResponse::decode(&mut cursor) {
@@ -1666,10 +1681,7 @@ async fn connect_webtransport(
 async fn connect_fastwebsocket(
     url: &str,
     protocols: &[String],
-) -> Result<(
-    FragmentCollector<TokioIo<Upgraded>>,
-    hyper::HeaderMap,
-)> {
+) -> Result<(FragmentCollector<TokioIo<Upgraded>>, hyper::HeaderMap)> {
     let parsed =
         reqwest::Url::parse(url).with_context(|| format!("invalid websocket url: {url}"))?;
     let host = parsed
@@ -1696,7 +1708,11 @@ async fn connect_fastwebsocket(
     let tcp_stream = TcpStream::connect((host, port)).await?;
     let request_url = format!(
         "{}://{}{}",
-        if parsed.scheme() == "wss" { "https" } else { "http" },
+        if parsed.scheme() == "wss" {
+            "https"
+        } else {
+            "http"
+        },
         authority,
         path
     );
@@ -1806,7 +1822,9 @@ async fn connect_hmr_fastwebsocket(
         .next()
         .ok_or_else(|| anyhow!("missing websocket upgrade status line"))?;
     if !status_line.starts_with("HTTP/1.1 101") && !status_line.starts_with("HTTP/1.0 101") {
-        return Err(anyhow!("unexpected websocket upgrade status: {status_line}"));
+        return Err(anyhow!(
+            "unexpected websocket upgrade status: {status_line}"
+        ));
     }
 
     let mut has_upgrade = false;
@@ -1848,7 +1866,10 @@ fn websocket_buffered_amount_add(
     amount: u32,
 ) {
     if let Ok(mut websocket_state) = websocket_state.lock() {
-        let entry = websocket_state.buffered_amounts.entry(socket_id).or_insert(0);
+        let entry = websocket_state
+            .buffered_amounts
+            .entry(socket_id)
+            .or_insert(0);
         *entry = entry.saturating_add(amount);
     }
 }
@@ -2142,26 +2163,35 @@ fn webtransport_session_error(message: impl Into<String>) -> JsErrorBox {
     webtransport_error_box(message, "session", None)
 }
 
-fn webtransport_stream_error(message: impl Into<String>, stream_error_code: Option<u32>) -> JsErrorBox {
+fn webtransport_stream_error(
+    message: impl Into<String>,
+    stream_error_code: Option<u32>,
+) -> JsErrorBox {
     webtransport_error_box(message, "stream", stream_error_code)
 }
 
-fn webtransport_connection_error(error: quinn::ConnectionError, source: &'static str) -> JsErrorBox {
+fn webtransport_connection_error(
+    error: quinn::ConnectionError,
+    source: &'static str,
+) -> JsErrorBox {
     webtransport_error_box(error.to_string(), source, None)
 }
 
-fn webtransport_write_error_with_source(error: quinn::WriteError, source: &'static str) -> JsErrorBox {
+fn webtransport_write_error_with_source(
+    error: quinn::WriteError,
+    source: &'static str,
+) -> JsErrorBox {
     match error {
-        quinn::WriteError::Stopped(code) => {
-            webtransport_error_box(
-                format!("sending stopped by peer: error {code}"),
-                source,
-                Some(code.into_inner() as u32),
-            )
-        }
+        quinn::WriteError::Stopped(code) => webtransport_error_box(
+            format!("sending stopped by peer: error {code}"),
+            source,
+            Some(code.into_inner() as u32),
+        ),
         quinn::WriteError::ConnectionLost(error) => webtransport_connection_error(error, source),
         quinn::WriteError::ClosedStream => webtransport_error_box("closed stream", source, None),
-        quinn::WriteError::ZeroRttRejected => webtransport_error_box("0-RTT rejected", source, None),
+        quinn::WriteError::ZeroRttRejected => {
+            webtransport_error_box("0-RTT rejected", source, None)
+        }
     }
 }
 
@@ -2169,7 +2199,10 @@ fn webtransport_write_error(error: quinn::WriteError) -> JsErrorBox {
     webtransport_write_error_with_source(error, "stream")
 }
 
-fn webtransport_read_error_with_source(error: quinn::ReadError, source: &'static str) -> JsErrorBox {
+fn webtransport_read_error_with_source(
+    error: quinn::ReadError,
+    source: &'static str,
+) -> JsErrorBox {
     match error {
         quinn::ReadError::Reset(code) => webtransport_error_box(
             format!("stream reset by peer: error {code}"),
@@ -2194,9 +2227,13 @@ fn webtransport_send_datagram_error(error: quinn::SendDatagramError) -> JsErrorB
         quinn::SendDatagramError::UnsupportedByPeer => {
             webtransport_session_error("datagrams not supported by peer")
         }
-        quinn::SendDatagramError::Disabled => webtransport_session_error("datagram support disabled"),
+        quinn::SendDatagramError::Disabled => {
+            webtransport_session_error("datagram support disabled")
+        }
         quinn::SendDatagramError::TooLarge => webtransport_session_error("datagram too large"),
-        quinn::SendDatagramError::ConnectionLost(error) => webtransport_connection_error(error, "session"),
+        quinn::SendDatagramError::ConnectionLost(error) => {
+            webtransport_connection_error(error, "session")
+        }
     }
 }
 
@@ -2417,7 +2454,10 @@ fn op_goldlight_websocket_get_buffered_amount(
         .websocket_state
         .lock()
         .map_err(|_| JsErrorBox::generic("websocket state mutex poisoned"))?;
-    Ok(*websocket_state.buffered_amounts.get(&socket_id).unwrap_or(&0))
+    Ok(*websocket_state
+        .buffered_amounts
+        .get(&socket_id)
+        .unwrap_or(&0))
 }
 
 #[deno_core::op2]
@@ -2621,11 +2661,15 @@ async fn op_goldlight_webtransport_create_bidirectional_stream(
         .lock()
         .map_err(|_| webtransport_stream_error("webtransport state mutex poisoned", None))?;
     let send_stream_id = webtransport_state.next_send_stream_id;
-    webtransport_state.next_send_stream_id =
-        webtransport_state.next_send_stream_id.wrapping_add(1).max(1);
+    webtransport_state.next_send_stream_id = webtransport_state
+        .next_send_stream_id
+        .wrapping_add(1)
+        .max(1);
     let receive_stream_id = webtransport_state.next_recv_stream_id;
-    webtransport_state.next_recv_stream_id =
-        webtransport_state.next_recv_stream_id.wrapping_add(1).max(1);
+    webtransport_state.next_recv_stream_id = webtransport_state
+        .next_recv_stream_id
+        .wrapping_add(1)
+        .max(1);
     webtransport_state.send_streams.insert(
         send_stream_id,
         WebTransportSendStreamHandle {
@@ -2673,8 +2717,10 @@ async fn op_goldlight_webtransport_create_unidirectional_stream(
         .lock()
         .map_err(|_| webtransport_stream_error("webtransport state mutex poisoned", None))?;
     let send_stream_id = webtransport_state.next_send_stream_id;
-    webtransport_state.next_send_stream_id =
-        webtransport_state.next_send_stream_id.wrapping_add(1).max(1);
+    webtransport_state.next_send_stream_id = webtransport_state
+        .next_send_stream_id
+        .wrapping_add(1)
+        .max(1);
     webtransport_state.send_streams.insert(
         send_stream_id,
         WebTransportSendStreamHandle {
@@ -2719,11 +2765,15 @@ async fn op_goldlight_webtransport_accept_bidirectional_stream(
         .lock()
         .map_err(|_| webtransport_stream_error("webtransport state mutex poisoned", None))?;
     let send_stream_id = webtransport_state.next_send_stream_id;
-    webtransport_state.next_send_stream_id =
-        webtransport_state.next_send_stream_id.wrapping_add(1).max(1);
+    webtransport_state.next_send_stream_id = webtransport_state
+        .next_send_stream_id
+        .wrapping_add(1)
+        .max(1);
     let receive_stream_id = webtransport_state.next_recv_stream_id;
-    webtransport_state.next_recv_stream_id =
-        webtransport_state.next_recv_stream_id.wrapping_add(1).max(1);
+    webtransport_state.next_recv_stream_id = webtransport_state
+        .next_recv_stream_id
+        .wrapping_add(1)
+        .max(1);
     webtransport_state.send_streams.insert(
         send_stream_id,
         WebTransportSendStreamHandle {
@@ -2777,8 +2827,10 @@ async fn op_goldlight_webtransport_accept_unidirectional_stream(
         .lock()
         .map_err(|_| webtransport_stream_error("webtransport state mutex poisoned", None))?;
     let receive_stream_id = webtransport_state.next_recv_stream_id;
-    webtransport_state.next_recv_stream_id =
-        webtransport_state.next_recv_stream_id.wrapping_add(1).max(1);
+    webtransport_state.next_recv_stream_id = webtransport_state
+        .next_recv_stream_id
+        .wrapping_add(1)
+        .max(1);
     webtransport_state.recv_streams.insert(
         receive_stream_id,
         WebTransportRecvStreamHandle {
@@ -2881,7 +2933,10 @@ async fn op_goldlight_webtransport_send_stream_write(
             .ok_or_else(|| webtransport_stream_error("unknown webtransport send stream id", None))?
     };
     let mut stream = stream.stream.lock().await;
-    stream.write_all(&data).await.map_err(webtransport_write_error)
+    stream
+        .write_all(&data)
+        .await
+        .map_err(webtransport_write_error)
 }
 
 #[deno_core::op2(async)]
@@ -2923,11 +2978,17 @@ async fn op_goldlight_webtransport_receive_stream_read(
             .recv_streams
             .get(&receive_stream_id)
             .cloned()
-            .ok_or_else(|| webtransport_stream_error("unknown webtransport receive stream id", None))?
+            .ok_or_else(|| {
+                webtransport_stream_error("unknown webtransport receive stream id", None)
+            })?
     };
     let mut buffer = vec![0; 64 * 1024];
     let mut stream = stream.stream.lock().await;
-    match stream.read(&mut buffer).await.map_err(webtransport_read_error)? {
+    match stream
+        .read(&mut buffer)
+        .await
+        .map_err(webtransport_read_error)?
+    {
         Some(read) => {
             buffer.truncate(read);
             Ok(Some(buffer))
@@ -2951,7 +3012,9 @@ async fn op_goldlight_webtransport_receive_stream_cancel(
             .recv_streams
             .get(&receive_stream_id)
             .cloned()
-            .ok_or_else(|| webtransport_stream_error("unknown webtransport receive stream id", None))?
+            .ok_or_else(|| {
+                webtransport_stream_error("unknown webtransport receive stream id", None)
+            })?
     };
     let mut stream = stream.stream.lock().await;
     stream
@@ -3278,7 +3341,10 @@ fn install_runtime_globals(js_runtime: &mut JsRuntime) -> Result<()> {
         .execute_script("ext:goldlight/hmr.js", GOLDLIGHT_HMR_SOURCE)
         .context("failed to install hmr globals")?;
     js_runtime
-        .execute_script("ext:goldlight/dom_exception.js", GOLDLIGHT_DOM_EXCEPTION_SOURCE)
+        .execute_script(
+            "ext:goldlight/dom_exception.js",
+            GOLDLIGHT_DOM_EXCEPTION_SOURCE,
+        )
         .context("failed to install DOMException globals")?;
     js_runtime
         .execute_script("ext:goldlight/blob.js", GOLDLIGHT_BLOB_SOURCE)
@@ -3296,7 +3362,10 @@ fn install_runtime_globals(js_runtime: &mut JsRuntime) -> Result<()> {
         .execute_script("ext:goldlight/websocket.js", GOLDLIGHT_WEBSOCKET_SOURCE)
         .context("failed to install websocket globals")?;
     js_runtime
-        .execute_script("ext:goldlight/webtransport.js", GOLDLIGHT_WEBTRANSPORT_SOURCE)
+        .execute_script(
+            "ext:goldlight/webtransport.js",
+            GOLDLIGHT_WEBTRANSPORT_SOURCE,
+        )
         .context("failed to install webtransport globals")?;
     js_runtime
         .execute_script("ext:goldlight/timers.js", GOLDLIGHT_TIMERS_SOURCE)
@@ -3695,9 +3764,8 @@ impl GoldlightRuntime {
                     window,
                     worker,
                     renderer,
-    },
-);
-
+                },
+            );
         }
     }
 
@@ -3894,7 +3962,9 @@ fn vite_hmr_ws_url(vite_origin: &str) -> Result<String> {
     if let Some(rest) = vite_origin.strip_prefix("https://") {
         return Ok(format!("wss://{rest}"));
     }
-    Err(anyhow!("unsupported vite origin for hmr websocket: {vite_origin}"))
+    Err(anyhow!(
+        "unsupported vite origin for hmr websocket: {vite_origin}"
+    ))
 }
 
 #[cfg(feature = "dev-runtime")]
@@ -3913,7 +3983,10 @@ fn spawn_hmr_client(
             }
         };
 
-        let runtime = match TokioRuntimeBuilder::new_current_thread().enable_all().build() {
+        let runtime = match TokioRuntimeBuilder::new_current_thread()
+            .enable_all()
+            .build()
+        {
             Ok(runtime) => runtime,
             Err(_) => {
                 return;
@@ -3928,10 +4001,13 @@ fn spawn_hmr_client(
                             match socket.read_frame().await {
                                 Ok(frame) if frame.opcode == FastOpCode::Text => {
                                     let text = String::from_utf8_lossy(&frame.payload).into_owned();
-                                    let Ok(payload) = serde_json::from_str::<serde_json::Value>(&text) else {
+                                    let Ok(payload) =
+                                        serde_json::from_str::<serde_json::Value>(&text)
+                                    else {
                                         continue;
                                     };
-                                    let message_type = payload.get("type").and_then(|value| value.as_str());
+                                    let message_type =
+                                        payload.get("type").and_then(|value| value.as_str());
                                     if matches!(message_type, Some("full-reload")) {
                                         let _ = event_proxy.send_event(RuntimeUserEvent::HotReload);
                                         continue;
@@ -3949,7 +4025,9 @@ fn spawn_hmr_client(
                                             .cloned()
                                             .unwrap_or_default();
                                         for update in updates {
-                                            let Some(path) = update.get("path").and_then(|value| value.as_str()) else {
+                                            let Some(path) =
+                                                update.get("path").and_then(|value| value.as_str())
+                                            else {
                                                 continue;
                                             };
                                             let accepted_path = update
@@ -3979,7 +4057,9 @@ fn spawn_hmr_client(
                                             .cloned()
                                             .unwrap_or_default();
                                         for update in updates {
-                                            let Some(path) = update.get("path").and_then(|value| value.as_str()) else {
+                                            let Some(path) =
+                                                update.get("path").and_then(|value| value.as_str())
+                                            else {
                                                 continue;
                                             };
                                             let accepted_path = update
@@ -4003,14 +4083,18 @@ fn spawn_hmr_client(
                                     }
                                 }
                                 Ok(frame) if frame.opcode == FastOpCode::Ping => {
-                                    let _ = socket.write_frame(FastWebSocketFrame::pong(frame.payload)).await;
+                                    let _ = socket
+                                        .write_frame(FastWebSocketFrame::pong(frame.payload))
+                                        .await;
                                 }
                                 Ok(frame) if frame.opcode == FastOpCode::Close => break,
                                 Ok(_) => {}
                                 Err(_) => break,
                             }
                         }
-                        let _ = socket.write_frame(FastWebSocketFrame::close_raw(vec![].into())).await;
+                        let _ = socket
+                            .write_frame(FastWebSocketFrame::close_raw(vec![].into()))
+                            .await;
                     }
                     Err(_) => {
                         tokio::time::sleep(Duration::from_millis(250)).await;
@@ -4045,16 +4129,14 @@ pub fn run_runtime(config: RuntimeConfig) -> Result<RuntimeRunResult> {
 
     #[cfg(feature = "dev-runtime")]
     let hmr_client = match &config.mode {
-        RuntimeMode::Dev { vite_origin, .. } => {
-            Some(spawn_hmr_client(
-                vite_origin.clone(),
-                event_proxy.clone(),
-                hmr_registry
-                    .as_ref()
-                    .expect("dev runtime should have an hmr registry")
-                    .clone(),
-            ))
-        }
+        RuntimeMode::Dev { vite_origin, .. } => Some(spawn_hmr_client(
+            vite_origin.clone(),
+            event_proxy.clone(),
+            hmr_registry
+                .as_ref()
+                .expect("dev runtime should have an hmr registry")
+                .clone(),
+        )),
         RuntimeMode::Prod { .. } => None,
     };
     #[cfg(not(feature = "dev-runtime"))]

@@ -6,10 +6,12 @@ use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec4};
 use serde::{Deserialize, Serialize};
 use wgpu::util::DeviceExt;
+use wgpu::TextureFormatFeatureFlags;
 use winit::{dpi::PhysicalSize, window::Window};
 
 use crate::drawing::{
     encode_drawing_command_buffer, prepare_drawing_recording, record_scene_2d, DawnSharedContext,
+    DRAWING_DEPTH_FORMAT,
 };
 
 const SHADER_SOURCE: &str = r#"
@@ -169,9 +171,16 @@ pub struct Rect2DUpdate {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", tag = "kind")]
 pub enum PathVerb2D {
-    MoveTo { to: [f32; 2] },
-    LineTo { to: [f32; 2] },
-    QuadTo { control: [f32; 2], to: [f32; 2] },
+    MoveTo {
+        to: [f32; 2],
+    },
+    LineTo {
+        to: [f32; 2],
+    },
+    QuadTo {
+        control: [f32; 2],
+        to: [f32; 2],
+    },
     ConicTo {
         control: [f32; 2],
         to: [f32; 2],
@@ -686,9 +695,23 @@ pub struct RendererState {
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
+    msaa_sample_count: u32,
+    msaa_color_target: Option<MsaaColorTarget>,
+    drawing_depth_target: DepthTarget,
+    drawing_msaa_depth_target: Option<DepthTarget>,
     drawing_context: DawnSharedContext,
     geometry_pipeline: wgpu::RenderPipeline,
     size: PhysicalSize<u32>,
+}
+
+struct MsaaColorTarget {
+    _texture: wgpu::Texture,
+    view: wgpu::TextureView,
+}
+
+struct DepthTarget {
+    _texture: wgpu::Texture,
+    view: wgpu::TextureView,
 }
 
 struct SceneCommandBuffer<'a> {
@@ -700,12 +723,46 @@ struct SceneCommandBuffer<'a> {
 }
 
 impl<'a> SceneCommandBuffer<'a> {
-    fn encode_drawing(&mut self, prepared: &crate::drawing::DrawingPreparedRecording) -> Result<()> {
+    fn encode_drawing(
+        &mut self,
+        prepared: &crate::drawing::DrawingPreparedRecording,
+        msaa_target_view: Option<&'a wgpu::TextureView>,
+        depth_target_view: Option<&'a wgpu::TextureView>,
+        msaa_depth_target_view: Option<&'a wgpu::TextureView>,
+    ) -> Result<()> {
+        let resource_provider = &self.drawing_context.resource_provider;
+        let use_msaa = prepared.requires_msaa
+            && resource_provider.msaa_sample_count() > 1
+            && msaa_target_view.is_some();
+        let use_depth = prepared.requires_depth;
+        let (color_view, resolve_target, depth_view, sample_count) = if use_msaa {
+            (
+                msaa_target_view.expect("msaa target view checked above"),
+                Some(self.target_view),
+                use_depth.then(|| {
+                    msaa_depth_target_view
+                        .expect("msaa depth target view required for stroke patches")
+                }),
+                resource_provider.msaa_sample_count(),
+            )
+        } else {
+            (
+                self.target_view,
+                None,
+                use_depth.then(|| {
+                    depth_target_view.expect("depth target view required for stroke patches")
+                }),
+                1,
+            )
+        };
         encode_drawing_command_buffer(
             self.drawing_context,
             prepared,
             self.encoder,
-            self.target_view,
+            color_view,
+            resolve_target,
+            depth_view,
+            sample_count,
         )
     }
 
@@ -764,6 +821,79 @@ impl<'a> SceneCommandBuffer<'a> {
 }
 
 impl RendererState {
+    fn choose_sample_count(adapter: &wgpu::Adapter, format: wgpu::TextureFormat) -> u32 {
+        let color_features = adapter.get_texture_format_features(format).flags;
+        let depth_features = adapter
+            .get_texture_format_features(DRAWING_DEPTH_FORMAT)
+            .flags;
+        if !color_features.contains(TextureFormatFeatureFlags::MULTISAMPLE_RESOLVE) {
+            return 1;
+        }
+        for sample_count in [4, 2] {
+            if color_features.sample_count_supported(sample_count)
+                && depth_features.sample_count_supported(sample_count)
+            {
+                return sample_count;
+            }
+        }
+        1
+    }
+
+    fn create_msaa_color_target(
+        device: &wgpu::Device,
+        config: &wgpu::SurfaceConfiguration,
+        sample_count: u32,
+    ) -> Option<MsaaColorTarget> {
+        if sample_count <= 1 {
+            return None;
+        }
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("goldlight msaa color target"),
+            size: wgpu::Extent3d {
+                width: config.width.max(1),
+                height: config.height.max(1),
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count,
+            dimension: wgpu::TextureDimension::D2,
+            format: config.format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        Some(MsaaColorTarget {
+            _texture: texture,
+            view,
+        })
+    }
+
+    fn create_depth_target(
+        device: &wgpu::Device,
+        config: &wgpu::SurfaceConfiguration,
+        sample_count: u32,
+    ) -> DepthTarget {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("goldlight drawing depth target"),
+            size: wgpu::Extent3d {
+                width: config.width.max(1),
+                height: config.height.max(1),
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count,
+            dimension: wgpu::TextureDimension::D2,
+            format: DRAWING_DEPTH_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        DepthTarget {
+            _texture: texture,
+            view,
+        }
+    }
+
     pub fn new(window: Arc<Window>) -> Result<Self> {
         let size = window.inner_size();
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
@@ -823,6 +953,7 @@ impl RendererState {
             desired_maximum_frame_latency: 2,
         };
         surface.configure(&device, &config);
+        let msaa_sample_count = Self::choose_sample_count(&adapter, format);
 
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("goldlight geometry shader"),
@@ -860,13 +991,21 @@ impl RendererState {
             multiview: None,
             cache: None,
         });
-        let drawing_context = DawnSharedContext::new(&device, format);
+        let msaa_color_target = Self::create_msaa_color_target(&device, &config, msaa_sample_count);
+        let drawing_depth_target = Self::create_depth_target(&device, &config, 1);
+        let drawing_msaa_depth_target = (msaa_sample_count > 1)
+            .then(|| Self::create_depth_target(&device, &config, msaa_sample_count));
+        let drawing_context = DawnSharedContext::new(&device, format, msaa_sample_count);
 
         Ok(Self {
             surface,
             device,
             queue,
             config,
+            msaa_sample_count,
+            msaa_color_target,
+            drawing_depth_target,
+            drawing_msaa_depth_target,
             drawing_context,
             geometry_pipeline,
             size,
@@ -882,6 +1021,11 @@ impl RendererState {
         self.config.width = new_size.width;
         self.config.height = new_size.height;
         self.surface.configure(&self.device, &self.config);
+        self.msaa_color_target =
+            Self::create_msaa_color_target(&self.device, &self.config, self.msaa_sample_count);
+        self.drawing_depth_target = Self::create_depth_target(&self.device, &self.config, 1);
+        self.drawing_msaa_depth_target = (self.msaa_sample_count > 1)
+            .then(|| Self::create_depth_target(&self.device, &self.config, self.msaa_sample_count));
     }
 
     pub fn render(&mut self, model: &RenderModel) -> Result<()> {
@@ -935,7 +1079,12 @@ impl RendererState {
                 let recording = record_scene_2d(scene, &rects, &paths);
                 let prepared =
                     prepare_drawing_recording(&recording, self.config.width, self.config.height);
-                command_buffer.encode_drawing(&prepared)?;
+                command_buffer.encode_drawing(
+                    &prepared,
+                    self.msaa_color_target.as_ref().map(|t| &t.view),
+                    Some(&self.drawing_depth_target.view),
+                    self.drawing_msaa_depth_target.as_ref().map(|t| &t.view),
+                )?;
             }
             Some(ActiveScene::ThreeD(scene_id)) => {
                 let scene = model

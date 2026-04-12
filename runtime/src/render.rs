@@ -229,6 +229,8 @@ pub struct Rect2DOptions {
     pub height: f32,
     #[serde(default = "default_rect_color")]
     pub color: ColorValue,
+    #[serde(default = "default_affine_transform_2d")]
+    pub transform: [f32; 6],
 }
 
 fn default_rect_width() -> f32 {
@@ -256,6 +258,7 @@ pub struct Rect2DUpdate {
     pub width: Option<f32>,
     pub height: Option<f32>,
     pub color: Option<ColorValue>,
+    pub transform: Option<[f32; 6]>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -375,10 +378,16 @@ pub struct Path2DOptions {
     pub dash_array: Vec<f32>,
     #[serde(default)]
     pub dash_offset: f32,
+    #[serde(default = "default_affine_transform_2d")]
+    pub transform: [f32; 6],
 }
 
 fn default_path_stroke_width() -> f32 {
     1.0
+}
+
+fn default_affine_transform_2d() -> [f32; 6] {
+    [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]
 }
 
 pub type Path2DUpdate = Path2DOptions;
@@ -450,6 +459,8 @@ pub enum Text2DOptions {
         color: ColorValue,
         #[serde(default)]
         glyphs: Vec<DirectMaskGlyph2DOptions>,
+        #[serde(default = "default_affine_transform_2d")]
+        transform: [f32; 6],
     },
     #[serde(rename = "transformed-mask")]
     TransformedMask {
@@ -461,6 +472,8 @@ pub enum Text2DOptions {
         color: ColorValue,
         #[serde(default)]
         glyphs: Vec<TransformedMaskGlyph2DOptions>,
+        #[serde(default = "default_affine_transform_2d")]
+        transform: [f32; 6],
     },
     #[serde(rename = "sdf")]
     Sdf {
@@ -472,6 +485,8 @@ pub enum Text2DOptions {
         color: ColorValue,
         #[serde(default)]
         glyphs: Vec<SdfGlyph2DOptions>,
+        #[serde(default = "default_affine_transform_2d")]
+        transform: [f32; 6],
     },
 }
 
@@ -554,6 +569,7 @@ pub(crate) struct Rect2D {
     pub width: f32,
     pub height: f32,
     pub color: ColorValue,
+    pub transform: [f32; 6],
 }
 
 #[derive(Clone, Debug)]
@@ -571,6 +587,7 @@ pub(crate) struct Path2D {
     pub stroke_cap: PathStrokeCap2D,
     pub dash_array: Vec<f32>,
     pub dash_offset: f32,
+    pub transform: [f32; 6],
 }
 
 #[derive(Clone, Debug)]
@@ -622,6 +639,7 @@ pub(crate) enum Text2D {
         y: f32,
         color: ColorValue,
         glyphs: Vec<DirectMaskGlyph2D>,
+        transform: [f32; 6],
     },
     TransformedMask {
         _scene_id: u32,
@@ -629,6 +647,7 @@ pub(crate) enum Text2D {
         y: f32,
         color: ColorValue,
         glyphs: Vec<TransformedMaskGlyph2D>,
+        transform: [f32; 6],
     },
     Sdf {
         _scene_id: u32,
@@ -636,6 +655,7 @@ pub(crate) enum Text2D {
         y: f32,
         color: ColorValue,
         glyphs: Vec<SdfGlyph2D>,
+        transform: [f32; 6],
     },
 }
 
@@ -750,6 +770,7 @@ impl RenderModel {
                 width: options.width,
                 height: options.height,
                 color: options.color,
+                transform: options.transform,
             },
         );
         scene.rect_ids.push(id);
@@ -775,6 +796,9 @@ impl RenderModel {
         }
         if let Some(color) = options.color {
             rect.color = color;
+        }
+        if let Some(transform) = options.transform {
+            rect.transform = transform;
         }
         Ok(())
     }
@@ -806,6 +830,7 @@ impl RenderModel {
                 stroke_cap: options.stroke_cap,
                 dash_array: options.dash_array,
                 dash_offset: options.dash_offset,
+                transform: options.transform,
             },
         );
         scene.path_ids.push(id);
@@ -829,6 +854,7 @@ impl RenderModel {
         path.stroke_cap = options.stroke_cap;
         path.dash_array = options.dash_array;
         path.dash_offset = options.dash_offset;
+        path.transform = options.transform;
         Ok(())
     }
 
@@ -979,6 +1005,7 @@ fn text_from_options(scene_id: u32, options: Text2DOptions) -> Text2D {
             y,
             color,
             glyphs,
+            transform,
         } => Text2D::DirectMask {
             _scene_id: scene_id,
             x,
@@ -993,12 +1020,14 @@ fn text_from_options(scene_id: u32, options: Text2DOptions) -> Text2D {
                     mask: glyph.mask.map(glyph_mask_from_options),
                 })
                 .collect(),
+            transform,
         },
         Text2DOptions::TransformedMask {
             x,
             y,
             color,
             glyphs,
+            transform,
         } => Text2D::TransformedMask {
             _scene_id: scene_id,
             x,
@@ -1014,12 +1043,14 @@ fn text_from_options(scene_id: u32, options: Text2DOptions) -> Text2D {
                     strike_to_source_scale: glyph.strike_to_source_scale,
                 })
                 .collect(),
+            transform,
         },
         Text2DOptions::Sdf {
             x,
             y,
             color,
             glyphs,
+            transform,
         } => Text2D::Sdf {
             _scene_id: scene_id,
             x,
@@ -1038,6 +1069,7 @@ fn text_from_options(scene_id: u32, options: Text2DOptions) -> Text2D {
                     strike_to_source_scale: glyph.strike_to_source_scale,
                 })
                 .collect(),
+            transform,
         },
     }
 }

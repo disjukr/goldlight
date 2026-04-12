@@ -323,6 +323,44 @@ function cloneRectState(state) {
   };
 }
 
+function cloneTransform2d(transform) {
+  return [...transform];
+}
+
+function multiplyAffineTransforms(left, right) {
+  return [
+    (left[0] * right[0]) + (left[2] * right[1]),
+    (left[1] * right[0]) + (left[3] * right[1]),
+    (left[0] * right[2]) + (left[2] * right[3]),
+    (left[1] * right[2]) + (left[3] * right[3]),
+    (left[0] * right[4]) + (left[2] * right[5]) + left[4],
+    (left[1] * right[4]) + (left[3] * right[5]) + left[5],
+  ];
+}
+
+function normalizeTransform2d(transform) {
+  if (transform === undefined) {
+    return [1, 0, 0, 1, 0, 0];
+  }
+
+  if (!Array.isArray(transform) || transform.length !== 6) {
+    throw new TypeError("2d transform must be a 6-element affine matrix");
+  }
+
+  return transform.map((value) => Number(value));
+}
+
+function normalizeGroupInit(init = {}) {
+  const transform = normalizeTransform2d(init.transform);
+  return { transform };
+}
+
+function cloneGroupState(state) {
+  return {
+    transform: cloneTransform2d(state.transform),
+  };
+}
+
 function clonePathVerb(verb) {
   switch (verb.kind) {
     case "moveTo":
@@ -1120,6 +1158,48 @@ function applyOffsetToNode2d(node, offsetX, offsetY) {
   }
 }
 
+function applyGroupTransformToNode2d(node, transform) {
+  if (node instanceof Rect2d || node instanceof Path2d || node instanceof Text2d) {
+    node._applyGroupTransform(transform);
+    return;
+  }
+
+  if (node instanceof Group2d) {
+    const nextTransform = multiplyAffineTransforms(transform, node._state.transform);
+    for (const child of node._children) {
+      applyGroupTransformToNode2d(child, nextTransform);
+    }
+    return;
+  }
+
+  if (node instanceof LayoutGroup2d) {
+    for (const child of node._children) {
+      applyGroupTransformToNode2d(child, transform);
+    }
+    return;
+  }
+
+  if (node instanceof LayoutItem2d && node._content !== null) {
+    applyGroupTransformToNode2d(node._content, transform);
+  }
+}
+
+function getParentGroupTransform2d(node) {
+  const transforms = [];
+  let current = node._parentNode2d ?? null;
+  while (current !== null) {
+    if (current instanceof Group2d) {
+      transforms.push(current._state.transform);
+    }
+    current = current._parentNode2d ?? null;
+  }
+  let result = [1, 0, 0, 1, 0, 0];
+  for (let index = transforms.length - 1; index >= 0; index -= 1) {
+    result = multiplyAffineTransforms(result, transforms[index]);
+  }
+  return result;
+}
+
 function applyOffsetToNode3d(node, offsetX, offsetY) {
   if (node instanceof Triangle3d) {
     node._applyLayoutOffset(offsetX, offsetY);
@@ -1253,8 +1333,10 @@ export class Scene2d {
     if (isLayoutNode(node)) {
       node._layoutParent = null;
     }
+    node._parentNode2d = null;
     this._children.push(node);
     attachNodeToScene2d(this, node);
+    applyGroupTransformToNode2d(node, [1, 0, 0, 1, 0, 0]);
     markSceneLayoutDirty(this);
     return node;
   }
@@ -1286,19 +1368,27 @@ export class Scene2d {
 }
 
 export class Group2d {
-  constructor(_init = {}) {
+  constructor(init = {}) {
     this._children = [];
     this._sceneId = null;
     this._scene = null;
-    this._state = {};
+    this._parentNode2d = null;
+    this._state = normalizeGroupInit(init);
   }
 
-  set(_patch = {}) {
+  set(patch = {}) {
+    if (Object.prototype.hasOwnProperty.call(patch, "transform")) {
+      this._state = normalizeGroupInit({
+        ...this._state,
+        transform: patch.transform,
+      });
+      applyGroupTransformToNode2d(this, getParentGroupTransform2d(this));
+    }
     return this;
   }
 
   get() {
-    return {};
+    return cloneGroupState(this._state);
   }
 
   add(child) {
@@ -1306,9 +1396,11 @@ export class Group2d {
     if (isLayoutNode(child)) {
       child._layoutParent = null;
     }
+    child._parentNode2d = this;
     this._children.push(child);
     if (this._scene) {
       attachNodeToScene2d(this._scene, child);
+      applyGroupTransformToNode2d(child, getParentGroupTransform2d(child));
       markSceneLayoutDirty(this._scene);
     }
     return child;
@@ -1326,6 +1418,7 @@ export class LayoutGroup2d {
     this._computedLayout = computeLayout(this._layout);
     this._layoutParent = null;
     this._layoutSubtreeDirty = true;
+    this._parentNode2d = null;
   }
 
   set(_patch = {}) {
@@ -1356,6 +1449,7 @@ export class LayoutGroup2d {
       throw new TypeError("LayoutGroup2d.add expects a LayoutItem2d or LayoutGroup2d");
     }
     child._layoutParent = this;
+    child._parentNode2d = this;
     this._children.push(child);
     if (this._scene) {
       attachNodeToScene2d(this._scene, child);
@@ -1409,6 +1503,7 @@ export class LayoutItem2d {
     this._computedLayout = computeLayout();
     this._layoutParent = null;
     this._layoutSubtreeDirty = true;
+    this._parentNode2d = null;
   }
 
   setLayout(layout = {}) {
@@ -1429,6 +1524,7 @@ export class LayoutItem2d {
   setContent(content) {
     ensureNode2d(content);
     this._content = content;
+    content._parentNode2d = this;
     if (this._scene) {
       attachNodeToScene2d(this._scene, content);
     }
@@ -1452,36 +1548,30 @@ export class LayoutItem2d {
     }
     const x = offsetX + this._computedLayout.x;
     const y = offsetY + this._computedLayout.y;
+    const groupTransform = getParentGroupTransform2d(this._content);
     if (this._content instanceof Rect2d) {
       const current = this._content.get();
       this._content._applyLayoutState({
-        ...current,
         x,
         y,
         width: this._computedLayout.width || current.width,
         height: this._computedLayout.height || current.height,
       });
+      this._content._applyGroupTransform(groupTransform);
       return;
     }
     if (this._content instanceof Path2d) {
-      const current = this._content.get();
-      this._content._applyLayoutState({
-        ...current,
-        x,
-        y,
-      });
+      this._content._applyLayoutState({ x, y });
+      this._content._applyGroupTransform(groupTransform);
       return;
     }
     if (this._content instanceof Text2d) {
-      const current = this._content.get();
-      this._content._applyLayoutState({
-        ...current,
-        x,
-        y,
-      });
+      this._content._applyLayoutState({ x, y });
+      this._content._applyGroupTransform(groupTransform);
       return;
     }
     applyOffsetToNode2d(this._content, x, y);
+    applyGroupTransformToNode2d(this._content, groupTransform);
   }
 }
 
@@ -1490,16 +1580,35 @@ export class Rect2d {
     this.id = null;
     this._sceneId = null;
     this._scene = null;
+    this._parentNode2d = null;
     this._state = normalizeRectInit(init);
+    this._layoutState = null;
+    this._groupTransform = [1, 0, 0, 1, 0, 0];
+    this._resolvedState = cloneRectState(this._state);
   }
 
   _attachToScene(sceneId) {
     if (this.id !== null) {
       return;
     }
-    const handle = Deno.core.ops.op_goldlight_scene_2d_create_rect(sceneId, this._state);
+    const handle = Deno.core.ops.op_goldlight_scene_2d_create_rect(sceneId, this._resolvedState);
     this.id = handle.id;
     this._sceneId = sceneId;
+  }
+
+  _syncResolvedState() {
+    const layoutState = this._layoutState ?? {};
+    this._resolvedState = {
+      x: layoutState.x ?? this._state.x,
+      y: layoutState.y ?? this._state.y,
+      width: layoutState.width ?? this._state.width,
+      height: layoutState.height ?? this._state.height,
+      color: normalizeColor(this._state.color),
+      transform: cloneTransform2d(this._groupTransform),
+    };
+    if (this.id !== null) {
+      Deno.core.ops.op_goldlight_rect_2d_update(this.id, this._resolvedState);
+    }
   }
 
   set(patch = {}) {
@@ -1509,20 +1618,23 @@ export class Rect2d {
     if (patch.height !== undefined) this._state.height = patch.height;
     if (patch.color !== undefined) this._state.color = normalizeColor(patch.color);
 
-    if (this.id !== null) {
-      Deno.core.ops.op_goldlight_rect_2d_update(this.id, this._state);
-    }
+    this._syncResolvedState();
     return this;
   }
 
   _applyLayoutState(state) {
-    this._state = {
-      ...state,
-      color: normalizeColor(state.color),
+    this._layoutState = {
+      x: state.x,
+      y: state.y,
+      width: state.width,
+      height: state.height,
     };
-    if (this.id !== null) {
-      Deno.core.ops.op_goldlight_rect_2d_update(this.id, this._state);
-    }
+    this._syncResolvedState();
+  }
+
+  _applyGroupTransform(transform) {
+    this._groupTransform = cloneTransform2d(transform);
+    this._syncResolvedState();
   }
 
   get() {
@@ -1535,16 +1647,33 @@ export class Path2d {
     this.id = null;
     this._sceneId = null;
     this._scene = null;
+    this._parentNode2d = null;
     this._state = normalizePathInit(init);
+    this._layoutState = null;
+    this._groupTransform = [1, 0, 0, 1, 0, 0];
+    this._resolvedState = clonePathState(this._state);
   }
 
   _attachToScene(sceneId) {
     if (this.id !== null) {
       return;
     }
-    const handle = Deno.core.ops.op_goldlight_scene_2d_create_path(sceneId, this._state);
+    const handle = Deno.core.ops.op_goldlight_scene_2d_create_path(sceneId, this._resolvedState);
     this.id = handle.id;
     this._sceneId = sceneId;
+  }
+
+  _syncResolvedState() {
+    const layoutState = this._layoutState ?? {};
+    this._resolvedState = {
+      ...clonePathState(this._state),
+      x: layoutState.x ?? this._state.x,
+      y: layoutState.y ?? this._state.y,
+      transform: cloneTransform2d(this._groupTransform),
+    };
+    if (this.id !== null) {
+      Deno.core.ops.op_goldlight_path_2d_update(this.id, this._resolvedState);
+    }
   }
 
   set(patch = {}) {
@@ -1563,23 +1692,21 @@ export class Path2d {
     if (patch.dashArray !== undefined) this._state.dashArray = patch.dashArray.map((value) => Number(value));
     if (patch.dashOffset !== undefined) this._state.dashOffset = patch.dashOffset;
 
-    if (this.id !== null) {
-      Deno.core.ops.op_goldlight_path_2d_update(this.id, this._state);
-    }
+    this._syncResolvedState();
     return this;
   }
 
   _applyLayoutState(state) {
-    this._state = {
-      ...state,
-      verbs: state.verbs.map(normalizePathVerb),
-      color: normalizeColor(state.color),
-      shader: normalizePathShader(state.shader),
-      dashArray: state.dashArray.map((value) => Number(value)),
+    this._layoutState = {
+      x: state.x,
+      y: state.y,
     };
-    if (this.id !== null) {
-      Deno.core.ops.op_goldlight_path_2d_update(this.id, this._state);
-    }
+    this._syncResolvedState();
+  }
+
+  _applyGroupTransform(transform) {
+    this._groupTransform = cloneTransform2d(transform);
+    this._syncResolvedState();
   }
 
   get() {
@@ -1592,16 +1719,35 @@ export class Text2d {
     this.id = null;
     this._sceneId = null;
     this._scene = null;
+    this._parentNode2d = null;
     this._state = normalizeTextInit(init);
+    this._layoutState = null;
+    this._groupTransform = [1, 0, 0, 1, 0, 0];
+    this._resolvedState = cloneTextState(this._state);
   }
 
   _attachToScene(sceneId) {
     if (this.id !== null) {
       return;
     }
-    const handle = Deno.core.ops.op_goldlight_scene_2d_create_text(sceneId, this._state);
+    const handle = Deno.core.ops.op_goldlight_scene_2d_create_text(sceneId, this._resolvedState);
     this.id = handle.id;
     this._sceneId = sceneId;
+  }
+
+  _syncResolvedState() {
+    const layoutState = this._layoutState ?? {};
+    this._resolvedState = {
+      ...normalizeTextInit({
+      ...this._state,
+      x: layoutState.x ?? this._state.x,
+      y: layoutState.y ?? this._state.y,
+      }),
+      transform: cloneTransform2d(this._groupTransform),
+    };
+    if (this.id !== null) {
+      Deno.core.ops.op_goldlight_text_2d_update(this.id, this._resolvedState);
+    }
   }
 
   set(patch = {}) {
@@ -1610,17 +1756,21 @@ export class Text2d {
       ...patch,
       glyphs: Object.prototype.hasOwnProperty.call(patch, "glyphs") ? patch.glyphs : this._state.glyphs,
     });
-    if (this.id !== null) {
-      Deno.core.ops.op_goldlight_text_2d_update(this.id, this._state);
-    }
+    this._syncResolvedState();
     return this;
   }
 
   _applyLayoutState(state) {
-    this._state = normalizeTextInit(state);
-    if (this.id !== null) {
-      Deno.core.ops.op_goldlight_text_2d_update(this.id, this._state);
-    }
+    this._layoutState = {
+      x: state.x,
+      y: state.y,
+    };
+    this._syncResolvedState();
+  }
+
+  _applyGroupTransform(transform) {
+    this._groupTransform = cloneTransform2d(transform);
+    this._syncResolvedState();
   }
 
   get() {

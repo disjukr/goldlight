@@ -78,9 +78,15 @@ export interface Scene2dState {
   clearColor: ResolvedColorValue;
 }
 
-export interface Group2dInit {}
+export type Transform2d = [number, number, number, number, number, number];
 
-export interface Group2dState {}
+export interface Group2dInit {
+  transform?: Transform2d;
+}
+
+export interface Group2dState {
+  transform: Transform2d;
+}
 
 export type Group2dPatch = Partial<Group2dState>;
 

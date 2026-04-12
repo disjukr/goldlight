@@ -1991,6 +1991,7 @@ mod tests {
             stroke_cap: PathStrokeCap2D::Round,
             dash_array: Vec::new(),
             dash_offset: 0.0,
+            transform: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
         }
     }
 

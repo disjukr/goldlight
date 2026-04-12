@@ -406,6 +406,13 @@ fn to_clip_space(x: f32, y: f32, surface_width: f32, surface_height: f32, depth:
     ]
 }
 
+fn transform_point(point: [f32; 2], transform: [f32; 6]) -> [f32; 2] {
+    [
+        (transform[0] * point[0]) + (transform[2] * point[1]) + transform[4],
+        (transform[1] * point[0]) + (transform[3] * point[1]) + transform[5],
+    ]
+}
+
 fn append_quad(
     vertices: &mut Vec<TextVertex>,
     color: [f32; 4],
@@ -422,6 +429,7 @@ fn append_quad(
     surface_width: f32,
     surface_height: f32,
     depth: f32,
+    transform: [f32; 6],
 ) {
     let positions = [
         (left, top, uv_left, uv_top),
@@ -442,8 +450,9 @@ fn append_quad(
         (left, top + height, uv_left, uv_top + uv_height),
     ];
     for (x, y, u, v) in positions {
+        let mapped = transform_point([x, y], transform);
         vertices.push(TextVertex {
-            position: to_clip_space(x, y, surface_width, surface_height, depth),
+            position: to_clip_space(mapped[0], mapped[1], surface_width, surface_height, depth),
             color,
             uv: [u / atlas_width, v / atlas_height],
         });
@@ -458,6 +467,7 @@ pub fn prepare_direct_mask_text_step(
     surface_width: u32,
     surface_height: u32,
     painter_depth: f32,
+    transform: [f32; 6],
 ) -> Option<PreparedBitmapTextStep> {
     let glyph_refs = glyphs
         .iter()
@@ -476,6 +486,7 @@ pub fn prepare_direct_mask_text_step(
         surface_width,
         surface_height,
         painter_depth,
+        transform,
     )
 }
 
@@ -487,6 +498,7 @@ pub fn prepare_transformed_mask_text_step(
     surface_width: u32,
     surface_height: u32,
     painter_depth: f32,
+    transform: [f32; 6],
 ) -> Option<PreparedBitmapTextStep> {
     let glyph_refs = glyphs
         .iter()
@@ -505,6 +517,7 @@ pub fn prepare_transformed_mask_text_step(
         surface_width,
         surface_height,
         painter_depth,
+        transform,
     )
 }
 
@@ -516,6 +529,7 @@ pub fn prepare_sdf_text_step(
     surface_width: u32,
     surface_height: u32,
     painter_depth: f32,
+    transform: [f32; 6],
 ) -> Option<PreparedSdfTextStep> {
     let glyph_refs = glyphs
         .iter()
@@ -558,6 +572,7 @@ pub fn prepare_sdf_text_step(
             surface_width as f32,
             surface_height as f32,
             painter_depth,
+            transform,
         );
     }
     (!vertices.is_empty()).then_some(PreparedSdfTextStep { vertices, atlas })
@@ -569,6 +584,7 @@ fn prepare_bitmap_text_step(
     surface_width: u32,
     surface_height: u32,
     painter_depth: f32,
+    transform: [f32; 6],
 ) -> Option<PreparedBitmapTextStep> {
     if glyphs.is_empty() {
         return None;
@@ -594,6 +610,7 @@ fn prepare_bitmap_text_step(
             surface_width as f32,
             surface_height as f32,
             painter_depth,
+            transform,
         );
     }
     (!vertices.is_empty()).then_some(PreparedBitmapTextStep { vertices, atlas })

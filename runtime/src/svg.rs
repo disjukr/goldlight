@@ -97,6 +97,7 @@ fn append_path(path: &usvg::Path, output: &mut Vec<Path2DOptions>) -> Result<()>
                 stroke_cap: PathStrokeCap2D::Butt,
                 dash_array: Vec::new(),
                 dash_offset: 0.0,
+                transform: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
             });
         }
     }
@@ -129,6 +130,7 @@ fn append_path(path: &usvg::Path, output: &mut Vec<Path2DOptions>) -> Result<()>
                     .map(|dash_array| dash_array.iter().map(|value| *value * scale).collect())
                     .unwrap_or_default(),
                 dash_offset: stroke.dashoffset() * scale,
+                transform: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
             });
         }
     }

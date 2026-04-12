@@ -1100,6 +1100,7 @@ pub struct RectDrawCommand {
     pub width: f32,
     pub height: f32,
     pub color: ColorValue,
+    pub transform: [f32; 6],
 }
 
 #[derive(Clone, Debug)]
@@ -1116,6 +1117,7 @@ pub struct PathDrawCommand {
     pub stroke_cap: PathStrokeCap2D,
     pub dash_array: Vec<f32>,
     pub dash_offset: f32,
+    pub transform: [f32; 6],
 }
 
 #[derive(Clone, Debug)]
@@ -1124,6 +1126,7 @@ pub struct DirectMaskTextDrawCommand {
     pub y: f32,
     pub color: ColorValue,
     pub glyphs: Vec<crate::render::DirectMaskGlyph2D>,
+    pub transform: [f32; 6],
 }
 
 #[derive(Clone, Debug)]
@@ -1132,6 +1135,7 @@ pub struct TransformedMaskTextDrawCommand {
     pub y: f32,
     pub color: ColorValue,
     pub glyphs: Vec<crate::render::TransformedMaskGlyph2D>,
+    pub transform: [f32; 6],
 }
 
 #[derive(Clone, Debug)]
@@ -1140,6 +1144,7 @@ pub struct SdfTextDrawCommand {
     pub y: f32,
     pub color: ColorValue,
     pub glyphs: Vec<crate::render::SdfGlyph2D>,
+    pub transform: [f32; 6],
 }
 
 #[derive(Clone, Debug)]
@@ -1317,6 +1322,7 @@ pub fn record_scene_2d(
             width: rect.width,
             height: rect.height,
             color: rect.color,
+            transform: rect.transform,
         });
     }
     for path in paths {
@@ -1333,6 +1339,7 @@ pub fn record_scene_2d(
             stroke_cap: path.stroke_cap,
             dash_array: path.dash_array.clone(),
             dash_offset: path.dash_offset,
+            transform: path.transform,
         });
     }
     for text in texts {
@@ -1342,36 +1349,42 @@ pub fn record_scene_2d(
                 y,
                 color,
                 glyphs,
+                transform,
                 ..
             } => recorder.draw_direct_mask_text(DirectMaskTextDrawCommand {
                 x: *x,
                 y: *y,
                 color: *color,
                 glyphs: glyphs.clone(),
+                transform: *transform,
             }),
             Text2D::TransformedMask {
                 x,
                 y,
                 color,
                 glyphs,
+                transform,
                 ..
             } => recorder.draw_transformed_mask_text(TransformedMaskTextDrawCommand {
                 x: *x,
                 y: *y,
                 color: *color,
                 glyphs: glyphs.clone(),
+                transform: *transform,
             }),
             Text2D::Sdf {
                 x,
                 y,
                 color,
                 glyphs,
+                transform,
                 ..
             } => recorder.draw_sdf_text(SdfTextDrawCommand {
                 x: *x,
                 y: *y,
                 color: *color,
                 glyphs: glyphs.clone(),
+                transform: *transform,
             }),
         }
     }
@@ -1441,6 +1454,7 @@ pub fn prepare_drawing_recording(
                     surface_width,
                     surface_height,
                     painter_depth,
+                    text.transform,
                 ) {
                     current_steps.push(DrawingPreparedStep::BitmapText(step));
                 }
@@ -1455,6 +1469,7 @@ pub fn prepare_drawing_recording(
                     surface_width,
                     surface_height,
                     painter_depth,
+                    text.transform,
                 ) {
                     current_steps.push(DrawingPreparedStep::BitmapText(step));
                 }
@@ -1469,6 +1484,7 @@ pub fn prepare_drawing_recording(
                     surface_width,
                     surface_height,
                     painter_depth,
+                    text.transform,
                 ) {
                     current_steps.push(DrawingPreparedStep::SdfText(step));
                 }
@@ -1499,6 +1515,19 @@ fn with_vertex_depth(mut vertices: Vec<DrawingVertex>, painter_depth: f32) -> Ve
     vertices
 }
 
+fn transform_vertices(mut vertices: Vec<DrawingVertex>, transform: [f32; 6], width: f32, height: f32) -> Vec<DrawingVertex> {
+    if is_identity_affine_transform(transform) {
+        return vertices;
+    }
+    for vertex in &mut vertices {
+        let mapped = transform_point(vertex.device_position, transform);
+        vertex.device_position = mapped;
+        vertex.position[0] = (mapped[0] / width) * 2.0 - 1.0;
+        vertex.position[1] = 1.0 - (mapped[1] / height) * 2.0;
+    }
+    vertices
+}
+
 impl PaintUniform {
     fn solid(color: [f32; 4]) -> Self {
         Self {
@@ -1523,6 +1552,37 @@ fn multiply_affine_matrices(left: [f32; 6], right: [f32; 6]) -> [f32; 6] {
         (left[0] * right[4]) + (left[2] * right[5]) + left[4],
         (left[1] * right[4]) + (left[3] * right[5]) + left[5],
     ]
+}
+
+fn invert_affine_transform(transform: [f32; 6]) -> Option<[f32; 6]> {
+    let determinant = (transform[0] * transform[3]) - (transform[2] * transform[1]);
+    if !determinant.is_finite() || determinant.abs() <= 1e-12 {
+        return None;
+    }
+    let inverse_determinant = 1.0 / determinant;
+    let i00 = transform[3] * inverse_determinant;
+    let i10 = -transform[1] * inverse_determinant;
+    let i01 = -transform[2] * inverse_determinant;
+    let i11 = transform[0] * inverse_determinant;
+    Some([
+        i00,
+        i10,
+        i01,
+        i11,
+        -((i00 * transform[4]) + (i01 * transform[5])),
+        -((i10 * transform[4]) + (i11 * transform[5])),
+    ])
+}
+
+fn transform_point(point: Point, transform: [f32; 6]) -> Point {
+    [
+        (transform[0] * point[0]) + (transform[2] * point[1]) + transform[4],
+        (transform[1] * point[0]) + (transform[3] * point[1]) + transform[5],
+    ]
+}
+
+fn is_identity_affine_transform(transform: [f32; 6]) -> bool {
+    transform == [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]
 }
 
 fn create_linear_gradient_matrix(start: Point, end: Point) -> [f32; 6] {
@@ -1705,7 +1765,10 @@ fn build_path_paint(path: &PathDrawCommand) -> PaintUniform {
         return PaintUniform::solid(path.color.to_array());
     };
 
-    let inverse_draw_transform = [1.0, 0.0, 0.0, 1.0, -path.x, -path.y];
+    let draw_transform =
+        multiply_affine_matrices(path.transform, [1.0, 0.0, 0.0, 1.0, path.x, path.y]);
+    let inverse_draw_transform = invert_affine_transform(draw_transform)
+        .unwrap_or([1.0, 0.0, 0.0, 1.0, -path.x, -path.y]);
     let (kind, tile_mode, stops, params0, gradient_matrix) = match shader {
         PathShader2D::LinearGradient {
             start,
@@ -1854,30 +1917,51 @@ fn vertex_colored_paint() -> PaintUniform {
 }
 
 fn build_rect_vertices(rect: &RectDrawCommand, width: f32, height: f32) -> Vec<DrawingVertex> {
-    let left = (rect.x / width) * 2.0 - 1.0;
-    let right = ((rect.x + rect.width) / width) * 2.0 - 1.0;
-    let top = 1.0 - (rect.y / height) * 2.0;
-    let bottom = 1.0 - ((rect.y + rect.height) / height) * 2.0;
+    let top_left_point = transform_point([rect.x, rect.y], rect.transform);
+    let top_right_point = transform_point([rect.x + rect.width, rect.y], rect.transform);
+    let bottom_left_point = transform_point([rect.x, rect.y + rect.height], rect.transform);
+    let bottom_right_point =
+        transform_point([rect.x + rect.width, rect.y + rect.height], rect.transform);
     let color = rect.color.to_array();
     let top_left = DrawingVertex {
-        position: [left, top, 0.0, 1.0],
+        position: [
+            (top_left_point[0] / width) * 2.0 - 1.0,
+            1.0 - (top_left_point[1] / height) * 2.0,
+            0.0,
+            1.0,
+        ],
         color,
-        device_position: [rect.x, rect.y],
+        device_position: top_left_point,
     };
     let top_right = DrawingVertex {
-        position: [right, top, 0.0, 1.0],
+        position: [
+            (top_right_point[0] / width) * 2.0 - 1.0,
+            1.0 - (top_right_point[1] / height) * 2.0,
+            0.0,
+            1.0,
+        ],
         color,
-        device_position: [rect.x + rect.width, rect.y],
+        device_position: top_right_point,
     };
     let bottom_left = DrawingVertex {
-        position: [left, bottom, 0.0, 1.0],
+        position: [
+            (bottom_left_point[0] / width) * 2.0 - 1.0,
+            1.0 - (bottom_left_point[1] / height) * 2.0,
+            0.0,
+            1.0,
+        ],
         color,
-        device_position: [rect.x, rect.y + rect.height],
+        device_position: bottom_left_point,
     };
     let bottom_right = DrawingVertex {
-        position: [right, bottom, 0.0, 1.0],
+        position: [
+            (bottom_right_point[0] / width) * 2.0 - 1.0,
+            1.0 - (bottom_right_point[1] / height) * 2.0,
+            0.0,
+            1.0,
+        ],
         color,
-        device_position: [rect.x + rect.width, rect.y + rect.height],
+        device_position: bottom_right_point,
     };
     vec![
         top_left,
@@ -1903,7 +1987,10 @@ fn build_path_steps(
                 match step {
                     PreparedFillStep::Triangles(PreparedFillTriangleStep { points, mode }) => {
                         let Some(vertices) = points_to_vertices_with_color(
-                            &points,
+                            &points
+                                .into_iter()
+                                .map(|point| transform_point(point, path.transform))
+                                .collect::<Vec<_>>(),
                             [1.0, 1.0, 1.0, 1.0],
                             width,
                             height,
@@ -1924,13 +2011,27 @@ fn build_path_steps(
                             paint: path_paint,
                         });
                     }
-                    PreparedFillStep::Wedges(step) => {
+                    PreparedFillStep::Wedges(mut step) => {
+                        for instance in &mut step.instances {
+                            instance.p0 = transform_point(instance.p0, path.transform);
+                            instance.p1 = transform_point(instance.p1, path.transform);
+                            instance.p2 = transform_point(instance.p2, path.transform);
+                            instance.p3 = transform_point(instance.p3, path.transform);
+                            instance.fan_point =
+                                transform_point(instance.fan_point, path.transform);
+                        }
                         steps.push(DrawingPreparedStep::WedgeFillPatches {
                             step,
                             paint: path_paint,
                         });
                     }
-                    PreparedFillStep::Curves(step) => {
+                    PreparedFillStep::Curves(mut step) => {
+                        for instance in &mut step.instances {
+                            instance.p0 = transform_point(instance.p0, path.transform);
+                            instance.p1 = transform_point(instance.p1, path.transform);
+                            instance.p2 = transform_point(instance.p2, path.transform);
+                            instance.p3 = transform_point(instance.p3, path.transform);
+                        }
                         steps.push(DrawingPreparedStep::CurveFillPatches {
                             step,
                             paint: path_paint,
@@ -1943,30 +2044,38 @@ fn build_path_steps(
             let dashed_subpaths = apply_dash_pattern(flatten_subpaths(path), path);
             let stroke_style = resolve_stroke_style(path);
             let stroke_color = resolve_stroke_color(path);
-            if let Some(step) = prepare_stroke_patch_step(
-                path,
-                stroke_style,
-                &dashed_subpaths,
-                stroke_color,
-                painter_depth,
-            ) {
-                steps.push(DrawingPreparedStep::StrokePatches(step));
-            } else {
-                let (interior, fringe) = build_stroke_vertices(path, width, height);
-                if let Some(vertices) = interior {
-                    steps.push(DrawingPreparedStep::Triangles {
-                        vertices: with_vertex_depth(vertices, painter_depth),
-                        mode: TriangleStepMode::Direct,
-                        paint: vertex_colored_paint(),
-                    });
+            if is_identity_affine_transform(path.transform) {
+                if let Some(step) = prepare_stroke_patch_step(
+                    path,
+                    stroke_style,
+                    &dashed_subpaths,
+                    stroke_color,
+                    painter_depth,
+                ) {
+                    steps.push(DrawingPreparedStep::StrokePatches(step));
+                    return steps;
                 }
-                if let Some(vertices) = fringe {
-                    steps.push(DrawingPreparedStep::Triangles {
-                        vertices: with_vertex_depth(vertices, painter_depth),
-                        mode: TriangleStepMode::Direct,
-                        paint: vertex_colored_paint(),
-                    });
-                }
+            }
+            let (interior, fringe) = build_stroke_vertices(path, width, height);
+            if let Some(vertices) = interior {
+                steps.push(DrawingPreparedStep::Triangles {
+                    vertices: with_vertex_depth(
+                        transform_vertices(vertices, path.transform, width, height),
+                        painter_depth,
+                    ),
+                    mode: TriangleStepMode::Direct,
+                    paint: vertex_colored_paint(),
+                });
+            }
+            if let Some(vertices) = fringe {
+                steps.push(DrawingPreparedStep::Triangles {
+                    vertices: with_vertex_depth(
+                        transform_vertices(vertices, path.transform, width, height),
+                        painter_depth,
+                    ),
+                    mode: TriangleStepMode::Direct,
+                    paint: vertex_colored_paint(),
+                });
             }
         }
     }
@@ -3864,6 +3973,7 @@ mod tests {
             stroke_cap: PathStrokeCap2D::Round,
             dash_array,
             dash_offset: 0.0,
+            transform: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
         }
     }
 
@@ -3913,6 +4023,7 @@ mod tests {
                     pixels: vec![255, 255, 255, 255],
                 }),
             }],
+            transform: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
         }
     }
 

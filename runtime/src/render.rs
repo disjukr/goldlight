@@ -1377,18 +1377,29 @@ impl RendererState {
             .then(|| Self::create_depth_target(&self.device, &self.config, self.msaa_sample_count));
     }
 
-    pub fn render(&mut self, model: &RenderModel) -> Result<()> {
+    pub fn render(&mut self, model: &RenderModel) -> Result<bool> {
         if self.config.width == 0 || self.config.height == 0 {
-            return Ok(());
+            return Ok(false);
         }
 
         let frame = match self.surface.get_current_texture() {
             Ok(frame) => frame,
             Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
                 self.surface.configure(&self.device, &self.config);
-                return Ok(());
+                match self.surface.get_current_texture() {
+                    Ok(frame) => frame,
+                    Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+                        return Ok(false);
+                    }
+                    Err(wgpu::SurfaceError::Timeout) => return Ok(false),
+                    Err(error) => {
+                        return Err(anyhow!(
+                            "failed to acquire frame after surface reconfigure: {error}"
+                        ));
+                    }
+                }
             }
-            Err(wgpu::SurfaceError::Timeout) => return Ok(()),
+            Err(wgpu::SurfaceError::Timeout) => return Ok(false),
             Err(error) => return Err(anyhow!("failed to acquire frame: {error}")),
         };
         let view = frame
@@ -1456,7 +1467,7 @@ impl RendererState {
 
         self.queue.submit(std::iter::once(encoder.finish()));
         frame.present();
-        Ok(())
+        Ok(true)
     }
 
     fn build_scene_3d_vertices(&self, model: &RenderModel, scene: &Scene3D) -> Vec<Vertex> {

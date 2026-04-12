@@ -466,27 +466,18 @@ enum WebSocketEventPayload {
 struct WorkerHostState {
     pending_events: Vec<WorkerEventPayload>,
     animation_frame_requested: bool,
-    redraw_requested: bool,
     render_model: RenderModel,
+    render_model_revision: u64,
+    published_render_model: Option<Arc<RenderModel>>,
+    published_render_model_revision: Option<u64>,
+    published_render_model_pending: bool,
 }
 
 type WorkerHostStateHandle = Arc<Mutex<WorkerHostState>>;
 
 enum WindowWorkerControl {
     Wake,
-    FlushLayout(std_mpsc::Sender<Result<()>>),
     Shutdown,
-}
-
-enum WindowRendererControl {
-    Wake,
-    Shutdown,
-}
-
-#[derive(Default)]
-struct WindowRendererPending {
-    resize: Option<winit::dpi::PhysicalSize<u32>>,
-    render_model: Option<RenderModel>,
 }
 
 struct WindowWorkerHandle {
@@ -498,7 +489,46 @@ struct WindowWorkerHandle {
 impl WindowWorkerHandle {
     fn push_event(&self, event: WorkerEventPayload) {
         if let Ok(mut state) = self.state.lock() {
-            state.pending_events.push(event);
+            match event {
+                WorkerEventPayload::Resize { width, height } => {
+                    let mut merged = false;
+                    for pending_event in state.pending_events.iter_mut().rev() {
+                        if let WorkerEventPayload::Resize {
+                            width: pending_width,
+                            height: pending_height,
+                        } = pending_event
+                        {
+                            *pending_width = width;
+                            *pending_height = height;
+                            merged = true;
+                            break;
+                        }
+                    }
+                    if !merged {
+                        state
+                            .pending_events
+                            .push(WorkerEventPayload::Resize { width, height });
+                    }
+                }
+                WorkerEventPayload::AnimationFrame { timestamp_ms } => {
+                    let mut merged = false;
+                    for pending_event in state.pending_events.iter_mut().rev() {
+                        if let WorkerEventPayload::AnimationFrame {
+                            timestamp_ms: pending_timestamp_ms,
+                        } = pending_event
+                        {
+                            *pending_timestamp_ms = timestamp_ms;
+                            merged = true;
+                            break;
+                        }
+                    }
+                    if !merged {
+                        state
+                            .pending_events
+                            .push(WorkerEventPayload::AnimationFrame { timestamp_ms });
+                    }
+                }
+            }
         }
         let _ = self.control_tx.send(WindowWorkerControl::Wake);
     }
@@ -513,23 +543,16 @@ impl WindowWorkerHandle {
         false
     }
 
-    fn take_redraw_request(&self) -> bool {
+    fn take_published_render_model(&self) -> Option<Arc<RenderModel>> {
         if let Ok(mut state) = self.state.lock() {
-            let requested = state.redraw_requested;
-            state.redraw_requested = false;
-            return requested;
+            if !state.published_render_model_pending {
+                return None;
+            }
+            state.published_render_model_pending = false;
+            return state.published_render_model.clone();
         }
 
-        false
-    }
-
-    fn flush_layout(&self) -> Result<()> {
-        let (tx, rx) = std_mpsc::channel();
-        self.control_tx
-            .send(WindowWorkerControl::FlushLayout(tx))
-            .map_err(|error| anyhow!("failed to request worker layout flush: {error}"))?;
-        rx.recv()
-            .map_err(|error| anyhow!("worker layout flush response failed: {error}"))?
+        None
     }
 
     fn shutdown(mut self) {
@@ -542,105 +565,34 @@ impl WindowWorkerHandle {
     }
 }
 
-struct WindowRendererHandle {
-    pending: Arc<Mutex<WindowRendererPending>>,
-    control_tx: Sender<WindowRendererControl>,
-    thread_handle: Option<thread::JoinHandle<()>>,
+struct WindowRendererInitHandle {
+    result_rx: std_mpsc::Receiver<Result<RendererState>>,
 }
 
-impl WindowRendererHandle {
-    fn resize(&self, size: winit::dpi::PhysicalSize<u32>) {
-        if let Ok(mut pending) = self.pending.lock() {
-            pending.resize = Some(size);
-        }
-        let _ = self.control_tx.send(WindowRendererControl::Wake);
-    }
-
-    fn render(&self, render_model: RenderModel) {
-        if let Ok(mut pending) = self.pending.lock() {
-            pending.render_model = Some(render_model);
-        }
-        let _ = self.control_tx.send(WindowRendererControl::Wake);
-    }
-
-    fn shutdown(mut self) {
-        let _ = self.control_tx.send(WindowRendererControl::Shutdown);
-        if let Some(thread_handle) = self.thread_handle.take() {
-            thread::spawn(move || {
-                let _ = thread_handle.join();
-            });
-        }
-    }
+enum WindowRendererState {
+    Pending(WindowRendererInitHandle),
+    Ready(RendererState),
+    Failed,
 }
 
 struct WindowRecord {
     window: Arc<Window>,
     worker: Option<WindowWorkerHandle>,
-    renderer: WindowRendererHandle,
+    renderer: WindowRendererState,
+    render_model_snapshot: Option<Arc<RenderModel>>,
+    pending_resize: Option<winit::dpi::PhysicalSize<u32>>,
 }
 
 fn spawn_window_renderer(
-    window_id: WindowId,
     bootstrap: RendererBootstrap,
-) -> WindowRendererHandle {
-    let (control_tx, control_rx) = std_mpsc::channel::<WindowRendererControl>();
-    let pending = Arc::new(Mutex::new(WindowRendererPending::default()));
-    let pending_handle = pending.clone();
-    let thread_handle = thread::spawn(move || {
-        run_window_renderer_thread(window_id, bootstrap, pending_handle, control_rx);
+    event_proxy: EventLoopProxy<RuntimeUserEvent>,
+) -> WindowRendererInitHandle {
+    let (result_tx, result_rx) = std_mpsc::channel();
+    thread::spawn(move || {
+        let _ = result_tx.send(RendererState::new(bootstrap));
+        let _ = event_proxy.send_event(RuntimeUserEvent::Wake);
     });
-    WindowRendererHandle {
-        pending,
-        control_tx,
-        thread_handle: Some(thread_handle),
-    }
-}
-
-fn run_window_renderer_thread(
-    _window_id: WindowId,
-    bootstrap: RendererBootstrap,
-    pending: Arc<Mutex<WindowRendererPending>>,
-    control_rx: std_mpsc::Receiver<WindowRendererControl>,
-) {
-    let mut renderer = match RendererState::new(bootstrap) {
-        Ok(renderer) => renderer,
-        Err(error) => {
-            eprintln!("goldlight renderer init failed: {error:?}");
-            return;
-        }
-    };
-    loop {
-        match control_rx.recv() {
-            Ok(WindowRendererControl::Wake) => {
-                let mut shutdown_requested = false;
-                while let Ok(control) = control_rx.try_recv() {
-                    match control {
-                        WindowRendererControl::Wake => {}
-                        WindowRendererControl::Shutdown => {
-                            shutdown_requested = true;
-                            break;
-                        }
-                    }
-                }
-                if shutdown_requested {
-                    break;
-                }
-                let pending_state = {
-                    let mut pending = pending.lock().expect("renderer pending mutex poisoned");
-                    std::mem::take(&mut *pending)
-                };
-                if let Some(size) = pending_state.resize {
-                    renderer.resize(size);
-                }
-                if let Some(render_model) = pending_state.render_model {
-                    if let Err(error) = renderer.render(&render_model) {
-                        eprintln!("goldlight render failed: {error:?}");
-                    }
-                }
-            }
-            Ok(WindowRendererControl::Shutdown) | Err(_) => break,
-        }
-    }
+    WindowRendererInitHandle { result_rx }
 }
 
 #[derive(Clone)]
@@ -1016,7 +968,7 @@ pub enum RuntimeRunResult {
     RestartRequested,
 }
 
-fn with_worker_host_state<R>(
+fn with_worker_render_model_mutation<R>(
     state: &mut OpState,
     mutate: impl FnOnce(&mut WorkerHostState) -> Result<R>,
 ) -> Result<R, JsErrorBox> {
@@ -1030,7 +982,7 @@ fn with_worker_host_state<R>(
             .map_err(|_| JsErrorBox::generic("worker state mutex poisoned"))?;
         let result =
             mutate(&mut worker_state).map_err(|error| JsErrorBox::generic(error.to_string()))?;
-        worker_state.redraw_requested = true;
+        worker_state.render_model_revision = worker_state.render_model_revision.wrapping_add(1);
         result
     };
     if let Some(event_proxy) = op_context.event_proxy {
@@ -3205,7 +3157,7 @@ fn op_goldlight_create_scene_2d(
     state: &mut OpState,
     #[serde] options: Scene2DOptions,
 ) -> Result<Scene2DHandle, JsErrorBox> {
-    with_worker_host_state(state, |worker_state| {
+    with_worker_render_model_mutation(state, |worker_state| {
         Ok(worker_state.render_model.create_scene_2d(options))
     })
 }
@@ -3216,7 +3168,7 @@ fn op_goldlight_scene_2d_set_clear_color(
     scene_id: u32,
     #[serde] options: SceneClearColorOptions,
 ) -> Result<(), JsErrorBox> {
-    with_worker_host_state(state, |worker_state| {
+    with_worker_render_model_mutation(state, |worker_state| {
         worker_state
             .render_model
             .scene_2d_set_clear_color(scene_id, options)
@@ -3230,7 +3182,7 @@ fn op_goldlight_scene_2d_create_rect(
     scene_id: u32,
     #[serde] options: Rect2DOptions,
 ) -> Result<Rect2DHandle, JsErrorBox> {
-    with_worker_host_state(state, |worker_state| {
+    with_worker_render_model_mutation(state, |worker_state| {
         worker_state
             .render_model
             .scene_2d_create_rect(scene_id, options)
@@ -3243,7 +3195,7 @@ fn op_goldlight_rect_2d_update(
     rect_id: u32,
     #[serde] options: Rect2DUpdate,
 ) -> Result<(), JsErrorBox> {
-    with_worker_host_state(state, |worker_state| {
+    with_worker_render_model_mutation(state, |worker_state| {
         worker_state.render_model.rect_2d_update(rect_id, options)
     })
 }
@@ -3255,7 +3207,7 @@ fn op_goldlight_scene_2d_create_path(
     scene_id: u32,
     #[serde] options: Path2DOptions,
 ) -> Result<Path2DHandle, JsErrorBox> {
-    with_worker_host_state(state, |worker_state| {
+    with_worker_render_model_mutation(state, |worker_state| {
         worker_state
             .render_model
             .scene_2d_create_path(scene_id, options)
@@ -3268,7 +3220,7 @@ fn op_goldlight_path_2d_update(
     path_id: u32,
     #[serde] options: Path2DUpdate,
 ) -> Result<(), JsErrorBox> {
-    with_worker_host_state(state, |worker_state| {
+    with_worker_render_model_mutation(state, |worker_state| {
         worker_state.render_model.path_2d_update(path_id, options)
     })
 }
@@ -3280,7 +3232,7 @@ fn op_goldlight_scene_2d_create_text(
     scene_id: u32,
     #[serde] options: Text2DOptions,
 ) -> Result<Text2DHandle, JsErrorBox> {
-    with_worker_host_state(state, |worker_state| {
+    with_worker_render_model_mutation(state, |worker_state| {
         worker_state
             .render_model
             .scene_2d_create_text(scene_id, options)
@@ -3293,14 +3245,14 @@ fn op_goldlight_text_2d_update(
     text_id: u32,
     #[serde] options: Text2DUpdate,
 ) -> Result<(), JsErrorBox> {
-    with_worker_host_state(state, |worker_state| {
+    with_worker_render_model_mutation(state, |worker_state| {
         worker_state.render_model.text_2d_update(text_id, options)
     })
 }
 
 #[deno_core::op2(fast)]
 fn op_goldlight_present_scene_2d(state: &mut OpState, scene_id: u32) -> Result<(), JsErrorBox> {
-    with_worker_host_state(state, |worker_state| {
+    with_worker_render_model_mutation(state, |worker_state| {
         worker_state.render_model.present_scene_2d(scene_id)
     })
 }
@@ -3311,7 +3263,7 @@ fn op_goldlight_create_scene_3d(
     state: &mut OpState,
     #[serde] options: Scene3DOptions,
 ) -> Result<Scene3DHandle, JsErrorBox> {
-    with_worker_host_state(state, |worker_state| {
+    with_worker_render_model_mutation(state, |worker_state| {
         Ok(worker_state.render_model.create_scene_3d(options))
     })
 }
@@ -3322,7 +3274,7 @@ fn op_goldlight_scene_3d_set_clear_color(
     scene_id: u32,
     #[serde] options: SceneClearColorOptions,
 ) -> Result<(), JsErrorBox> {
-    with_worker_host_state(state, |worker_state| {
+    with_worker_render_model_mutation(state, |worker_state| {
         worker_state
             .render_model
             .scene_3d_set_clear_color(scene_id, options)
@@ -3335,7 +3287,7 @@ fn op_goldlight_scene_3d_set_camera(
     scene_id: u32,
     #[serde] options: SceneCameraUpdate,
 ) -> Result<(), JsErrorBox> {
-    with_worker_host_state(state, |worker_state| {
+    with_worker_render_model_mutation(state, |worker_state| {
         worker_state
             .render_model
             .scene_3d_set_camera(scene_id, options)
@@ -3349,7 +3301,7 @@ fn op_goldlight_scene_3d_create_triangle(
     scene_id: u32,
     #[serde] options: Triangle3DOptions,
 ) -> Result<Triangle3DHandle, JsErrorBox> {
-    with_worker_host_state(state, |worker_state| {
+    with_worker_render_model_mutation(state, |worker_state| {
         worker_state
             .render_model
             .scene_3d_create_triangle(scene_id, options)
@@ -3362,7 +3314,7 @@ fn op_goldlight_triangle_3d_update(
     triangle_id: u32,
     #[serde] options: Triangle3DUpdate,
 ) -> Result<(), JsErrorBox> {
-    with_worker_host_state(state, |worker_state| {
+    with_worker_render_model_mutation(state, |worker_state| {
         worker_state
             .render_model
             .triangle_3d_update(triangle_id, options)
@@ -3371,7 +3323,7 @@ fn op_goldlight_triangle_3d_update(
 
 #[deno_core::op2(fast)]
 fn op_goldlight_present_scene_3d(state: &mut OpState, scene_id: u32) -> Result<(), JsErrorBox> {
-    with_worker_host_state(state, |worker_state| {
+    with_worker_render_model_mutation(state, |worker_state| {
         worker_state.render_model.present_scene_3d(scene_id)
     })
 }
@@ -3954,7 +3906,7 @@ impl GoldlightRuntime {
             let window_id = window.id();
             let renderer_bootstrap = RendererBootstrap::new(window.clone())
                 .expect("failed to create window renderer bootstrap");
-            let renderer = spawn_window_renderer(window_id, renderer_bootstrap);
+            let renderer = spawn_window_renderer(renderer_bootstrap, self.event_proxy.clone());
             debug!(
                 id = pending_window.id,
                 title = pending_window.title,
@@ -3984,9 +3936,77 @@ impl GoldlightRuntime {
                 WindowRecord {
                     window,
                     worker,
-                    renderer,
+                    renderer: WindowRendererState::Pending(renderer),
+                    render_model_snapshot: None,
+                    pending_resize: None,
                 },
             );
+        }
+    }
+
+    fn promote_pending_renderers(&mut self) {
+        for record in self.windows.values_mut() {
+            let init_result = match &mut record.renderer {
+                WindowRendererState::Pending(handle) => Some(handle.result_rx.try_recv()),
+                WindowRendererState::Ready(_) | WindowRendererState::Failed => None,
+            };
+            let Some(init_result) = init_result else {
+                continue;
+            };
+            match init_result {
+                Ok(Ok(mut renderer)) => {
+                    if let Some(size) = record.pending_resize.take() {
+                        renderer.resize(size);
+                    }
+                    record.renderer = WindowRendererState::Ready(renderer);
+                    record.window.request_redraw();
+                }
+                Ok(Err(error)) => {
+                    eprintln!("goldlight renderer init failed: {error:?}");
+                    record.renderer = WindowRendererState::Failed;
+                }
+                Err(std_mpsc::TryRecvError::Empty) => {}
+                Err(std_mpsc::TryRecvError::Disconnected) => {
+                    eprintln!("goldlight renderer init failed: renderer init thread disconnected");
+                    record.renderer = WindowRendererState::Failed;
+                }
+            }
+        }
+    }
+
+    fn sync_window_redraws(&mut self) {
+        for record in self.windows.values_mut() {
+            let Some(worker) = record.worker.as_ref() else {
+                continue;
+            };
+
+            let mut needs_redraw = false;
+            if let Some(render_model) = worker.take_published_render_model() {
+                record.render_model_snapshot = Some(render_model);
+                needs_redraw = true;
+            }
+            if worker.take_animation_frame_request() {
+                needs_redraw = true;
+            }
+            if needs_redraw {
+                record.window.request_redraw();
+            }
+        }
+    }
+
+    fn render_window(record: &mut WindowRecord) -> bool {
+        if let (WindowRendererState::Ready(renderer), Some(render_model)) =
+            (&mut record.renderer, record.render_model_snapshot.as_ref())
+        {
+            match renderer.render(render_model.as_ref()) {
+                Ok(rendered) => rendered,
+                Err(error) => {
+                    eprintln!("goldlight render failed: {error:?}");
+                    false
+                }
+            }
+        } else {
+            false
         }
     }
 
@@ -4016,7 +4036,6 @@ impl GoldlightRuntime {
                 if let Some(worker) = record.worker.take() {
                     worker.shutdown();
                 }
-                record.renderer.shutdown();
             }
         }
     }
@@ -4039,7 +4058,6 @@ impl ApplicationHandler<RuntimeUserEvent> for GoldlightRuntime {
                 if let Some(worker) = record.worker.take() {
                     worker.shutdown();
                 }
-                record.renderer.shutdown();
             }
             self.maybe_exit(event_loop);
             return;
@@ -4051,7 +4069,15 @@ impl ApplicationHandler<RuntimeUserEvent> for GoldlightRuntime {
 
         match event {
             WindowEvent::Resized(size) => {
-                record.renderer.resize(size);
+                match &mut record.renderer {
+                    WindowRendererState::Ready(renderer) => {
+                        renderer.resize(size);
+                    }
+                    WindowRendererState::Pending(_) | WindowRendererState::Failed => {
+                        record.pending_resize = Some(size);
+                    }
+                }
+                record.window.request_redraw();
                 if let Some(worker) = record.worker.as_ref() {
                     worker.push_event(WorkerEventPayload::Resize {
                         width: size.width,
@@ -4060,14 +4086,7 @@ impl ApplicationHandler<RuntimeUserEvent> for GoldlightRuntime {
                 }
             }
             WindowEvent::RedrawRequested => {
-                if let Some(worker) = record.worker.as_ref() {
-                    if let Err(error) = worker.flush_layout() {
-                        eprintln!("goldlight layout flush failed: {error:?}");
-                    }
-                    if let Ok(worker_state) = worker.state.lock() {
-                        record.renderer.render(worker_state.render_model.clone());
-                    }
-                }
+                let _ = Self::render_window(record);
                 if let Some(worker) = record.worker.as_ref() {
                     worker.push_event(WorkerEventPayload::AnimationFrame {
                         timestamp_ms: self.frame_time_origin.elapsed().as_secs_f64() * 1000.0,
@@ -4080,13 +4099,8 @@ impl ApplicationHandler<RuntimeUserEvent> for GoldlightRuntime {
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         self.drain_pending_windows(event_loop);
-        for record in self.windows.values() {
-            if let Some(worker) = record.worker.as_ref() {
-                if worker.take_redraw_request() || worker.take_animation_frame_request() {
-                    record.window.request_redraw();
-                }
-            }
-        }
+        self.promote_pending_renderers();
+        self.sync_window_redraws();
         self.maybe_exit(event_loop);
     }
 
@@ -4094,6 +4108,8 @@ impl ApplicationHandler<RuntimeUserEvent> for GoldlightRuntime {
         match _event {
             RuntimeUserEvent::Wake => {
                 self.drain_pending_windows(event_loop);
+                self.promote_pending_renderers();
+                self.sync_window_redraws();
                 self.maybe_exit(event_loop);
             }
             #[cfg(feature = "dev-runtime")]
@@ -4685,6 +4701,21 @@ fn run_main_runtime_thread(
     Ok(())
 }
 
+// The worker owns the mutable render model; the main thread only renders published snapshots.
+fn publish_worker_render_model_snapshot(worker_state: &WorkerHostStateHandle) -> bool {
+    let Ok(mut worker_state) = worker_state.lock() else {
+        return false;
+    };
+    if worker_state.published_render_model_revision == Some(worker_state.render_model_revision) {
+        return false;
+    }
+
+    worker_state.published_render_model = Some(Arc::new(worker_state.render_model.clone()));
+    worker_state.published_render_model_revision = Some(worker_state.render_model_revision);
+    worker_state.published_render_model_pending = true;
+    true
+}
+
 fn run_window_worker_thread(
     runtime_state: RuntimeStateHandle,
     worker_state: WorkerHostStateHandle,
@@ -4714,8 +4745,8 @@ fn run_window_worker_thread(
         module_loader: Some(Rc::new(GoldlightModuleLoader::new(mode))),
         extensions: vec![goldlight_runtime::init(RuntimeOpContext {
             state: runtime_state,
-            event_proxy: Some(event_proxy),
-            worker_state: Some(worker_state),
+            event_proxy: Some(event_proxy.clone()),
+            worker_state: Some(worker_state.clone()),
             timer_state,
             fetch_state: fetch_state.clone(),
             websocket_state: websocket_state.clone(),
@@ -4794,34 +4825,23 @@ fn run_window_worker_thread(
     let hmr_pump = get_global_function(&mut js_runtime, "__goldlightPumpHmr")
         .context("failed to capture window worker hmr pump function")?;
 
+    tokio_runtime.block_on(async {
+        js_runtime.call(&layout_flush).await?;
+        js_runtime
+            .run_event_loop(PollEventLoopOptions {
+                wait_for_inspector: false,
+                pump_v8_message_loop: true,
+            })
+            .await?;
+        Ok::<(), anyhow::Error>(())
+    })?;
+    if publish_worker_render_model_snapshot(&worker_state) {
+        let _ = event_proxy.send_event(RuntimeUserEvent::Wake);
+    }
+
     loop {
         match control_rx.recv_timeout(Duration::from_millis(RUNTIME_POLL_INTERVAL_MS)) {
             Ok(WindowWorkerControl::Shutdown) => break,
-            Ok(WindowWorkerControl::FlushLayout(response_tx)) => {
-                let result = tokio_runtime.block_on(async {
-                    let layout_flush_call = js_runtime.call(&layout_flush);
-                    js_runtime
-                        .with_event_loop_future(
-                            layout_flush_call,
-                            PollEventLoopOptions {
-                                wait_for_inspector: false,
-                                pump_v8_message_loop: true,
-                            },
-                        )
-                        .await?;
-                    js_runtime
-                        .run_event_loop(PollEventLoopOptions {
-                            wait_for_inspector: false,
-                            pump_v8_message_loop: true,
-                        })
-                        .await?;
-                    Ok::<(), anyhow::Error>(())
-                });
-                let _ = response_tx.send(result);
-                if inspector_registry.is_some() {
-                    let _ = js_runtime.inspector().borrow().poll_sessions(None);
-                }
-            }
             Ok(WindowWorkerControl::Wake) | Err(std_mpsc::RecvTimeoutError::Timeout) => {
                 tokio_runtime.block_on(async {
                     let timer_pump_call = js_runtime.call(&timer_pump);
@@ -4877,6 +4897,7 @@ fn run_window_worker_thread(
                             },
                         )
                         .await?;
+                    js_runtime.call(&layout_flush).await?;
                     js_runtime
                         .run_event_loop(PollEventLoopOptions {
                             wait_for_inspector: false,
@@ -4887,6 +4908,9 @@ fn run_window_worker_thread(
                 })?;
                 if inspector_registry.is_some() {
                     let _ = js_runtime.inspector().borrow().poll_sessions(None);
+                }
+                if publish_worker_render_model_snapshot(&worker_state) {
+                    let _ = event_proxy.send_event(RuntimeUserEvent::Wake);
                 }
             }
             Err(std_mpsc::RecvTimeoutError::Disconnected) => break,

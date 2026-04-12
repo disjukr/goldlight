@@ -120,10 +120,7 @@ impl PipelinePair {
 
     fn get(&self, sample_count: u32) -> Arc<wgpu::RenderPipeline> {
         if sample_count > 1 && self.msaa_sample_count > 1 {
-            return self
-                .msaa
-                .get_or_init(|| self.create(sample_count))
-                .clone();
+            return self.msaa.get_or_init(|| self.create(sample_count)).clone();
         }
         self.single.get_or_init(|| self.create(1)).clone()
     }
@@ -222,7 +219,10 @@ fn create_wedge_render_pipeline(
             module: shader,
             entry_point: Some("vs_main"),
             compilation_options: wgpu::PipelineCompilationOptions::default(),
-            buffers: &[PatchResolveVertex::layout(), WedgeFillPatchInstance::layout()],
+            buffers: &[
+                PatchResolveVertex::layout(),
+                WedgeFillPatchInstance::layout(),
+            ],
         },
         fragment: Some(wgpu::FragmentState {
             module: shader,
@@ -261,7 +261,10 @@ fn create_curve_render_pipeline(
             module: shader,
             entry_point: Some("vs_main"),
             compilation_options: wgpu::PipelineCompilationOptions::default(),
-            buffers: &[PatchResolveVertex::layout(), CurveFillPatchInstance::layout()],
+            buffers: &[
+                PatchResolveVertex::layout(),
+                CurveFillPatchInstance::layout(),
+            ],
         },
         fragment: Some(wgpu::FragmentState {
             module: shader,
@@ -673,14 +676,18 @@ impl DawnResourceProvider {
                         sample_count,
                         mode: *mode,
                     },
-                    DrawingPreparedStep::WedgeFillPatches { step, .. } => PipelineWarmupKey::Wedge {
-                        sample_count,
-                        stencil_mode: step.stencil_mode,
-                    },
-                    DrawingPreparedStep::CurveFillPatches { step, .. } => PipelineWarmupKey::Curve {
-                        sample_count,
-                        stencil_mode: step.stencil_mode,
-                    },
+                    DrawingPreparedStep::WedgeFillPatches { step, .. } => {
+                        PipelineWarmupKey::Wedge {
+                            sample_count,
+                            stencil_mode: step.stencil_mode,
+                        }
+                    }
+                    DrawingPreparedStep::CurveFillPatches { step, .. } => {
+                        PipelineWarmupKey::Curve {
+                            sample_count,
+                            stencil_mode: step.stencil_mode,
+                        }
+                    }
                     DrawingPreparedStep::StrokePatches(_) => {
                         PipelineWarmupKey::Stroke { sample_count }
                     }

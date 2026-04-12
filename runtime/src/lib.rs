@@ -1,7 +1,9 @@
 mod drawing;
+mod drawing_text;
 mod fill_patch;
 mod render;
 mod stroke_patch;
+mod text;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -89,9 +91,10 @@ use winit::{
 use crate::render::{
     Path2DHandle, Path2DOptions, Path2DUpdate, Rect2DHandle, Rect2DOptions, Rect2DUpdate,
     RenderModel, RendererState, Scene2DHandle, Scene2DOptions, Scene3DHandle, Scene3DOptions,
-    SceneCameraUpdate, SceneClearColorOptions, Triangle3DHandle, Triangle3DOptions,
-    Triangle3DUpdate,
+    SceneCameraUpdate, SceneClearColorOptions, Text2DHandle, Text2DOptions, Text2DUpdate,
+    Triangle3DHandle, Triangle3DOptions, Triangle3DUpdate,
 };
+use crate::text::{GlyphSubpixelOffsetInput, ShapeTextInput};
 
 pub const GOLDLIGHT_MODULE_SPECIFIER: &str = "ext:goldlight/mod.js";
 pub const GOLDLIGHT_APP_MANIFEST: &str = "goldlight.manifest.json";
@@ -3025,6 +3028,73 @@ async fn op_goldlight_webtransport_receive_stream_cancel(
 
 #[deno_core::op2]
 #[serde]
+fn op_goldlight_text_list_families() -> Result<Vec<String>, JsErrorBox> {
+    text::list_families().map_err(|error| JsErrorBox::generic(error.to_string()))
+}
+
+#[deno_core::op2]
+#[string]
+fn op_goldlight_text_match_typeface(#[string] family: String) -> Result<String, JsErrorBox> {
+    text::match_typeface(&family)
+        .map(|handle| handle.unwrap_or_default())
+        .map_err(|error| JsErrorBox::generic(error.to_string()))
+}
+
+#[deno_core::op2]
+#[serde]
+fn op_goldlight_text_get_font_metrics(
+    #[string] typeface: String,
+    size: f32,
+) -> Result<Option<text::FontMetricsValue>, JsErrorBox> {
+    text::get_font_metrics(&typeface, size).map_err(|error| JsErrorBox::generic(error.to_string()))
+}
+
+#[deno_core::op2]
+#[serde]
+fn op_goldlight_text_shape_text(
+    #[serde] input: ShapeTextInput,
+) -> Result<Option<text::ShapedRunValue>, JsErrorBox> {
+    text::shape_text(input).map_err(|error| JsErrorBox::generic(error.to_string()))
+}
+
+#[deno_core::op2]
+#[serde]
+fn op_goldlight_text_get_glyph_path(
+    #[string] typeface: String,
+    glyph_id: u32,
+    size: f32,
+) -> Result<Option<Vec<render::PathVerb2D>>, JsErrorBox> {
+    text::get_glyph_path(&typeface, glyph_id, size)
+        .map_err(|error| JsErrorBox::generic(error.to_string()))
+}
+
+#[deno_core::op2]
+#[serde]
+fn op_goldlight_text_get_glyph_mask(
+    #[string] typeface: String,
+    glyph_id: u32,
+    size: f32,
+    #[serde] subpixel_offset: Option<GlyphSubpixelOffsetInput>,
+) -> Result<Option<text::GlyphMaskValue>, JsErrorBox> {
+    text::get_glyph_mask(&typeface, glyph_id, size, subpixel_offset)
+        .map_err(|error| JsErrorBox::generic(error.to_string()))
+}
+
+#[deno_core::op2]
+#[serde]
+fn op_goldlight_text_get_glyph_sdf(
+    #[string] typeface: String,
+    glyph_id: u32,
+    size: f32,
+    inset: Option<u32>,
+    radius: Option<f32>,
+) -> Result<Option<text::GlyphMaskValue>, JsErrorBox> {
+    text::get_glyph_sdf(&typeface, glyph_id, size, inset, radius)
+        .map_err(|error| JsErrorBox::generic(error.to_string()))
+}
+
+#[deno_core::op2]
+#[serde]
 fn op_goldlight_create_scene_2d(
     state: &mut OpState,
     #[serde] options: Scene2DOptions,
@@ -3094,6 +3164,31 @@ fn op_goldlight_path_2d_update(
 ) -> Result<(), JsErrorBox> {
     with_worker_host_state(state, |worker_state| {
         worker_state.render_model.path_2d_update(path_id, options)
+    })
+}
+
+#[deno_core::op2]
+#[serde]
+fn op_goldlight_scene_2d_create_text(
+    state: &mut OpState,
+    scene_id: u32,
+    #[serde] options: Text2DOptions,
+) -> Result<Text2DHandle, JsErrorBox> {
+    with_worker_host_state(state, |worker_state| {
+        worker_state
+            .render_model
+            .scene_2d_create_text(scene_id, options)
+    })
+}
+
+#[deno_core::op2]
+fn op_goldlight_text_2d_update(
+    state: &mut OpState,
+    text_id: u32,
+    #[serde] options: Text2DUpdate,
+) -> Result<(), JsErrorBox> {
+    with_worker_host_state(state, |worker_state| {
+        worker_state.render_model.text_2d_update(text_id, options)
     })
 }
 
@@ -3209,6 +3304,13 @@ deno_core::extension!(
         op_goldlight_webtransport_send_stream_close,
         op_goldlight_webtransport_receive_stream_read,
         op_goldlight_webtransport_receive_stream_cancel,
+        op_goldlight_text_list_families,
+        op_goldlight_text_match_typeface,
+        op_goldlight_text_get_font_metrics,
+        op_goldlight_text_shape_text,
+        op_goldlight_text_get_glyph_path,
+        op_goldlight_text_get_glyph_mask,
+        op_goldlight_text_get_glyph_sdf,
         op_goldlight_hmr_drain_updates,
         op_goldlight_hmr_request_restart,
         op_goldlight_worker_request_animation_frame,
@@ -3220,6 +3322,8 @@ deno_core::extension!(
         op_goldlight_rect_2d_update,
         op_goldlight_scene_2d_create_path,
         op_goldlight_path_2d_update,
+        op_goldlight_scene_2d_create_text,
+        op_goldlight_text_2d_update,
         op_goldlight_present_scene_2d,
         op_goldlight_create_scene_3d,
         op_goldlight_scene_3d_set_clear_color,
@@ -3270,6 +3374,13 @@ deno_core::extension!(
         op_goldlight_webtransport_send_stream_close,
         op_goldlight_webtransport_receive_stream_read,
         op_goldlight_webtransport_receive_stream_cancel,
+        op_goldlight_text_list_families,
+        op_goldlight_text_match_typeface,
+        op_goldlight_text_get_font_metrics,
+        op_goldlight_text_shape_text,
+        op_goldlight_text_get_glyph_path,
+        op_goldlight_text_get_glyph_mask,
+        op_goldlight_text_get_glyph_sdf,
         op_goldlight_worker_request_animation_frame,
         op_goldlight_worker_drain_events,
         op_goldlight_compute_layout,
@@ -3279,6 +3390,8 @@ deno_core::extension!(
         op_goldlight_rect_2d_update,
         op_goldlight_scene_2d_create_path,
         op_goldlight_path_2d_update,
+        op_goldlight_scene_2d_create_text,
+        op_goldlight_text_2d_update,
         op_goldlight_present_scene_2d,
         op_goldlight_create_scene_3d,
         op_goldlight_scene_3d_set_clear_color,

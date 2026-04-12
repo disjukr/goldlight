@@ -50,14 +50,22 @@ Current built-in scene APIs:
 - `new Scene2d()`
 - `new Rect2d()`
 - `new Path2d()`
+- `new Text2d()`
 - `scene.add(rect)`
 - `scene.add(path)`
+- `scene.add(text)`
 - `scene.get()`
 - `scene.set(...)`
 - `rect.get()`
 - `rect.set(...)`
 - `path.get()`
 - `path.set(...)`
+- `text.get()`
+- `text.set(...)`
+- `createTextHost()`
+- `buildDirectMaskSubRun(...)`
+- `buildTransformedMaskSubRun(...)`
+- `buildSdfSubRun(...)`
 - `setWindowScene(scene)`
 - `new Scene3d()`
 - `new Triangle3d()`

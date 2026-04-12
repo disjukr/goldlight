@@ -195,6 +195,11 @@ pub struct Path2DHandle {
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
+pub struct Text2DHandle {
+    pub id: u32,
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
 pub struct Scene3DHandle {
     pub id: u32,
 }
@@ -253,7 +258,7 @@ pub struct Rect2DUpdate {
     pub color: Option<ColorValue>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", tag = "kind")]
 pub enum PathVerb2D {
     MoveTo {
@@ -380,6 +385,100 @@ pub type Path2DUpdate = Path2DOptions;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct GlyphMask2DOptions {
+    pub cache_key: String,
+    pub width: u32,
+    pub height: u32,
+    pub stride: u32,
+    pub format: String,
+    pub offset_x: i32,
+    pub offset_y: i32,
+    pub pixels: Vec<u8>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DirectMaskGlyph2DOptions {
+    pub glyph_id: u32,
+    pub x: f32,
+    pub y: f32,
+    #[serde(default)]
+    pub mask: Option<GlyphMask2DOptions>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TransformedMaskGlyph2DOptions {
+    pub glyph_id: u32,
+    pub x: f32,
+    pub y: f32,
+    #[serde(default)]
+    pub mask: Option<GlyphMask2DOptions>,
+    pub strike_to_source_scale: f32,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SdfGlyph2DOptions {
+    pub glyph_id: u32,
+    pub x: f32,
+    pub y: f32,
+    #[serde(default)]
+    pub mask: Option<GlyphMask2DOptions>,
+    #[serde(default)]
+    pub sdf: Option<GlyphMask2DOptions>,
+    pub sdf_inset: u32,
+    pub sdf_radius: f32,
+    #[serde(default = "default_text_strike_to_source_scale")]
+    pub strike_to_source_scale: f32,
+}
+
+fn default_text_strike_to_source_scale() -> f32 {
+    1.0
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", tag = "kind")]
+pub enum Text2DOptions {
+    #[serde(rename = "direct-mask")]
+    DirectMask {
+        #[serde(default)]
+        x: f32,
+        #[serde(default)]
+        y: f32,
+        #[serde(default = "default_rect_color")]
+        color: ColorValue,
+        #[serde(default)]
+        glyphs: Vec<DirectMaskGlyph2DOptions>,
+    },
+    #[serde(rename = "transformed-mask")]
+    TransformedMask {
+        #[serde(default)]
+        x: f32,
+        #[serde(default)]
+        y: f32,
+        #[serde(default = "default_rect_color")]
+        color: ColorValue,
+        #[serde(default)]
+        glyphs: Vec<TransformedMaskGlyph2DOptions>,
+    },
+    #[serde(rename = "sdf")]
+    Sdf {
+        #[serde(default)]
+        x: f32,
+        #[serde(default)]
+        y: f32,
+        #[serde(default = "default_rect_color")]
+        color: ColorValue,
+        #[serde(default)]
+        glyphs: Vec<SdfGlyph2DOptions>,
+    },
+}
+
+pub type Text2DUpdate = Text2DOptions;
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Scene3DOptions {
     #[serde(default)]
     pub clear_color: ColorValue,
@@ -475,6 +574,72 @@ pub(crate) struct Path2D {
 }
 
 #[derive(Clone, Debug)]
+pub(crate) struct GlyphMask2D {
+    pub _cache_key: String,
+    pub width: u32,
+    pub height: u32,
+    pub stride: u32,
+    pub _format: String,
+    pub offset_x: i32,
+    pub offset_y: i32,
+    pub pixels: Vec<u8>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct DirectMaskGlyph2D {
+    pub _glyph_id: u32,
+    pub x: f32,
+    pub y: f32,
+    pub mask: Option<GlyphMask2D>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct TransformedMaskGlyph2D {
+    pub _glyph_id: u32,
+    pub x: f32,
+    pub y: f32,
+    pub mask: Option<GlyphMask2D>,
+    pub strike_to_source_scale: f32,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct SdfGlyph2D {
+    pub _glyph_id: u32,
+    pub x: f32,
+    pub y: f32,
+    pub _mask: Option<GlyphMask2D>,
+    pub sdf: Option<GlyphMask2D>,
+    pub sdf_inset: u32,
+    pub _sdf_radius: f32,
+    pub strike_to_source_scale: f32,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum Text2D {
+    DirectMask {
+        _scene_id: u32,
+        x: f32,
+        y: f32,
+        color: ColorValue,
+        glyphs: Vec<DirectMaskGlyph2D>,
+    },
+    TransformedMask {
+        _scene_id: u32,
+        x: f32,
+        y: f32,
+        color: ColorValue,
+        glyphs: Vec<TransformedMaskGlyph2D>,
+    },
+    Sdf {
+        _scene_id: u32,
+        x: f32,
+        y: f32,
+        color: ColorValue,
+        glyphs: Vec<SdfGlyph2D>,
+    },
+}
+
+#[derive(Clone, Debug)]
 struct Triangle3D {
     scene_id: u32,
     positions: [[f32; 3]; 3],
@@ -486,6 +651,7 @@ pub(crate) struct Scene2D {
     pub clear_color: ColorValue,
     pub rect_ids: Vec<u32>,
     pub path_ids: Vec<u32>,
+    pub text_ids: Vec<u32>,
 }
 
 #[derive(Clone, Debug)]
@@ -513,6 +679,7 @@ pub struct RenderModel {
     scenes_2d: HashMap<u32, Scene2D>,
     rects_2d: HashMap<u32, Rect2D>,
     paths_2d: HashMap<u32, Path2D>,
+    texts_2d: HashMap<u32, Text2D>,
     scenes_3d: HashMap<u32, Scene3D>,
     triangles_3d: HashMap<u32, Triangle3D>,
 }
@@ -526,6 +693,7 @@ impl Default for RenderModel {
             scenes_2d: HashMap::new(),
             rects_2d: HashMap::new(),
             paths_2d: HashMap::new(),
+            texts_2d: HashMap::new(),
             scenes_3d: HashMap::new(),
             triangles_3d: HashMap::new(),
         }
@@ -542,6 +710,7 @@ impl RenderModel {
                 clear_color: options.clear_color,
                 rect_ids: Vec::new(),
                 path_ids: Vec::new(),
+                text_ids: Vec::new(),
             },
         );
         Scene2DHandle { id }
@@ -662,6 +831,35 @@ impl RenderModel {
         Ok(())
     }
 
+    pub fn scene_2d_create_text(
+        &mut self,
+        scene_id: u32,
+        options: Text2DOptions,
+    ) -> Result<Text2DHandle> {
+        let scene = self
+            .scenes_2d
+            .get_mut(&scene_id)
+            .ok_or_else(|| anyhow!("unknown 2D scene {scene_id}"))?;
+        let id = self.next_object_id;
+        self.next_object_id += 1;
+        self.texts_2d
+            .insert(id, text_from_options(scene_id, options));
+        scene.text_ids.push(id);
+        Ok(Text2DHandle { id })
+    }
+
+    pub fn text_2d_update(&mut self, text_id: u32, options: Text2DUpdate) -> Result<()> {
+        let scene_id = match self.texts_2d.get(&text_id) {
+            Some(Text2D::DirectMask { _scene_id, .. })
+            | Some(Text2D::TransformedMask { _scene_id, .. })
+            | Some(Text2D::Sdf { _scene_id, .. }) => *_scene_id,
+            None => return Err(anyhow!("unknown 2D text {text_id}")),
+        };
+        self.texts_2d
+            .insert(text_id, text_from_options(scene_id, options));
+        Ok(())
+    }
+
     pub fn create_scene_3d(&mut self, options: Scene3DOptions) -> Scene3DHandle {
         let id = self.next_scene_id;
         self.next_scene_id += 1;
@@ -760,6 +958,89 @@ impl RenderModel {
     }
 }
 
+fn glyph_mask_from_options(options: GlyphMask2DOptions) -> GlyphMask2D {
+    GlyphMask2D {
+        _cache_key: options.cache_key,
+        width: options.width,
+        height: options.height,
+        stride: options.stride,
+        _format: options.format,
+        offset_x: options.offset_x,
+        offset_y: options.offset_y,
+        pixels: options.pixels,
+    }
+}
+
+fn text_from_options(scene_id: u32, options: Text2DOptions) -> Text2D {
+    match options {
+        Text2DOptions::DirectMask {
+            x,
+            y,
+            color,
+            glyphs,
+        } => Text2D::DirectMask {
+            _scene_id: scene_id,
+            x,
+            y,
+            color,
+            glyphs: glyphs
+                .into_iter()
+                .map(|glyph| DirectMaskGlyph2D {
+                    _glyph_id: glyph.glyph_id,
+                    x: glyph.x,
+                    y: glyph.y,
+                    mask: glyph.mask.map(glyph_mask_from_options),
+                })
+                .collect(),
+        },
+        Text2DOptions::TransformedMask {
+            x,
+            y,
+            color,
+            glyphs,
+        } => Text2D::TransformedMask {
+            _scene_id: scene_id,
+            x,
+            y,
+            color,
+            glyphs: glyphs
+                .into_iter()
+                .map(|glyph| TransformedMaskGlyph2D {
+                    _glyph_id: glyph.glyph_id,
+                    x: glyph.x,
+                    y: glyph.y,
+                    mask: glyph.mask.map(glyph_mask_from_options),
+                    strike_to_source_scale: glyph.strike_to_source_scale,
+                })
+                .collect(),
+        },
+        Text2DOptions::Sdf {
+            x,
+            y,
+            color,
+            glyphs,
+        } => Text2D::Sdf {
+            _scene_id: scene_id,
+            x,
+            y,
+            color,
+            glyphs: glyphs
+                .into_iter()
+                .map(|glyph| SdfGlyph2D {
+                    _glyph_id: glyph.glyph_id,
+                    x: glyph.x,
+                    y: glyph.y,
+                    _mask: glyph.mask.map(glyph_mask_from_options),
+                    sdf: glyph.sdf.map(glyph_mask_from_options),
+                    sdf_inset: glyph.sdf_inset,
+                    _sdf_radius: glyph.sdf_radius,
+                    strike_to_source_scale: glyph.strike_to_source_scale,
+                })
+                .collect(),
+        },
+    }
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct Vertex {
@@ -820,39 +1101,14 @@ impl<'a> SceneCommandBuffer<'a> {
         depth_target_view: Option<&'a wgpu::TextureView>,
         msaa_depth_target_view: Option<&'a wgpu::TextureView>,
     ) -> Result<()> {
-        let resource_provider = &self.drawing_context.resource_provider;
-        let use_msaa = prepared.requires_msaa
-            && resource_provider.msaa_sample_count() > 1
-            && msaa_target_view.is_some();
-        let use_depth = prepared.requires_depth;
-        let (color_view, resolve_target, depth_view, sample_count) = if use_msaa {
-            (
-                msaa_target_view.expect("msaa target view checked above"),
-                Some(self.target_view),
-                use_depth.then(|| {
-                    msaa_depth_target_view
-                        .expect("msaa depth target view required for stroke patches")
-                }),
-                resource_provider.msaa_sample_count(),
-            )
-        } else {
-            (
-                self.target_view,
-                None,
-                use_depth.then(|| {
-                    depth_target_view.expect("depth target view required for stroke patches")
-                }),
-                1,
-            )
-        };
         encode_drawing_command_buffer(
             self.drawing_context,
             prepared,
             self.encoder,
-            color_view,
-            resolve_target,
-            depth_view,
-            sample_count,
+            self.target_view,
+            msaa_target_view,
+            depth_target_view,
+            msaa_depth_target_view,
         )
     }
 
@@ -1085,7 +1341,7 @@ impl RendererState {
         let drawing_depth_target = Self::create_depth_target(&device, &config, 1);
         let drawing_msaa_depth_target = (msaa_sample_count > 1)
             .then(|| Self::create_depth_target(&device, &config, msaa_sample_count));
-        let drawing_context = DawnSharedContext::new(&device, format, msaa_sample_count);
+        let drawing_context = DawnSharedContext::new(&device, &queue, format, msaa_sample_count);
 
         Ok(Self {
             surface,
@@ -1166,7 +1422,13 @@ impl RendererState {
                     .filter_map(|path_id| model.paths_2d.get(path_id))
                     .cloned()
                     .collect::<Vec<_>>();
-                let recording = record_scene_2d(scene, &rects, &paths);
+                let texts = scene
+                    .text_ids
+                    .iter()
+                    .filter_map(|text_id| model.texts_2d.get(text_id))
+                    .cloned()
+                    .collect::<Vec<_>>();
+                let recording = record_scene_2d(scene, &rects, &paths, &texts);
                 let prepared =
                     prepare_drawing_recording(&recording, self.config.width, self.config.height);
                 command_buffer.encode_drawing(

@@ -233,6 +233,175 @@ export interface Path2dState {
 
 export type Path2dPatch = Partial<Path2dState>;
 
+export interface FontQuery {
+  family?: string;
+}
+
+export type TypefaceHandle = bigint;
+
+export type TextDirection = 'ltr' | 'rtl';
+
+export interface ShapeTextInput {
+  typeface: TypefaceHandle;
+  text: string;
+  size: number;
+  direction?: TextDirection;
+  language?: string;
+  scriptTag?: string;
+}
+
+export interface FontMetrics {
+  unitsPerEm: number;
+  ascent: number;
+  descent: number;
+  lineGap: number;
+  xHeight: number;
+  capHeight: number;
+  underlinePosition: number;
+  underlineThickness: number;
+  strikeoutPosition: number;
+  strikeoutThickness: number;
+}
+
+export interface GlyphMask {
+  cacheKey: string;
+  width: number;
+  height: number;
+  stride: number;
+  format: 'a8';
+  offsetX: number;
+  offsetY: number;
+  pixels: Uint8Array;
+}
+
+export interface GlyphSubpixelOffset {
+  x: number;
+  y: number;
+}
+
+export interface ShapedRun {
+  typeface: TypefaceHandle;
+  text: string;
+  size: number;
+  direction: TextDirection;
+  bidiLevel: number;
+  scriptTag: string;
+  language: string;
+  glyphIDs: Uint32Array;
+  positions: Float32Array;
+  offsets: Float32Array;
+  clusterIndices: Uint32Array;
+  advanceX: number;
+  advanceY: number;
+  utf8RangeStart: number;
+  utf8RangeEnd: number;
+}
+
+export interface GlyphCluster {
+  textStart: number;
+  textEnd: number;
+  glyphStart: number;
+  glyphEnd: number;
+  advanceX: number;
+  advanceY: number;
+}
+
+export interface DirectMaskGlyph {
+  glyphId: number;
+  x: number;
+  y: number;
+  mask: GlyphMask | null;
+}
+
+export interface DirectMaskSubRun {
+  typeface: TypefaceHandle;
+  size: number;
+  glyphs: DirectMaskGlyph[];
+}
+
+export interface TransformedMaskGlyph {
+  glyphId: number;
+  x: number;
+  y: number;
+  mask: GlyphMask | null;
+  strikeToSourceScale: number;
+}
+
+export interface TransformedMaskSubRun {
+  typeface: TypefaceHandle;
+  size: number;
+  glyphs: TransformedMaskGlyph[];
+  strikeScale: number;
+}
+
+export interface SdfGlyph {
+  glyphId: number;
+  x: number;
+  y: number;
+  mask: GlyphMask | null;
+  sdf: GlyphMask | null;
+  sdfInset: number;
+  sdfRadius: number;
+  strikeToSourceScale: number;
+}
+
+export interface SdfSubRun {
+  typeface: TypefaceHandle;
+  size: number;
+  glyphs: SdfGlyph[];
+  sdfInset: number;
+  sdfRadius: number;
+}
+
+export interface TextHost {
+  listFamilies(): string[];
+  matchTypeface(query: FontQuery): TypefaceHandle | null;
+  getFontMetrics(typeface: TypefaceHandle, size: number): FontMetrics | null;
+  shapeText(input: ShapeTextInput): ShapedRun | null;
+  getGlyphPath(typeface: TypefaceHandle, glyphID: number, size: number): PathVerb2d[] | null;
+  getGlyphMask(
+    typeface: TypefaceHandle,
+    glyphID: number,
+    size: number,
+    subpixelOffset?: GlyphSubpixelOffset,
+  ): GlyphMask | null;
+  getGlyphSdf(
+    typeface: TypefaceHandle,
+    glyphID: number,
+    size: number,
+    inset?: number,
+    radius?: number,
+  ): GlyphMask | null;
+  close(): void;
+}
+
+export type Text2dInit =
+  | {
+    kind: 'direct-mask';
+    x?: number;
+    y?: number;
+    color?: ColorValue;
+    glyphs?: DirectMaskGlyph[];
+  }
+  | {
+    kind: 'transformed-mask';
+    x?: number;
+    y?: number;
+    color?: ColorValue;
+    glyphs?: TransformedMaskGlyph[];
+  }
+  | {
+    kind: 'sdf';
+    x?: number;
+    y?: number;
+    color?: ColorValue;
+    glyphs?: SdfGlyph[];
+  };
+
+export type Text2dState = Text2dInit & { color: ResolvedColorValue; x: number; y: number };
+
+export type Text2dPatch = Partial<Text2dState>;
+
 export type Mat4Value = [
   number, number, number, number,
   number, number, number, number,
@@ -436,7 +605,23 @@ export class Path2d {
   }
 }
 
-export type Node2d = Rect2d | Path2d | Group2d | LayoutGroup2d | LayoutItem2d;
+export class Text2d {
+  readonly id!: number | null;
+
+  constructor(_init: Text2dInit) {
+    throw new Error(RUNTIME_ONLY_ERROR);
+  }
+
+  set(_patch: Text2dPatch = {}): this {
+    throw new Error(RUNTIME_ONLY_ERROR);
+  }
+
+  get(): Text2dState {
+    throw new Error(RUNTIME_ONLY_ERROR);
+  }
+}
+
+export type Node2d = Rect2d | Path2d | Text2d | Group2d | LayoutGroup2d | LayoutItem2d;
 
 export class Scene2d {
   readonly id!: number;
@@ -613,6 +798,44 @@ export function createWindow(_init: WindowInit = {}): WindowHandle {
 }
 
 export function setWindowScene<T extends WindowScene>(_scene: T): T {
+  throw new Error(RUNTIME_ONLY_ERROR);
+}
+
+export function createTextHost(): TextHost {
+  throw new Error(RUNTIME_ONLY_ERROR);
+}
+
+export class TextShaper {
+  constructor(_host: TextHost) {
+    throw new Error(RUNTIME_ONLY_ERROR);
+  }
+
+  shapeText(_input: ShapeTextInput): ShapedRun | null {
+    throw new Error(RUNTIME_ONLY_ERROR);
+  }
+}
+
+export function buildGlyphClusters(_run: ShapedRun): GlyphCluster[] {
+  throw new Error(RUNTIME_ONLY_ERROR);
+}
+
+export function buildDirectMaskSubRun(
+  _host: TextHost,
+  _run: ShapedRun,
+  _transform?: [number, number, number, number, number, number],
+): DirectMaskSubRun {
+  throw new Error(RUNTIME_ONLY_ERROR);
+}
+
+export function buildTransformedMaskSubRun(
+  _host: TextHost,
+  _run: ShapedRun,
+  _strikeScale: number,
+): TransformedMaskSubRun {
+  throw new Error(RUNTIME_ONLY_ERROR);
+}
+
+export function buildSdfSubRun(_host: TextHost, _run: ShapedRun): SdfSubRun {
   throw new Error(RUNTIME_ONLY_ERROR);
 }
 

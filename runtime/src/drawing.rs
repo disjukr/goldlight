@@ -5,6 +5,11 @@ use anyhow::Result;
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 
+use crate::drawing_text::{
+    encode_bitmap_text_step, encode_sdf_text_step, prepare_direct_mask_text_step,
+    prepare_sdf_text_step, prepare_transformed_mask_text_step, PreparedBitmapTextStep,
+    PreparedSdfTextStep, TextPipelineResources,
+};
 use crate::fill_patch::{
     curve_fill_shader_source, curve_template_vertices, fill_paint_shader_source,
     prepare_fill_steps, wedge_fill_shader_source, wedge_template_vertices, CurveFillPatchInstance,
@@ -13,7 +18,7 @@ use crate::fill_patch::{
 };
 use crate::render::{
     ColorValue, GradientStop2D, GradientTileMode2D, Path2D, PathFillRule2D, PathShader2D,
-    PathStrokeCap2D, PathStrokeJoin2D, PathStyle2D, PathVerb2D, Rect2D, Scene2D,
+    PathStrokeCap2D, PathStrokeJoin2D, PathStyle2D, PathVerb2D, Rect2D, Scene2D, Text2D,
 };
 use crate::stroke_patch::{
     prepare_stroke_patch_step, stroke_patch_shader_source, PreparedStrokePatchStep,
@@ -87,6 +92,7 @@ pub struct DawnResourceProvider {
     curve_template_vertex_count: u32,
     viewport_bind_group_layout: Arc<wgpu::BindGroupLayout>,
     fill_paint_bind_group_layout: Arc<wgpu::BindGroupLayout>,
+    text_resources: TextPipelineResources,
 }
 
 #[derive(Clone)]
@@ -397,6 +403,7 @@ impl DawnResourceProvider {
             curve_template_vertex_count: curve_template_vertices.len() as u32,
             viewport_bind_group_layout: Arc::new(viewport_bind_group_layout),
             fill_paint_bind_group_layout: Arc::new(fill_paint_bind_group_layout),
+            text_resources: TextPipelineResources::new(device, format, msaa_sample_count),
         }
     }
 
@@ -684,12 +691,19 @@ fn patch_pipeline_state(
 #[derive(Clone)]
 pub struct DawnSharedContext {
     pub resource_provider: DawnResourceProvider,
+    pub queue: wgpu::Queue,
 }
 
 impl DawnSharedContext {
-    pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat, sample_count: u32) -> Self {
+    pub fn new(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        format: wgpu::TextureFormat,
+        sample_count: u32,
+    ) -> Self {
         Self {
             resource_provider: DawnResourceProvider::new(device, format, sample_count),
+            queue: queue.clone(),
         }
     }
 }
@@ -718,6 +732,19 @@ impl DrawingRecorder {
         self.commands.push(DrawingCommand::DrawPath(path));
     }
 
+    pub fn draw_direct_mask_text(&mut self, text: DirectMaskTextDrawCommand) {
+        self.commands.push(DrawingCommand::DrawDirectMaskText(text));
+    }
+
+    pub fn draw_transformed_mask_text(&mut self, text: TransformedMaskTextDrawCommand) {
+        self.commands
+            .push(DrawingCommand::DrawTransformedMaskText(text));
+    }
+
+    pub fn draw_sdf_text(&mut self, text: SdfTextDrawCommand) {
+        self.commands.push(DrawingCommand::DrawSdfText(text));
+    }
+
     pub fn finish(self) -> DrawingRecording {
         DrawingRecording {
             commands: self.commands,
@@ -735,6 +762,9 @@ enum DrawingCommand {
     Clear { color: ColorValue },
     FillRect(RectDrawCommand),
     DrawPath(PathDrawCommand),
+    DrawDirectMaskText(DirectMaskTextDrawCommand),
+    DrawTransformedMaskText(TransformedMaskTextDrawCommand),
+    DrawSdfText(SdfTextDrawCommand),
 }
 
 #[derive(Clone, Debug)]
@@ -763,6 +793,30 @@ pub struct PathDrawCommand {
 }
 
 #[derive(Clone, Debug)]
+pub struct DirectMaskTextDrawCommand {
+    pub x: f32,
+    pub y: f32,
+    pub color: ColorValue,
+    pub glyphs: Vec<crate::render::DirectMaskGlyph2D>,
+}
+
+#[derive(Clone, Debug)]
+pub struct TransformedMaskTextDrawCommand {
+    pub x: f32,
+    pub y: f32,
+    pub color: ColorValue,
+    pub glyphs: Vec<crate::render::TransformedMaskGlyph2D>,
+}
+
+#[derive(Clone, Debug)]
+pub struct SdfTextDrawCommand {
+    pub x: f32,
+    pub y: f32,
+    pub color: ColorValue,
+    pub glyphs: Vec<crate::render::SdfGlyph2D>,
+}
+
+#[derive(Clone, Debug)]
 pub enum DrawingPreparedStep {
     Triangles {
         vertices: Vec<DrawingVertex>,
@@ -778,6 +832,8 @@ pub enum DrawingPreparedStep {
         paint: PaintUniform,
     },
     StrokePatches(PreparedStrokePatchStep),
+    BitmapText(PreparedBitmapTextStep),
+    SdfText(PreparedSdfTextStep),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -792,6 +848,8 @@ pub enum TriangleStepMode {
 #[derive(Clone, Debug)]
 pub struct DrawingDrawPass {
     pub load_op: wgpu::LoadOp<wgpu::Color>,
+    pub requires_msaa: bool,
+    pub requires_depth: bool,
     pub steps: Vec<DrawingPreparedStep>,
 }
 
@@ -799,8 +857,6 @@ pub struct DrawingDrawPass {
 pub struct DrawingPreparedRecording {
     pub surface_width: u32,
     pub surface_height: u32,
-    pub requires_msaa: bool,
-    pub requires_depth: bool,
     pub passes: Vec<DrawingDrawPass>,
 }
 
@@ -832,6 +888,8 @@ impl DrawingPreparedStep {
             } | Self::WedgeFillPatches { .. }
                 | Self::CurveFillPatches { .. }
                 | Self::StrokePatches(_)
+                | Self::BitmapText(_)
+                | Self::SdfText(_)
         )
     }
 }
@@ -918,7 +976,12 @@ impl DrawingVertex {
     }
 }
 
-pub fn record_scene_2d(scene: &Scene2D, rects: &[Rect2D], paths: &[Path2D]) -> DrawingRecording {
+pub fn record_scene_2d(
+    scene: &Scene2D,
+    rects: &[Rect2D],
+    paths: &[Path2D],
+    texts: &[Text2D],
+) -> DrawingRecording {
     let mut recorder = DrawingRecorder::new();
     recorder.clear(scene.clear_color);
     for rect in rects {
@@ -946,6 +1009,46 @@ pub fn record_scene_2d(scene: &Scene2D, rects: &[Rect2D], paths: &[Path2D]) -> D
             dash_offset: path.dash_offset,
         });
     }
+    for text in texts {
+        match text {
+            Text2D::DirectMask {
+                x,
+                y,
+                color,
+                glyphs,
+                ..
+            } => recorder.draw_direct_mask_text(DirectMaskTextDrawCommand {
+                x: *x,
+                y: *y,
+                color: *color,
+                glyphs: glyphs.clone(),
+            }),
+            Text2D::TransformedMask {
+                x,
+                y,
+                color,
+                glyphs,
+                ..
+            } => recorder.draw_transformed_mask_text(TransformedMaskTextDrawCommand {
+                x: *x,
+                y: *y,
+                color: *color,
+                glyphs: glyphs.clone(),
+            }),
+            Text2D::Sdf {
+                x,
+                y,
+                color,
+                glyphs,
+                ..
+            } => recorder.draw_sdf_text(SdfTextDrawCommand {
+                x: *x,
+                y: *y,
+                color: *color,
+                glyphs: glyphs.clone(),
+            }),
+        }
+    }
     recorder.finish()
 }
 
@@ -967,8 +1070,14 @@ pub fn prepare_drawing_recording(
         if matches!(current_load_op, wgpu::LoadOp::Load) && current_steps.is_empty() {
             return;
         }
+        let requires_msaa = current_steps.iter().any(DrawingPreparedStep::requires_msaa);
+        let requires_depth = current_steps
+            .iter()
+            .any(DrawingPreparedStep::requires_depth);
         passes.push(DrawingDrawPass {
             load_op: *current_load_op,
+            requires_msaa,
+            requires_depth,
             steps: std::mem::take(current_steps),
         });
         *current_load_op = wgpu::LoadOp::Load;
@@ -996,24 +1105,56 @@ pub fn prepare_drawing_recording(
                 let painter_depth = next_painter_depth_as_float(&mut next_painters_depth);
                 current_steps.extend(build_path_steps(path, width, height, painter_depth));
             }
+            DrawingCommand::DrawDirectMaskText(text) => {
+                let painter_depth = next_painter_depth_as_float(&mut next_painters_depth);
+                if let Some(step) = prepare_direct_mask_text_step(
+                    &text.glyphs,
+                    text.color,
+                    text.x,
+                    text.y,
+                    surface_width,
+                    surface_height,
+                    painter_depth,
+                ) {
+                    current_steps.push(DrawingPreparedStep::BitmapText(step));
+                }
+            }
+            DrawingCommand::DrawTransformedMaskText(text) => {
+                let painter_depth = next_painter_depth_as_float(&mut next_painters_depth);
+                if let Some(step) = prepare_transformed_mask_text_step(
+                    &text.glyphs,
+                    text.color,
+                    text.x,
+                    text.y,
+                    surface_width,
+                    surface_height,
+                    painter_depth,
+                ) {
+                    current_steps.push(DrawingPreparedStep::BitmapText(step));
+                }
+            }
+            DrawingCommand::DrawSdfText(text) => {
+                let painter_depth = next_painter_depth_as_float(&mut next_painters_depth);
+                if let Some(step) = prepare_sdf_text_step(
+                    &text.glyphs,
+                    text.color,
+                    text.x,
+                    text.y,
+                    surface_width,
+                    surface_height,
+                    painter_depth,
+                ) {
+                    current_steps.push(DrawingPreparedStep::SdfText(step));
+                }
+            }
         }
     }
 
     flush_pass(&mut passes, &mut current_load_op, &mut current_steps);
-    let requires_msaa = passes
-        .iter()
-        .flat_map(|pass| pass.steps.iter())
-        .any(DrawingPreparedStep::requires_msaa);
-    let requires_depth = passes
-        .iter()
-        .flat_map(|pass| pass.steps.iter())
-        .any(DrawingPreparedStep::requires_depth);
 
     DrawingPreparedRecording {
         surface_width,
         surface_height,
-        requires_msaa,
-        requires_depth,
         passes,
     }
 }
@@ -3199,18 +3340,40 @@ pub fn encode_drawing_command_buffer(
     prepared: &DrawingPreparedRecording,
     encoder: &mut wgpu::CommandEncoder,
     target_view: &wgpu::TextureView,
-    resolve_target: Option<&wgpu::TextureView>,
-    depth_view: Option<&wgpu::TextureView>,
-    sample_count: u32,
+    msaa_target_view: Option<&wgpu::TextureView>,
+    depth_target_view: Option<&wgpu::TextureView>,
+    msaa_depth_target_view: Option<&wgpu::TextureView>,
 ) -> Result<()> {
     let (_viewport_buffer, viewport_bind_group) = shared_context
         .resource_provider
         .create_viewport_bind_group(prepared.surface_width, prepared.surface_height);
     for pass in &prepared.passes {
+        let use_msaa = pass.requires_msaa
+            && shared_context.resource_provider.msaa_sample_count() > 1
+            && msaa_target_view.is_some();
+        let (color_view, resolve_target, depth_view, sample_count) = if use_msaa {
+            (
+                msaa_target_view.expect("msaa target view checked above"),
+                Some(target_view),
+                pass.requires_depth.then(|| {
+                    msaa_depth_target_view.expect("msaa depth target view required for msaa pass")
+                }),
+                shared_context.resource_provider.msaa_sample_count(),
+            )
+        } else {
+            (
+                target_view,
+                None,
+                pass.requires_depth.then(|| {
+                    depth_target_view.expect("depth target view required for drawing pass")
+                }),
+                1,
+            )
+        };
         let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("goldlight drawing draw pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: target_view,
+                view: color_view,
                 resolve_target,
                 ops: wgpu::Operations {
                     load: pass.load_op,
@@ -3316,6 +3479,26 @@ pub fn encode_drawing_command_buffer(
                     render_pass.set_vertex_buffer(0, instance_buffer.slice(..));
                     render_pass.draw(0..step.vertex_count, 0..step.instances.len() as u32);
                 }
+                DrawingPreparedStep::BitmapText(step) => {
+                    encode_bitmap_text_step(
+                        &shared_context.resource_provider.text_resources,
+                        &shared_context.resource_provider.device,
+                        &shared_context.queue,
+                        &mut render_pass,
+                        step,
+                        sample_count,
+                    );
+                }
+                DrawingPreparedStep::SdfText(step) => {
+                    encode_sdf_text_step(
+                        &shared_context.resource_provider.text_resources,
+                        &shared_context.resource_provider.device,
+                        &shared_context.queue,
+                        &mut render_pass,
+                        step,
+                        sample_count,
+                    );
+                }
             }
         }
     }
@@ -3324,9 +3507,13 @@ pub fn encode_drawing_command_buffer(
 
 #[cfg(test)]
 mod tests {
-    use super::{prepare_drawing_recording, DrawingPreparedStep, DrawingRecorder, PathDrawCommand};
+    use super::{
+        prepare_drawing_recording, DirectMaskTextDrawCommand, DrawingPreparedStep, DrawingRecorder,
+        PathDrawCommand,
+    };
     use crate::render::{
-        ColorValue, PathFillRule2D, PathStrokeCap2D, PathStrokeJoin2D, PathStyle2D, PathVerb2D,
+        ColorValue, DirectMaskGlyph2D, GlyphMask2D, PathFillRule2D, PathStrokeCap2D,
+        PathStrokeJoin2D, PathStyle2D, PathVerb2D,
     };
 
     fn stroke_path(verbs: Vec<PathVerb2D>, dash_array: Vec<f32>) -> PathDrawCommand {
@@ -3368,6 +3555,34 @@ mod tests {
             .any(|step| matches!(step, DrawingPreparedStep::Triangles { .. })));
     }
 
+    fn direct_mask_text() -> DirectMaskTextDrawCommand {
+        DirectMaskTextDrawCommand {
+            x: 0.0,
+            y: 0.0,
+            color: ColorValue {
+                r: 1.0,
+                g: 1.0,
+                b: 1.0,
+                a: 1.0,
+            },
+            glyphs: vec![DirectMaskGlyph2D {
+                _glyph_id: 1,
+                x: 24.0,
+                y: 32.0,
+                mask: Some(GlyphMask2D {
+                    _cache_key: "glyph-1".into(),
+                    width: 2,
+                    height: 2,
+                    stride: 2,
+                    _format: "a8".into(),
+                    offset_x: 0,
+                    offset_y: 0,
+                    pixels: vec![255, 255, 255, 255],
+                }),
+            }],
+        }
+    }
+
     #[test]
     fn stroke_recording_uses_patch_step_for_cubic() {
         assert_stroke_uses_patch_step(stroke_path(
@@ -3392,5 +3607,58 @@ mod tests {
             ],
             vec![12.0, 8.0],
         ));
+    }
+
+    #[test]
+    fn text_pass_requires_depth_but_not_msaa() {
+        let mut recorder = DrawingRecorder::new();
+        recorder.draw_direct_mask_text(direct_mask_text());
+
+        let prepared = prepare_drawing_recording(&recorder.finish(), 640, 480);
+
+        assert_eq!(prepared.passes.len(), 1);
+        assert!(!prepared.passes[0].requires_msaa);
+        assert!(prepared.passes[0].requires_depth);
+    }
+
+    #[test]
+    fn msaa_requirement_is_tracked_per_pass() {
+        let mut recorder = DrawingRecorder::new();
+        recorder.draw_direct_mask_text(direct_mask_text());
+        recorder.clear(ColorValue::default());
+        recorder.draw_path(stroke_path(
+            vec![
+                PathVerb2D::MoveTo { to: [10.0, 10.0] },
+                PathVerb2D::LineTo { to: [120.0, 120.0] },
+            ],
+            vec![],
+        ));
+
+        let prepared = prepare_drawing_recording(&recorder.finish(), 640, 480);
+
+        assert_eq!(prepared.passes.len(), 2);
+        assert!(!prepared.passes[0].requires_msaa);
+        assert!(prepared.passes[0].requires_depth);
+        assert!(prepared.passes[1].requires_msaa);
+        assert!(prepared.passes[1].requires_depth);
+    }
+
+    #[test]
+    fn text_can_share_an_msaa_pass() {
+        let mut recorder = DrawingRecorder::new();
+        recorder.draw_direct_mask_text(direct_mask_text());
+        recorder.draw_path(stroke_path(
+            vec![
+                PathVerb2D::MoveTo { to: [10.0, 10.0] },
+                PathVerb2D::LineTo { to: [120.0, 120.0] },
+            ],
+            vec![],
+        ));
+
+        let prepared = prepare_drawing_recording(&recorder.finish(), 640, 480);
+
+        assert_eq!(prepared.passes.len(), 1);
+        assert!(prepared.passes[0].requires_msaa);
+        assert!(prepared.passes[0].requires_depth);
     }
 }

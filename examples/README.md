@@ -5,9 +5,8 @@ Examples for the new goldlight runtime live here.
 ## Categories
 
 - [`window`](./window): window lifecycle and app shell examples
-- [`2d`](./2d): 2D scene, layout, and path drawing examples
+- [`2d`](./2d): 2D scene, layout, path drawing, and text rendering examples
 - [`3d`](./3d): 3D scene and camera examples
-- [`text`](./text): text layout and rendering examples
 
 ## Run the basic window example
 
@@ -26,6 +25,8 @@ local Rust dev runtime.
 - [`examples/2d/basic_rect`](./2d/basic_rect): animated 2D rectangles
 - [`examples/2d/fills`](./2d/fills): multiple filled path compositions
 - [`examples/2d/strokes`](./2d/strokes): stroke join and cap samples
+- [`examples/2d/text_modes`](./2d/text_modes): direct mask, SDF, and path fallback text
+- [`examples/2d/text_on_path`](./2d/text_on_path): path-aligned glyph path fallback text
 - [`examples/3d/basic_triangle`](./3d/basic_triangle): animated 3D triangle
 
 ## Build a production bundle

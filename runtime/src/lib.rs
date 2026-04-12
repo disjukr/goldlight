@@ -2,6 +2,7 @@ mod drawing;
 mod drawing_text;
 mod fill_patch;
 mod render;
+mod svg;
 mod stroke_patch;
 mod text;
 
@@ -3184,6 +3185,14 @@ fn op_goldlight_text_get_glyph_sdf(
 
 #[deno_core::op2]
 #[serde]
+fn op_goldlight_svg_parse(
+    #[string] source: String,
+) -> Result<svg::SvgSceneValue, JsErrorBox> {
+    svg::parse_svg(&source).map_err(|error| JsErrorBox::generic(error.to_string()))
+}
+
+#[deno_core::op2]
+#[serde]
 fn op_goldlight_create_scene_2d(
     state: &mut OpState,
     #[serde] options: Scene2DOptions,
@@ -3400,6 +3409,7 @@ deno_core::extension!(
         op_goldlight_text_get_glyph_path,
         op_goldlight_text_get_glyph_mask,
         op_goldlight_text_get_glyph_sdf,
+        op_goldlight_svg_parse,
         op_goldlight_hmr_drain_updates,
         op_goldlight_hmr_request_restart,
         op_goldlight_worker_request_animation_frame,
@@ -3470,6 +3480,7 @@ deno_core::extension!(
         op_goldlight_text_get_glyph_path,
         op_goldlight_text_get_glyph_mask,
         op_goldlight_text_get_glyph_sdf,
+        op_goldlight_svg_parse,
         op_goldlight_worker_request_animation_frame,
         op_goldlight_worker_drain_events,
         op_goldlight_compute_layout,

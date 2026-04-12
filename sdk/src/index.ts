@@ -382,6 +382,14 @@ export interface TextHost {
   close(): void;
 }
 
+export interface ParsedSvgScene {
+  size: {
+    width: number;
+    height: number;
+  };
+  paths: Path2dState[];
+}
+
 export type Text2dInit =
   | {
     kind: 'direct-mask';
@@ -809,6 +817,10 @@ export function setWindowScene<T extends WindowScene>(_scene: T): T {
 }
 
 export function createTextHost(): TextHost {
+  throw new Error(RUNTIME_ONLY_ERROR);
+}
+
+export function parseSvgPaths(_source: string): ParsedSvgScene {
   throw new Error(RUNTIME_ONLY_ERROR);
 }
 

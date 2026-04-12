@@ -480,7 +480,11 @@ impl MiddleOutPolygonTriangulator {
 
     fn replace_top(&mut self, new_top_index: usize, new_top_value: MiddleOutStackVertex) {
         self.top_index = new_top_index;
-        self.stack.truncate(new_top_index + 1);
+        if self.stack.len() <= new_top_index {
+            self.stack.resize(new_top_index + 1, new_top_value);
+        } else {
+            self.stack.truncate(new_top_index + 1);
+        }
         self.stack[new_top_index] = new_top_value;
     }
 

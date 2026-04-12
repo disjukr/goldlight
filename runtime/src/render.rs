@@ -54,7 +54,7 @@ fn preferred_backends() -> wgpu::Backends {
     }
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ColorValue {
     pub r: f32,
@@ -111,7 +111,7 @@ impl ColorValue {
     }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum GradientTileMode2D {
     Clamp,
@@ -126,14 +126,14 @@ impl Default for GradientTileMode2D {
     }
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GradientStop2D {
     pub offset: f32,
     pub color: ColorValue,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", tag = "kind")]
 pub enum PathShader2D {
     #[serde(rename = "linear-gradient")]
@@ -258,7 +258,7 @@ pub struct Rect2DUpdate {
     pub color: Option<ColorValue>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", tag = "kind")]
 pub enum PathVerb2D {
     MoveTo {
@@ -294,7 +294,7 @@ pub enum PathVerb2D {
     Close,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum PathFillRule2D {
     Nonzero,
@@ -307,7 +307,7 @@ impl Default for PathFillRule2D {
     }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum PathStyle2D {
     Fill,
@@ -320,7 +320,7 @@ impl Default for PathStyle2D {
     }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum PathStrokeJoin2D {
     Miter,
@@ -334,7 +334,7 @@ impl Default for PathStrokeJoin2D {
     }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum PathStrokeCap2D {
     Butt,
@@ -348,7 +348,7 @@ impl Default for PathStrokeCap2D {
     }
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Path2DOptions {
     #[serde(default)]

@@ -697,6 +697,18 @@ export function createTextHost() {
   };
 }
 
+export function parseSvgPaths(source) {
+  const normalizedSource = String(source ?? "");
+  const parsed = Deno.core.ops.op_goldlight_svg_parse(normalizedSource);
+  return {
+    size: {
+      width: Number(parsed.size?.width ?? 0),
+      height: Number(parsed.size?.height ?? 0),
+    },
+    paths: (parsed.paths ?? []).map(clonePathState),
+  };
+}
+
 export class TextShaper {
   constructor(host) {
     this._host = host;

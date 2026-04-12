@@ -8,6 +8,7 @@ if (!hmrData?.windowCreated) {
     title: "2d gradients",
     width: 960,
     height: 720,
+    showPolicy: "after-first-paint",
     workerEntrypoint: windowWorkerEntrypoint,
   });
 }

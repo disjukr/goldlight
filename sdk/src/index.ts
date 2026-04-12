@@ -1,14 +1,3 @@
-export interface WindowInit {
-  title?: string;
-  width?: number;
-  height?: number;
-  workerEntrypoint?: string;
-}
-
-export interface WindowHandle {
-  id: number;
-}
-
 export interface ColorValue {
   r: number;
   g: number;
@@ -21,6 +10,24 @@ export interface ResolvedColorValue {
   g: number;
   b: number;
   a: number;
+}
+
+export type WindowShowPolicy =
+  | 'immediate'
+  | 'after-initial-clear'
+  | 'after-first-paint';
+
+export interface WindowInit {
+  title?: string;
+  width?: number;
+  height?: number;
+  initialClearColor?: ColorValue;
+  showPolicy?: WindowShowPolicy;
+  workerEntrypoint?: string;
+}
+
+export interface WindowHandle {
+  id: number;
 }
 
 export type LayoutPosition = 'relative' | 'absolute';

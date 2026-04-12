@@ -8,6 +8,7 @@ if (!hmrData?.windowCreated) {
     title: "2d fills",
     width: 720,
     height: 980,
+    showPolicy: "after-first-paint",
     workerEntrypoint: windowWorkerEntrypoint,
   });
 }

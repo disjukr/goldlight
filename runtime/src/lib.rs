@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 #[cfg(feature = "dev-runtime")]
 use axum::extract::{Path as AxumPath, State};
 #[cfg(feature = "dev-runtime")]
@@ -29,31 +29,31 @@ use axum::routing::get;
 #[cfg(feature = "dev-runtime")]
 use axum::{Json, Router};
 #[cfg(feature = "dev-runtime")]
-use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-#[cfg(feature = "dev-runtime")]
 use base64::Engine;
+#[cfg(feature = "dev-runtime")]
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use bytes::Bytes;
-use deno_core::{
-    resolve_import, resolve_path, v8, JsRuntime, ModuleLoadResponse, ModuleLoader, ModuleSource,
-    ModuleSourceCode, ModuleSpecifier, ModuleType, OpState, PollEventLoopOptions,
-    RequestedModuleType, ResolutionKind, RuntimeOptions,
-};
 #[cfg(feature = "dev-runtime")]
 use deno_core::{
     InspectorMsg, InspectorSessionKind, InspectorSessionOptions, InspectorSessionProxy,
 };
+use deno_core::{
+    JsRuntime, ModuleLoadResponse, ModuleLoader, ModuleSource, ModuleSourceCode, ModuleSpecifier,
+    ModuleType, OpState, PollEventLoopOptions, RequestedModuleType, ResolutionKind, RuntimeOptions,
+    resolve_import, resolve_path, v8,
+};
 use deno_error::JsErrorBox;
+use fastwebsockets::{FragmentCollector, Frame as FastWebSocketFrame, OpCode as FastOpCode};
 #[cfg(feature = "dev-runtime")]
 use fastwebsockets::{
-    upgrade::IncomingUpgrade, WebSocket as FastWebSocket, WebSocketWrite as FastWebSocketWrite,
+    WebSocket as FastWebSocket, WebSocketWrite as FastWebSocketWrite, upgrade::IncomingUpgrade,
 };
-use fastwebsockets::{FragmentCollector, Frame as FastWebSocketFrame, OpCode as FastOpCode};
 #[cfg(feature = "dev-runtime")]
 use futures::channel::mpsc;
 use futures_util::StreamExt;
 use http_body_util::Empty;
-use hyper::upgrade::Upgraded;
 use hyper::Request;
+use hyper::upgrade::Upgraded;
 use hyper_util::rt::TokioIo;
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "dev-runtime")]
@@ -73,10 +73,10 @@ use tokio::runtime::Builder as TokioRuntimeBuilder;
 use tokio::sync::mpsc::{self as tokio_mpsc, UnboundedSender as TokioUnboundedSender};
 #[cfg(feature = "dev-runtime")]
 use tokio::sync::oneshot;
-use tokio_rustls::rustls::pki_types::ServerName;
+use tokio_rustls::TlsConnector;
 use tokio_rustls::rustls::ClientConfig;
 use tokio_rustls::rustls::RootCertStore;
-use tokio_rustls::TlsConnector;
+use tokio_rustls::rustls::pki_types::ServerName;
 use tracing::debug;
 #[cfg(feature = "dev-runtime")]
 use uuid::Uuid;
@@ -89,10 +89,10 @@ use winit::{
 };
 
 use crate::render::{
-    Path2DHandle, Path2DOptions, Path2DUpdate, Rect2DHandle, Rect2DOptions, Rect2DUpdate,
-    RenderModel, RendererBootstrap, RendererState, Scene2DHandle, Scene2DOptions, Scene3DHandle,
-    Scene3DOptions, SceneCameraUpdate, SceneClearColorOptions, Text2DHandle, Text2DOptions,
-    Text2DUpdate, Triangle3DHandle, Triangle3DOptions, Triangle3DUpdate,
+    ColorValue, Path2DHandle, Path2DOptions, Path2DUpdate, Rect2DHandle, Rect2DOptions,
+    Rect2DUpdate, RenderModel, RendererBootstrap, RendererState, Scene2DHandle, Scene2DOptions,
+    Scene3DHandle, Scene3DOptions, SceneCameraUpdate, SceneClearColorOptions, Text2DHandle,
+    Text2DOptions, Text2DUpdate, Triangle3DHandle, Triangle3DOptions, Triangle3DUpdate,
 };
 use crate::text::{GlyphSubpixelOffsetInput, ShapeTextInput};
 
@@ -115,8 +115,7 @@ const GOLDLIGHT_WEBTRANSPORT_SOURCE: &str = include_str!("../js/webtransport.js"
 #[cfg(feature = "dev-runtime")]
 const GOLDLIGHT_VITE_CLIENT_SPECIFIER: &str = "ext:goldlight/vite_client.js";
 #[cfg(feature = "dev-runtime")]
-const GOLDLIGHT_VITE_CLIENT_SOURCE: &str =
-    "export function createHotContext(ownerPath) { return globalThis.__goldlightCreateHotContext(ownerPath); }\n";
+const GOLDLIGHT_VITE_CLIENT_SOURCE: &str = "export function createHotContext(ownerPath) { return globalThis.__goldlightCreateHotContext(ownerPath); }\n";
 const RUNTIME_POLL_INTERVAL_MS: u64 = 16;
 
 #[cfg(feature = "dev-runtime")]
@@ -258,8 +257,33 @@ struct WindowOptions {
     title: String,
     width: u32,
     height: u32,
+    #[serde(default = "default_window_initial_clear_color")]
+    initial_clear_color: ColorValue,
+    #[serde(default = "default_window_show_policy")]
+    show_policy: WindowShowPolicy,
     #[serde(default)]
     worker_entrypoint: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+enum WindowShowPolicy {
+    Immediate,
+    AfterInitialClear,
+    AfterFirstPaint,
+}
+
+fn default_window_initial_clear_color() -> ColorValue {
+    ColorValue {
+        r: 1.0,
+        g: 1.0,
+        b: 1.0,
+        a: 1.0,
+    }
+}
+
+fn default_window_show_policy() -> WindowShowPolicy {
+    WindowShowPolicy::AfterInitialClear
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -419,6 +443,8 @@ struct PendingWindow {
     title: String,
     width: u32,
     height: u32,
+    initial_clear_color: ColorValue,
+    show_policy: WindowShowPolicy,
     worker_entrypoint: Option<String>,
 }
 
@@ -581,6 +607,9 @@ struct WindowRecord {
     renderer: WindowRendererState,
     render_model_snapshot: Option<Arc<RenderModel>>,
     pending_resize: Option<winit::dpi::PhysicalSize<u32>>,
+    initial_clear_color: ColorValue,
+    show_policy: WindowShowPolicy,
+    startup_presented: bool,
 }
 
 fn spawn_window_renderer(
@@ -1014,6 +1043,8 @@ fn op_goldlight_create_window(
         title: options.title,
         width: options.width,
         height: options.height,
+        initial_clear_color: options.initial_clear_color,
+        show_policy: options.show_policy,
         worker_entrypoint: options.worker_entrypoint,
     });
     if let Some(event_proxy) = op_context.event_proxy {
@@ -3892,12 +3923,14 @@ impl GoldlightRuntime {
         };
 
         for pending_window in pending {
+            let startup_presented = pending_window.show_policy == WindowShowPolicy::Immediate;
             let attributes = WindowAttributes::default()
                 .with_title(pending_window.title.clone())
                 .with_inner_size(winit::dpi::PhysicalSize::new(
                     pending_window.width,
                     pending_window.height,
-                ));
+                ))
+                .with_visible(startup_presented);
             let window = Arc::new(
                 event_loop
                     .create_window(attributes)
@@ -3939,6 +3972,9 @@ impl GoldlightRuntime {
                     renderer: WindowRendererState::Pending(renderer),
                     render_model_snapshot: None,
                     pending_resize: None,
+                    initial_clear_color: pending_window.initial_clear_color,
+                    show_policy: pending_window.show_policy,
+                    startup_presented,
                 },
             );
         }
@@ -3979,13 +4015,21 @@ impl GoldlightRuntime {
             let Some(worker) = record.worker.as_ref() else {
                 continue;
             };
+            let published_render_model = worker.take_published_render_model();
+            let animation_frame_requested = worker.take_animation_frame_request();
 
             let mut needs_redraw = false;
-            if let Some(render_model) = worker.take_published_render_model() {
+            if let Some(render_model) = published_render_model {
                 record.render_model_snapshot = Some(render_model);
-                needs_redraw = true;
+                if !record.startup_presented
+                    && record.show_policy == WindowShowPolicy::AfterFirstPaint
+                {
+                    needs_redraw = !Self::present_first_frame(record);
+                } else {
+                    needs_redraw = true;
+                }
             }
-            if worker.take_animation_frame_request() {
+            if animation_frame_requested {
                 needs_redraw = true;
             }
             if needs_redraw {
@@ -3999,7 +4043,12 @@ impl GoldlightRuntime {
             (&mut record.renderer, record.render_model_snapshot.as_ref())
         {
             match renderer.render(render_model.as_ref()) {
-                Ok(rendered) => rendered,
+                Ok(rendered) => {
+                    if rendered {
+                        Self::complete_startup_presentation(record);
+                    }
+                    rendered
+                }
                 Err(error) => {
                     eprintln!("goldlight render failed: {error:?}");
                     false
@@ -4007,6 +4056,63 @@ impl GoldlightRuntime {
             }
         } else {
             false
+        }
+    }
+
+    fn draw_window(record: &mut WindowRecord) -> bool {
+        if record.startup_presented {
+            return Self::render_window(record);
+        }
+        match record.show_policy {
+            WindowShowPolicy::Immediate => Self::render_window(record),
+            WindowShowPolicy::AfterInitialClear => Self::present_initial_clear(record),
+            WindowShowPolicy::AfterFirstPaint => Self::present_first_frame(record),
+        }
+    }
+
+    fn complete_startup_presentation(record: &mut WindowRecord) {
+        if record.startup_presented {
+            return;
+        }
+        record.window.set_visible(true);
+        record.startup_presented = true;
+    }
+
+    fn present_initial_clear(record: &mut WindowRecord) -> bool {
+        if record.startup_presented || record.show_policy != WindowShowPolicy::AfterInitialClear {
+            return false;
+        }
+        let WindowRendererState::Ready(renderer) = &mut record.renderer else {
+            return false;
+        };
+        match renderer.render_clear(record.initial_clear_color) {
+            Ok(rendered) => {
+                if rendered {
+                    Self::complete_startup_presentation(record);
+                }
+                rendered
+            }
+            Err(error) => {
+                eprintln!("goldlight initial clear failed: {error:?}");
+                false
+            }
+        }
+    }
+
+    fn present_first_frame(record: &mut WindowRecord) -> bool {
+        if record.startup_presented || record.show_policy != WindowShowPolicy::AfterFirstPaint {
+            return false;
+        }
+        Self::render_window(record)
+    }
+
+    fn present_pending_startup_frames(&mut self) {
+        for record in self.windows.values_mut() {
+            if Self::present_initial_clear(record) {
+                record.window.request_redraw();
+                continue;
+            }
+            let _ = Self::present_first_frame(record);
         }
     }
 
@@ -4086,7 +4192,7 @@ impl ApplicationHandler<RuntimeUserEvent> for GoldlightRuntime {
                 }
             }
             WindowEvent::RedrawRequested => {
-                let _ = Self::render_window(record);
+                let _ = Self::draw_window(record);
                 if let Some(worker) = record.worker.as_ref() {
                     worker.push_event(WorkerEventPayload::AnimationFrame {
                         timestamp_ms: self.frame_time_origin.elapsed().as_secs_f64() * 1000.0,
@@ -4100,6 +4206,7 @@ impl ApplicationHandler<RuntimeUserEvent> for GoldlightRuntime {
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         self.drain_pending_windows(event_loop);
         self.promote_pending_renderers();
+        self.present_pending_startup_frames();
         self.sync_window_redraws();
         self.maybe_exit(event_loop);
     }
@@ -4109,6 +4216,7 @@ impl ApplicationHandler<RuntimeUserEvent> for GoldlightRuntime {
             RuntimeUserEvent::Wake => {
                 self.drain_pending_windows(event_loop);
                 self.promote_pending_renderers();
+                self.present_pending_startup_frames();
                 self.sync_window_redraws();
                 self.maybe_exit(event_loop);
             }

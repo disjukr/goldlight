@@ -5,5 +5,6 @@ createWindow({
   title: "2d text glyph clusters",
   width: 1280,
   height: 720,
+  showPolicy: "after-first-paint",
   workerEntrypoint: windowWorkerEntrypoint,
 });

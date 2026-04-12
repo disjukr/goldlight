@@ -8,6 +8,7 @@ if (!hmrData?.windowCreated) {
     title: "2d strokes",
     width: 680,
     height: 940,
+    showPolicy: "after-first-paint",
     workerEntrypoint: windowWorkerEntrypoint,
   });
 }

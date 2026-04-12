@@ -3,10 +3,27 @@ function normalizeWindowInit(init = {}) {
     title = "untitled",
     width = 640,
     height = 480,
+    initialClearColor = { r: 1, g: 1, b: 1, a: 1 },
+    showPolicy = "after-initial-clear",
     workerEntrypoint = undefined,
   } = init;
 
-  return { title, width, height, workerEntrypoint };
+  if (
+    showPolicy !== "immediate" &&
+    showPolicy !== "after-initial-clear" &&
+    showPolicy !== "after-first-paint"
+  ) {
+    throw new TypeError(`unsupported window show policy: ${showPolicy}`);
+  }
+
+  return {
+    title,
+    width,
+    height,
+    initialClearColor: normalizeColor(initialClearColor),
+    showPolicy,
+    workerEntrypoint,
+  };
 }
 
 function normalizeColor(color = {}) {

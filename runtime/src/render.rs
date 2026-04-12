@@ -1,17 +1,17 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec4};
 use serde::{Deserialize, Serialize};
-use wgpu::util::DeviceExt;
 use wgpu::TextureFormatFeatureFlags;
+use wgpu::util::DeviceExt;
 use winit::{dpi::PhysicalSize, window::Window};
 
 use crate::drawing::{
-    encode_drawing_command_buffer, prepare_drawing_recording, record_scene_2d, DawnSharedContext,
-    DRAWING_DEPTH_FORMAT,
+    DRAWING_DEPTH_FORMAT, DawnSharedContext, encode_drawing_command_buffer,
+    prepare_drawing_recording, record_scene_2d,
 };
 
 const SHADER_SOURCE: &str = r#"
@@ -1375,6 +1375,54 @@ impl RendererState {
         self.drawing_depth_target = Self::create_depth_target(&self.device, &self.config, 1);
         self.drawing_msaa_depth_target = (self.msaa_sample_count > 1)
             .then(|| Self::create_depth_target(&self.device, &self.config, self.msaa_sample_count));
+    }
+
+    pub fn render_clear(&mut self, clear_color: ColorValue) -> Result<bool> {
+        if self.config.width == 0 || self.config.height == 0 {
+            return Ok(false);
+        }
+
+        let frame = match self.surface.get_current_texture() {
+            Ok(frame) => frame,
+            Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+                self.surface.configure(&self.device, &self.config);
+                match self.surface.get_current_texture() {
+                    Ok(frame) => frame,
+                    Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+                        return Ok(false);
+                    }
+                    Err(wgpu::SurfaceError::Timeout) => return Ok(false),
+                    Err(error) => {
+                        return Err(anyhow!(
+                            "failed to acquire clear frame after surface reconfigure: {error}"
+                        ));
+                    }
+                }
+            }
+            Err(wgpu::SurfaceError::Timeout) => return Ok(false),
+            Err(error) => return Err(anyhow!("failed to acquire clear frame: {error}")),
+        };
+        let view = frame
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("goldlight clear encoder"),
+            });
+        let mut command_buffer = SceneCommandBuffer {
+            device: &self.device,
+            encoder: &mut encoder,
+            target_view: &view,
+            drawing_context: &self.drawing_context,
+            geometry_pipeline: &self.geometry_pipeline,
+        };
+        command_buffer.encode_clear(clear_color);
+
+        self.queue.submit(std::iter::once(encoder.finish()));
+        frame.present();
+        Ok(true)
     }
 
     pub fn render(&mut self, model: &RenderModel) -> Result<bool> {

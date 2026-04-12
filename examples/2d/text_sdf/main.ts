@@ -5,5 +5,6 @@ createWindow({
   title: "2d text sdf",
   width: 1280,
   height: 760,
+  showPolicy: "after-first-paint",
   workerEntrypoint: windowWorkerEntrypoint,
 });

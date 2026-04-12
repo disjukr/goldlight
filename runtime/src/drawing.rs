@@ -6,23 +6,24 @@ use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 
 use crate::drawing_text::{
-    encode_bitmap_text_step, encode_sdf_text_step, prepare_direct_mask_text_step,
-    prepare_sdf_text_step, prepare_transformed_mask_text_step, PreparedBitmapTextStep,
-    PreparedSdfTextStep, TextPipelineResources,
+    PreparedBitmapTextStep, PreparedSdfTextStep, TextPipelineResources, encode_bitmap_text_step,
+    encode_sdf_text_step, prepare_direct_mask_text_step, prepare_sdf_text_step,
+    prepare_transformed_mask_text_step,
 };
 use crate::fill_patch::{
-    curve_fill_shader_source, curve_template_vertices, fill_paint_shader_source,
-    prepare_fill_steps, wedge_fill_shader_source, wedge_template_vertices, CurveFillPatchInstance,
-    FillStencilMode, FillTriangleMode, PatchResolveVertex, PreparedCurveFillStep, PreparedFillStep,
-    PreparedFillTriangleStep, PreparedWedgeFillStep, WedgeFillPatchInstance,
+    CurveFillPatchInstance, FillStencilMode, FillTriangleMode, PatchResolveVertex,
+    PreparedCurveFillStep, PreparedFillStep, PreparedFillTriangleStep, PreparedWedgeFillStep,
+    WedgeFillPatchInstance, curve_fill_shader_source, curve_template_vertices,
+    fill_paint_shader_source, prepare_fill_steps, wedge_fill_shader_source,
+    wedge_template_vertices,
 };
 use crate::render::{
     ColorValue, GradientStop2D, GradientTileMode2D, Path2D, PathFillRule2D, PathShader2D,
     PathStrokeCap2D, PathStrokeJoin2D, PathStyle2D, PathVerb2D, Rect2D, Scene2D, Text2D,
 };
 use crate::stroke_patch::{
-    prepare_stroke_patch_step, stroke_patch_shader_source, PreparedStrokePatchStep,
-    StrokePatchInstance,
+    PreparedStrokePatchStep, StrokePatchInstance, prepare_stroke_patch_step,
+    stroke_patch_shader_source,
 };
 
 const EPSILON: f32 = 1e-5;
@@ -3836,8 +3837,8 @@ pub fn encode_drawing_command_buffer(
 #[cfg(test)]
 mod tests {
     use super::{
-        prepare_drawing_recording, DirectMaskTextDrawCommand, DrawingPreparedStep, DrawingRecorder,
-        PathDrawCommand,
+        DirectMaskTextDrawCommand, DrawingPreparedStep, DrawingRecorder, PathDrawCommand,
+        prepare_drawing_recording,
     };
     use crate::render::{
         ColorValue, DirectMaskGlyph2D, GlyphMask2D, PathFillRule2D, PathStrokeCap2D,
@@ -3875,12 +3876,16 @@ mod tests {
             .iter()
             .flat_map(|pass| pass.steps.iter())
             .collect::<Vec<_>>();
-        assert!(steps
-            .iter()
-            .any(|step| matches!(step, DrawingPreparedStep::StrokePatches(_))));
-        assert!(!steps
-            .iter()
-            .any(|step| matches!(step, DrawingPreparedStep::Triangles { .. })));
+        assert!(
+            steps
+                .iter()
+                .any(|step| matches!(step, DrawingPreparedStep::StrokePatches(_)))
+        );
+        assert!(
+            !steps
+                .iter()
+                .any(|step| matches!(step, DrawingPreparedStep::Triangles { .. }))
+        );
     }
 
     fn direct_mask_text() -> DirectMaskTextDrawCommand {

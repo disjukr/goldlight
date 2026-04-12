@@ -5,5 +5,6 @@ createWindow({
   title: "2d text modes",
   width: 1280,
   height: 960,
+  showPolicy: "after-first-paint",
   workerEntrypoint: windowWorkerEntrypoint,
 });

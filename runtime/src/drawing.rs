@@ -1,5 +1,5 @@
 use std::f32::consts::PI;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use anyhow::Result;
 use bytemuck::{Pod, Zeroable};
@@ -75,17 +75,17 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {{
 pub struct DawnResourceProvider {
     device: wgpu::Device,
     msaa_sample_count: u32,
-    triangle_direct_pipeline: PipelinePair,
-    triangle_depth_pipeline: PipelinePair,
-    triangle_stencil_evenodd_pipeline: PipelinePair,
-    triangle_stencil_nonzero_pipeline: PipelinePair,
-    triangle_stencil_cover_pipeline: PipelinePair,
-    wedge_direct_pipeline: PipelinePair,
-    wedge_stencil_evenodd_pipeline: PipelinePair,
-    wedge_stencil_nonzero_pipeline: PipelinePair,
-    curve_stencil_evenodd_pipeline: PipelinePair,
-    curve_stencil_nonzero_pipeline: PipelinePair,
-    stroke_pipeline: PipelinePair,
+    triangle_direct_pipeline: Arc<PipelinePair>,
+    triangle_depth_pipeline: Arc<PipelinePair>,
+    triangle_stencil_evenodd_pipeline: Arc<PipelinePair>,
+    triangle_stencil_nonzero_pipeline: Arc<PipelinePair>,
+    triangle_stencil_cover_pipeline: Arc<PipelinePair>,
+    wedge_direct_pipeline: Arc<PipelinePair>,
+    wedge_stencil_evenodd_pipeline: Arc<PipelinePair>,
+    wedge_stencil_nonzero_pipeline: Arc<PipelinePair>,
+    curve_stencil_evenodd_pipeline: Arc<PipelinePair>,
+    curve_stencil_nonzero_pipeline: Arc<PipelinePair>,
+    stroke_pipeline: Arc<PipelinePair>,
     wedge_template_buffer: wgpu::Buffer,
     wedge_template_vertex_count: u32,
     curve_template_buffer: wgpu::Buffer,
@@ -95,26 +95,41 @@ pub struct DawnResourceProvider {
     text_resources: TextPipelineResources,
 }
 
-#[derive(Clone)]
 struct PipelinePair {
-    single: Arc<wgpu::RenderPipeline>,
-    msaa: Option<Arc<wgpu::RenderPipeline>>,
+    _name: &'static str,
+    create_pipeline: Arc<dyn Fn(u32) -> wgpu::RenderPipeline + Send + Sync>,
+    single: OnceLock<Arc<wgpu::RenderPipeline>>,
+    msaa: OnceLock<Arc<wgpu::RenderPipeline>>,
+    msaa_sample_count: u32,
 }
 
 impl PipelinePair {
-    fn new(create_pipeline: impl Fn(u32) -> wgpu::RenderPipeline, msaa_sample_count: u32) -> Self {
-        let single = Arc::new(create_pipeline(1));
-        let msaa = (msaa_sample_count > 1).then(|| Arc::new(create_pipeline(msaa_sample_count)));
-        Self { single, msaa }
+    fn new(
+        name: &'static str,
+        create_pipeline: impl Fn(u32) -> wgpu::RenderPipeline + Send + Sync + 'static,
+        msaa_sample_count: u32,
+    ) -> Self {
+        Self {
+            _name: name,
+            create_pipeline: Arc::new(create_pipeline),
+            single: OnceLock::new(),
+            msaa: OnceLock::new(),
+            msaa_sample_count,
+        }
     }
 
     fn get(&self, sample_count: u32) -> Arc<wgpu::RenderPipeline> {
-        if sample_count > 1 {
-            if let Some(pipeline) = &self.msaa {
-                return pipeline.clone();
-            }
+        if sample_count > 1 && self.msaa_sample_count > 1 {
+            return self
+                .msaa
+                .get_or_init(|| self.create(sample_count))
+                .clone();
         }
-        self.single.clone()
+        self.single.get_or_init(|| self.create(1)).clone()
+    }
+
+    fn create(&self, sample_count: u32) -> Arc<wgpu::RenderPipeline> {
+        Arc::new((self.create_pipeline)(sample_count))
     }
 }
 
@@ -127,8 +142,197 @@ enum TrianglePipelineKind {
     StencilCover,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PipelineWarmupKey {
+    Triangle {
+        sample_count: u32,
+        mode: TriangleStepMode,
+    },
+    Wedge {
+        sample_count: u32,
+        stencil_mode: Option<FillStencilMode>,
+    },
+    Curve {
+        sample_count: u32,
+        stencil_mode: FillStencilMode,
+    },
+    Stroke {
+        sample_count: u32,
+    },
+    BitmapText {
+        sample_count: u32,
+    },
+    SdfText {
+        sample_count: u32,
+    },
+}
+
+fn create_triangle_render_pipeline(
+    device: &wgpu::Device,
+    format: wgpu::TextureFormat,
+    shader: &wgpu::ShaderModule,
+    pipeline_layout: &wgpu::PipelineLayout,
+    sample_count: u32,
+    kind: TrianglePipelineKind,
+) -> wgpu::RenderPipeline {
+    let (depth_stencil, write_mask) = triangle_pipeline_state(kind);
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("goldlight drawing pipeline"),
+        layout: Some(pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: shader,
+            entry_point: Some("vs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            buffers: &[DrawingVertex::layout()],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: shader,
+            entry_point: Some("fs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask,
+            })],
+        }),
+        primitive: wgpu::PrimitiveState::default(),
+        depth_stencil,
+        multisample: wgpu::MultisampleState {
+            count: sample_count,
+            ..wgpu::MultisampleState::default()
+        },
+        multiview: None,
+        cache: None,
+    })
+}
+
+fn create_wedge_render_pipeline(
+    device: &wgpu::Device,
+    format: wgpu::TextureFormat,
+    shader: &wgpu::ShaderModule,
+    pipeline_layout: &wgpu::PipelineLayout,
+    sample_count: u32,
+    stencil_mode: Option<FillStencilMode>,
+) -> wgpu::RenderPipeline {
+    let (depth_stencil, write_mask) = patch_pipeline_state(stencil_mode);
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("goldlight wedge fill patch pipeline"),
+        layout: Some(pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: shader,
+            entry_point: Some("vs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            buffers: &[PatchResolveVertex::layout(), WedgeFillPatchInstance::layout()],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: shader,
+            entry_point: Some("fs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask,
+            })],
+        }),
+        primitive: wgpu::PrimitiveState::default(),
+        depth_stencil,
+        multisample: wgpu::MultisampleState {
+            count: sample_count,
+            ..wgpu::MultisampleState::default()
+        },
+        multiview: None,
+        cache: None,
+    })
+}
+
+fn create_curve_render_pipeline(
+    device: &wgpu::Device,
+    format: wgpu::TextureFormat,
+    shader: &wgpu::ShaderModule,
+    pipeline_layout: &wgpu::PipelineLayout,
+    sample_count: u32,
+    stencil_mode: FillStencilMode,
+) -> wgpu::RenderPipeline {
+    let (depth_stencil, write_mask) = patch_pipeline_state(Some(stencil_mode));
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("goldlight curve fill patch pipeline"),
+        layout: Some(pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: shader,
+            entry_point: Some("vs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            buffers: &[PatchResolveVertex::layout(), CurveFillPatchInstance::layout()],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: shader,
+            entry_point: Some("fs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask,
+            })],
+        }),
+        primitive: wgpu::PrimitiveState::default(),
+        depth_stencil,
+        multisample: wgpu::MultisampleState {
+            count: sample_count,
+            ..wgpu::MultisampleState::default()
+        },
+        multiview: None,
+        cache: None,
+    })
+}
+
+fn create_stroke_render_pipeline(
+    device: &wgpu::Device,
+    format: wgpu::TextureFormat,
+    shader: &wgpu::ShaderModule,
+    pipeline_layout: &wgpu::PipelineLayout,
+    sample_count: u32,
+) -> wgpu::RenderPipeline {
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("goldlight stroke patch pipeline"),
+        layout: Some(pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: shader,
+            entry_point: Some("vs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            buffers: &[StrokePatchInstance::layout()],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: shader,
+            entry_point: Some("fs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleStrip,
+            ..wgpu::PrimitiveState::default()
+        },
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: DRAWING_DEPTH_FORMAT,
+            depth_write_enabled: true,
+            depth_compare: wgpu::CompareFunction::Less,
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        }),
+        multisample: wgpu::MultisampleState {
+            count: sample_count,
+            ..wgpu::MultisampleState::default()
+        },
+        multiview: None,
+        cache: None,
+    })
+}
+
 impl DawnResourceProvider {
     fn new(device: &wgpu::Device, format: wgpu::TextureFormat, msaa_sample_count: u32) -> Self {
+        let device = device.clone();
         let triangle_shader_source = drawing_shader_source();
         let triangle_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("goldlight drawing shader"),
@@ -195,144 +399,6 @@ impl DawnResourceProvider {
                 bind_group_layouts: &[&viewport_bind_group_layout],
                 push_constant_ranges: &[],
             });
-        let create_triangle_pipeline = |sample_count: u32, kind: TrianglePipelineKind| {
-            let (depth_stencil, write_mask) = triangle_pipeline_state(kind);
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("goldlight drawing pipeline"),
-                layout: Some(&triangle_pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: &triangle_shader,
-                    entry_point: Some("vs_main"),
-                    compilation_options: wgpu::PipelineCompilationOptions::default(),
-                    buffers: &[DrawingVertex::layout()],
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &triangle_shader,
-                    entry_point: Some("fs_main"),
-                    compilation_options: wgpu::PipelineCompilationOptions::default(),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format,
-                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                        write_mask,
-                    })],
-                }),
-                primitive: wgpu::PrimitiveState::default(),
-                depth_stencil,
-                multisample: wgpu::MultisampleState {
-                    count: sample_count,
-                    ..wgpu::MultisampleState::default()
-                },
-                multiview: None,
-                cache: None,
-            })
-        };
-        let create_wedge_pipeline = |sample_count: u32, stencil_mode: Option<FillStencilMode>| {
-            let (depth_stencil, write_mask) = patch_pipeline_state(stencil_mode);
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("goldlight wedge fill patch pipeline"),
-                layout: Some(&fill_patch_pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: &wedge_shader,
-                    entry_point: Some("vs_main"),
-                    compilation_options: wgpu::PipelineCompilationOptions::default(),
-                    buffers: &[
-                        PatchResolveVertex::layout(),
-                        WedgeFillPatchInstance::layout(),
-                    ],
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &wedge_shader,
-                    entry_point: Some("fs_main"),
-                    compilation_options: wgpu::PipelineCompilationOptions::default(),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format,
-                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                        write_mask,
-                    })],
-                }),
-                primitive: wgpu::PrimitiveState::default(),
-                depth_stencil,
-                multisample: wgpu::MultisampleState {
-                    count: sample_count,
-                    ..wgpu::MultisampleState::default()
-                },
-                multiview: None,
-                cache: None,
-            })
-        };
-        let create_curve_pipeline = |sample_count: u32, stencil_mode: FillStencilMode| {
-            let (depth_stencil, write_mask) = patch_pipeline_state(Some(stencil_mode));
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("goldlight curve fill patch pipeline"),
-                layout: Some(&fill_patch_pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: &curve_shader,
-                    entry_point: Some("vs_main"),
-                    compilation_options: wgpu::PipelineCompilationOptions::default(),
-                    buffers: &[
-                        PatchResolveVertex::layout(),
-                        CurveFillPatchInstance::layout(),
-                    ],
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &curve_shader,
-                    entry_point: Some("fs_main"),
-                    compilation_options: wgpu::PipelineCompilationOptions::default(),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format,
-                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                        write_mask,
-                    })],
-                }),
-                primitive: wgpu::PrimitiveState::default(),
-                depth_stencil,
-                multisample: wgpu::MultisampleState {
-                    count: sample_count,
-                    ..wgpu::MultisampleState::default()
-                },
-                multiview: None,
-                cache: None,
-            })
-        };
-        let create_stroke_pipeline = |sample_count: u32| {
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("goldlight stroke patch pipeline"),
-                layout: Some(&stroke_pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: &stroke_shader,
-                    entry_point: Some("vs_main"),
-                    compilation_options: wgpu::PipelineCompilationOptions::default(),
-                    buffers: &[StrokePatchInstance::layout()],
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &stroke_shader,
-                    entry_point: Some("fs_main"),
-                    compilation_options: wgpu::PipelineCompilationOptions::default(),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format,
-                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                }),
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleStrip,
-                    ..wgpu::PrimitiveState::default()
-                },
-                depth_stencil: Some(wgpu::DepthStencilState {
-                    format: DRAWING_DEPTH_FORMAT,
-                    depth_write_enabled: true,
-                    depth_compare: wgpu::CompareFunction::Less,
-                    stencil: wgpu::StencilState::default(),
-                    bias: wgpu::DepthBiasState::default(),
-                }),
-                multisample: wgpu::MultisampleState {
-                    count: sample_count,
-                    ..wgpu::MultisampleState::default()
-                },
-                multiview: None,
-                cache: None,
-            })
-        };
         let wedge_template_vertices = wedge_template_vertices();
         let wedge_template_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("goldlight wedge fill template buffer"),
@@ -345,65 +411,237 @@ impl DawnResourceProvider {
             contents: bytemuck::cast_slice(&curve_template_vertices),
             usage: wgpu::BufferUsages::VERTEX,
         });
+        let triangle_direct_pipeline = Arc::new(PipelinePair::new(
+            "triangle direct",
+            {
+                let device = device.clone();
+                let triangle_shader = triangle_shader.clone();
+                let triangle_pipeline_layout = triangle_pipeline_layout.clone();
+                move |sample_count| {
+                    create_triangle_render_pipeline(
+                        &device,
+                        format,
+                        &triangle_shader,
+                        &triangle_pipeline_layout,
+                        sample_count,
+                        TrianglePipelineKind::Direct,
+                    )
+                }
+            },
+            msaa_sample_count,
+        ));
+        let triangle_depth_pipeline = Arc::new(PipelinePair::new(
+            "triangle direct depth",
+            {
+                let device = device.clone();
+                let triangle_shader = triangle_shader.clone();
+                let triangle_pipeline_layout = triangle_pipeline_layout.clone();
+                move |sample_count| {
+                    create_triangle_render_pipeline(
+                        &device,
+                        format,
+                        &triangle_shader,
+                        &triangle_pipeline_layout,
+                        sample_count,
+                        TrianglePipelineKind::DirectDepth,
+                    )
+                }
+            },
+            msaa_sample_count,
+        ));
+        let triangle_stencil_evenodd_pipeline = Arc::new(PipelinePair::new(
+            "triangle stencil evenodd",
+            {
+                let device = device.clone();
+                let triangle_shader = triangle_shader.clone();
+                let triangle_pipeline_layout = triangle_pipeline_layout.clone();
+                move |sample_count| {
+                    create_triangle_render_pipeline(
+                        &device,
+                        format,
+                        &triangle_shader,
+                        &triangle_pipeline_layout,
+                        sample_count,
+                        TrianglePipelineKind::StencilEvenodd,
+                    )
+                }
+            },
+            msaa_sample_count,
+        ));
+        let triangle_stencil_nonzero_pipeline = Arc::new(PipelinePair::new(
+            "triangle stencil nonzero",
+            {
+                let device = device.clone();
+                let triangle_shader = triangle_shader.clone();
+                let triangle_pipeline_layout = triangle_pipeline_layout.clone();
+                move |sample_count| {
+                    create_triangle_render_pipeline(
+                        &device,
+                        format,
+                        &triangle_shader,
+                        &triangle_pipeline_layout,
+                        sample_count,
+                        TrianglePipelineKind::StencilNonzero,
+                    )
+                }
+            },
+            msaa_sample_count,
+        ));
+        let triangle_stencil_cover_pipeline = Arc::new(PipelinePair::new(
+            "triangle stencil cover",
+            {
+                let device = device.clone();
+                let triangle_shader = triangle_shader.clone();
+                let triangle_pipeline_layout = triangle_pipeline_layout.clone();
+                move |sample_count| {
+                    create_triangle_render_pipeline(
+                        &device,
+                        format,
+                        &triangle_shader,
+                        &triangle_pipeline_layout,
+                        sample_count,
+                        TrianglePipelineKind::StencilCover,
+                    )
+                }
+            },
+            msaa_sample_count,
+        ));
+        let wedge_direct_pipeline = Arc::new(PipelinePair::new(
+            "wedge direct",
+            {
+                let device = device.clone();
+                let wedge_shader = wedge_shader.clone();
+                let fill_patch_pipeline_layout = fill_patch_pipeline_layout.clone();
+                move |sample_count| {
+                    create_wedge_render_pipeline(
+                        &device,
+                        format,
+                        &wedge_shader,
+                        &fill_patch_pipeline_layout,
+                        sample_count,
+                        None,
+                    )
+                }
+            },
+            msaa_sample_count,
+        ));
+        let wedge_stencil_evenodd_pipeline = Arc::new(PipelinePair::new(
+            "wedge stencil evenodd",
+            {
+                let device = device.clone();
+                let wedge_shader = wedge_shader.clone();
+                let fill_patch_pipeline_layout = fill_patch_pipeline_layout.clone();
+                move |sample_count| {
+                    create_wedge_render_pipeline(
+                        &device,
+                        format,
+                        &wedge_shader,
+                        &fill_patch_pipeline_layout,
+                        sample_count,
+                        Some(FillStencilMode::Evenodd),
+                    )
+                }
+            },
+            msaa_sample_count,
+        ));
+        let wedge_stencil_nonzero_pipeline = Arc::new(PipelinePair::new(
+            "wedge stencil nonzero",
+            {
+                let device = device.clone();
+                let wedge_shader = wedge_shader.clone();
+                let fill_patch_pipeline_layout = fill_patch_pipeline_layout.clone();
+                move |sample_count| {
+                    create_wedge_render_pipeline(
+                        &device,
+                        format,
+                        &wedge_shader,
+                        &fill_patch_pipeline_layout,
+                        sample_count,
+                        Some(FillStencilMode::Nonzero),
+                    )
+                }
+            },
+            msaa_sample_count,
+        ));
+        let curve_stencil_evenodd_pipeline = Arc::new(PipelinePair::new(
+            "curve stencil evenodd",
+            {
+                let device = device.clone();
+                let curve_shader = curve_shader.clone();
+                let fill_patch_pipeline_layout = fill_patch_pipeline_layout.clone();
+                move |sample_count| {
+                    create_curve_render_pipeline(
+                        &device,
+                        format,
+                        &curve_shader,
+                        &fill_patch_pipeline_layout,
+                        sample_count,
+                        FillStencilMode::Evenodd,
+                    )
+                }
+            },
+            msaa_sample_count,
+        ));
+        let curve_stencil_nonzero_pipeline = Arc::new(PipelinePair::new(
+            "curve stencil nonzero",
+            {
+                let device = device.clone();
+                let curve_shader = curve_shader.clone();
+                let fill_patch_pipeline_layout = fill_patch_pipeline_layout.clone();
+                move |sample_count| {
+                    create_curve_render_pipeline(
+                        &device,
+                        format,
+                        &curve_shader,
+                        &fill_patch_pipeline_layout,
+                        sample_count,
+                        FillStencilMode::Nonzero,
+                    )
+                }
+            },
+            msaa_sample_count,
+        ));
+        let stroke_pipeline = Arc::new(PipelinePair::new(
+            "stroke",
+            {
+                let device = device.clone();
+                let stroke_shader = stroke_shader.clone();
+                let stroke_pipeline_layout = stroke_pipeline_layout.clone();
+                move |sample_count| {
+                    create_stroke_render_pipeline(
+                        &device,
+                        format,
+                        &stroke_shader,
+                        &stroke_pipeline_layout,
+                        sample_count,
+                    )
+                }
+            },
+            msaa_sample_count,
+        ));
+        let text_resources = TextPipelineResources::new(&device, format, msaa_sample_count);
+
         Self {
             device: device.clone(),
             msaa_sample_count,
-            triangle_direct_pipeline: PipelinePair::new(
-                |sample_count| create_triangle_pipeline(sample_count, TrianglePipelineKind::Direct),
-                msaa_sample_count,
-            ),
-            triangle_depth_pipeline: PipelinePair::new(
-                |sample_count| {
-                    create_triangle_pipeline(sample_count, TrianglePipelineKind::DirectDepth)
-                },
-                msaa_sample_count,
-            ),
-            triangle_stencil_evenodd_pipeline: PipelinePair::new(
-                |sample_count| {
-                    create_triangle_pipeline(sample_count, TrianglePipelineKind::StencilEvenodd)
-                },
-                msaa_sample_count,
-            ),
-            triangle_stencil_nonzero_pipeline: PipelinePair::new(
-                |sample_count| {
-                    create_triangle_pipeline(sample_count, TrianglePipelineKind::StencilNonzero)
-                },
-                msaa_sample_count,
-            ),
-            triangle_stencil_cover_pipeline: PipelinePair::new(
-                |sample_count| {
-                    create_triangle_pipeline(sample_count, TrianglePipelineKind::StencilCover)
-                },
-                msaa_sample_count,
-            ),
-            wedge_direct_pipeline: PipelinePair::new(
-                |sample_count| create_wedge_pipeline(sample_count, None),
-                msaa_sample_count,
-            ),
-            wedge_stencil_evenodd_pipeline: PipelinePair::new(
-                |sample_count| create_wedge_pipeline(sample_count, Some(FillStencilMode::Evenodd)),
-                msaa_sample_count,
-            ),
-            wedge_stencil_nonzero_pipeline: PipelinePair::new(
-                |sample_count| create_wedge_pipeline(sample_count, Some(FillStencilMode::Nonzero)),
-                msaa_sample_count,
-            ),
-            curve_stencil_evenodd_pipeline: PipelinePair::new(
-                |sample_count| create_curve_pipeline(sample_count, FillStencilMode::Evenodd),
-                msaa_sample_count,
-            ),
-            curve_stencil_nonzero_pipeline: PipelinePair::new(
-                |sample_count| create_curve_pipeline(sample_count, FillStencilMode::Nonzero),
-                msaa_sample_count,
-            ),
-            stroke_pipeline: PipelinePair::new(create_stroke_pipeline, msaa_sample_count),
+            triangle_direct_pipeline,
+            triangle_depth_pipeline,
+            triangle_stencil_evenodd_pipeline,
+            triangle_stencil_nonzero_pipeline,
+            triangle_stencil_cover_pipeline,
+            wedge_direct_pipeline,
+            wedge_stencil_evenodd_pipeline,
+            wedge_stencil_nonzero_pipeline,
+            curve_stencil_evenodd_pipeline,
+            curve_stencil_nonzero_pipeline,
+            stroke_pipeline,
             wedge_template_buffer,
             wedge_template_vertex_count: wedge_template_vertices.len() as u32,
             curve_template_buffer,
             curve_template_vertex_count: curve_template_vertices.len() as u32,
             viewport_bind_group_layout: Arc::new(viewport_bind_group_layout),
             fill_paint_bind_group_layout: Arc::new(fill_paint_bind_group_layout),
-            text_resources: TextPipelineResources::new(device, format, msaa_sample_count),
+            text_resources,
         }
     }
 
@@ -419,6 +657,86 @@ impl DawnResourceProvider {
                     usage: wgpu::BufferUsages::VERTEX,
                 }),
         )
+    }
+
+    fn warm_prepared_pipelines(&self, prepared: &DrawingPreparedRecording) {
+        let mut keys = Vec::new();
+        for pass in &prepared.passes {
+            let sample_count = if pass.requires_msaa && self.msaa_sample_count > 1 {
+                self.msaa_sample_count
+            } else {
+                1
+            };
+            for step in &pass.steps {
+                let key = match step {
+                    DrawingPreparedStep::Triangles { mode, .. } => PipelineWarmupKey::Triangle {
+                        sample_count,
+                        mode: *mode,
+                    },
+                    DrawingPreparedStep::WedgeFillPatches { step, .. } => PipelineWarmupKey::Wedge {
+                        sample_count,
+                        stencil_mode: step.stencil_mode,
+                    },
+                    DrawingPreparedStep::CurveFillPatches { step, .. } => PipelineWarmupKey::Curve {
+                        sample_count,
+                        stencil_mode: step.stencil_mode,
+                    },
+                    DrawingPreparedStep::StrokePatches(_) => {
+                        PipelineWarmupKey::Stroke { sample_count }
+                    }
+                    DrawingPreparedStep::BitmapText(_) => {
+                        PipelineWarmupKey::BitmapText { sample_count }
+                    }
+                    DrawingPreparedStep::SdfText(_) => PipelineWarmupKey::SdfText { sample_count },
+                };
+                if !keys.contains(&key) {
+                    keys.push(key);
+                }
+            }
+        }
+        if keys.len() <= 1 {
+            for key in keys {
+                self.warm_pipeline(key);
+            }
+            return;
+        }
+        std::thread::scope(|scope| {
+            for key in keys {
+                let provider = self.clone();
+                scope.spawn(move || {
+                    provider.warm_pipeline(key);
+                });
+            }
+        });
+    }
+
+    fn warm_pipeline(&self, key: PipelineWarmupKey) {
+        match key {
+            PipelineWarmupKey::Triangle { sample_count, mode } => {
+                let _ = self.triangle_pipeline(sample_count, mode);
+            }
+            PipelineWarmupKey::Wedge {
+                sample_count,
+                stencil_mode,
+            } => {
+                let _ = self.wedge_pipeline(sample_count, stencil_mode);
+            }
+            PipelineWarmupKey::Curve {
+                sample_count,
+                stencil_mode,
+            } => {
+                let _ = self.curve_pipeline(sample_count, stencil_mode);
+            }
+            PipelineWarmupKey::Stroke { sample_count } => {
+                let _ = self.stroke_pipeline(sample_count);
+            }
+            PipelineWarmupKey::BitmapText { sample_count } => {
+                let _ = self.text_resources.bitmap_pipeline(sample_count);
+            }
+            PipelineWarmupKey::SdfText { sample_count } => {
+                let _ = self.text_resources.sdf_pipeline(sample_count);
+            }
+        }
     }
 
     fn create_stroke_patch_buffer(
@@ -3344,6 +3662,9 @@ pub fn encode_drawing_command_buffer(
     depth_target_view: Option<&wgpu::TextureView>,
     msaa_depth_target_view: Option<&wgpu::TextureView>,
 ) -> Result<()> {
+    shared_context
+        .resource_provider
+        .warm_prepared_pipelines(prepared);
     let (_viewport_buffer, viewport_bind_group) = shared_context
         .resource_provider
         .create_viewport_bind_group(prepared.surface_width, prepared.surface_height);

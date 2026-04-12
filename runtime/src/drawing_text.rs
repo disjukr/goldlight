@@ -1,3 +1,5 @@
+use std::sync::{Arc, OnceLock};
+
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 
@@ -114,14 +116,64 @@ pub struct PreparedSdfTextStep {
 pub struct TextPipelineResources {
     bind_group_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
-    bitmap_pipeline: TextPipelinePair,
-    sdf_pipeline: TextPipelinePair,
+    bitmap_pipeline: Arc<TextPipelinePair>,
+    sdf_pipeline: Arc<TextPipelinePair>,
 }
 
-#[derive(Clone)]
 struct TextPipelinePair {
-    single: wgpu::RenderPipeline,
-    msaa: Option<wgpu::RenderPipeline>,
+    _name: &'static str,
+    create_pipeline: Arc<dyn Fn(u32) -> wgpu::RenderPipeline + Send + Sync>,
+    single: OnceLock<Arc<wgpu::RenderPipeline>>,
+    msaa: OnceLock<Arc<wgpu::RenderPipeline>>,
+    msaa_sample_count: u32,
+}
+
+fn create_text_pipeline(
+    device: &wgpu::Device,
+    format: wgpu::TextureFormat,
+    pipeline_layout: &wgpu::PipelineLayout,
+    shader_source: &str,
+    label: &str,
+    sample_count: u32,
+) -> wgpu::RenderPipeline {
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some(label),
+        source: wgpu::ShaderSource::Wgsl(shader_source.into()),
+    });
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some(label),
+        layout: Some(pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            buffers: &[TextVertex::layout()],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        primitive: wgpu::PrimitiveState::default(),
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: crate::drawing::DRAWING_DEPTH_FORMAT,
+            depth_write_enabled: true,
+            depth_compare: wgpu::CompareFunction::Less,
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        }),
+        multisample: wgpu::MultisampleState {
+            count: sample_count,
+            ..wgpu::MultisampleState::default()
+        },
+        multiview: None,
+        cache: None,
+    })
 }
 
 #[derive(Clone, Copy)]
@@ -146,24 +198,36 @@ pub struct SdfTextGlyphRef<'a> {
 }
 
 impl TextPipelinePair {
-    fn new(create_pipeline: impl Fn(u32) -> wgpu::RenderPipeline, msaa_sample_count: u32) -> Self {
-        let single = create_pipeline(1);
-        let msaa = (msaa_sample_count > 1).then(|| create_pipeline(msaa_sample_count));
-        Self { single, msaa }
+    fn new(
+        name: &'static str,
+        create_pipeline: impl Fn(u32) -> wgpu::RenderPipeline + Send + Sync + 'static,
+        msaa_sample_count: u32,
+    ) -> Self {
+        Self {
+            _name: name,
+            create_pipeline: Arc::new(create_pipeline),
+            single: OnceLock::new(),
+            msaa: OnceLock::new(),
+            msaa_sample_count,
+        }
     }
 
-    fn get(&self, sample_count: u32) -> &wgpu::RenderPipeline {
-        if sample_count > 1 {
-            if let Some(pipeline) = &self.msaa {
-                return pipeline;
-            }
+    fn get(&self, sample_count: u32) -> Arc<wgpu::RenderPipeline> {
+        if sample_count > 1 && self.msaa_sample_count > 1 {
+            return self
+                .msaa
+                .get_or_init(|| Arc::new((self.create_pipeline)(sample_count)))
+                .clone();
         }
-        &self.single
+        self.single
+            .get_or_init(|| Arc::new((self.create_pipeline)(1)))
+            .clone()
     }
 }
 
 impl TextPipelineResources {
     pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat, msaa_sample_count: u32) -> Self {
+        let device = device.clone();
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("goldlight text bind group layout"),
             entries: &[
@@ -201,78 +265,53 @@ impl TextPipelineResources {
             push_constant_ranges: &[],
         });
 
-        let create_pipeline = |shader_source: &str, label: &str, sample_count: u32| {
-            let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some(label),
-                source: wgpu::ShaderSource::Wgsl(shader_source.into()),
-            });
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some(label),
-                layout: Some(&pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: &shader,
-                    entry_point: Some("vs_main"),
-                    compilation_options: wgpu::PipelineCompilationOptions::default(),
-                    buffers: &[TextVertex::layout()],
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &shader,
-                    entry_point: Some("fs_main"),
-                    compilation_options: wgpu::PipelineCompilationOptions::default(),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format,
-                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                }),
-                primitive: wgpu::PrimitiveState::default(),
-                depth_stencil: Some(wgpu::DepthStencilState {
-                    format: crate::drawing::DRAWING_DEPTH_FORMAT,
-                    depth_write_enabled: true,
-                    depth_compare: wgpu::CompareFunction::Less,
-                    stencil: wgpu::StencilState::default(),
-                    bias: wgpu::DepthBiasState::default(),
-                }),
-                multisample: wgpu::MultisampleState {
-                    count: sample_count,
-                    ..wgpu::MultisampleState::default()
-                },
-                multiview: None,
-                cache: None,
-            })
-        };
-
         Self {
             bind_group_layout,
             sampler,
-            bitmap_pipeline: TextPipelinePair::new(
-                |sample_count| {
-                    create_pipeline(
-                        BITMAP_TEXT_SHADER_SOURCE,
-                        "goldlight bitmap text pipeline",
-                        sample_count,
-                    )
+            bitmap_pipeline: Arc::new(TextPipelinePair::new(
+                "bitmap text",
+                {
+                    let device = device.clone();
+                    let pipeline_layout = pipeline_layout.clone();
+                    move |sample_count| {
+                        create_text_pipeline(
+                            &device,
+                            format,
+                            &pipeline_layout,
+                            BITMAP_TEXT_SHADER_SOURCE,
+                            "goldlight bitmap text pipeline",
+                            sample_count,
+                        )
+                    }
                 },
                 msaa_sample_count,
-            ),
-            sdf_pipeline: TextPipelinePair::new(
-                |sample_count| {
-                    create_pipeline(
-                        SDF_TEXT_SHADER_SOURCE,
-                        "goldlight sdf text pipeline",
-                        sample_count,
-                    )
+            )),
+            sdf_pipeline: Arc::new(TextPipelinePair::new(
+                "sdf text",
+                {
+                    let device = device.clone();
+                    let pipeline_layout = pipeline_layout.clone();
+                    move |sample_count| {
+                        create_text_pipeline(
+                            &device,
+                            format,
+                            &pipeline_layout,
+                            SDF_TEXT_SHADER_SOURCE,
+                            "goldlight sdf text pipeline",
+                            sample_count,
+                        )
+                    }
                 },
                 msaa_sample_count,
-            ),
+            )),
         }
     }
 
-    pub fn bitmap_pipeline(&self, sample_count: u32) -> &wgpu::RenderPipeline {
+    pub fn bitmap_pipeline(&self, sample_count: u32) -> Arc<wgpu::RenderPipeline> {
         self.bitmap_pipeline.get(sample_count)
     }
 
-    pub fn sdf_pipeline(&self, sample_count: u32) -> &wgpu::RenderPipeline {
+    pub fn sdf_pipeline(&self, sample_count: u32) -> Arc<wgpu::RenderPipeline> {
         self.sdf_pipeline.get(sample_count)
     }
 
@@ -603,7 +642,8 @@ pub fn encode_bitmap_text_step(
     });
     let (_texture, view) = create_text_atlas_texture(device, queue, &step.atlas);
     let bind_group = resources.create_bind_group(device, &view);
-    render_pass.set_pipeline(resources.bitmap_pipeline(sample_count));
+    let pipeline = resources.bitmap_pipeline(sample_count);
+    render_pass.set_pipeline(&pipeline);
     render_pass.set_bind_group(0, &bind_group, &[]);
     render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
     render_pass.draw(0..step.vertices.len() as u32, 0..1);
@@ -624,7 +664,8 @@ pub fn encode_sdf_text_step(
     });
     let (_texture, view) = create_text_atlas_texture(device, queue, &step.atlas);
     let bind_group = resources.create_bind_group(device, &view);
-    render_pass.set_pipeline(resources.sdf_pipeline(sample_count));
+    let pipeline = resources.sdf_pipeline(sample_count);
+    render_pass.set_pipeline(&pipeline);
     render_pass.set_bind_group(0, &bind_group, &[]);
     render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
     render_pass.draw(0..step.vertices.len() as u32, 0..1);

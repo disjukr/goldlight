@@ -672,6 +672,7 @@ enum ActiveScene {
     ThreeD(u32),
 }
 
+#[derive(Clone)]
 pub struct RenderModel {
     next_scene_id: u32,
     next_object_id: u32,
@@ -1075,6 +1076,12 @@ pub struct RendererState {
     size: PhysicalSize<u32>,
 }
 
+pub struct RendererBootstrap {
+    instance: wgpu::Instance,
+    surface: wgpu::Surface<'static>,
+    size: PhysicalSize<u32>,
+}
+
 struct MsaaColorTarget {
     _texture: wgpu::Texture,
     view: wgpu::TextureView,
@@ -1240,16 +1247,12 @@ impl RendererState {
         }
     }
 
-    pub fn new(window: Arc<Window>) -> Result<Self> {
-        let size = window.inner_size();
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            backends: preferred_backends(),
-            flags: wgpu::InstanceFlags::empty(),
-            backend_options: wgpu::BackendOptions::default(),
-        });
-        let surface = instance
-            .create_surface(window.clone())
-            .context("failed to create window surface")?;
+    pub fn new(bootstrap: RendererBootstrap) -> Result<Self> {
+        let RendererBootstrap {
+            instance,
+            surface,
+            size,
+        } = bootstrap;
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
             compatible_surface: Some(&surface),
@@ -1475,5 +1478,24 @@ impl RendererState {
             }
         }
         vertices
+    }
+}
+
+impl RendererBootstrap {
+    pub fn new(window: Arc<Window>) -> Result<Self> {
+        let size = window.inner_size();
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+            backends: preferred_backends(),
+            flags: wgpu::InstanceFlags::empty(),
+            backend_options: wgpu::BackendOptions::default(),
+        });
+        let surface = instance
+            .create_surface(window)
+            .context("failed to create window surface")?;
+        Ok(Self {
+            instance,
+            surface,
+            size,
+        })
     }
 }

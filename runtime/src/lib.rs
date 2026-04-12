@@ -90,9 +90,9 @@ use winit::{
 
 use crate::render::{
     Path2DHandle, Path2DOptions, Path2DUpdate, Rect2DHandle, Rect2DOptions, Rect2DUpdate,
-    RenderModel, RendererState, Scene2DHandle, Scene2DOptions, Scene3DHandle, Scene3DOptions,
-    SceneCameraUpdate, SceneClearColorOptions, Text2DHandle, Text2DOptions, Text2DUpdate,
-    Triangle3DHandle, Triangle3DOptions, Triangle3DUpdate,
+    RenderModel, RendererBootstrap, RendererState, Scene2DHandle, Scene2DOptions, Scene3DHandle,
+    Scene3DOptions, SceneCameraUpdate, SceneClearColorOptions, Text2DHandle, Text2DOptions,
+    Text2DUpdate, Triangle3DHandle, Triangle3DOptions, Triangle3DUpdate,
 };
 use crate::text::{GlyphSubpixelOffsetInput, ShapeTextInput};
 
@@ -478,6 +478,17 @@ enum WindowWorkerControl {
     Shutdown,
 }
 
+enum WindowRendererControl {
+    Wake,
+    Shutdown,
+}
+
+#[derive(Default)]
+struct WindowRendererPending {
+    resize: Option<winit::dpi::PhysicalSize<u32>>,
+    render_model: Option<RenderModel>,
+}
+
 struct WindowWorkerHandle {
     state: WorkerHostStateHandle,
     control_tx: Sender<WindowWorkerControl>,
@@ -531,10 +542,105 @@ impl WindowWorkerHandle {
     }
 }
 
+struct WindowRendererHandle {
+    pending: Arc<Mutex<WindowRendererPending>>,
+    control_tx: Sender<WindowRendererControl>,
+    thread_handle: Option<thread::JoinHandle<()>>,
+}
+
+impl WindowRendererHandle {
+    fn resize(&self, size: winit::dpi::PhysicalSize<u32>) {
+        if let Ok(mut pending) = self.pending.lock() {
+            pending.resize = Some(size);
+        }
+        let _ = self.control_tx.send(WindowRendererControl::Wake);
+    }
+
+    fn render(&self, render_model: RenderModel) {
+        if let Ok(mut pending) = self.pending.lock() {
+            pending.render_model = Some(render_model);
+        }
+        let _ = self.control_tx.send(WindowRendererControl::Wake);
+    }
+
+    fn shutdown(mut self) {
+        let _ = self.control_tx.send(WindowRendererControl::Shutdown);
+        if let Some(thread_handle) = self.thread_handle.take() {
+            thread::spawn(move || {
+                let _ = thread_handle.join();
+            });
+        }
+    }
+}
+
 struct WindowRecord {
     window: Arc<Window>,
     worker: Option<WindowWorkerHandle>,
-    renderer: RendererState,
+    renderer: WindowRendererHandle,
+}
+
+fn spawn_window_renderer(
+    window_id: WindowId,
+    bootstrap: RendererBootstrap,
+) -> WindowRendererHandle {
+    let (control_tx, control_rx) = std_mpsc::channel::<WindowRendererControl>();
+    let pending = Arc::new(Mutex::new(WindowRendererPending::default()));
+    let pending_handle = pending.clone();
+    let thread_handle = thread::spawn(move || {
+        run_window_renderer_thread(window_id, bootstrap, pending_handle, control_rx);
+    });
+    WindowRendererHandle {
+        pending,
+        control_tx,
+        thread_handle: Some(thread_handle),
+    }
+}
+
+fn run_window_renderer_thread(
+    _window_id: WindowId,
+    bootstrap: RendererBootstrap,
+    pending: Arc<Mutex<WindowRendererPending>>,
+    control_rx: std_mpsc::Receiver<WindowRendererControl>,
+) {
+    let mut renderer = match RendererState::new(bootstrap) {
+        Ok(renderer) => renderer,
+        Err(error) => {
+            eprintln!("goldlight renderer init failed: {error:?}");
+            return;
+        }
+    };
+    loop {
+        match control_rx.recv() {
+            Ok(WindowRendererControl::Wake) => {
+                let mut shutdown_requested = false;
+                while let Ok(control) = control_rx.try_recv() {
+                    match control {
+                        WindowRendererControl::Wake => {}
+                        WindowRendererControl::Shutdown => {
+                            shutdown_requested = true;
+                            break;
+                        }
+                    }
+                }
+                if shutdown_requested {
+                    break;
+                }
+                let pending_state = {
+                    let mut pending = pending.lock().expect("renderer pending mutex poisoned");
+                    std::mem::take(&mut *pending)
+                };
+                if let Some(size) = pending_state.resize {
+                    renderer.resize(size);
+                }
+                if let Some(render_model) = pending_state.render_model {
+                    if let Err(error) = renderer.render(&render_model) {
+                        eprintln!("goldlight render failed: {error:?}");
+                    }
+                }
+            }
+            Ok(WindowRendererControl::Shutdown) | Err(_) => break,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -3845,8 +3951,10 @@ impl GoldlightRuntime {
                     .create_window(attributes)
                     .expect("failed to create runtime window"),
             );
-            let renderer =
-                RendererState::new(window.clone()).expect("failed to initialize window renderer");
+            let window_id = window.id();
+            let renderer_bootstrap = RendererBootstrap::new(window.clone())
+                .expect("failed to create window renderer bootstrap");
+            let renderer = spawn_window_renderer(window_id, renderer_bootstrap);
             debug!(
                 id = pending_window.id,
                 title = pending_window.title,
@@ -3871,7 +3979,6 @@ impl GoldlightRuntime {
                     });
                     worker
                 });
-            let window_id = window.id();
             self.windows.insert(
                 window_id,
                 WindowRecord {
@@ -3909,6 +4016,7 @@ impl GoldlightRuntime {
                 if let Some(worker) = record.worker.take() {
                     worker.shutdown();
                 }
+                record.renderer.shutdown();
             }
         }
     }
@@ -3931,6 +4039,7 @@ impl ApplicationHandler<RuntimeUserEvent> for GoldlightRuntime {
                 if let Some(worker) = record.worker.take() {
                     worker.shutdown();
                 }
+                record.renderer.shutdown();
             }
             self.maybe_exit(event_loop);
             return;
@@ -3955,12 +4064,8 @@ impl ApplicationHandler<RuntimeUserEvent> for GoldlightRuntime {
                     if let Err(error) = worker.flush_layout() {
                         eprintln!("goldlight layout flush failed: {error:?}");
                     }
-                }
-                if let Some(worker) = record.worker.as_ref() {
                     if let Ok(worker_state) = worker.state.lock() {
-                        if let Err(error) = record.renderer.render(&worker_state.render_model) {
-                            eprintln!("goldlight render failed: {error:?}");
-                        }
+                        record.renderer.render(worker_state.render_model.clone());
                     }
                 }
                 if let Some(worker) = record.worker.as_ref() {

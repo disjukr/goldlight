@@ -4,7 +4,8 @@ import { spawn } from 'bun';
 import { build as viteBuild, createServer as createViteServer, mergeConfig } from 'vite';
 import { existsSync, readFileSync } from 'node:fs';
 import { createServer as createNetServer } from 'node:net';
-import { dirname, join, resolve } from 'node:path';
+import { homedir } from 'node:os';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 interface GoldlightProjectConfig {
@@ -107,6 +108,17 @@ function formatDevLine(line: string) {
   const label = line.slice(0, separatorIndex + 1);
   const value = line.slice(separatorIndex + 2);
   return `${colorize(label, ANSI.brightMagenta)} ${colorize(value, ANSI.brightYellow)}`;
+}
+
+function formatDisplayPath(path: string) {
+  const homePath = resolve(homedir());
+  const relativePath = relative(homePath, path);
+  const isInsideHome =
+    relativePath === '' ||
+    (!relativePath.startsWith('..') && !isAbsolute(relativePath));
+  if (!isInsideHome) return path;
+  if (!relativePath) return '~';
+  return `~/${relativePath.replaceAll('\\', '/')}`;
 }
 
 function printDevHeader(lines: string[]) {
@@ -303,10 +315,14 @@ async function fetchInspectorTargets(url: string) {
 }
 
 function inspectorLines(
+  projectRoot: string,
   devServerOrigin: string,
   inspectorTargets: InspectorTargetInfo[] | null,
 ) {
-  const lines = [`dev server: ${devServerOrigin}`];
+  const lines = [
+    `cwd: ${formatDisplayPath(projectRoot)}`,
+    `dev server: ${devServerOrigin}`,
+  ];
   if (inspectorTargets?.length) {
     const mainTarget =
       inspectorTargets.find((target) => target.title === 'main' && target.devtoolsFrontendUrl) ??
@@ -410,7 +426,7 @@ async function devProject() {
       }
       lastInspectorSignature = signature;
       clearTerminalIfInteractive();
-      printDevHeader(inspectorLines(devServerOrigin, inspectorTargets));
+      printDevHeader(inspectorLines(projectRoot, devServerOrigin, inspectorTargets));
     };
 
     renderInspectorTargets(null);

@@ -1,18 +1,19 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec4};
 use serde::{Deserialize, Serialize};
-use wgpu::TextureFormatFeatureFlags;
 use wgpu::util::DeviceExt;
+use wgpu::TextureFormatFeatureFlags;
 use winit::{dpi::PhysicalSize, window::Window};
 
 use crate::drawing::{
-    DRAWING_DEPTH_FORMAT, DawnSharedContext, encode_drawing_command_buffer,
-    prepare_drawing_recording, record_scene_2d,
+    encode_drawing_command_buffer, prepare_drawing_recording_with_atlas, record_scene_2d,
+    DawnSharedContext, DRAWING_DEPTH_FORMAT,
 };
+use crate::path_atlas::AtlasProvider;
 
 const SHADER_SOURCE: &str = r#"
 struct VertexOutput {
@@ -1104,6 +1105,7 @@ pub struct RendererState {
     drawing_depth_target: DepthTarget,
     drawing_msaa_depth_target: Option<DepthTarget>,
     drawing_context: DawnSharedContext,
+    path_atlas_provider: AtlasProvider,
     geometry_pipeline: wgpu::RenderPipeline,
     size: PhysicalSize<u32>,
 }
@@ -1136,6 +1138,7 @@ impl<'a> SceneCommandBuffer<'a> {
     fn encode_drawing(
         &mut self,
         prepared: &crate::drawing::DrawingPreparedRecording,
+        path_atlas_provider: &mut AtlasProvider,
         msaa_target_view: Option<&'a wgpu::TextureView>,
         depth_target_view: Option<&'a wgpu::TextureView>,
         msaa_depth_target_view: Option<&'a wgpu::TextureView>,
@@ -1143,6 +1146,7 @@ impl<'a> SceneCommandBuffer<'a> {
         encode_drawing_command_buffer(
             self.drawing_context,
             prepared,
+            Some(path_atlas_provider),
             self.encoder,
             self.target_view,
             msaa_target_view,
@@ -1377,6 +1381,7 @@ impl RendererState {
         let drawing_msaa_depth_target = (msaa_sample_count > 1)
             .then(|| Self::create_depth_target(&device, &config, msaa_sample_count));
         let drawing_context = DawnSharedContext::new(&device, &queue, format, msaa_sample_count);
+        let path_atlas_provider = AtlasProvider::new(&device);
 
         Ok(Self {
             surface,
@@ -1388,6 +1393,7 @@ impl RendererState {
             drawing_depth_target,
             drawing_msaa_depth_target,
             drawing_context,
+            path_atlas_provider,
             geometry_pipeline,
             size,
         })
@@ -1523,10 +1529,16 @@ impl RendererState {
                     .cloned()
                     .collect::<Vec<_>>();
                 let recording = record_scene_2d(scene, &rects, &paths, &texts);
-                let prepared =
-                    prepare_drawing_recording(&recording, self.config.width, self.config.height);
+                self.path_atlas_provider.begin_frame();
+                let prepared = prepare_drawing_recording_with_atlas(
+                    &recording,
+                    self.config.width,
+                    self.config.height,
+                    Some(&mut self.path_atlas_provider),
+                );
                 command_buffer.encode_drawing(
                     &prepared,
+                    &mut self.path_atlas_provider,
                     self.msaa_color_target.as_ref().map(|t| &t.view),
                     Some(&self.drawing_depth_target.view),
                     self.drawing_msaa_depth_target.as_ref().map(|t| &t.view),

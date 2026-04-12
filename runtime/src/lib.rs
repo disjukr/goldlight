@@ -1,9 +1,10 @@
 mod drawing;
 mod drawing_text;
 mod fill_patch;
+mod path_atlas;
 mod render;
-mod svg;
 mod stroke_patch;
+mod svg;
 mod text;
 
 use std::cell::RefCell;
@@ -18,7 +19,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
 #[cfg(feature = "dev-runtime")]
 use axum::extract::{Path as AxumPath, State};
 #[cfg(feature = "dev-runtime")]
@@ -30,31 +31,31 @@ use axum::routing::get;
 #[cfg(feature = "dev-runtime")]
 use axum::{Json, Router};
 #[cfg(feature = "dev-runtime")]
-use base64::Engine;
-#[cfg(feature = "dev-runtime")]
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+#[cfg(feature = "dev-runtime")]
+use base64::Engine;
 use bytes::Bytes;
+use deno_core::{
+    resolve_import, resolve_path, v8, JsRuntime, ModuleLoadResponse, ModuleLoader, ModuleSource,
+    ModuleSourceCode, ModuleSpecifier, ModuleType, OpState, PollEventLoopOptions,
+    RequestedModuleType, ResolutionKind, RuntimeOptions,
+};
 #[cfg(feature = "dev-runtime")]
 use deno_core::{
     InspectorMsg, InspectorSessionKind, InspectorSessionOptions, InspectorSessionProxy,
 };
-use deno_core::{
-    JsRuntime, ModuleLoadResponse, ModuleLoader, ModuleSource, ModuleSourceCode, ModuleSpecifier,
-    ModuleType, OpState, PollEventLoopOptions, RequestedModuleType, ResolutionKind, RuntimeOptions,
-    resolve_import, resolve_path, v8,
-};
 use deno_error::JsErrorBox;
-use fastwebsockets::{FragmentCollector, Frame as FastWebSocketFrame, OpCode as FastOpCode};
 #[cfg(feature = "dev-runtime")]
 use fastwebsockets::{
-    WebSocket as FastWebSocket, WebSocketWrite as FastWebSocketWrite, upgrade::IncomingUpgrade,
+    upgrade::IncomingUpgrade, WebSocket as FastWebSocket, WebSocketWrite as FastWebSocketWrite,
 };
+use fastwebsockets::{FragmentCollector, Frame as FastWebSocketFrame, OpCode as FastOpCode};
 #[cfg(feature = "dev-runtime")]
 use futures::channel::mpsc;
 use futures_util::StreamExt;
 use http_body_util::Empty;
-use hyper::Request;
 use hyper::upgrade::Upgraded;
+use hyper::Request;
 use hyper_util::rt::TokioIo;
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "dev-runtime")]
@@ -74,10 +75,10 @@ use tokio::runtime::Builder as TokioRuntimeBuilder;
 use tokio::sync::mpsc::{self as tokio_mpsc, UnboundedSender as TokioUnboundedSender};
 #[cfg(feature = "dev-runtime")]
 use tokio::sync::oneshot;
-use tokio_rustls::TlsConnector;
+use tokio_rustls::rustls::pki_types::ServerName;
 use tokio_rustls::rustls::ClientConfig;
 use tokio_rustls::rustls::RootCertStore;
-use tokio_rustls::rustls::pki_types::ServerName;
+use tokio_rustls::TlsConnector;
 use tracing::debug;
 #[cfg(feature = "dev-runtime")]
 use uuid::Uuid;
@@ -3185,9 +3186,7 @@ fn op_goldlight_text_get_glyph_sdf(
 
 #[deno_core::op2]
 #[serde]
-fn op_goldlight_svg_parse(
-    #[string] source: String,
-) -> Result<svg::SvgSceneValue, JsErrorBox> {
+fn op_goldlight_svg_parse(#[string] source: String) -> Result<svg::SvgSceneValue, JsErrorBox> {
     svg::parse_svg(&source).map_err(|error| JsErrorBox::generic(error.to_string()))
 }
 

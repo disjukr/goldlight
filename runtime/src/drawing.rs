@@ -6,24 +6,24 @@ use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 
 use crate::drawing_text::{
-    PreparedBitmapTextStep, PreparedSdfTextStep, TextPipelineResources, encode_bitmap_text_step,
-    encode_sdf_text_step, prepare_direct_mask_text_step, prepare_sdf_text_step,
-    prepare_transformed_mask_text_step,
+    encode_bitmap_text_step, encode_sdf_text_step, prepare_direct_mask_text_step,
+    prepare_sdf_text_step, prepare_transformed_mask_text_step, PreparedBitmapTextStep,
+    PreparedSdfTextStep, TextPipelineResources,
 };
 use crate::fill_patch::{
-    CurveFillPatchInstance, FillStencilMode, FillTriangleMode, PatchResolveVertex,
-    PreparedCurveFillStep, PreparedFillStep, PreparedFillTriangleStep, PreparedWedgeFillStep,
-    WedgeFillPatchInstance, curve_fill_shader_source, curve_template_vertices,
-    fill_paint_shader_source, prepare_fill_steps, wedge_fill_shader_source,
-    wedge_template_vertices,
+    curve_fill_shader_source, curve_template_vertices, fill_paint_shader_source,
+    prepare_fill_steps, wedge_fill_shader_source, wedge_template_vertices, CurveFillPatchInstance,
+    FillStencilMode, FillTriangleMode, PatchResolveVertex, PreparedCurveFillStep, PreparedFillStep,
+    PreparedFillTriangleStep, PreparedWedgeFillStep, WedgeFillPatchInstance,
 };
+use crate::path_atlas::{AtlasProvider, CoverageMask};
 use crate::render::{
     ColorValue, GradientStop2D, GradientTileMode2D, Path2D, PathFillRule2D, PathShader2D,
     PathStrokeCap2D, PathStrokeJoin2D, PathStyle2D, PathVerb2D, Rect2D, Scene2D, Text2D,
 };
 use crate::stroke_patch::{
-    PreparedStrokePatchStep, StrokePatchInstance, prepare_stroke_patch_step,
-    stroke_patch_shader_source,
+    prepare_stroke_patch_step, stroke_patch_shader_source, PreparedStrokePatchStep,
+    StrokePatchInstance,
 };
 
 const EPSILON: f32 = 1e-5;
@@ -72,6 +72,44 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {{
     )
 }
 
+fn path_mask_shader_source() -> String {
+    format!(
+        r#"
+{paint_shader}
+
+struct VertexOutput {{
+  @builtin(position) position: vec4<f32>,
+  @location(0) devicePosition: vec2<f32>,
+  @location(1) uv: vec2<f32>,
+}};
+
+@group(0) @binding(0) var path_mask_sampler: sampler;
+@group(0) @binding(1) var path_mask_texture: texture_2d<f32>;
+
+@vertex
+fn vs_main(
+  @location(0) position: vec4<f32>,
+  @location(1) devicePosition: vec2<f32>,
+  @location(2) uv: vec2<f32>,
+) -> VertexOutput {{
+  var output: VertexOutput;
+  output.position = position;
+  output.devicePosition = devicePosition;
+  output.uv = uv;
+  return output;
+}}
+
+@fragment
+fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {{
+  let coverage = textureSample(path_mask_texture, path_mask_sampler, input.uv).r;
+  let color = paint_shader_color(input.devicePosition);
+  return vec4<f32>(color.rgb, color.a * coverage);
+}}
+"#,
+        paint_shader = fill_paint_shader_source(1),
+    )
+}
+
 #[derive(Clone)]
 pub struct DawnResourceProvider {
     device: wgpu::Device,
@@ -87,12 +125,15 @@ pub struct DawnResourceProvider {
     curve_stencil_evenodd_pipeline: Arc<PipelinePair>,
     curve_stencil_nonzero_pipeline: Arc<PipelinePair>,
     stroke_pipeline: Arc<PipelinePair>,
+    path_mask_pipeline: Arc<PipelinePair>,
     wedge_template_buffer: wgpu::Buffer,
     wedge_template_vertex_count: u32,
     curve_template_buffer: wgpu::Buffer,
     curve_template_vertex_count: u32,
     viewport_bind_group_layout: Arc<wgpu::BindGroupLayout>,
     fill_paint_bind_group_layout: Arc<wgpu::BindGroupLayout>,
+    path_mask_bind_group_layout: Arc<wgpu::BindGroupLayout>,
+    path_mask_sampler: wgpu::Sampler,
     text_resources: TextPipelineResources,
 }
 
@@ -155,6 +196,9 @@ enum PipelineWarmupKey {
         stencil_mode: FillStencilMode,
     },
     Stroke {
+        sample_count: u32,
+    },
+    PathMask {
         sample_count: u32,
     },
     BitmapText {
@@ -334,6 +378,49 @@ fn create_stroke_render_pipeline(
     })
 }
 
+fn create_path_mask_render_pipeline(
+    device: &wgpu::Device,
+    format: wgpu::TextureFormat,
+    shader: &wgpu::ShaderModule,
+    pipeline_layout: &wgpu::PipelineLayout,
+    sample_count: u32,
+) -> wgpu::RenderPipeline {
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("goldlight path mask pipeline"),
+        layout: Some(pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: shader,
+            entry_point: Some("vs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            buffers: &[PathMaskVertex::layout()],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: shader,
+            entry_point: Some("fs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        primitive: wgpu::PrimitiveState::default(),
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: DRAWING_DEPTH_FORMAT,
+            depth_write_enabled: true,
+            depth_compare: wgpu::CompareFunction::Less,
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        }),
+        multisample: wgpu::MultisampleState {
+            count: sample_count,
+            ..wgpu::MultisampleState::default()
+        },
+        multiview: None,
+        cache: None,
+    })
+}
+
 impl DawnResourceProvider {
     fn new(device: &wgpu::Device, format: wgpu::TextureFormat, msaa_sample_count: u32) -> Self {
         let device = device.clone();
@@ -370,6 +457,38 @@ impl DawnResourceProvider {
                     count: None,
                 }],
             });
+        let path_mask_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("goldlight path mask bind group layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+        let path_mask_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("goldlight path mask sampler"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            ..Default::default()
+        });
         let triangle_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("goldlight drawing pipeline layout"),
@@ -391,6 +510,11 @@ impl DawnResourceProvider {
             label: Some("goldlight stroke patch shader"),
             source: wgpu::ShaderSource::Wgsl(stroke_shader_source.into()),
         });
+        let path_mask_shader_source = path_mask_shader_source();
+        let path_mask_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("goldlight path mask shader"),
+            source: wgpu::ShaderSource::Wgsl(path_mask_shader_source.into()),
+        });
         let fill_patch_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("goldlight fill patch pipeline layout"),
@@ -401,6 +525,12 @@ impl DawnResourceProvider {
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("goldlight stroke patch pipeline layout"),
                 bind_group_layouts: &[&viewport_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+        let path_mask_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("goldlight path mask pipeline layout"),
+                bind_group_layouts: &[&path_mask_bind_group_layout, &fill_paint_bind_group_layout],
                 push_constant_ranges: &[],
             });
         let wedge_template_vertices = wedge_template_vertices();
@@ -623,6 +753,24 @@ impl DawnResourceProvider {
             },
             msaa_sample_count,
         ));
+        let path_mask_pipeline = Arc::new(PipelinePair::new(
+            "path mask",
+            {
+                let device = device.clone();
+                let path_mask_shader = path_mask_shader.clone();
+                let path_mask_pipeline_layout = path_mask_pipeline_layout.clone();
+                move |sample_count| {
+                    create_path_mask_render_pipeline(
+                        &device,
+                        format,
+                        &path_mask_shader,
+                        &path_mask_pipeline_layout,
+                        sample_count,
+                    )
+                }
+            },
+            msaa_sample_count,
+        ));
         let text_resources = TextPipelineResources::new(&device, format, msaa_sample_count);
 
         Self {
@@ -639,12 +787,15 @@ impl DawnResourceProvider {
             curve_stencil_evenodd_pipeline,
             curve_stencil_nonzero_pipeline,
             stroke_pipeline,
+            path_mask_pipeline,
             wedge_template_buffer,
             wedge_template_vertex_count: wedge_template_vertices.len() as u32,
             curve_template_buffer,
             curve_template_vertex_count: curve_template_vertices.len() as u32,
             viewport_bind_group_layout: Arc::new(viewport_bind_group_layout),
             fill_paint_bind_group_layout: Arc::new(fill_paint_bind_group_layout),
+            path_mask_bind_group_layout: Arc::new(path_mask_bind_group_layout),
+            path_mask_sampler,
             text_resources,
         }
     }
@@ -692,6 +843,9 @@ impl DawnResourceProvider {
                     DrawingPreparedStep::StrokePatches(_) => {
                         PipelineWarmupKey::Stroke { sample_count }
                     }
+                    DrawingPreparedStep::PathMask(_) => {
+                        PipelineWarmupKey::PathMask { sample_count }
+                    }
                     DrawingPreparedStep::BitmapText(_) => {
                         PipelineWarmupKey::BitmapText { sample_count }
                     }
@@ -738,6 +892,9 @@ impl DawnResourceProvider {
             PipelineWarmupKey::Stroke { sample_count } => {
                 let _ = self.stroke_pipeline(sample_count);
             }
+            PipelineWarmupKey::PathMask { sample_count } => {
+                let _ = self.path_mask_pipeline(sample_count);
+            }
             PipelineWarmupKey::BitmapText { sample_count } => {
                 let _ = self.text_resources.bitmap_pipeline(sample_count);
             }
@@ -759,6 +916,20 @@ impl DawnResourceProvider {
                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("goldlight stroke patch buffer"),
                     contents: bytemuck::cast_slice(instances),
+                    usage: wgpu::BufferUsages::VERTEX,
+                }),
+        )
+    }
+
+    fn create_path_mask_vertex_buffer(&self, vertices: &[PathMaskVertex]) -> Option<wgpu::Buffer> {
+        if vertices.is_empty() {
+            return None;
+        }
+        Some(
+            self.device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("goldlight path mask vertex buffer"),
+                    contents: bytemuck::cast_slice(vertices),
                     usage: wgpu::BufferUsages::VERTEX,
                 }),
         )
@@ -849,6 +1020,23 @@ impl DawnResourceProvider {
         (buffer, bind_group)
     }
 
+    fn create_path_mask_bind_group(&self, view: &wgpu::TextureView) -> wgpu::BindGroup {
+        self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("goldlight path mask bind group"),
+            layout: &self.path_mask_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Sampler(&self.path_mask_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(view),
+                },
+            ],
+        })
+    }
+
     fn triangle_pipeline(
         &self,
         sample_count: u32,
@@ -871,6 +1059,10 @@ impl DawnResourceProvider {
 
     fn stroke_pipeline(&self, sample_count: u32) -> Arc<wgpu::RenderPipeline> {
         self.stroke_pipeline.get(sample_count)
+    }
+
+    fn path_mask_pipeline(&self, sample_count: u32) -> Arc<wgpu::RenderPipeline> {
+        self.path_mask_pipeline.get(sample_count)
     }
 
     fn wedge_pipeline(
@@ -1163,6 +1355,7 @@ pub enum DrawingPreparedStep {
         paint: PaintUniform,
     },
     StrokePatches(PreparedStrokePatchStep),
+    PathMask(PreparedPathMaskStep),
     BitmapText(PreparedBitmapTextStep),
     SdfText(PreparedSdfTextStep),
 }
@@ -1219,6 +1412,7 @@ impl DrawingPreparedStep {
             } | Self::WedgeFillPatches { .. }
                 | Self::CurveFillPatches { .. }
                 | Self::StrokePatches(_)
+                | Self::PathMask(_)
                 | Self::BitmapText(_)
                 | Self::SdfText(_)
         )
@@ -1251,6 +1445,21 @@ pub struct DrawingVertex {
     position: [f32; 4],
     color: [f32; 4],
     device_position: [f32; 2],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable, Debug)]
+pub struct PathMaskVertex {
+    position: [f32; 4],
+    device_position: [f32; 2],
+    uv: [f32; 2],
+}
+
+#[derive(Clone, Debug)]
+pub struct PreparedPathMaskStep {
+    pub vertices: Vec<PathMaskVertex>,
+    pub paint: PaintUniform,
+    pub mask: CoverageMask,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1297,6 +1506,19 @@ pub(crate) struct StrokeStyle {
 impl DrawingVertex {
     const ATTRIBUTES: [wgpu::VertexAttribute; 3] =
         wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x2];
+
+    fn layout() -> wgpu::VertexBufferLayout<'static> {
+        wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<Self>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &Self::ATTRIBUTES,
+        }
+    }
+}
+
+impl PathMaskVertex {
+    const ATTRIBUTES: [wgpu::VertexAttribute; 3] =
+        wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x2, 2 => Float32x2];
 
     fn layout() -> wgpu::VertexBufferLayout<'static> {
         wgpu::VertexBufferLayout {
@@ -1391,10 +1613,20 @@ pub fn record_scene_2d(
     recorder.finish()
 }
 
+#[allow(dead_code)]
 pub fn prepare_drawing_recording(
     recording: &DrawingRecording,
     surface_width: u32,
     surface_height: u32,
+) -> DrawingPreparedRecording {
+    prepare_drawing_recording_with_atlas(recording, surface_width, surface_height, None)
+}
+
+pub fn prepare_drawing_recording_with_atlas(
+    recording: &DrawingRecording,
+    surface_width: u32,
+    surface_height: u32,
+    mut atlas_provider: Option<&mut AtlasProvider>,
 ) -> DrawingPreparedRecording {
     let width = surface_width.max(1) as f32;
     let height = surface_height.max(1) as f32;
@@ -1442,7 +1674,15 @@ pub fn prepare_drawing_recording(
             }
             DrawingCommand::DrawPath(path) => {
                 let painter_depth = next_painter_depth_as_float(&mut next_painters_depth);
-                current_steps.extend(build_path_steps(path, width, height, painter_depth));
+                current_steps.extend(build_path_steps(
+                    path,
+                    width,
+                    height,
+                    painter_depth,
+                    surface_width,
+                    surface_height,
+                    atlas_provider.as_deref_mut(),
+                ));
             }
             DrawingCommand::DrawDirectMaskText(text) => {
                 let painter_depth = next_painter_depth_as_float(&mut next_painters_depth);
@@ -1515,7 +1755,12 @@ fn with_vertex_depth(mut vertices: Vec<DrawingVertex>, painter_depth: f32) -> Ve
     vertices
 }
 
-fn transform_vertices(mut vertices: Vec<DrawingVertex>, transform: [f32; 6], width: f32, height: f32) -> Vec<DrawingVertex> {
+fn transform_vertices(
+    mut vertices: Vec<DrawingVertex>,
+    transform: [f32; 6],
+    width: f32,
+    height: f32,
+) -> Vec<DrawingVertex> {
     if is_identity_affine_transform(transform) {
         return vertices;
     }
@@ -1760,15 +2005,15 @@ fn normalize_gradient_stops(
     deduped
 }
 
-fn build_path_paint(path: &PathDrawCommand) -> PaintUniform {
+fn build_fill_path_paint(path: &PathDrawCommand) -> PaintUniform {
     let Some(shader) = &path.shader else {
         return PaintUniform::solid(path.color.to_array());
     };
 
     let draw_transform =
         multiply_affine_matrices(path.transform, [1.0, 0.0, 0.0, 1.0, path.x, path.y]);
-    let inverse_draw_transform = invert_affine_transform(draw_transform)
-        .unwrap_or([1.0, 0.0, 0.0, 1.0, -path.x, -path.y]);
+    let inverse_draw_transform =
+        invert_affine_transform(draw_transform).unwrap_or([1.0, 0.0, 0.0, 1.0, -path.x, -path.y]);
     let (kind, tile_mode, stops, params0, gradient_matrix) = match shader {
         PathShader2D::LinearGradient {
             start,
@@ -1912,6 +2157,13 @@ fn build_path_paint(path: &PathDrawCommand) -> PaintUniform {
     }
 }
 
+fn build_path_mask_paint(path: &PathDrawCommand) -> PaintUniform {
+    match path.style {
+        PathStyle2D::Fill => build_fill_path_paint(path),
+        PathStyle2D::Stroke => PaintUniform::solid(resolve_stroke_color(path)),
+    }
+}
+
 fn vertex_colored_paint() -> PaintUniform {
     PaintUniform::solid([1.0, 1.0, 1.0, 1.0])
 }
@@ -1973,14 +2225,71 @@ fn build_rect_vertices(rect: &RectDrawCommand, width: f32, height: f32) -> Vec<D
     ]
 }
 
+fn build_path_mask_vertices(
+    mask: &CoverageMask,
+    width: f32,
+    height: f32,
+    painter_depth: f32,
+) -> Vec<PathMaskVertex> {
+    let left = mask.mask_origin[0];
+    let top = mask.mask_origin[1];
+    let mask_width = mask.mask_size[0] as f32;
+    let mask_height = mask.mask_size[1] as f32;
+    let uv_left = mask.texture_origin[0] as f32 / mask.atlas_size[0] as f32;
+    let uv_top = mask.texture_origin[1] as f32 / mask.atlas_size[1] as f32;
+    let uv_right = (mask.texture_origin[0] + mask.mask_size[0]) as f32 / mask.atlas_size[0] as f32;
+    let uv_bottom = (mask.texture_origin[1] + mask.mask_size[1]) as f32 / mask.atlas_size[1] as f32;
+    let corners = [
+        ([left, top], [uv_left, uv_top]),
+        ([left + mask_width, top], [uv_right, uv_top]),
+        (
+            [left + mask_width, top + mask_height],
+            [uv_right, uv_bottom],
+        ),
+        ([left, top + mask_height], [uv_left, uv_bottom]),
+    ];
+    [0usize, 1, 2, 0, 2, 3]
+        .into_iter()
+        .map(|index| {
+            let (device_position, uv) = corners[index];
+            PathMaskVertex {
+                position: [
+                    (device_position[0] / width) * 2.0 - 1.0,
+                    1.0 - (device_position[1] / height) * 2.0,
+                    painter_depth,
+                    1.0,
+                ],
+                device_position,
+                uv,
+            }
+        })
+        .collect()
+}
+
 fn build_path_steps(
     path: &PathDrawCommand,
     width: f32,
     height: f32,
     painter_depth: f32,
+    surface_width: u32,
+    surface_height: u32,
+    atlas_provider: Option<&mut AtlasProvider>,
 ) -> Vec<DrawingPreparedStep> {
     let mut steps = Vec::new();
-    let path_paint = build_path_paint(path);
+    if let Some(step) = prepare_path_mask_step(
+        path,
+        width,
+        height,
+        painter_depth,
+        surface_width,
+        surface_height,
+        atlas_provider,
+    ) {
+        steps.push(DrawingPreparedStep::PathMask(step));
+        return steps;
+    }
+
+    let path_paint = build_fill_path_paint(path);
     match path.style {
         PathStyle2D::Fill => {
             for step in prepare_fill_steps(path, painter_depth) {
@@ -2080,6 +2389,25 @@ fn build_path_steps(
         }
     }
     steps
+}
+
+fn prepare_path_mask_step(
+    path: &PathDrawCommand,
+    width: f32,
+    height: f32,
+    painter_depth: f32,
+    surface_width: u32,
+    surface_height: u32,
+    atlas_provider: Option<&mut AtlasProvider>,
+) -> Option<PreparedPathMaskStep> {
+    let atlas_provider = atlas_provider?;
+    let mask = atlas_provider.add_path(path, surface_width, surface_height)?;
+    let vertices = build_path_mask_vertices(&mask, width, height, painter_depth);
+    (!vertices.is_empty()).then_some(PreparedPathMaskStep {
+        vertices,
+        paint: build_path_mask_paint(path),
+        mask,
+    })
 }
 
 fn build_stroke_vertices(
@@ -3773,15 +4101,21 @@ fn cross(a: Point, b: Point) -> f32 {
 pub fn encode_drawing_command_buffer(
     shared_context: &DawnSharedContext,
     prepared: &DrawingPreparedRecording,
+    atlas_provider: Option<&mut AtlasProvider>,
     encoder: &mut wgpu::CommandEncoder,
     target_view: &wgpu::TextureView,
     msaa_target_view: Option<&wgpu::TextureView>,
     depth_target_view: Option<&wgpu::TextureView>,
     msaa_depth_target_view: Option<&wgpu::TextureView>,
 ) -> Result<()> {
+    let mut atlas_provider = atlas_provider;
     shared_context
         .resource_provider
         .warm_prepared_pipelines(prepared);
+    if let Some(atlas_provider) = atlas_provider.as_deref_mut() {
+        atlas_provider.upload_pending(&shared_context.queue);
+    }
+    let atlas_provider = atlas_provider.as_deref();
     let (_viewport_buffer, viewport_bind_group) = shared_context
         .resource_provider
         .create_viewport_bind_group(prepared.surface_width, prepared.surface_height);
@@ -3917,6 +4251,32 @@ pub fn encode_drawing_command_buffer(
                     render_pass.set_vertex_buffer(0, instance_buffer.slice(..));
                     render_pass.draw(0..step.vertex_count, 0..step.instances.len() as u32);
                 }
+                DrawingPreparedStep::PathMask(step) => {
+                    let Some(atlas_provider) = atlas_provider else {
+                        continue;
+                    };
+                    let Some(vertex_buffer) = shared_context
+                        .resource_provider
+                        .create_path_mask_vertex_buffer(&step.vertices)
+                    else {
+                        continue;
+                    };
+                    let atlas_view = atlas_provider.page_view(step.mask.page_index);
+                    let atlas_bind_group = shared_context
+                        .resource_provider
+                        .create_path_mask_bind_group(atlas_view);
+                    let (_paint_buffer, paint_bind_group) = shared_context
+                        .resource_provider
+                        .create_fill_paint_bind_group(&step.paint);
+                    let pipeline = shared_context
+                        .resource_provider
+                        .path_mask_pipeline(sample_count);
+                    render_pass.set_pipeline(&pipeline);
+                    render_pass.set_bind_group(0, &atlas_bind_group, &[]);
+                    render_pass.set_bind_group(1, &paint_bind_group, &[]);
+                    render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+                    render_pass.draw(0..step.vertices.len() as u32, 0..1);
+                }
                 DrawingPreparedStep::BitmapText(step) => {
                     encode_bitmap_text_step(
                         &shared_context.resource_provider.text_resources,
@@ -3946,8 +4306,8 @@ pub fn encode_drawing_command_buffer(
 #[cfg(test)]
 mod tests {
     use super::{
-        DirectMaskTextDrawCommand, DrawingPreparedStep, DrawingRecorder, PathDrawCommand,
-        prepare_drawing_recording,
+        prepare_drawing_recording, DirectMaskTextDrawCommand, DrawingPreparedStep, DrawingRecorder,
+        PathDrawCommand,
     };
     use crate::render::{
         ColorValue, DirectMaskGlyph2D, GlyphMask2D, PathFillRule2D, PathStrokeCap2D,
@@ -3986,16 +4346,12 @@ mod tests {
             .iter()
             .flat_map(|pass| pass.steps.iter())
             .collect::<Vec<_>>();
-        assert!(
-            steps
-                .iter()
-                .any(|step| matches!(step, DrawingPreparedStep::StrokePatches(_)))
-        );
-        assert!(
-            !steps
-                .iter()
-                .any(|step| matches!(step, DrawingPreparedStep::Triangles { .. }))
-        );
+        assert!(steps
+            .iter()
+            .any(|step| matches!(step, DrawingPreparedStep::StrokePatches(_))));
+        assert!(!steps
+            .iter()
+            .any(|step| matches!(step, DrawingPreparedStep::Triangles { .. })));
     }
 
     fn direct_mask_text() -> DirectMaskTextDrawCommand {

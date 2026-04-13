@@ -810,7 +810,18 @@ struct LayoutNodeInput {
     #[serde(default)]
     style: LayoutStyleInput,
     #[serde(default)]
+    measure: Option<LayoutMeasureInput>,
+    #[serde(default)]
     children: Vec<LayoutNodeInput>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LayoutMeasureInput {
+    #[serde(default)]
+    width: Option<f32>,
+    #[serde(default)]
+    height: Option<f32>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -819,6 +830,12 @@ struct ComputedLayoutOutput {
     id: u32,
     x: f32,
     y: f32,
+    width: f32,
+    height: f32,
+}
+
+#[derive(Clone, Debug)]
+struct LayoutMeasureContext {
     width: f32,
     height: f32,
 }
@@ -935,8 +952,25 @@ fn build_taffy_style(style: &LayoutStyleInput) -> TaffyStyle {
     }
 }
 
+fn layout_measure_function(
+    known_dimensions: Size<Option<f32>>,
+    _available_space: Size<AvailableSpace>,
+    node_context: Option<&mut LayoutMeasureContext>,
+) -> Size<f32> {
+    let Some(node_context) = node_context else {
+        return Size {
+            width: known_dimensions.width.unwrap_or(0.0),
+            height: known_dimensions.height.unwrap_or(0.0),
+        };
+    };
+    Size {
+        width: known_dimensions.width.unwrap_or(node_context.width),
+        height: known_dimensions.height.unwrap_or(node_context.height),
+    }
+}
+
 fn add_layout_node(
-    taffy: &mut TaffyTree<()>,
+    taffy: &mut TaffyTree<LayoutMeasureContext>,
     node: &LayoutNodeInput,
     computed: &mut Vec<(u32, taffy::prelude::NodeId)>,
 ) -> Result<taffy::prelude::NodeId> {
@@ -946,9 +980,25 @@ fn add_layout_node(
         .map(|child| add_layout_node(taffy, child, computed))
         .collect::<Result<Vec<_>>>()?;
     let style = build_taffy_style(&node.style);
-    let node_id = taffy
-        .new_with_children(style, &child_ids)
-        .map_err(|error| anyhow!("failed to create taffy node: {error}"))?;
+    let node_id = if child_ids.is_empty() {
+        if let Some(measure) = &node.measure {
+            let context = LayoutMeasureContext {
+                width: measure.width.unwrap_or(0.0),
+                height: measure.height.unwrap_or(0.0),
+            };
+            taffy
+                .new_leaf_with_context(style, context)
+                .map_err(|error| anyhow!("failed to create measured taffy node: {error}"))?
+        } else {
+            taffy
+                .new_leaf(style)
+                .map_err(|error| anyhow!("failed to create taffy leaf node: {error}"))?
+        }
+    } else {
+        taffy
+            .new_with_children(style, &child_ids)
+            .map_err(|error| anyhow!("failed to create taffy node: {error}"))?
+    };
     computed.push((node.id, node_id));
     Ok(node_id)
 }
@@ -958,16 +1008,19 @@ fn add_layout_node(
 fn op_goldlight_compute_layout(
     #[serde] root: LayoutNodeInput,
 ) -> Result<Vec<ComputedLayoutOutput>, JsErrorBox> {
-    let mut taffy = TaffyTree::<()>::new();
+    let mut taffy = TaffyTree::<LayoutMeasureContext>::new();
     let mut nodes = Vec::new();
     let root_id = add_layout_node(&mut taffy, &root, &mut nodes)
         .map_err(|error| JsErrorBox::generic(error.to_string()))?;
     taffy
-        .compute_layout(
+        .compute_layout_with_measure(
             root_id,
             Size {
                 width: AvailableSpace::MaxContent,
                 height: AvailableSpace::MaxContent,
+            },
+            |known_dimensions, available_space, _node_id, node_context, _style| {
+                layout_measure_function(known_dimensions, available_space, node_context)
             },
         )
         .map_err(|error| JsErrorBox::generic(format!("failed to compute layout: {error}")))?;
@@ -4001,10 +4054,7 @@ impl GoldlightRuntime {
                 continue;
             };
             match init_result {
-                Ok(Ok(mut renderer)) => {
-                    if let Some(size) = record.pending_resize.take() {
-                        renderer.resize(size);
-                    }
+                Ok(Ok(renderer)) => {
                     record.renderer = WindowRendererState::Ready(renderer);
                     record.window.request_redraw();
                 }
@@ -4049,7 +4099,19 @@ impl GoldlightRuntime {
         }
     }
 
+    fn apply_pending_resize(record: &mut WindowRecord) {
+        let Some(size) = record.pending_resize.take() else {
+            return;
+        };
+        let WindowRendererState::Ready(renderer) = &mut record.renderer else {
+            record.pending_resize = Some(size);
+            return;
+        };
+        renderer.resize(size);
+    }
+
     fn render_window(record: &mut WindowRecord) -> bool {
+        Self::apply_pending_resize(record);
         if let (WindowRendererState::Ready(renderer), Some(render_model)) =
             (&mut record.renderer, record.render_model_snapshot.as_ref())
         {
@@ -4093,6 +4155,7 @@ impl GoldlightRuntime {
         if record.startup_presented || record.show_policy != WindowShowPolicy::AfterInitialClear {
             return false;
         }
+        Self::apply_pending_resize(record);
         let WindowRendererState::Ready(renderer) = &mut record.renderer else {
             return false;
         };
@@ -4186,14 +4249,7 @@ impl ApplicationHandler<RuntimeUserEvent> for GoldlightRuntime {
 
         match event {
             WindowEvent::Resized(size) => {
-                match &mut record.renderer {
-                    WindowRendererState::Ready(renderer) => {
-                        renderer.resize(size);
-                    }
-                    WindowRendererState::Pending(_) | WindowRendererState::Failed => {
-                        record.pending_resize = Some(size);
-                    }
-                }
+                record.pending_resize = Some(size);
                 record.window.request_redraw();
                 if let Some(worker) = record.worker.as_ref() {
                     worker.push_event(WorkerEventPayload::Resize {

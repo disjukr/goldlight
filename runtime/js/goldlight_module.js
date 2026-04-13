@@ -631,6 +631,210 @@ function cloneShapedRun(run) {
   return normalizeShapedRun(run);
 }
 
+const autoTextRunKeySymbol = Symbol("goldlightAutoTextRunKey");
+const graphiteTextBlobBudgetBytes = 1 << 22;
+const autoTextCoordinatorByHost = new WeakMap();
+const autoTextHashFloat32 = new Float32Array(1);
+const autoTextHashUint32 = new Uint32Array(autoTextHashFloat32.buffer);
+
+function hashAutoTextU32(hash, value) {
+  return Math.imul((hash ^ (value >>> 0)) >>> 0, 16777619) >>> 0;
+}
+
+function hashAutoTextNumber(hash, value) {
+  autoTextHashFloat32[0] = Number.isFinite(value) ? Number(value) : 0;
+  return hashAutoTextU32(hash, autoTextHashUint32[0]);
+}
+
+function hashAutoTextString(hash, value) {
+  const text = String(value ?? "");
+  hash = hashAutoTextU32(hash, text.length);
+  for (let index = 0; index < text.length; index += 1) {
+    hash = hashAutoTextU32(hash, text.charCodeAt(index));
+  }
+  return hash;
+}
+
+function hashAutoTextUint32Array(hash, values) {
+  hash = hashAutoTextU32(hash, values.length);
+  for (let index = 0; index < values.length; index += 1) {
+    hash = hashAutoTextU32(hash, Number(values[index]) >>> 0);
+  }
+  return hash;
+}
+
+function hashAutoTextFloat32Array(hash, values) {
+  hash = hashAutoTextU32(hash, values.length);
+  for (let index = 0; index < values.length; index += 1) {
+    hash = hashAutoTextNumber(hash, values[index]);
+  }
+  return hash;
+}
+
+function computeAutoTextRunKey(run) {
+  let hash = 2166136261;
+  hash = hashAutoTextString(hash, run.typeface);
+  hash = hashAutoTextString(hash, run.text);
+  hash = hashAutoTextNumber(hash, run.size);
+  hash = hashAutoTextString(hash, run.direction);
+  hash = hashAutoTextNumber(hash, run.bidiLevel);
+  hash = hashAutoTextString(hash, run.scriptTag);
+  hash = hashAutoTextString(hash, run.language);
+  hash = hashAutoTextUint32Array(hash, run.glyphIDs);
+  hash = hashAutoTextFloat32Array(hash, run.positions);
+  hash = hashAutoTextFloat32Array(hash, run.offsets);
+  hash = hashAutoTextUint32Array(hash, run.clusterIndices);
+  hash = hashAutoTextNumber(hash, run.advanceX);
+  hash = hashAutoTextNumber(hash, run.advanceY);
+  hash = hashAutoTextU32(hash, Number(run.utf8RangeStart ?? 0) >>> 0);
+  hash = hashAutoTextU32(hash, Number(run.utf8RangeEnd ?? 0) >>> 0);
+  return [
+    String(run.typeface ?? ""),
+    String(run.direction ?? "ltr"),
+    String(run.language ?? ""),
+    String(run.scriptTag ?? ""),
+    String(run.text ?? ""),
+    `${Number(run.size ?? 0)}`,
+    hash.toString(16),
+  ].join("|");
+}
+
+function getAutoTextRunKey(run) {
+  const existing = run?.[autoTextRunKeySymbol];
+  if (typeof existing === "string" && existing.length > 0) {
+    return existing;
+  }
+  const key = computeAutoTextRunKey(run);
+  if (run && typeof run === "object" && Object.isExtensible(run)) {
+    Object.defineProperty(run, autoTextRunKeySymbol, {
+      value: key,
+      enumerable: false,
+      configurable: false,
+      writable: false,
+    });
+  }
+  return key;
+}
+
+function estimateGlyphMaskBytes(mask) {
+  if (!mask) {
+    return 0;
+  }
+  return Number(mask.pixels?.length ?? 0) + 32;
+}
+
+function estimateDirectMaskAssetBytes(asset) {
+  let size = 32;
+  for (const glyph of asset.glyphs) {
+    size += 16 + estimateGlyphMaskBytes(glyph.mask);
+  }
+  return size;
+}
+
+function estimateTransformedMaskAssetBytes(asset) {
+  let size = 32;
+  for (const glyph of asset.glyphs) {
+    size += 24 + estimateGlyphMaskBytes(glyph.mask);
+  }
+  return size;
+}
+
+function estimateSdfAssetBytes(asset) {
+  let size = 32;
+  for (const glyph of asset.glyphs) {
+    size += 32 + estimateGlyphMaskBytes(glyph.mask) + estimateGlyphMaskBytes(glyph.sdf);
+  }
+  return size;
+}
+
+function estimatePathGlyphAssetBytes(glyphs) {
+  let size = 32;
+  for (const glyph of glyphs) {
+    if (!glyph) {
+      size += 8;
+      continue;
+    }
+    size += 16 + (glyph.verbs?.length ?? 0) * 24;
+  }
+  return size;
+}
+
+function createAutoTextCoordinator() {
+  return {
+    entries: new Map(),
+    currentSize: 0,
+    sizeBudget: graphiteTextBlobBudgetBytes,
+  };
+}
+
+function getAutoTextCoordinator(host) {
+  let coordinator = autoTextCoordinatorByHost.get(host);
+  if (!coordinator) {
+    coordinator = createAutoTextCoordinator();
+    autoTextCoordinatorByHost.set(host, coordinator);
+  }
+  return coordinator;
+}
+
+function createAutoTextRunEntry(runKey, run) {
+  return {
+    runKey,
+    run,
+    sizeBytes: 0,
+    directMaskAssets: new Map(),
+    transformedMaskAssets: new Map(),
+    sdfAssets: new Map(),
+    pathGlyphAssets: undefined,
+  };
+}
+
+function touchAutoTextRunEntry(coordinator, entry) {
+  coordinator.entries.delete(entry.runKey);
+  coordinator.entries.set(entry.runKey, entry);
+}
+
+function pruneAutoTextCoordinator(coordinator, protectedEntry = null) {
+  while (coordinator.currentSize > coordinator.sizeBudget) {
+    let evicted = false;
+    for (const [runKey, entry] of coordinator.entries) {
+      if (entry === protectedEntry) {
+        continue;
+      }
+      coordinator.entries.delete(runKey);
+      coordinator.currentSize = Math.max(0, coordinator.currentSize - entry.sizeBytes);
+      evicted = true;
+      break;
+    }
+    if (!evicted) {
+      break;
+    }
+  }
+}
+
+function noteAutoTextAssetBytes(coordinator, entry, byteSize) {
+  if (!Number.isFinite(byteSize) || byteSize <= 0) {
+    return;
+  }
+  entry.sizeBytes += byteSize;
+  coordinator.currentSize += byteSize;
+  pruneAutoTextCoordinator(coordinator, entry);
+}
+
+function getOrCreateAutoTextRunEntry(host, run) {
+  const coordinator = getAutoTextCoordinator(host);
+  const runKey = getAutoTextRunKey(run);
+  let entry = coordinator.entries.get(runKey);
+  if (!entry) {
+    entry = createAutoTextRunEntry(runKey, run);
+    coordinator.entries.set(runKey, entry);
+  }
+  touchAutoTextRunEntry(coordinator, entry);
+  return {
+    coordinator,
+    entry,
+  };
+}
+
 function normalizeAutoTextHost(host) {
   if (!host || typeof host.getGlyphMask !== "function" || typeof host.getGlyphPath !== "function") {
     throw new TypeError("auto text requires a valid text host");
@@ -761,16 +965,8 @@ function cloneTextState(state) {
 function createAutoTextCache() {
   return {
     host: null,
-    run: null,
-    x: NaN,
-    y: NaN,
-    translatedRun: null,
-    directMaskSubRun: null,
-    directMaskTransformKey: "",
-    transformedMaskSubRun: null,
-    transformedMaskScale: NaN,
-    sdfSubRuns: new Map(),
-    pathGlyphEntries: null,
+    runKey: "",
+    runEntry: null,
   };
 }
 
@@ -808,7 +1004,7 @@ function makeShapedRun(typeface, input, run) {
 }
 
 export function createTextHost() {
-  return {
+  const host = {
     listFamilies() {
       return Deno.core.ops.op_goldlight_text_list_families();
     },
@@ -862,8 +1058,11 @@ export function createTextHost() {
       );
       return cloneGlyphMask(mask);
     },
-    close() {},
+    close() {
+      autoTextCoordinatorByHost.delete(host);
+    },
   };
+  return host;
 }
 
 export function parseSvgPaths(source) {
@@ -1114,6 +1313,217 @@ export function buildPathSubRun(host, run) {
   };
 }
 
+function buildDirectMaskAsset(host, run, transform, x, y) {
+  const glyphs = [];
+  for (let index = 0; index < run.glyphIDs.length; index += 1) {
+    const glyphID = run.glyphIDs[index];
+    const localX = run.positions[index * 2] + run.offsets[index * 2] + x;
+    const localY = run.positions[index * 2 + 1] + run.offsets[index * 2 + 1] + y;
+    const mapped = transformPoint2d([localX, localY], transform);
+    const phaseX = quantizeDirectMaskSubpixelPhase(mapped[0]) / 4;
+    const phaseY = quantizeDirectMaskSubpixelPhase(mapped[1]) / 4;
+    glyphs.push({
+      glyphId: glyphID,
+      mask: host.getGlyphMask(run.typeface, glyphID, run.size, { x: phaseX, y: phaseY }),
+    });
+  }
+  return { glyphs };
+}
+
+function buildTransformedMaskAsset(host, run, strikeScale) {
+  const effectiveStrikeScale = Number.isFinite(strikeScale) && strikeScale > 1 ? strikeScale : 1;
+  const strikeSize = run.size * effectiveStrikeScale;
+  const strikeToSourceScale = run.size / strikeSize;
+  const glyphs = [];
+  for (let index = 0; index < run.glyphIDs.length; index += 1) {
+    const glyphID = run.glyphIDs[index];
+    glyphs.push({
+      glyphId: glyphID,
+      mask: host.getGlyphMask(run.typeface, glyphID, strikeSize),
+      strikeToSourceScale,
+    });
+  }
+  return {
+    glyphs,
+    strikeScale: effectiveStrikeScale,
+  };
+}
+
+function buildSdfAsset(host, run, strikeSize) {
+  const sdfInset = 2;
+  const sdfRadius = 4;
+  const effectiveStrikeSize = Number.isFinite(strikeSize) && strikeSize > 0
+    ? strikeSize
+    : run.size;
+  const strikeToSourceScale = run.size / effectiveStrikeSize;
+  const glyphs = [];
+  let complete = true;
+  for (let index = 0; index < run.glyphIDs.length; index += 1) {
+    const glyphID = run.glyphIDs[index];
+    const mask = host.getGlyphMask(run.typeface, glyphID, effectiveStrikeSize);
+    const sdf = host.getGlyphSdf(run.typeface, glyphID, effectiveStrikeSize, sdfInset, sdfRadius);
+    if (!sdf) {
+      complete = false;
+    }
+    glyphs.push({
+      glyphId: glyphID,
+      mask,
+      sdf,
+      sdfInset,
+      sdfRadius,
+      strikeToSourceScale,
+    });
+  }
+  return {
+    glyphs,
+    sdfInset,
+    sdfRadius,
+    strikeSize: effectiveStrikeSize,
+    complete,
+  };
+}
+
+function buildPathGlyphAssets(host, run) {
+  const glyphs = [];
+  for (let index = 0; index < run.glyphIDs.length; index += 1) {
+    const glyphID = run.glyphIDs[index];
+    const verbs = host.getGlyphPath(run.typeface, glyphID, run.size);
+    glyphs.push(verbs
+      ? {
+        glyphId: glyphID,
+        verbs,
+      }
+      : null);
+  }
+  return glyphs;
+}
+
+function serializeDirectMaskReuseKey(transform, x, y) {
+  const mappedOrigin = transformPoint2d([x, y], transform);
+  const fractionalX = mappedOrigin[0] - Math.floor(mappedOrigin[0]);
+  const fractionalY = mappedOrigin[1] - Math.floor(mappedOrigin[1]);
+  return [
+    Number(transform[0]).toFixed(6),
+    Number(transform[1]).toFixed(6),
+    Number(transform[2]).toFixed(6),
+    Number(transform[3]).toFixed(6),
+    fractionalX.toFixed(6),
+    fractionalY.toFixed(6),
+  ].join(",");
+}
+
+function findReusableTransformedMaskAsset(entry, strikeScale) {
+  let best = null;
+  for (const asset of entry.transformedMaskAssets.values()) {
+    if (asset.strikeScale < strikeScale) {
+      continue;
+    }
+    if (!best || asset.strikeScale < best.strikeScale) {
+      best = asset;
+    }
+  }
+  return best;
+}
+
+function buildResolvedDirectMaskStateFromAsset(run, asset, indices, color, transform, x, y) {
+  const inverse = invertAffineTransform(transform);
+  return {
+    kind: "direct-mask",
+    x: 0,
+    y: 0,
+    color: cloneColor(color),
+    glyphs: indices.map((index) => {
+      const glyph = asset.glyphs[index];
+      const localX = run.positions[index * 2] + run.offsets[index * 2] + x;
+      const localY = run.positions[index * 2 + 1] + run.offsets[index * 2 + 1] + y;
+      const mapped = transformPoint2d([localX, localY], transform);
+      const snappedDeviceOrigin = [
+        Math.floor(mapped[0] + directMaskSubpixelRound),
+        Math.floor(mapped[1] + directMaskSubpixelRound),
+      ];
+      const snappedLocalOrigin = inverse ? transformPoint2d(snappedDeviceOrigin, inverse) : [localX, localY];
+      const mask = glyph.mask;
+      return {
+        glyphId: glyph.glyphId,
+        x: mask ? snappedLocalOrigin[0] + mask.offsetX : snappedLocalOrigin[0],
+        y: mask ? snappedLocalOrigin[1] + mask.offsetY : snappedLocalOrigin[1],
+        mask,
+      };
+    }),
+    transform: cloneTransform2d(transform),
+  };
+}
+
+function buildResolvedTransformedMaskStateFromAsset(run, asset, indices, color, transform, x, y) {
+  return {
+    kind: "transformed-mask",
+    x: 0,
+    y: 0,
+    color: cloneColor(color),
+    glyphs: indices.map((index) => {
+      const glyph = asset.glyphs[index];
+      const localX = run.positions[index * 2] + run.offsets[index * 2] + x;
+      const localY = run.positions[index * 2 + 1] + run.offsets[index * 2 + 1] + y;
+      const mask = glyph.mask;
+      return {
+        glyphId: glyph.glyphId,
+        x: mask ? localX + (mask.offsetX * glyph.strikeToSourceScale) : localX,
+        y: mask ? localY + (mask.offsetY * glyph.strikeToSourceScale) : localY,
+        mask,
+        strikeToSourceScale: glyph.strikeToSourceScale,
+      };
+    }),
+    transform: cloneTransform2d(transform),
+  };
+}
+
+function buildResolvedSdfStateFromAsset(run, asset, indices, color, transform, x, y) {
+  return {
+    kind: "sdf",
+    x: 0,
+    y: 0,
+    color: cloneColor(color),
+    glyphs: indices.map((index) => {
+      const glyph = asset.glyphs[index];
+      return {
+        glyphId: glyph.glyphId,
+        x: run.positions[index * 2] + run.offsets[index * 2] + x,
+        y: run.positions[index * 2 + 1] + run.offsets[index * 2 + 1] + y,
+        mask: glyph.mask,
+        sdf: glyph.sdf,
+        sdfInset: glyph.sdfInset,
+        sdfRadius: glyph.sdfRadius,
+        strikeToSourceScale: glyph.strikeToSourceScale,
+      };
+    }),
+    transform: cloneTransform2d(transform),
+  };
+}
+
+function buildResolvedPathStateFromAsset(run, glyphs, indices, color, transform, x, y) {
+  return {
+    kind: "path",
+    x: 0,
+    y: 0,
+    color: cloneColor(color),
+    glyphs: indices
+      .map((index) => {
+        const glyph = glyphs[index];
+        if (!glyph) {
+          return null;
+        }
+        return {
+          glyphId: glyph.glyphId,
+          x: run.positions[index * 2] + run.offsets[index * 2] + x,
+          y: run.positions[index * 2 + 1] + run.offsets[index * 2 + 1] + y,
+          verbs: glyph.verbs,
+        };
+      })
+      .filter((glyph) => glyph !== null),
+    transform: cloneTransform2d(transform),
+  };
+}
+
 const graphiteDirectAtlasLimit = 256;
 const graphiteMinDistanceFieldFontSize = 18;
 const graphiteSmallDistanceFieldFontLimit = 32;
@@ -1339,22 +1749,18 @@ function composeResolvedTextRuns(runs, color, transform) {
 function resolveAutoTextState(state, layoutState, groupTransform, cache) {
   const x = layoutState.x ?? state.x;
   const y = layoutState.y ?? state.y;
-  if (cache.host !== state.host || cache.run !== state.run || cache.x !== x || cache.y !== y) {
+  const runKey = getAutoTextRunKey(state.run);
+  if (cache.host !== state.host || cache.runKey !== runKey) {
     cache.host = state.host;
-    cache.run = state.run;
-    cache.x = x;
-    cache.y = y;
-    cache.translatedRun = translateGlyphRun(state.run, x, y);
-    cache.directMaskSubRun = null;
-    cache.directMaskTransformKey = "";
-    cache.transformedMaskSubRun = null;
-    cache.transformedMaskScale = NaN;
-    cache.sdfSubRuns = new Map();
-    cache.pathGlyphEntries = null;
+    cache.runKey = runKey;
+    cache.runEntry = null;
   }
+  const { coordinator, entry } = getOrCreateAutoTextRunEntry(state.host, state.run);
+  cache.runEntry = entry;
+  const sourceRun = entry.run;
 
   const approximateDeviceTextSize = approximateTransformedTextSize(
-    cache.translatedRun.size,
+    sourceRun.size,
     groupTransform,
   );
   const preferBitmapMask = Number.isFinite(approximateDeviceTextSize) &&
@@ -1362,28 +1768,35 @@ function resolveAutoTextState(state, layoutState, groupTransform, cache) {
     approximateDeviceTextSize < graphiteDirectAtlasLimit;
   const preferDirectMask = preferBitmapMask && canUseDirectMaskMode(groupTransform);
   const resolvedRuns = [];
-  let remaining = collectGlyphIndices(cache.translatedRun);
+  let remaining = collectGlyphIndices(sourceRun);
 
   const sdfSelection = resolveGraphiteSdfSelection(
-    cache.translatedRun,
+    sourceRun,
     groupTransform,
     state.useSdfForSmallText,
   );
   if (remaining.length > 0 && sdfSelection) {
-    if (!cache.sdfSubRuns.has(sdfSelection.cacheKey)) {
-      cache.sdfSubRuns.set(
-        sdfSelection.cacheKey,
-        buildSdfSubRun(state.host, cache.translatedRun, sdfSelection.strikeSize),
-      );
+    let sdfAsset = entry.sdfAssets.get(sdfSelection.cacheKey);
+    if (!sdfAsset) {
+      sdfAsset = buildSdfAsset(state.host, sourceRun, sdfSelection.strikeSize);
+      entry.sdfAssets.set(sdfSelection.cacheKey, sdfAsset);
+      noteAutoTextAssetBytes(coordinator, entry, estimateSdfAssetBytes(sdfAsset));
     }
-    const sdfSubRun = cache.sdfSubRuns.get(sdfSelection.cacheKey);
     const { accepted, rejected } = partitionGlyphIndices(
       remaining,
-      (index) => Boolean(sdfSubRun.glyphs[index]?.sdf),
+      (index) => Boolean(sdfAsset.glyphs[index]?.sdf),
     );
     if (accepted.length > 0) {
       resolvedRuns.push(
-        buildResolvedSdfState(sdfSubRun, accepted, state.color, groupTransform),
+        buildResolvedSdfStateFromAsset(
+          sourceRun,
+          sdfAsset,
+          accepted,
+          state.color,
+          groupTransform,
+          x,
+          y,
+        ),
       );
     }
     remaining = rejected;
@@ -1393,26 +1806,27 @@ function resolveAutoTextState(state, layoutState, groupTransform, cache) {
     remaining.length > 0 &&
     preferDirectMask
   ) {
-    const directMaskTransformKey = serializeMatrix2d(groupTransform);
-    if (!cache.directMaskSubRun || cache.directMaskTransformKey !== directMaskTransformKey) {
-      cache.directMaskSubRun = buildDirectMaskSubRun(
-        state.host,
-        cache.translatedRun,
-        groupTransform,
-      );
-      cache.directMaskTransformKey = directMaskTransformKey;
+    const directMaskReuseKey = serializeDirectMaskReuseKey(groupTransform, x, y);
+    let directMaskAsset = entry.directMaskAssets.get(directMaskReuseKey);
+    if (!directMaskAsset) {
+      directMaskAsset = buildDirectMaskAsset(state.host, sourceRun, groupTransform, x, y);
+      entry.directMaskAssets.set(directMaskReuseKey, directMaskAsset);
+      noteAutoTextAssetBytes(coordinator, entry, estimateDirectMaskAssetBytes(directMaskAsset));
     }
     const { accepted, rejected } = partitionGlyphIndices(
       remaining,
-      (index) => Boolean(cache.directMaskSubRun.glyphs[index]?.mask),
+      (index) => Boolean(directMaskAsset.glyphs[index]?.mask),
     );
     if (accepted.length > 0) {
       resolvedRuns.push(
-        buildResolvedDirectMaskState(
-          cache.directMaskSubRun,
+        buildResolvedDirectMaskStateFromAsset(
+          sourceRun,
+          directMaskAsset,
           accepted,
           state.color,
           groupTransform,
+          x,
+          y,
         ),
       );
     }
@@ -1421,25 +1835,30 @@ function resolveAutoTextState(state, layoutState, groupTransform, cache) {
 
   if (remaining.length > 0 && preferBitmapMask && !preferDirectMask) {
     const strikeScale = getTransformedMaskStrikeScale(groupTransform);
-    if (!cache.transformedMaskSubRun || cache.transformedMaskScale !== strikeScale) {
-      cache.transformedMaskSubRun = buildTransformedMaskSubRun(
-        state.host,
-        cache.translatedRun,
-        strikeScale,
+    let transformedMaskAsset = findReusableTransformedMaskAsset(entry, strikeScale);
+    if (!transformedMaskAsset) {
+      transformedMaskAsset = buildTransformedMaskAsset(state.host, sourceRun, strikeScale);
+      entry.transformedMaskAssets.set(transformedMaskAsset.strikeScale, transformedMaskAsset);
+      noteAutoTextAssetBytes(
+        coordinator,
+        entry,
+        estimateTransformedMaskAssetBytes(transformedMaskAsset),
       );
-      cache.transformedMaskScale = strikeScale;
     }
     const { accepted, rejected } = partitionGlyphIndices(
       remaining,
-      (index) => Boolean(cache.transformedMaskSubRun.glyphs[index]?.mask),
+      (index) => Boolean(transformedMaskAsset.glyphs[index]?.mask),
     );
     if (accepted.length > 0) {
       resolvedRuns.push(
-        buildResolvedTransformedMaskState(
-          cache.transformedMaskSubRun,
+        buildResolvedTransformedMaskStateFromAsset(
+          sourceRun,
+          transformedMaskAsset,
           accepted,
           state.color,
           groupTransform,
+          x,
+          y,
         ),
       );
     }
@@ -1447,18 +1866,28 @@ function resolveAutoTextState(state, layoutState, groupTransform, cache) {
   }
 
   if (remaining.length > 0) {
-    cache.pathGlyphEntries ??= buildPathGlyphEntries(state.host, cache.translatedRun);
+    if (entry.pathGlyphAssets === undefined) {
+      entry.pathGlyphAssets = buildPathGlyphAssets(state.host, sourceRun);
+      noteAutoTextAssetBytes(
+        coordinator,
+        entry,
+        estimatePathGlyphAssetBytes(entry.pathGlyphAssets),
+      );
+    }
     const { accepted, rejected } = partitionGlyphIndices(
       remaining,
-      (index) => cache.pathGlyphEntries[index] !== null,
+      (index) => entry.pathGlyphAssets[index] !== null,
     );
     if (accepted.length > 0) {
       resolvedRuns.push(
-        buildResolvedPathState(
-          cache.pathGlyphEntries,
+        buildResolvedPathStateFromAsset(
+          sourceRun,
+          entry.pathGlyphAssets,
           accepted,
           state.color,
           groupTransform,
+          x,
+          y,
         ),
       );
     }
@@ -1471,30 +1900,36 @@ function resolveAutoTextState(state, layoutState, groupTransform, cache) {
     approximateDeviceTextSize > 0
   ) {
     const strikeScale = getTransformedMaskStrikeScale(groupTransform);
-    if (!cache.transformedMaskSubRun || cache.transformedMaskScale !== strikeScale) {
-      cache.transformedMaskSubRun = buildTransformedMaskSubRun(
-        state.host,
-        cache.translatedRun,
-        strikeScale,
+    let transformedMaskAsset = findReusableTransformedMaskAsset(entry, strikeScale);
+    if (!transformedMaskAsset) {
+      transformedMaskAsset = buildTransformedMaskAsset(state.host, sourceRun, strikeScale);
+      entry.transformedMaskAssets.set(transformedMaskAsset.strikeScale, transformedMaskAsset);
+      noteAutoTextAssetBytes(
+        coordinator,
+        entry,
+        estimateTransformedMaskAssetBytes(transformedMaskAsset),
       );
-      cache.transformedMaskScale = strikeScale;
     }
     const { accepted } = partitionGlyphIndices(
       remaining,
-      (index) => Boolean(cache.transformedMaskSubRun.glyphs[index]?.mask),
+      (index) => Boolean(transformedMaskAsset.glyphs[index]?.mask),
     );
     if (accepted.length > 0) {
       resolvedRuns.push(
-        buildResolvedTransformedMaskState(
-          cache.transformedMaskSubRun,
+        buildResolvedTransformedMaskStateFromAsset(
+          sourceRun,
+          transformedMaskAsset,
           accepted,
           state.color,
           groupTransform,
+          x,
+          y,
         ),
       );
     }
   }
 
+  touchAutoTextRunEntry(coordinator, entry);
   return composeResolvedTextRuns(resolvedRuns, state.color, groupTransform);
 }
 
@@ -1543,6 +1978,233 @@ function computeLayout(layout = {}) {
     width: layout.width ?? 0,
     height: layout.height ?? 0,
   };
+}
+
+function emptyBounds() {
+  return {
+    minX: Infinity,
+    minY: Infinity,
+    maxX: -Infinity,
+    maxY: -Infinity,
+  };
+}
+
+function includePoint(bounds, x, y) {
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    return;
+  }
+  bounds.minX = Math.min(bounds.minX, x);
+  bounds.minY = Math.min(bounds.minY, y);
+  bounds.maxX = Math.max(bounds.maxX, x);
+  bounds.maxY = Math.max(bounds.maxY, y);
+}
+
+function includeRect(bounds, x, y, width, height) {
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(width) || !Number.isFinite(height)) {
+    return;
+  }
+  includePoint(bounds, x, y);
+  includePoint(bounds, x + Math.max(0, width), y + Math.max(0, height));
+}
+
+function boundsToIntrinsicSize(bounds) {
+  if (!Number.isFinite(bounds.minX) || !Number.isFinite(bounds.minY) ||
+      !Number.isFinite(bounds.maxX) || !Number.isFinite(bounds.maxY)) {
+    return { width: 0, height: 0 };
+  }
+  return {
+    width: Math.max(0, bounds.maxX - bounds.minX),
+    height: Math.max(0, bounds.maxY - bounds.minY),
+  };
+}
+
+function measurePathVerbBounds(verbs = []) {
+  const bounds = emptyBounds();
+  for (const verb of verbs) {
+    switch (verb.kind) {
+      case "moveTo":
+      case "lineTo":
+        includePoint(bounds, verb.to[0], verb.to[1]);
+        break;
+      case "quadTo":
+      case "conicTo":
+        includePoint(bounds, verb.control[0], verb.control[1]);
+        includePoint(bounds, verb.to[0], verb.to[1]);
+        break;
+      case "cubicTo":
+        includePoint(bounds, verb.control1[0], verb.control1[1]);
+        includePoint(bounds, verb.control2[0], verb.control2[1]);
+        includePoint(bounds, verb.to[0], verb.to[1]);
+        break;
+      case "arcTo":
+        includeRect(
+          bounds,
+          verb.center[0] - verb.radius,
+          verb.center[1] - verb.radius,
+          verb.radius * 2,
+          verb.radius * 2,
+        );
+        break;
+      case "close":
+        break;
+      default:
+        throw new TypeError(`Unsupported path verb kind: ${verb.kind}`);
+    }
+  }
+  return boundsToIntrinsicSize(bounds);
+}
+
+function measureTextLineHeight(host, typeface, size) {
+  const metrics = host.getFontMetrics(typeface, size);
+  if (metrics) {
+    const lineHeight = (metrics.descent - metrics.ascent) + metrics.lineGap;
+    if (Number.isFinite(lineHeight) && lineHeight > 0) {
+      return lineHeight;
+    }
+  }
+  return Number.isFinite(size) && size > 0 ? size : 0;
+}
+
+function measureDirectMaskGlyphs(glyphs) {
+  const bounds = emptyBounds();
+  for (const glyph of glyphs) {
+    if (glyph.mask) {
+      includeRect(bounds, glyph.x, glyph.y, glyph.mask.width, glyph.mask.height);
+    } else {
+      includePoint(bounds, glyph.x, glyph.y);
+    }
+  }
+  return boundsToIntrinsicSize(bounds);
+}
+
+function measureTransformedMaskGlyphs(glyphs) {
+  const bounds = emptyBounds();
+  for (const glyph of glyphs) {
+    const scale = Number.isFinite(glyph.strikeToSourceScale) && glyph.strikeToSourceScale > 0
+      ? glyph.strikeToSourceScale
+      : 1;
+    if (glyph.mask) {
+      includeRect(bounds, glyph.x, glyph.y, glyph.mask.width * scale, glyph.mask.height * scale);
+    } else {
+      includePoint(bounds, glyph.x, glyph.y);
+    }
+  }
+  return boundsToIntrinsicSize(bounds);
+}
+
+function measureSdfGlyphs(glyphs) {
+  const bounds = emptyBounds();
+  for (const glyph of glyphs) {
+    const scale = Number.isFinite(glyph.strikeToSourceScale) && glyph.strikeToSourceScale > 0
+      ? glyph.strikeToSourceScale
+      : 1;
+    const source = glyph.sdf ?? glyph.mask;
+    if (source) {
+      includeRect(
+        bounds,
+        glyph.x + (source.offsetX * scale),
+        glyph.y + (source.offsetY * scale),
+        source.width * scale,
+        source.height * scale,
+      );
+    } else {
+      includePoint(bounds, glyph.x, glyph.y);
+    }
+  }
+  return boundsToIntrinsicSize(bounds);
+}
+
+function measurePathTextGlyphs(glyphs) {
+  const bounds = emptyBounds();
+  for (const glyph of glyphs) {
+    const glyphBounds = measurePathVerbBounds(glyph.verbs);
+    includeRect(bounds, glyph.x, glyph.y, glyphBounds.width, glyphBounds.height);
+  }
+  return boundsToIntrinsicSize(bounds);
+}
+
+function measureTextIntrinsicSize(state) {
+  switch (state.kind) {
+    case "auto":
+      return {
+        width: Math.max(0, Math.abs(state.run.advanceX)),
+        height: measureTextLineHeight(state.host, state.run.typeface, state.run.size),
+      };
+    case "direct-mask":
+      return measureDirectMaskGlyphs(state.glyphs);
+    case "transformed-mask":
+      return measureTransformedMaskGlyphs(state.glyphs);
+    case "sdf":
+      return measureSdfGlyphs(state.glyphs);
+    case "path":
+      return measurePathTextGlyphs(state.glyphs);
+    case "composite": {
+      const bounds = emptyBounds();
+      for (const run of state.runs) {
+        const size = measureTextIntrinsicSize(run);
+        includeRect(bounds, 0, 0, size.width, size.height);
+      }
+      return boundsToIntrinsicSize(bounds);
+    }
+    default:
+      throw new TypeError(`Unsupported text kind: ${state.kind}`);
+  }
+}
+
+function getNodeIntrinsicSize(node) {
+  if (!node) {
+    return null;
+  }
+  if (node instanceof Rect2d) {
+    return {
+      width: Math.max(0, Number(node._state.width ?? 0)),
+      height: Math.max(0, Number(node._state.height ?? 0)),
+    };
+  }
+  if (node instanceof Path2d) {
+    return measurePathVerbBounds(node._state.verbs);
+  }
+  if (node instanceof Text2d) {
+    return measureTextIntrinsicSize(node._state);
+  }
+  return null;
+}
+
+function sameIntrinsicSize(left, right) {
+  if (left === null || right === null) {
+    return left === right;
+  }
+  return Math.abs(left.width - right.width) <= 1e-4 &&
+    Math.abs(left.height - right.height) <= 1e-4;
+}
+
+function markIntrinsicParentLayoutDirty(node, previousSize, nextSize) {
+  if (sameIntrinsicSize(previousSize, nextSize)) {
+    return;
+  }
+  let current = node._parentNode2d ?? node._parentNode3d ?? null;
+  while (current !== null) {
+    if (
+      current instanceof LayoutItem2d ||
+      current instanceof LayoutGroup2d ||
+      current instanceof LayoutItem3d ||
+      current instanceof LayoutGroup3d
+    ) {
+      markLayoutNodeDirty(current);
+      return;
+    }
+    current = current._parentNode2d ?? current._parentNode3d ?? null;
+  }
+}
+
+function getLayoutContentChild(node) {
+  if (!node || !(node instanceof LayoutItem2d || node instanceof LayoutItem3d)) {
+    return null;
+  }
+  if (isLayoutNode(node._content)) {
+    return node._content;
+  }
+  return null;
 }
 
 let nextLayoutNodeId = 1;
@@ -1630,10 +2292,12 @@ function buildLayoutTree(node) {
     };
   }
   if (node instanceof LayoutItem2d || node instanceof LayoutItem3d) {
+    const contentChild = getLayoutContentChild(node);
     return {
       id: node._layoutNodeId,
       style: cloneLayout(node._layout),
-      children: [],
+      measure: contentChild === null ? getNodeIntrinsicSize(node._content) : undefined,
+      children: contentChild ? [buildLayoutTree(contentChild)] : [],
     };
   }
   throw new TypeError("buildLayoutTree expects a layout node");
@@ -1674,6 +2338,10 @@ function clearLayoutNodeDirty(node) {
     for (const child of node._children) {
       clearLayoutNodeDirty(child);
     }
+  }
+  const contentChild = getLayoutContentChild(node);
+  if (contentChild) {
+    clearLayoutNodeDirty(contentChild);
   }
 }
 
@@ -2109,7 +2777,14 @@ export class LayoutItem2d {
 
   setContent(content) {
     ensureNode2d(content);
+    const previousContentChild = getLayoutContentChild(this);
+    if (previousContentChild) {
+      previousContentChild._layoutParent = null;
+    }
     this._content = content;
+    if (isLayoutNode(content)) {
+      content._layoutParent = this;
+    }
     content._parentNode2d = this;
     if (this._scene) {
       attachNodeToScene2d(this._scene, content);
@@ -2125,6 +2800,10 @@ export class LayoutItem2d {
   _setComputedLayouts(computedLayouts) {
     if (computedLayouts.has(this._layoutNodeId)) {
       this._computedLayout = computedLayouts.get(this._layoutNodeId);
+    }
+    const contentChild = getLayoutContentChild(this);
+    if (contentChild) {
+      contentChild._setComputedLayouts(computedLayouts);
     }
   }
 
@@ -2198,6 +2877,7 @@ export class Rect2d {
   }
 
   set(patch = {}) {
+    const previousIntrinsicSize = getNodeIntrinsicSize(this);
     if (patch.x !== undefined) this._state.x = patch.x;
     if (patch.y !== undefined) this._state.y = patch.y;
     if (patch.width !== undefined) this._state.width = patch.width;
@@ -2205,6 +2885,7 @@ export class Rect2d {
     if (patch.color !== undefined) this._state.color = normalizeColor(patch.color);
 
     this._syncResolvedState();
+    markIntrinsicParentLayoutDirty(this, previousIntrinsicSize, getNodeIntrinsicSize(this));
     return this;
   }
 
@@ -2263,6 +2944,7 @@ export class Path2d {
   }
 
   set(patch = {}) {
+    const previousIntrinsicSize = getNodeIntrinsicSize(this);
     if (patch.x !== undefined) this._state.x = patch.x;
     if (patch.y !== undefined) this._state.y = patch.y;
     if (patch.verbs !== undefined) this._state.verbs = patch.verbs.map(normalizePathVerb);
@@ -2279,6 +2961,7 @@ export class Path2d {
     if (patch.dashOffset !== undefined) this._state.dashOffset = patch.dashOffset;
 
     this._syncResolvedState();
+    markIntrinsicParentLayoutDirty(this, previousIntrinsicSize, getNodeIntrinsicSize(this));
     return this;
   }
 
@@ -2352,6 +3035,7 @@ export class Text2d {
   }
 
   set(patch = {}) {
+    const previousIntrinsicSize = getNodeIntrinsicSize(this);
     const nextKind = patch.kind ?? this._state.kind;
     this._state = normalizeTextInit({
       ...this._state,
@@ -2362,6 +3046,7 @@ export class Text2d {
       this._autoCache = createAutoTextCache();
     }
     this._syncResolvedState();
+    markIntrinsicParentLayoutDirty(this, previousIntrinsicSize, getNodeIntrinsicSize(this));
     return this;
   }
 
@@ -2660,7 +3345,14 @@ export class LayoutItem3d {
 
   setContent(content) {
     ensureNode3d(content);
+    const previousContentChild = getLayoutContentChild(this);
+    if (previousContentChild) {
+      previousContentChild._layoutParent = null;
+    }
     this._content = content;
+    if (isLayoutNode(content)) {
+      content._layoutParent = this;
+    }
     if (this._scene) {
       attachNodeToScene3d(this._scene, content);
     }
@@ -2675,6 +3367,10 @@ export class LayoutItem3d {
   _setComputedLayouts(computedLayouts) {
     if (computedLayouts.has(this._layoutNodeId)) {
       this._computedLayout = computedLayouts.get(this._layoutNodeId);
+    }
+    const contentChild = getLayoutContentChild(this);
+    if (contentChild) {
+      contentChild._setComputedLayouts(computedLayouts);
     }
   }
 

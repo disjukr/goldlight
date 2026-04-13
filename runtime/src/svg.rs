@@ -150,7 +150,10 @@ fn resolve_paint_color(paint: &Paint, opacity: f32) -> Option<ColorValue> {
     }
 }
 
-fn transform_verbs(verbs: &[PathVerb2D], transform: usvg::tiny_skia_path::Transform) -> Vec<PathVerb2D> {
+fn transform_verbs(
+    verbs: &[PathVerb2D],
+    transform: usvg::tiny_skia_path::Transform,
+) -> Vec<PathVerb2D> {
     let mut transformed = Vec::new();
     for verb in verbs {
         append_transformed_verb(&mut transformed, verb, transform);

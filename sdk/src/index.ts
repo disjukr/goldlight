@@ -358,12 +358,29 @@ export interface SdfGlyph {
   strikeToSourceScale: number;
 }
 
+export interface PathTextGlyph {
+  glyphId: number;
+  x: number;
+  y: number;
+  verbs: PathVerb2d[];
+}
+
 export interface SdfSubRun {
   typeface: TypefaceHandle;
   size: number;
   glyphs: SdfGlyph[];
   sdfInset: number;
   sdfRadius: number;
+  strikeSize?: number;
+}
+
+export type AutoTextMode = 'direct-mask' | 'transformed-mask' | 'sdf' | 'path';
+
+export interface AutoTextSelection {
+  mode: AutoTextMode;
+  approximateDeviceTextSize: number;
+  sdfStrikeSize?: number | null;
+  sdfStrikeToSourceScale?: number | null;
 }
 
 export interface TextHost {
@@ -417,6 +434,22 @@ export type Text2dInit =
     y?: number;
     color?: ColorValue;
     glyphs?: SdfGlyph[];
+  }
+  | {
+    kind: 'path';
+    x?: number;
+    y?: number;
+    color?: ColorValue;
+    glyphs?: PathTextGlyph[];
+  }
+  | {
+    kind: 'auto';
+    x?: number;
+    y?: number;
+    color?: ColorValue;
+    host: TextHost;
+    run: ShapedRun;
+    useSdfForSmallText?: boolean;
   };
 
 export type Text2dState = Text2dInit & { color: ResolvedColorValue; x: number; y: number };
@@ -860,7 +893,19 @@ export function buildTransformedMaskSubRun(
   throw new Error(RUNTIME_ONLY_ERROR);
 }
 
-export function buildSdfSubRun(_host: TextHost, _run: ShapedRun): SdfSubRun {
+export function buildSdfSubRun(
+  _host: TextHost,
+  _run: ShapedRun,
+  _strikeSize?: number,
+): SdfSubRun {
+  throw new Error(RUNTIME_ONLY_ERROR);
+}
+
+export function inspectAutoTextSelection(
+  _run: ShapedRun,
+  _transform: Transform2d = [1, 0, 0, 1, 0, 0],
+  _options: { useSdfForSmallText?: boolean } = {},
+): AutoTextSelection {
   throw new Error(RUNTIME_ONLY_ERROR);
 }
 

@@ -6,6 +6,8 @@ mod render;
 mod stroke_patch;
 mod svg;
 mod text;
+mod text_atlas;
+mod vello_compute;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -3931,7 +3933,6 @@ impl GoldlightRuntime {
             let mut state = self.state.lock().expect("runtime state mutex poisoned");
             std::mem::take(&mut state.pending_windows)
         };
-
         for pending_window in pending {
             let startup_presented = pending_window.show_policy == WindowShowPolicy::Immediate;
             let attributes = WindowAttributes::default()

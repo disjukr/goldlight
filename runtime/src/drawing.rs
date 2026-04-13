@@ -25,6 +25,7 @@ use crate::stroke_patch::{
     prepare_stroke_patch_step, stroke_patch_shader_source, PreparedStrokePatchStep,
     StrokePatchInstance,
 };
+use crate::text_atlas::TextAtlasProvider;
 
 const EPSILON: f32 = 1e-5;
 const GRADIENT_EPSILON: f32 = 1e-5;
@@ -1565,52 +1566,87 @@ pub fn record_scene_2d(
         });
     }
     for text in texts {
-        match text {
-            Text2D::DirectMask {
-                x,
-                y,
-                color,
-                glyphs,
-                transform,
-                ..
-            } => recorder.draw_direct_mask_text(DirectMaskTextDrawCommand {
-                x: *x,
-                y: *y,
-                color: *color,
-                glyphs: glyphs.clone(),
-                transform: *transform,
-            }),
-            Text2D::TransformedMask {
-                x,
-                y,
-                color,
-                glyphs,
-                transform,
-                ..
-            } => recorder.draw_transformed_mask_text(TransformedMaskTextDrawCommand {
-                x: *x,
-                y: *y,
-                color: *color,
-                glyphs: glyphs.clone(),
-                transform: *transform,
-            }),
-            Text2D::Sdf {
-                x,
-                y,
-                color,
-                glyphs,
-                transform,
-                ..
-            } => recorder.draw_sdf_text(SdfTextDrawCommand {
-                x: *x,
-                y: *y,
-                color: *color,
-                glyphs: glyphs.clone(),
-                transform: *transform,
-            }),
-        }
+        record_text_2d(&mut recorder, text);
     }
     recorder.finish()
+}
+
+fn record_text_2d(recorder: &mut DrawingRecorder, text: &Text2D) {
+    match text {
+        Text2D::DirectMask {
+            x,
+            y,
+            color,
+            glyphs,
+            transform,
+            ..
+        } => recorder.draw_direct_mask_text(DirectMaskTextDrawCommand {
+            x: *x,
+            y: *y,
+            color: *color,
+            glyphs: glyphs.clone(),
+            transform: *transform,
+        }),
+        Text2D::TransformedMask {
+            x,
+            y,
+            color,
+            glyphs,
+            transform,
+            ..
+        } => recorder.draw_transformed_mask_text(TransformedMaskTextDrawCommand {
+            x: *x,
+            y: *y,
+            color: *color,
+            glyphs: glyphs.clone(),
+            transform: *transform,
+        }),
+        Text2D::Sdf {
+            x,
+            y,
+            color,
+            glyphs,
+            transform,
+            ..
+        } => recorder.draw_sdf_text(SdfTextDrawCommand {
+            x: *x,
+            y: *y,
+            color: *color,
+            glyphs: glyphs.clone(),
+            transform: *transform,
+        }),
+        Text2D::Path {
+            x,
+            y,
+            color,
+            glyphs,
+            transform,
+            ..
+        } => {
+            for glyph in glyphs {
+                recorder.draw_path(PathDrawCommand {
+                    x: *x + glyph.x,
+                    y: *y + glyph.y,
+                    verbs: glyph.verbs.clone(),
+                    fill_rule: PathFillRule2D::Nonzero,
+                    style: PathStyle2D::Fill,
+                    color: *color,
+                    shader: None,
+                    stroke_width: 1.0,
+                    stroke_join: PathStrokeJoin2D::Miter,
+                    stroke_cap: PathStrokeCap2D::Butt,
+                    dash_array: Vec::new(),
+                    dash_offset: 0.0,
+                    transform: *transform,
+                });
+            }
+        }
+        Text2D::Composite { runs, .. } => {
+            for run in runs {
+                record_text_2d(recorder, run);
+            }
+        }
+    }
 }
 
 #[allow(dead_code)]
@@ -1619,14 +1655,31 @@ pub fn prepare_drawing_recording(
     surface_width: u32,
     surface_height: u32,
 ) -> DrawingPreparedRecording {
-    prepare_drawing_recording_with_atlas(recording, surface_width, surface_height, None)
+    prepare_drawing_recording_with_providers(recording, surface_width, surface_height, None, None)
 }
 
+#[allow(dead_code)]
 pub fn prepare_drawing_recording_with_atlas(
     recording: &DrawingRecording,
     surface_width: u32,
     surface_height: u32,
     mut atlas_provider: Option<&mut AtlasProvider>,
+) -> DrawingPreparedRecording {
+    prepare_drawing_recording_with_providers(
+        recording,
+        surface_width,
+        surface_height,
+        atlas_provider.as_deref_mut(),
+        None,
+    )
+}
+
+pub fn prepare_drawing_recording_with_providers(
+    recording: &DrawingRecording,
+    surface_width: u32,
+    surface_height: u32,
+    mut path_atlas_provider: Option<&mut AtlasProvider>,
+    mut text_atlas_provider: Option<&mut TextAtlasProvider>,
 ) -> DrawingPreparedRecording {
     let width = surface_width.max(1) as f32;
     let height = surface_height.max(1) as f32;
@@ -1681,53 +1734,62 @@ pub fn prepare_drawing_recording_with_atlas(
                     painter_depth,
                     surface_width,
                     surface_height,
-                    atlas_provider.as_deref_mut(),
+                    path_atlas_provider.as_deref_mut(),
                 ));
             }
             DrawingCommand::DrawDirectMaskText(text) => {
                 let painter_depth = next_painter_depth_as_float(&mut next_painters_depth);
-                if let Some(step) = prepare_direct_mask_text_step(
-                    &text.glyphs,
-                    text.color,
-                    text.x,
-                    text.y,
-                    surface_width,
-                    surface_height,
-                    painter_depth,
-                    text.transform,
-                ) {
-                    current_steps.push(DrawingPreparedStep::BitmapText(step));
-                }
+                current_steps.extend(
+                    prepare_direct_mask_text_step(
+                        &text.glyphs,
+                        text.color,
+                        text.x,
+                        text.y,
+                        surface_width,
+                        surface_height,
+                        painter_depth,
+                        text.transform,
+                        text_atlas_provider.as_deref_mut(),
+                    )
+                    .into_iter()
+                    .map(DrawingPreparedStep::BitmapText),
+                );
             }
             DrawingCommand::DrawTransformedMaskText(text) => {
                 let painter_depth = next_painter_depth_as_float(&mut next_painters_depth);
-                if let Some(step) = prepare_transformed_mask_text_step(
-                    &text.glyphs,
-                    text.color,
-                    text.x,
-                    text.y,
-                    surface_width,
-                    surface_height,
-                    painter_depth,
-                    text.transform,
-                ) {
-                    current_steps.push(DrawingPreparedStep::BitmapText(step));
-                }
+                current_steps.extend(
+                    prepare_transformed_mask_text_step(
+                        &text.glyphs,
+                        text.color,
+                        text.x,
+                        text.y,
+                        surface_width,
+                        surface_height,
+                        painter_depth,
+                        text.transform,
+                        text_atlas_provider.as_deref_mut(),
+                    )
+                    .into_iter()
+                    .map(DrawingPreparedStep::BitmapText),
+                );
             }
             DrawingCommand::DrawSdfText(text) => {
                 let painter_depth = next_painter_depth_as_float(&mut next_painters_depth);
-                if let Some(step) = prepare_sdf_text_step(
-                    &text.glyphs,
-                    text.color,
-                    text.x,
-                    text.y,
-                    surface_width,
-                    surface_height,
-                    painter_depth,
-                    text.transform,
-                ) {
-                    current_steps.push(DrawingPreparedStep::SdfText(step));
-                }
+                current_steps.extend(
+                    prepare_sdf_text_step(
+                        &text.glyphs,
+                        text.color,
+                        text.x,
+                        text.y,
+                        surface_width,
+                        surface_height,
+                        painter_depth,
+                        text.transform,
+                        text_atlas_provider.as_deref_mut(),
+                    )
+                    .into_iter()
+                    .map(DrawingPreparedStep::SdfText),
+                );
             }
         }
     }
@@ -2273,20 +2335,26 @@ fn build_path_steps(
     painter_depth: f32,
     surface_width: u32,
     surface_height: u32,
-    atlas_provider: Option<&mut AtlasProvider>,
+    mut atlas_provider: Option<&mut AtlasProvider>,
 ) -> Vec<DrawingPreparedStep> {
     let mut steps = Vec::new();
-    if let Some(step) = prepare_path_mask_step(
-        path,
-        width,
-        height,
-        painter_depth,
-        surface_width,
-        surface_height,
-        atlas_provider,
-    ) {
-        steps.push(DrawingPreparedStep::PathMask(step));
-        return steps;
+    let should_use_path_atlas = match atlas_provider.as_deref_mut() {
+        Some(provider) => provider.should_use_path_atlas(path, surface_width, surface_height),
+        None => false,
+    };
+    if should_use_path_atlas {
+        if let Some(step) = prepare_path_mask_step(
+            path,
+            width,
+            height,
+            painter_depth,
+            surface_width,
+            surface_height,
+            atlas_provider,
+        ) {
+            steps.push(DrawingPreparedStep::PathMask(step));
+            return steps;
+        }
     }
 
     let path_paint = build_fill_path_paint(path);
@@ -4098,6 +4166,7 @@ fn cross(a: Point, b: Point) -> f32 {
     a[0] * b[1] - a[1] * b[0]
 }
 
+#[allow(dead_code)]
 pub fn encode_drawing_command_buffer(
     shared_context: &DawnSharedContext,
     prepared: &DrawingPreparedRecording,
@@ -4108,14 +4177,44 @@ pub fn encode_drawing_command_buffer(
     depth_target_view: Option<&wgpu::TextureView>,
     msaa_depth_target_view: Option<&wgpu::TextureView>,
 ) -> Result<()> {
-    let mut atlas_provider = atlas_provider;
+    encode_drawing_command_buffer_with_providers(
+        shared_context,
+        prepared,
+        atlas_provider,
+        None,
+        encoder,
+        target_view,
+        msaa_target_view,
+        depth_target_view,
+        msaa_depth_target_view,
+    )
+}
+
+pub fn encode_drawing_command_buffer_with_providers(
+    shared_context: &DawnSharedContext,
+    prepared: &DrawingPreparedRecording,
+    path_atlas_provider: Option<&mut AtlasProvider>,
+    text_atlas_provider: Option<&mut TextAtlasProvider>,
+    encoder: &mut wgpu::CommandEncoder,
+    target_view: &wgpu::TextureView,
+    msaa_target_view: Option<&wgpu::TextureView>,
+    depth_target_view: Option<&wgpu::TextureView>,
+    msaa_depth_target_view: Option<&wgpu::TextureView>,
+) -> Result<()> {
+    let mut path_atlas_provider = path_atlas_provider;
+    let mut text_atlas_provider = text_atlas_provider;
     shared_context
         .resource_provider
         .warm_prepared_pipelines(prepared);
-    if let Some(atlas_provider) = atlas_provider.as_deref_mut() {
+    if let Some(atlas_provider) = path_atlas_provider.as_deref_mut() {
+        atlas_provider.upload_pending(&shared_context.queue);
+        atlas_provider.encode_pending(encoder);
+    }
+    if let Some(atlas_provider) = text_atlas_provider.as_deref_mut() {
         atlas_provider.upload_pending(&shared_context.queue);
     }
-    let atlas_provider = atlas_provider.as_deref();
+    let path_atlas_provider = path_atlas_provider.as_deref();
+    let text_atlas_provider = text_atlas_provider.as_deref();
     let (_viewport_buffer, viewport_bind_group) = shared_context
         .resource_provider
         .create_viewport_bind_group(prepared.surface_width, prepared.surface_height);
@@ -4252,7 +4351,7 @@ pub fn encode_drawing_command_buffer(
                     render_pass.draw(0..step.vertex_count, 0..step.instances.len() as u32);
                 }
                 DrawingPreparedStep::PathMask(step) => {
-                    let Some(atlas_provider) = atlas_provider else {
+                    let Some(atlas_provider) = path_atlas_provider else {
                         continue;
                     };
                     let Some(vertex_buffer) = shared_context
@@ -4284,6 +4383,7 @@ pub fn encode_drawing_command_buffer(
                         &shared_context.queue,
                         &mut render_pass,
                         step,
+                        text_atlas_provider,
                         sample_count,
                     );
                 }
@@ -4294,6 +4394,7 @@ pub fn encode_drawing_command_buffer(
                         &shared_context.queue,
                         &mut render_pass,
                         step,
+                        text_atlas_provider,
                         sample_count,
                     );
                 }

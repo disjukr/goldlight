@@ -8,6 +8,7 @@ Examples in this directory focus on the built-in 2D scene model.
 - [`strokes`](./strokes): stroke join and cap examples
 - [`tiger`](./tiger): `usvg`-parsed SVG path rendering
 - [`text_modes`](./text_modes): direct mask, SDF, and path-fallback text in one scene
+- [`text_auto_transform`](./text_auto_transform): animated auto text switching across transform-driven rendering modes
 - [`text_direct_mask`](./text_direct_mask): direct-mask glyph atlas text rendering
 - [`text_sdf`](./text_sdf): signed-distance-field glyph rendering
 - [`text_glyph_clusters`](./text_glyph_clusters): glyph-cluster visualization from shaped text

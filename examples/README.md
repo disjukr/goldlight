@@ -27,6 +27,7 @@ local Rust dev runtime.
 - [`examples/2d/tiger`](./2d/tiger): `usvg`-parsed SVG tiger rendering
 - [`examples/2d/strokes`](./2d/strokes): stroke join and cap samples
 - [`examples/2d/text_modes`](./2d/text_modes): direct mask, SDF, and path fallback text
+- [`examples/2d/text_auto_transform`](./2d/text_auto_transform): animated auto text under translate, rotate, and scale changes
 - [`examples/2d/text_on_path`](./2d/text_on_path): path-aligned glyph path fallback text
 - [`examples/3d/basic_triangle`](./3d/basic_triangle): animated 3D triangle
 

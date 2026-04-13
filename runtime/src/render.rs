@@ -10,10 +10,11 @@ use wgpu::TextureFormatFeatureFlags;
 use winit::{dpi::PhysicalSize, window::Window};
 
 use crate::drawing::{
-    encode_drawing_command_buffer, prepare_drawing_recording_with_atlas, record_scene_2d,
-    DawnSharedContext, DRAWING_DEPTH_FORMAT,
+    encode_drawing_command_buffer_with_providers, prepare_drawing_recording_with_providers,
+    record_scene_2d, DawnSharedContext, DRAWING_DEPTH_FORMAT,
 };
 use crate::path_atlas::AtlasProvider;
+use crate::text_atlas::TextAtlasProvider;
 
 const SHADER_SOURCE: &str = r#"
 struct VertexOutput {
@@ -443,6 +444,18 @@ pub struct SdfGlyph2DOptions {
     pub strike_to_source_scale: f32,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PathTextGlyph2DOptions {
+    pub glyph_id: u32,
+    #[serde(default)]
+    pub x: f32,
+    #[serde(default)]
+    pub y: f32,
+    #[serde(default)]
+    pub verbs: Vec<PathVerb2D>,
+}
+
 fn default_text_strike_to_source_scale() -> f32 {
     1.0
 }
@@ -488,6 +501,24 @@ pub enum Text2DOptions {
         glyphs: Vec<SdfGlyph2DOptions>,
         #[serde(default = "default_affine_transform_2d")]
         transform: [f32; 6],
+    },
+    #[serde(rename = "path")]
+    Path {
+        #[serde(default)]
+        x: f32,
+        #[serde(default)]
+        y: f32,
+        #[serde(default = "default_rect_color")]
+        color: ColorValue,
+        #[serde(default)]
+        glyphs: Vec<PathTextGlyph2DOptions>,
+        #[serde(default = "default_affine_transform_2d")]
+        transform: [f32; 6],
+    },
+    #[serde(rename = "composite")]
+    Composite {
+        #[serde(default)]
+        runs: Vec<Text2DOptions>,
     },
 }
 
@@ -633,6 +664,14 @@ pub(crate) struct SdfGlyph2D {
 }
 
 #[derive(Clone, Debug)]
+pub(crate) struct PathTextGlyph2D {
+    pub _glyph_id: u32,
+    pub x: f32,
+    pub y: f32,
+    pub verbs: Vec<PathVerb2D>,
+}
+
+#[derive(Clone, Debug)]
 pub(crate) enum Text2D {
     DirectMask {
         _scene_id: u32,
@@ -657,6 +696,18 @@ pub(crate) enum Text2D {
         color: ColorValue,
         glyphs: Vec<SdfGlyph2D>,
         transform: [f32; 6],
+    },
+    Path {
+        _scene_id: u32,
+        x: f32,
+        y: f32,
+        color: ColorValue,
+        glyphs: Vec<PathTextGlyph2D>,
+        transform: [f32; 6],
+    },
+    Composite {
+        _scene_id: u32,
+        runs: Vec<Text2D>,
     },
 }
 
@@ -880,7 +931,9 @@ impl RenderModel {
         let scene_id = match self.texts_2d.get(&text_id) {
             Some(Text2D::DirectMask { _scene_id, .. })
             | Some(Text2D::TransformedMask { _scene_id, .. })
-            | Some(Text2D::Sdf { _scene_id, .. }) => *_scene_id,
+            | Some(Text2D::Sdf { _scene_id, .. })
+            | Some(Text2D::Path { _scene_id, .. })
+            | Some(Text2D::Composite { _scene_id, .. }) => *_scene_id,
             None => return Err(anyhow!("unknown 2D text {text_id}")),
         };
         self.texts_2d
@@ -1072,6 +1125,35 @@ fn text_from_options(scene_id: u32, options: Text2DOptions) -> Text2D {
                 .collect(),
             transform,
         },
+        Text2DOptions::Path {
+            x,
+            y,
+            color,
+            glyphs,
+            transform,
+        } => Text2D::Path {
+            _scene_id: scene_id,
+            x,
+            y,
+            color,
+            glyphs: glyphs
+                .into_iter()
+                .map(|glyph| PathTextGlyph2D {
+                    _glyph_id: glyph.glyph_id,
+                    x: glyph.x,
+                    y: glyph.y,
+                    verbs: glyph.verbs,
+                })
+                .collect(),
+            transform,
+        },
+        Text2DOptions::Composite { runs } => Text2D::Composite {
+            _scene_id: scene_id,
+            runs: runs
+                .into_iter()
+                .map(|run| text_from_options(scene_id, run))
+                .collect(),
+        },
     }
 }
 
@@ -1106,6 +1188,7 @@ pub struct RendererState {
     drawing_msaa_depth_target: Option<DepthTarget>,
     drawing_context: DawnSharedContext,
     path_atlas_provider: AtlasProvider,
+    text_atlas_provider: TextAtlasProvider,
     geometry_pipeline: wgpu::RenderPipeline,
     size: PhysicalSize<u32>,
 }
@@ -1139,14 +1222,16 @@ impl<'a> SceneCommandBuffer<'a> {
         &mut self,
         prepared: &crate::drawing::DrawingPreparedRecording,
         path_atlas_provider: &mut AtlasProvider,
+        text_atlas_provider: &mut TextAtlasProvider,
         msaa_target_view: Option<&'a wgpu::TextureView>,
         depth_target_view: Option<&'a wgpu::TextureView>,
         msaa_depth_target_view: Option<&'a wgpu::TextureView>,
     ) -> Result<()> {
-        encode_drawing_command_buffer(
+        encode_drawing_command_buffer_with_providers(
             self.drawing_context,
             prepared,
             Some(path_atlas_provider),
+            Some(text_atlas_provider),
             self.encoder,
             self.target_view,
             msaa_target_view,
@@ -1382,6 +1467,7 @@ impl RendererState {
             .then(|| Self::create_depth_target(&device, &config, msaa_sample_count));
         let drawing_context = DawnSharedContext::new(&device, &queue, format, msaa_sample_count);
         let path_atlas_provider = AtlasProvider::new(&device);
+        let text_atlas_provider = TextAtlasProvider::new(&device);
 
         Ok(Self {
             surface,
@@ -1394,6 +1480,7 @@ impl RendererState {
             drawing_msaa_depth_target,
             drawing_context,
             path_atlas_provider,
+            text_atlas_provider,
             geometry_pipeline,
             size,
         })
@@ -1530,15 +1617,18 @@ impl RendererState {
                     .collect::<Vec<_>>();
                 let recording = record_scene_2d(scene, &rects, &paths, &texts);
                 self.path_atlas_provider.begin_frame();
-                let prepared = prepare_drawing_recording_with_atlas(
+                self.text_atlas_provider.begin_frame();
+                let prepared = prepare_drawing_recording_with_providers(
                     &recording,
                     self.config.width,
                     self.config.height,
                     Some(&mut self.path_atlas_provider),
+                    Some(&mut self.text_atlas_provider),
                 );
                 command_buffer.encode_drawing(
                     &prepared,
                     &mut self.path_atlas_provider,
+                    &mut self.text_atlas_provider,
                     self.msaa_color_target.as_ref().map(|t| &t.view),
                     Some(&self.drawing_depth_target.view),
                     self.drawing_msaa_depth_target.as_ref().map(|t| &t.view),

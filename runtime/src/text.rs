@@ -3,13 +3,9 @@ use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
 use anyhow::Result;
-use font_kit::canvas::{Canvas, Format, RasterizationOptions};
 use font_kit::font::Font;
-use font_kit::hinting::HintingOptions;
 use font_kit::source::SystemSource;
 use harfbuzz_sys::*;
-use pathfinder_geometry::transform2d::Transform2F;
-use pathfinder_geometry::vector::{Vector2F, Vector2I};
 use serde::{Deserialize, Serialize};
 use ttf_parser::{Face, GlyphId, OutlineBuilder};
 
@@ -140,7 +136,6 @@ struct TextHostState {
 struct TypefaceState {
     font_data: Arc<Vec<u8>>,
     face_index: u32,
-    font: Font,
 }
 
 #[derive(Clone)]
@@ -262,7 +257,6 @@ fn load_typeface_state_from_font(font: Font) -> Option<TypefaceState> {
     Some(TypefaceState {
         font_data,
         face_index,
-        font,
     })
 }
 
@@ -422,57 +416,424 @@ fn rasterize_glyph_mask(
     } else {
         0.0
     };
-    let subpixel_translation = Transform2F::from_translation(Vector2F::new(subpixel_x, subpixel_y));
-    let bounds = typeface
-        .font
-        .raster_bounds(
-            glyph_id,
-            size,
-            subpixel_translation,
-            HintingOptions::None,
-            RasterizationOptions::GrayscaleAa,
+    let contours = build_glyph_raster_contours(typeface, glyph_id, size, subpixel_x, subpixel_y)?;
+    Some(rasterize_glyph_contours(&contours))
+}
+
+const GLYPH_EPSILON: f32 = 1e-5;
+const GLYPH_RASTER_SUBPIXEL_ROWS: usize = 4;
+const GLYPH_SKIA_AA_SHIFT: i32 = 2;
+const GLYPH_SKIA_CURVE_MAX_SHIFT: i32 = 6;
+
+struct GlyphMaskContourBuilder {
+    contours: Vec<Vec<[f32; 2]>>,
+    current_contour: Vec<[f32; 2]>,
+    scale: f32,
+    translate_x: f32,
+    translate_y: f32,
+}
+
+impl GlyphMaskContourBuilder {
+    fn new(scale: f32, translate_x: f32, translate_y: f32) -> Self {
+        Self {
+            contours: Vec::new(),
+            current_contour: Vec::new(),
+            scale,
+            translate_x,
+            translate_y,
+        }
+    }
+
+    fn point(&self, x: f32, y: f32) -> (f32, f32) {
+        (
+            x * self.scale + self.translate_x,
+            -y * self.scale + self.translate_y,
         )
-        .ok()?;
-    let width = bounds.width().max(0) as u32;
-    let height = bounds.height().max(0) as u32;
-    let offset_x = bounds.origin_x();
-    let offset_y = bounds.origin_y();
-    if width == 0 || height == 0 {
-        return Some(GlyphBitmap {
-            width,
-            height,
+    }
+
+    fn append_point(&mut self, point: [f32; 2]) {
+        if self.current_contour.last().copied() != Some(point) {
+            self.current_contour.push(point);
+        }
+    }
+
+    fn finish_contour(&mut self) {
+        if self.current_contour.len() < 2 {
+            self.current_contour.clear();
+            return;
+        }
+        let first = self.current_contour[0];
+        if self.current_contour.last().copied() != Some(first) {
+            self.current_contour.push(first);
+        }
+        self.contours
+            .push(std::mem::take(&mut self.current_contour));
+    }
+
+    fn finish(mut self) -> Vec<Vec<[f32; 2]>> {
+        self.finish_contour();
+        self.contours
+    }
+}
+
+impl OutlineBuilder for GlyphMaskContourBuilder {
+    fn move_to(&mut self, x: f32, y: f32) {
+        self.finish_contour();
+        let (x, y) = self.point(x, y);
+        self.current_contour.push([x, y]);
+    }
+
+    fn line_to(&mut self, x: f32, y: f32) {
+        let (x, y) = self.point(x, y);
+        self.append_point([x, y]);
+    }
+
+    fn quad_to(&mut self, x1: f32, y1: f32, x: f32, y: f32) {
+        let (x1, y1) = self.point(x1, y1);
+        let (x, y) = self.point(x, y);
+        let Some(from) = self.current_contour.last().copied() else {
+            self.current_contour.push([x, y]);
+            return;
+        };
+        flatten_quadratic_skia_curve(&mut self.current_contour, from, [x1, y1], [x, y]);
+    }
+
+    fn curve_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32) {
+        let (x1, y1) = self.point(x1, y1);
+        let (x2, y2) = self.point(x2, y2);
+        let (x, y) = self.point(x, y);
+        let Some(from) = self.current_contour.last().copied() else {
+            self.current_contour.push([x, y]);
+            return;
+        };
+        flatten_cubic_skia_curve(&mut self.current_contour, from, [x1, y1], [x2, y2], [x, y]);
+    }
+
+    fn close(&mut self) {
+        self.finish_contour();
+    }
+}
+
+fn build_glyph_raster_contours(
+    typeface: &TypefaceState,
+    glyph_id: u32,
+    size: f32,
+    subpixel_x: f32,
+    subpixel_y: f32,
+) -> Option<Vec<Vec<[f32; 2]>>> {
+    let face = Face::parse(typeface.font_data.as_slice(), typeface.face_index).ok()?;
+    let units_per_em = face.units_per_em();
+    if units_per_em == 0 {
+        return None;
+    }
+    let mut builder =
+        GlyphMaskContourBuilder::new(size / units_per_em as f32, subpixel_x, subpixel_y);
+    face.outline_glyph(GlyphId(glyph_id as u16), &mut builder)?;
+    Some(builder.finish())
+}
+
+fn append_unique_contour_point(contour: &mut Vec<[f32; 2]>, point: [f32; 2]) {
+    if contour.last().copied() != Some(point) {
+        contour.push(point);
+    }
+}
+
+fn flatten_quadratic_skia_curve(
+    contour: &mut Vec<[f32; 2]>,
+    from: [f32; 2],
+    control: [f32; 2],
+    to: [f32; 2],
+) {
+    let steps = glyph_skia_quadratic_segments(from, control, to);
+    for index in 1..=steps {
+        let t = index as f32 / steps as f32;
+        append_unique_contour_point(contour, evaluate_quadratic_curve(from, control, to, t));
+    }
+}
+
+fn flatten_cubic_skia_curve(
+    contour: &mut Vec<[f32; 2]>,
+    from: [f32; 2],
+    control1: [f32; 2],
+    control2: [f32; 2],
+    to: [f32; 2],
+) {
+    let steps = glyph_skia_cubic_segments(from, control1, control2, to);
+    for index in 1..=steps {
+        let t = index as f32 / steps as f32;
+        append_unique_contour_point(
+            contour,
+            evaluate_cubic_curve(from, control1, control2, to, t),
+        );
+    }
+}
+
+fn glyph_skia_quadratic_segments(from: [f32; 2], control: [f32; 2], to: [f32; 2]) -> usize {
+    let x0 = glyph_to_skia_subpixel(from[0]);
+    let y0 = glyph_to_skia_subpixel(from[1]);
+    let x1 = glyph_to_skia_subpixel(control[0]);
+    let y1 = glyph_to_skia_subpixel(control[1]);
+    let x2 = glyph_to_skia_subpixel(to[0]);
+    let y2 = glyph_to_skia_subpixel(to[1]);
+    let dx = (((x1 as i64) << 1) - x0 as i64 - x2 as i64) >> 2;
+    let dy = (((y1 as i64) << 1) - y0 as i64 - y2 as i64) >> 2;
+    let shift =
+        glyph_diff_to_shift(dx, dy, GLYPH_SKIA_AA_SHIFT).clamp(1, GLYPH_SKIA_CURVE_MAX_SHIFT);
+    1usize << shift
+}
+
+fn glyph_skia_cubic_segments(
+    from: [f32; 2],
+    control1: [f32; 2],
+    control2: [f32; 2],
+    to: [f32; 2],
+) -> usize {
+    let x0 = glyph_to_skia_subpixel(from[0]);
+    let y0 = glyph_to_skia_subpixel(from[1]);
+    let x1 = glyph_to_skia_subpixel(control1[0]);
+    let y1 = glyph_to_skia_subpixel(control1[1]);
+    let x2 = glyph_to_skia_subpixel(control2[0]);
+    let y2 = glyph_to_skia_subpixel(control2[1]);
+    let x3 = glyph_to_skia_subpixel(to[0]);
+    let y3 = glyph_to_skia_subpixel(to[1]);
+    let dx = glyph_cubic_delta_from_line(x0, x1, x2, x3);
+    let dy = glyph_cubic_delta_from_line(y0, y1, y2, y3);
+    let shift =
+        (glyph_diff_to_shift(dx, dy, GLYPH_SKIA_AA_SHIFT) + 1).clamp(1, GLYPH_SKIA_CURVE_MAX_SHIFT);
+    1usize << shift
+}
+
+fn glyph_to_skia_subpixel(value: f32) -> i64 {
+    (value * ((1 << (GLYPH_SKIA_AA_SHIFT + 6)) as f32)).round() as i64
+}
+
+fn glyph_cubic_delta_from_line(a: i64, b: i64, c: i64, d: i64) -> i64 {
+    let one_third = (a * 8 - b * 15 + 6 * c + d) * 19 >> 9;
+    let two_third = (a + 6 * b - c * 15 + d * 8) * 19 >> 9;
+    one_third.abs().max(two_third.abs())
+}
+
+fn glyph_diff_to_shift(dx: i64, dy: i64, shift_aa: i32) -> i32 {
+    let dist = glyph_cheap_distance(dx, dy);
+    let shifted = (dist + (1i64 << (2 + shift_aa))) >> (3 + shift_aa);
+    if shifted <= 0 {
+        return 0;
+    }
+    ((64 - shifted.leading_zeros() as i32) >> 1).max(0)
+}
+
+fn glyph_cheap_distance(dx: i64, dy: i64) -> i64 {
+    let dx = dx.abs();
+    let dy = dy.abs();
+    if dx > dy {
+        dx + (dy >> 1)
+    } else {
+        dy + (dx >> 1)
+    }
+}
+
+fn evaluate_quadratic_curve(from: [f32; 2], control: [f32; 2], to: [f32; 2], t: f32) -> [f32; 2] {
+    let omt = 1.0 - t;
+    [
+        omt * omt * from[0] + 2.0 * omt * t * control[0] + t * t * to[0],
+        omt * omt * from[1] + 2.0 * omt * t * control[1] + t * t * to[1],
+    ]
+}
+
+fn evaluate_cubic_curve(
+    from: [f32; 2],
+    control1: [f32; 2],
+    control2: [f32; 2],
+    to: [f32; 2],
+    t: f32,
+) -> [f32; 2] {
+    let omt = 1.0 - t;
+    let omt2 = omt * omt;
+    let omt3 = omt2 * omt;
+    let t2 = t * t;
+    let t3 = t2 * t;
+    [
+        omt3 * from[0] + 3.0 * omt2 * t * control1[0] + 3.0 * omt * t2 * control2[0] + t3 * to[0],
+        omt3 * from[1] + 3.0 * omt2 * t * control1[1] + 3.0 * omt * t2 * control2[1] + t3 * to[1],
+    ]
+}
+
+fn rasterize_glyph_contours(contours: &[Vec<[f32; 2]>]) -> GlyphBitmap {
+    let mut min_x = f32::INFINITY;
+    let mut min_y = f32::INFINITY;
+    let mut max_x = f32::NEG_INFINITY;
+    let mut max_y = f32::NEG_INFINITY;
+    for contour in contours {
+        for point in contour {
+            min_x = min_x.min(point[0]);
+            min_y = min_y.min(point[1]);
+            max_x = max_x.max(point[0]);
+            max_y = max_y.max(point[1]);
+        }
+    }
+    if !min_x.is_finite() || !min_y.is_finite() || !max_x.is_finite() || !max_y.is_finite() {
+        return GlyphBitmap {
+            width: 0,
+            height: 0,
+            stride: 0,
+            offset_x: 0,
+            offset_y: 0,
+            pixels: Vec::new(),
+        };
+    }
+
+    let offset_x = min_x.floor() as i32;
+    let offset_y = min_y.floor() as i32;
+    let right = max_x.ceil() as i32;
+    let bottom = max_y.ceil() as i32;
+    if right <= offset_x || bottom <= offset_y {
+        return GlyphBitmap {
+            width: 0,
+            height: 0,
             stride: 0,
             offset_x,
             offset_y,
             pixels: Vec::new(),
-        });
+        };
     }
 
-    let mut canvas = Canvas::new(Vector2I::new(width as i32, height as i32), Format::A8);
-    let translation = Transform2F::from_translation(Vector2F::new(
-        subpixel_x - offset_x as f32,
-        subpixel_y - offset_y as f32,
-    ));
-    typeface
-        .font
-        .rasterize_glyph(
-            &mut canvas,
-            glyph_id,
-            size,
-            translation,
-            HintingOptions::None,
-            RasterizationOptions::GrayscaleAa,
-        )
-        .ok()?;
+    let width = (right - offset_x) as u32;
+    let height = (bottom - offset_y) as u32;
+    let mut coverage = vec![0.0f32; (width * height) as usize];
+    let subrow_height = 1.0 / GLYPH_RASTER_SUBPIXEL_ROWS as f32;
+    let first_subrow = subrow_height * 0.5;
+    let clip_left = offset_x as f32;
+    let clip_right = clip_left + width as f32;
+    let mut spans = Vec::new();
 
-    Some(GlyphBitmap {
+    for y in 0..height as usize {
+        let row_offset = y * width as usize;
+        for subrow in 0..GLYPH_RASTER_SUBPIXEL_ROWS {
+            let sample_y =
+                offset_y as f32 + y as f32 + first_subrow + subrow as f32 * subrow_height;
+            spans.clear();
+            collect_glyph_nonzero_spans(contours, sample_y, &mut spans);
+            for &(span_left, span_right) in &spans {
+                let left = span_left.max(clip_left);
+                let right = span_right.min(clip_right);
+                if right <= left {
+                    continue;
+                }
+                accumulate_glyph_span(
+                    &mut coverage[row_offset..row_offset + width as usize],
+                    offset_x,
+                    left,
+                    right,
+                    subrow_height,
+                );
+            }
+        }
+    }
+
+    let pixels = coverage
+        .into_iter()
+        .map(|value| (value.clamp(0.0, 1.0) * 255.0).round() as u8)
+        .collect();
+
+    GlyphBitmap {
         width,
         height,
-        stride: canvas.stride as u32,
+        stride: width,
         offset_x,
         offset_y,
-        pixels: canvas.pixels,
-    })
+        pixels,
+    }
+}
+
+fn collect_glyph_nonzero_spans(
+    contours: &[Vec<[f32; 2]>],
+    sample_y: f32,
+    spans: &mut Vec<(f32, f32)>,
+) {
+    let mut events = Vec::new();
+    for contour in contours {
+        collect_glyph_scanline_intersections(contour, sample_y, |x, winding| {
+            events.push((x, winding));
+        });
+    }
+    events.sort_by(|left, right| left.0.total_cmp(&right.0));
+
+    let mut index = 0;
+    let mut winding = 0;
+    let mut span_start = None;
+    while index < events.len() {
+        let x = events[index].0;
+        let was_filled = winding != 0;
+        while index < events.len() && (events[index].0 - x).abs() <= GLYPH_EPSILON {
+            winding += events[index].1;
+            index += 1;
+        }
+        let is_filled = winding != 0;
+        if !was_filled && is_filled {
+            span_start = Some(x);
+        } else if was_filled && !is_filled {
+            if let Some(start) = span_start.take() {
+                if x > start {
+                    spans.push((start, x));
+                }
+            }
+        }
+    }
+}
+
+fn collect_glyph_scanline_intersections(
+    points: &[[f32; 2]],
+    sample_y: f32,
+    mut push: impl FnMut(f32, i32),
+) {
+    if points.len() < 2 {
+        return;
+    }
+    let mut previous = points[points.len() - 1];
+    for &point in points {
+        if let Some((x, winding)) = glyph_scanline_intersection(previous, point, sample_y) {
+            push(x, winding);
+        }
+        previous = point;
+    }
+}
+
+fn glyph_scanline_intersection(from: [f32; 2], to: [f32; 2], sample_y: f32) -> Option<(f32, i32)> {
+    if (from[1] - to[1]).abs() <= GLYPH_EPSILON {
+        return None;
+    }
+    let min_y = from[1].min(to[1]);
+    let max_y = from[1].max(to[1]);
+    if sample_y < min_y || sample_y >= max_y {
+        return None;
+    }
+    let t = (sample_y - from[1]) / (to[1] - from[1]);
+    let x = from[0] + (to[0] - from[0]) * t;
+    let winding = if to[1] > from[1] { 1 } else { -1 };
+    Some((x, winding))
+}
+
+fn accumulate_glyph_span(
+    row: &mut [f32],
+    mask_left: i32,
+    span_left: f32,
+    span_right: f32,
+    span_height: f32,
+) {
+    let start = span_left.floor() as i32;
+    let end = span_right.ceil() as i32;
+    for pixel_x in start..end {
+        let left = span_left.max(pixel_x as f32);
+        let right = span_right.min(pixel_x as f32 + 1.0);
+        if right <= left {
+            continue;
+        }
+        let index = pixel_x - mask_left;
+        if index < 0 || index >= row.len() as i32 {
+            continue;
+        }
+        row[index as usize] += (right - left) * span_height;
+    }
 }
 
 const SK_DISTANCE_FIELD_MAGNITUDE: f32 = 4.0;
@@ -888,6 +1249,45 @@ fn create_glyph_sdf(typeface: &TypefaceState, glyph_id: u32, size: f32) -> Optio
     Some(create_sdf_from_mask(&bitmap))
 }
 
+fn inset_glyph_sdf(bitmap: &GlyphBitmap, inset: u32) -> GlyphBitmap {
+    let inset = inset.clamp(1, SK_DISTANCE_FIELD_PAD);
+    if inset == SK_DISTANCE_FIELD_PAD || bitmap.width == 0 || bitmap.height == 0 {
+        return bitmap.clone();
+    }
+
+    let trim = (SK_DISTANCE_FIELD_PAD - inset) as usize;
+    let trimmed_width = bitmap.width.saturating_sub((trim * 2) as u32);
+    let trimmed_height = bitmap.height.saturating_sub((trim * 2) as u32);
+    if trimmed_width == 0 || trimmed_height == 0 {
+        return GlyphBitmap {
+            width: 0,
+            height: 0,
+            stride: 0,
+            offset_x: bitmap.offset_x + trim as i32,
+            offset_y: bitmap.offset_y + trim as i32,
+            pixels: Vec::new(),
+        };
+    }
+
+    let mut pixels = Vec::with_capacity((trimmed_width * trimmed_height) as usize);
+    let stride = bitmap.stride as usize;
+    let trimmed_width_usize = trimmed_width as usize;
+    for row in 0..trimmed_height as usize {
+        let start = ((row + trim) * stride) + trim;
+        let end = start + trimmed_width_usize;
+        pixels.extend_from_slice(&bitmap.pixels[start..end]);
+    }
+
+    GlyphBitmap {
+        width: trimmed_width,
+        height: trimmed_height,
+        stride: trimmed_width,
+        offset_x: bitmap.offset_x + trim as i32,
+        offset_y: bitmap.offset_y + trim as i32,
+        pixels,
+    }
+}
+
 pub fn list_families() -> Result<Vec<String>> {
     with_state(|state| Ok(state.family_names.clone()))
 }
@@ -1229,7 +1629,7 @@ pub fn get_glyph_sdf(
     radius: Option<f32>,
 ) -> Result<Option<GlyphMaskValue>> {
     let typeface_handle = parse_typeface_handle(typeface)?;
-    let inset = inset.unwrap_or(2).max(1);
+    let inset = inset.unwrap_or(2).clamp(1, SK_DISTANCE_FIELD_PAD);
     let radius = radius.unwrap_or(4.0).max(1.0);
     with_state_mut(|state| {
         let cache_key = glyph_sdf_cache_key(typeface_handle, glyph_id, size, inset, radius);
@@ -1240,7 +1640,9 @@ pub fn get_glyph_sdf(
             let Some(bitmap) = create_glyph_sdf(typeface, glyph_id, size) else {
                 return Ok(None);
             };
-            state.glyph_sdf_cache.insert(cache_key, bitmap);
+            state
+                .glyph_sdf_cache
+                .insert(cache_key, inset_glyph_sdf(&bitmap, inset));
         }
         let Some(bitmap) = state.glyph_sdf_cache.get(&cache_key) else {
             return Ok(None);
@@ -1256,4 +1658,50 @@ pub fn get_glyph_sdf(
             pixels: bitmap.pixels.clone(),
         }))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{inset_glyph_sdf, rasterize_glyph_contours, GlyphBitmap};
+
+    #[test]
+    fn inset_glyph_sdf_trims_padding_and_offsets() {
+        let bitmap = GlyphBitmap {
+            width: 12,
+            height: 10,
+            stride: 12,
+            offset_x: -4,
+            offset_y: -3,
+            pixels: (0..120).map(|value| value as u8).collect(),
+        };
+
+        let inset = inset_glyph_sdf(&bitmap, 2);
+
+        assert_eq!(inset.width, 8);
+        assert_eq!(inset.height, 6);
+        assert_eq!(inset.stride, 8);
+        assert_eq!(inset.offset_x, -2);
+        assert_eq!(inset.offset_y, -1);
+        assert_eq!(inset.pixels.len(), 48);
+        assert_eq!(&inset.pixels[0..8], &bitmap.pixels[26..34]);
+    }
+
+    #[test]
+    fn custom_rasterizer_fills_simple_square() {
+        let bitmap = rasterize_glyph_contours(&[vec![
+            [0.0, 0.0],
+            [4.0, 0.0],
+            [4.0, 4.0],
+            [0.0, 4.0],
+            [0.0, 0.0],
+        ]]);
+
+        assert_eq!(bitmap.width, 4);
+        assert_eq!(bitmap.height, 4);
+        assert_eq!(bitmap.offset_x, 0);
+        assert_eq!(bitmap.offset_y, 0);
+        assert_eq!(bitmap.stride, 4);
+        assert_eq!(bitmap.pixels[5], 255);
+        assert_eq!(bitmap.pixels[10], 255);
+    }
 }

@@ -1708,7 +1708,11 @@ fn solve_quadratic_mid_tangent(a: f32, b: f32, c: f32) -> f32 {
     let q = -0.5 * (b + (if b == 0.0 { 1.0 } else { b.signum() } * discriminant.sqrt()));
     let half_qa = -0.5 * q * a;
     let t = if ((q * q) + half_qa).abs() < ((a * c) + half_qa).abs() {
-        if a.abs() <= EPSILON { f32::NAN } else { q / a }
+        if a.abs() <= EPSILON {
+            f32::NAN
+        } else {
+            q / a
+        }
     } else if q.abs() <= EPSILON {
         f32::NAN
     } else {

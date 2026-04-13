@@ -546,6 +546,15 @@ function normalizeSdfGlyph(glyph) {
   };
 }
 
+function normalizePathTextGlyph(glyph) {
+  return {
+    glyphId: Number(glyph?.glyphId ?? 0),
+    x: Number(glyph?.x ?? 0),
+    y: Number(glyph?.y ?? 0),
+    verbs: (glyph?.verbs ?? []).map(normalizePathVerb),
+  };
+}
+
 function cloneDirectMaskGlyph(glyph) {
   return {
     glyphId: glyph.glyphId,
@@ -578,10 +587,62 @@ function cloneSdfGlyph(glyph) {
   };
 }
 
+function clonePathTextGlyph(glyph) {
+  return {
+    glyphId: glyph.glyphId,
+    x: glyph.x,
+    y: glyph.y,
+    verbs: glyph.verbs.map(clonePathVerb),
+  };
+}
+
+function normalizeCompositeTextRun(run) {
+  const normalized = normalizeTextInit(run);
+  if (normalized.kind === "auto") {
+    throw new TypeError("composite text cannot contain auto runs");
+  }
+  return normalized;
+}
+
+function normalizeShapedRun(run) {
+  if (!run) {
+    throw new TypeError("auto text requires a shaped run");
+  }
+  return {
+    typeface: run.typeface,
+    text: String(run.text ?? ""),
+    size: Number(run.size ?? 0),
+    direction: run.direction ?? "ltr",
+    bidiLevel: Number(run.bidiLevel ?? 0),
+    scriptTag: run.scriptTag ?? "",
+    language: run.language ?? "",
+    glyphIDs: Uint32Array.from(run.glyphIDs ?? []),
+    positions: Float32Array.from(run.positions ?? []),
+    offsets: Float32Array.from(run.offsets ?? []),
+    clusterIndices: Uint32Array.from(run.clusterIndices ?? []),
+    advanceX: Number(run.advanceX ?? 0),
+    advanceY: Number(run.advanceY ?? 0),
+    utf8RangeStart: Number(run.utf8RangeStart ?? 0),
+    utf8RangeEnd: Number(run.utf8RangeEnd ?? 0),
+  };
+}
+
+function cloneShapedRun(run) {
+  return normalizeShapedRun(run);
+}
+
+function normalizeAutoTextHost(host) {
+  if (!host || typeof host.getGlyphMask !== "function" || typeof host.getGlyphPath !== "function") {
+    throw new TypeError("auto text requires a valid text host");
+  }
+  return host;
+}
+
 function normalizeTextInit(init = {}) {
   const x = Number(init.x ?? 0);
   const y = Number(init.y ?? 0);
   const color = init.color ? normalizeColor(init.color) : { r: 1, g: 1, b: 1, a: 1 };
+  const transform = normalizeTransform2d(init.transform ?? identityTextMatrix2d);
   switch (init.kind) {
     case "direct-mask":
       return {
@@ -590,6 +651,7 @@ function normalizeTextInit(init = {}) {
         y,
         color,
         glyphs: (init.glyphs ?? []).map(normalizeDirectMaskGlyph),
+        transform,
       };
     case "transformed-mask":
       return {
@@ -598,6 +660,7 @@ function normalizeTextInit(init = {}) {
         y,
         color,
         glyphs: (init.glyphs ?? []).map(normalizeTransformedMaskGlyph),
+        transform,
       };
     case "sdf":
       return {
@@ -606,6 +669,31 @@ function normalizeTextInit(init = {}) {
         y,
         color,
         glyphs: (init.glyphs ?? []).map(normalizeSdfGlyph),
+        transform,
+      };
+    case "path":
+      return {
+        kind: "path",
+        x,
+        y,
+        color,
+        glyphs: (init.glyphs ?? []).map(normalizePathTextGlyph),
+        transform,
+      };
+    case "composite":
+      return {
+        kind: "composite",
+        runs: (init.runs ?? []).map(normalizeCompositeTextRun),
+      };
+    case "auto":
+      return {
+        kind: "auto",
+        x,
+        y,
+        color,
+        host: normalizeAutoTextHost(init.host),
+        run: normalizeShapedRun(init.run),
+        useSdfForSmallText: init.useSdfForSmallText ?? true,
       };
     default:
       throw new TypeError(`Unsupported text kind: ${init?.kind}`);
@@ -621,6 +709,7 @@ function cloneTextState(state) {
         y: state.y,
         color: cloneColor(state.color),
         glyphs: state.glyphs.map(cloneDirectMaskGlyph),
+        transform: cloneTransform2d(state.transform ?? identityTextMatrix2d),
       };
     case "transformed-mask":
       return {
@@ -629,6 +718,7 @@ function cloneTextState(state) {
         y: state.y,
         color: cloneColor(state.color),
         glyphs: state.glyphs.map(cloneTransformedMaskGlyph),
+        transform: cloneTransform2d(state.transform ?? identityTextMatrix2d),
       };
     case "sdf":
       return {
@@ -637,10 +727,51 @@ function cloneTextState(state) {
         y: state.y,
         color: cloneColor(state.color),
         glyphs: state.glyphs.map(cloneSdfGlyph),
+        transform: cloneTransform2d(state.transform ?? identityTextMatrix2d),
+      };
+    case "path":
+      return {
+        kind: state.kind,
+        x: state.x,
+        y: state.y,
+        color: cloneColor(state.color),
+        glyphs: state.glyphs.map(clonePathTextGlyph),
+        transform: cloneTransform2d(state.transform ?? identityTextMatrix2d),
+      };
+    case "composite":
+      return {
+        kind: state.kind,
+        runs: state.runs.map(cloneTextState),
+      };
+    case "auto":
+      return {
+        kind: state.kind,
+        x: state.x,
+        y: state.y,
+        color: cloneColor(state.color),
+        host: state.host,
+        run: cloneShapedRun(state.run),
+        useSdfForSmallText: state.useSdfForSmallText,
       };
     default:
       throw new TypeError(`Unsupported text kind: ${state.kind}`);
   }
+}
+
+function createAutoTextCache() {
+  return {
+    host: null,
+    run: null,
+    x: NaN,
+    y: NaN,
+    translatedRun: null,
+    directMaskSubRun: null,
+    directMaskTransformKey: "",
+    transformedMaskSubRun: null,
+    transformedMaskScale: NaN,
+    sdfSubRuns: new Map(),
+    pathGlyphEntries: null,
+  };
 }
 
 function normalizeTypefaceHandle(typeface) {
@@ -839,6 +970,26 @@ function quantizeDirectMaskSubpixelPhase(mapped) {
   return Math.floor((((mapped + directMaskSubpixelRound) - Math.floor(mapped + directMaskSubpixelRound)) * 4) + 1e-6) & 0x3;
 }
 
+function getTransformedMaskStrikeScale(transform) {
+  const scaleX = Math.hypot(transform[0], transform[1]);
+  const scaleY = Math.hypot(transform[2], transform[3]);
+  const maxScale = Math.max(scaleX, scaleY, 1);
+  const axisAlignmentX = scaleX > 0
+    ? Math.max(Math.abs(transform[0]), Math.abs(transform[1])) / scaleX
+    : 1;
+  const axisAlignmentY = scaleY > 0
+    ? Math.max(Math.abs(transform[2]), Math.abs(transform[3])) / scaleY
+    : 1;
+  const axisAlignment = Math.min(axisAlignmentX, axisAlignmentY);
+  if (!Number.isFinite(axisAlignment) || axisAlignment <= 0) {
+    return Math.min(4, Math.ceil(maxScale));
+  }
+  const transformedScale = axisAlignment < 0.97
+    ? Math.ceil(maxScale / axisAlignment)
+    : Math.ceil(maxScale);
+  return Math.min(4, Math.max(1, transformedScale));
+}
+
 export function buildDirectMaskSubRun(host, run, transform = identityTextMatrix2d) {
   const inverse = invertAffineTransform(transform);
   const glyphs = [];
@@ -895,23 +1046,33 @@ export function buildTransformedMaskSubRun(host, run, strikeScale) {
   };
 }
 
-export function buildSdfSubRun(host, run) {
+export function buildSdfSubRun(host, run, strikeSize = run.size) {
   const sdfInset = 2;
   const sdfRadius = 4;
+  const effectiveStrikeSize = Number.isFinite(strikeSize) && strikeSize > 0
+    ? strikeSize
+    : run.size;
+  const strikeToSourceScale = run.size / effectiveStrikeSize;
   const glyphs = [];
+  let complete = true;
   for (let index = 0; index < run.glyphIDs.length; index += 1) {
     const glyphID = run.glyphIDs[index];
     const x = run.positions[index * 2] + run.offsets[index * 2];
     const y = run.positions[index * 2 + 1] + run.offsets[index * 2 + 1];
+    const mask = host.getGlyphMask(run.typeface, glyphID, effectiveStrikeSize);
+    const sdf = host.getGlyphSdf(run.typeface, glyphID, effectiveStrikeSize, sdfInset, sdfRadius);
+    if (!sdf) {
+      complete = false;
+    }
     glyphs.push({
       glyphId: glyphID,
       x,
       y,
-      mask: host.getGlyphMask(run.typeface, glyphID, run.size),
-      sdf: host.getGlyphSdf(run.typeface, glyphID, run.size, sdfInset, sdfRadius),
+      mask,
+      sdf,
       sdfInset,
       sdfRadius,
-      strikeToSourceScale: 1,
+      strikeToSourceScale,
     });
   }
   return {
@@ -920,6 +1081,431 @@ export function buildSdfSubRun(host, run) {
     glyphs,
     sdfInset,
     sdfRadius,
+    strikeSize: effectiveStrikeSize,
+    complete,
+  };
+}
+
+function buildPathGlyphEntries(host, run) {
+  const glyphs = [];
+  for (let index = 0; index < run.glyphIDs.length; index += 1) {
+    const glyphID = run.glyphIDs[index];
+    const x = run.positions[index * 2] + run.offsets[index * 2];
+    const y = run.positions[index * 2 + 1] + run.offsets[index * 2 + 1];
+    const verbs = host.getGlyphPath(run.typeface, glyphID, run.size);
+    glyphs.push(verbs
+      ? {
+        glyphId: glyphID,
+        x,
+        y,
+        verbs,
+      }
+      : null);
+  }
+  return glyphs;
+}
+
+export function buildPathSubRun(host, run) {
+  const glyphs = buildPathGlyphEntries(host, run).filter((glyph) => glyph !== null);
+  return {
+    typeface: run.typeface,
+    size: run.size,
+    glyphs,
+  };
+}
+
+const graphiteDirectAtlasLimit = 256;
+const graphiteMinDistanceFieldFontSize = 18;
+const graphiteSmallDistanceFieldFontLimit = 32;
+const graphiteMediumDistanceFieldFontLimit = 72;
+const graphiteLargeDistanceFieldFontLimit = 162;
+const graphiteGlyphsAsPathsFontSize = 324;
+const graphiteAutoTextEpsilon = 1e-4;
+
+function translateGlyphRun(run, x, y) {
+  const positions = new Float32Array(run.positions.length);
+  for (let index = 0; index < run.glyphIDs.length; index += 1) {
+    positions[index * 2] = run.positions[index * 2] + x;
+    positions[index * 2 + 1] = run.positions[index * 2 + 1] + y;
+  }
+  positions[run.glyphIDs.length * 2] = run.positions[run.glyphIDs.length * 2] + x;
+  positions[run.glyphIDs.length * 2 + 1] = run.positions[run.glyphIDs.length * 2 + 1] + y;
+  return {
+    ...run,
+    positions,
+  };
+}
+
+function serializeMatrix2d(matrix) {
+  return matrix.map((value) => Number(value).toFixed(6)).join(",");
+}
+
+function approximateTransformedTextSize(size, transform) {
+  const scaleX = Math.hypot(transform[0], transform[1]);
+  const scaleY = Math.hypot(transform[2], transform[3]);
+  return Number(size) * Math.max(scaleX, scaleY);
+}
+
+function canUseDirectMaskMode(transform) {
+  const scaleX = Math.hypot(transform[0], transform[1]);
+  const scaleY = Math.hypot(transform[2], transform[3]);
+  if (!Number.isFinite(scaleX) || !Number.isFinite(scaleY) || scaleX <= 0 || scaleY <= 0) {
+    return false;
+  }
+  // Direct masks are only worth using when the parent transform stays in the
+  // translate/uniform-scale bucket; rotated or anisotropic text should reuse
+  // transformed bitmap masks instead of rebuilding direct masks per matrix.
+  const axisAligned = Math.abs(transform[1]) <= graphiteAutoTextEpsilon &&
+    Math.abs(transform[2]) <= graphiteAutoTextEpsilon;
+  if (!axisAligned) {
+    return false;
+  }
+  const uniformScaleTolerance = graphiteAutoTextEpsilon * Math.max(1, scaleX, scaleY);
+  return Math.abs(scaleX - scaleY) <= uniformScaleTolerance;
+}
+
+function usesDistanceFieldText(approximateDeviceTextSize, useSdfForSmallText) {
+  if (!Number.isFinite(approximateDeviceTextSize) || approximateDeviceTextSize <= 0) {
+    return false;
+  }
+  const minSize = useSdfForSmallText
+    ? graphiteMinDistanceFieldFontSize
+    : graphiteLargeDistanceFieldFontLimit;
+  return approximateDeviceTextSize >= minSize &&
+    approximateDeviceTextSize <= graphiteGlyphsAsPathsFontSize;
+}
+
+function resolveGraphiteSdfSelection(run, transform, useSdfForSmallText) {
+  const approximateDeviceTextSize = approximateTransformedTextSize(run.size, transform);
+  if (!usesDistanceFieldText(approximateDeviceTextSize, useSdfForSmallText)) {
+    return null;
+  }
+  if (approximateDeviceTextSize <= graphiteSmallDistanceFieldFontLimit) {
+    return {
+      approximateDeviceTextSize,
+      strikeSize: graphiteSmallDistanceFieldFontLimit,
+      strikeToSourceScale: run.size / graphiteSmallDistanceFieldFontLimit,
+      matrixScaleFloor: (useSdfForSmallText
+        ? graphiteMinDistanceFieldFontSize
+        : graphiteLargeDistanceFieldFontLimit) / run.size,
+      matrixScaleCeil: graphiteSmallDistanceFieldFontLimit / run.size,
+      cacheKey: `32:${run.size}`,
+    };
+  }
+  if (approximateDeviceTextSize <= graphiteMediumDistanceFieldFontLimit) {
+    return {
+      approximateDeviceTextSize,
+      strikeSize: graphiteMediumDistanceFieldFontLimit,
+      strikeToSourceScale: run.size / graphiteMediumDistanceFieldFontLimit,
+      matrixScaleFloor: graphiteSmallDistanceFieldFontLimit / run.size,
+      matrixScaleCeil: graphiteMediumDistanceFieldFontLimit / run.size,
+      cacheKey: `72:${run.size}`,
+    };
+  }
+  return {
+    approximateDeviceTextSize,
+    strikeSize: graphiteLargeDistanceFieldFontLimit,
+    strikeToSourceScale: run.size / graphiteLargeDistanceFieldFontLimit,
+    matrixScaleFloor: graphiteMediumDistanceFieldFontLimit / run.size,
+    matrixScaleCeil: graphiteGlyphsAsPathsFontSize / run.size,
+    cacheKey: `162:${run.size}`,
+  };
+}
+
+function chooseAutoTextMode(run, transform, useSdfForSmallText) {
+  const approximateDeviceTextSize = approximateTransformedTextSize(run.size, transform);
+  if (!Number.isFinite(approximateDeviceTextSize) || approximateDeviceTextSize <= 0) {
+    return "path";
+  }
+  if (usesDistanceFieldText(approximateDeviceTextSize, useSdfForSmallText)) {
+    return "sdf";
+  }
+  if (approximateDeviceTextSize < graphiteDirectAtlasLimit) {
+    return canUseDirectMaskMode(transform)
+      ? "direct-mask"
+      : "transformed-mask";
+  }
+  return "path";
+}
+
+export function inspectAutoTextSelection(
+  run,
+  transform = identityTextMatrix2d,
+  options = {},
+) {
+  const normalizedRun = normalizeShapedRun(run);
+  const normalizedTransform = normalizeTransform2d(transform);
+  const useSdfForSmallText = options.useSdfForSmallText ?? true;
+  const sdfSelection = resolveGraphiteSdfSelection(
+    normalizedRun,
+    normalizedTransform,
+    useSdfForSmallText,
+  );
+  return {
+    mode: chooseAutoTextMode(normalizedRun, normalizedTransform, useSdfForSmallText),
+    approximateDeviceTextSize: approximateTransformedTextSize(
+      normalizedRun.size,
+      normalizedTransform,
+    ),
+    sdfStrikeSize: sdfSelection?.strikeSize ?? null,
+    sdfStrikeToSourceScale: sdfSelection?.strikeToSourceScale ?? null,
+  };
+}
+
+function collectGlyphIndices(run) {
+  return Array.from({ length: run.glyphIDs.length }, (_unused, index) => index);
+}
+
+function partitionGlyphIndices(indices, predicate) {
+  const accepted = [];
+  const rejected = [];
+  for (const index of indices) {
+    if (predicate(index)) {
+      accepted.push(index);
+    } else {
+      rejected.push(index);
+    }
+  }
+  return { accepted, rejected };
+}
+
+function buildResolvedDirectMaskState(subRun, indices, color, transform) {
+  return {
+    kind: "direct-mask",
+    x: 0,
+    y: 0,
+    color: cloneColor(color),
+    glyphs: indices.map((index) => cloneDirectMaskGlyph(subRun.glyphs[index])),
+    transform: cloneTransform2d(transform),
+  };
+}
+
+function buildResolvedTransformedMaskState(subRun, indices, color, transform) {
+  return {
+    kind: "transformed-mask",
+    x: 0,
+    y: 0,
+    color: cloneColor(color),
+    glyphs: indices.map((index) => cloneTransformedMaskGlyph(subRun.glyphs[index])),
+    transform: cloneTransform2d(transform),
+  };
+}
+
+function buildResolvedSdfState(subRun, indices, color, transform) {
+  return {
+    kind: "sdf",
+    x: 0,
+    y: 0,
+    color: cloneColor(color),
+    glyphs: indices.map((index) => cloneSdfGlyph(subRun.glyphs[index])),
+    transform: cloneTransform2d(transform),
+  };
+}
+
+function buildResolvedPathState(pathGlyphEntries, indices, color, transform) {
+  return {
+    kind: "path",
+    x: 0,
+    y: 0,
+    color: cloneColor(color),
+    glyphs: indices
+      .map((index) => pathGlyphEntries[index])
+      .filter((glyph) => glyph !== null)
+      .map(clonePathTextGlyph),
+    transform: cloneTransform2d(transform),
+  };
+}
+
+function composeResolvedTextRuns(runs, color, transform) {
+  if (runs.length === 0) {
+    return {
+      kind: "path",
+      x: 0,
+      y: 0,
+      color: cloneColor(color),
+      glyphs: [],
+      transform: cloneTransform2d(transform),
+    };
+  }
+  if (runs.length === 1) {
+    return runs[0];
+  }
+  return {
+    kind: "composite",
+    runs,
+  };
+}
+
+function resolveAutoTextState(state, layoutState, groupTransform, cache) {
+  const x = layoutState.x ?? state.x;
+  const y = layoutState.y ?? state.y;
+  if (cache.host !== state.host || cache.run !== state.run || cache.x !== x || cache.y !== y) {
+    cache.host = state.host;
+    cache.run = state.run;
+    cache.x = x;
+    cache.y = y;
+    cache.translatedRun = translateGlyphRun(state.run, x, y);
+    cache.directMaskSubRun = null;
+    cache.directMaskTransformKey = "";
+    cache.transformedMaskSubRun = null;
+    cache.transformedMaskScale = NaN;
+    cache.sdfSubRuns = new Map();
+    cache.pathGlyphEntries = null;
+  }
+
+  const approximateDeviceTextSize = approximateTransformedTextSize(
+    cache.translatedRun.size,
+    groupTransform,
+  );
+  const preferBitmapMask = Number.isFinite(approximateDeviceTextSize) &&
+    approximateDeviceTextSize > 0 &&
+    approximateDeviceTextSize < graphiteDirectAtlasLimit;
+  const preferDirectMask = preferBitmapMask && canUseDirectMaskMode(groupTransform);
+  const resolvedRuns = [];
+  let remaining = collectGlyphIndices(cache.translatedRun);
+
+  const sdfSelection = resolveGraphiteSdfSelection(
+    cache.translatedRun,
+    groupTransform,
+    state.useSdfForSmallText,
+  );
+  if (remaining.length > 0 && sdfSelection) {
+    if (!cache.sdfSubRuns.has(sdfSelection.cacheKey)) {
+      cache.sdfSubRuns.set(
+        sdfSelection.cacheKey,
+        buildSdfSubRun(state.host, cache.translatedRun, sdfSelection.strikeSize),
+      );
+    }
+    const sdfSubRun = cache.sdfSubRuns.get(sdfSelection.cacheKey);
+    const { accepted, rejected } = partitionGlyphIndices(
+      remaining,
+      (index) => Boolean(sdfSubRun.glyphs[index]?.sdf),
+    );
+    if (accepted.length > 0) {
+      resolvedRuns.push(
+        buildResolvedSdfState(sdfSubRun, accepted, state.color, groupTransform),
+      );
+    }
+    remaining = rejected;
+  }
+
+  if (
+    remaining.length > 0 &&
+    preferDirectMask
+  ) {
+    const directMaskTransformKey = serializeMatrix2d(groupTransform);
+    if (!cache.directMaskSubRun || cache.directMaskTransformKey !== directMaskTransformKey) {
+      cache.directMaskSubRun = buildDirectMaskSubRun(
+        state.host,
+        cache.translatedRun,
+        groupTransform,
+      );
+      cache.directMaskTransformKey = directMaskTransformKey;
+    }
+    const { accepted, rejected } = partitionGlyphIndices(
+      remaining,
+      (index) => Boolean(cache.directMaskSubRun.glyphs[index]?.mask),
+    );
+    if (accepted.length > 0) {
+      resolvedRuns.push(
+        buildResolvedDirectMaskState(
+          cache.directMaskSubRun,
+          accepted,
+          state.color,
+          groupTransform,
+        ),
+      );
+    }
+    remaining = rejected;
+  }
+
+  if (remaining.length > 0 && preferBitmapMask && !preferDirectMask) {
+    const strikeScale = getTransformedMaskStrikeScale(groupTransform);
+    if (!cache.transformedMaskSubRun || cache.transformedMaskScale !== strikeScale) {
+      cache.transformedMaskSubRun = buildTransformedMaskSubRun(
+        state.host,
+        cache.translatedRun,
+        strikeScale,
+      );
+      cache.transformedMaskScale = strikeScale;
+    }
+    const { accepted, rejected } = partitionGlyphIndices(
+      remaining,
+      (index) => Boolean(cache.transformedMaskSubRun.glyphs[index]?.mask),
+    );
+    if (accepted.length > 0) {
+      resolvedRuns.push(
+        buildResolvedTransformedMaskState(
+          cache.transformedMaskSubRun,
+          accepted,
+          state.color,
+          groupTransform,
+        ),
+      );
+    }
+    remaining = rejected;
+  }
+
+  if (remaining.length > 0) {
+    cache.pathGlyphEntries ??= buildPathGlyphEntries(state.host, cache.translatedRun);
+    const { accepted, rejected } = partitionGlyphIndices(
+      remaining,
+      (index) => cache.pathGlyphEntries[index] !== null,
+    );
+    if (accepted.length > 0) {
+      resolvedRuns.push(
+        buildResolvedPathState(
+          cache.pathGlyphEntries,
+          accepted,
+          state.color,
+          groupTransform,
+        ),
+      );
+    }
+    remaining = rejected;
+  }
+
+  if (
+    remaining.length > 0 &&
+    Number.isFinite(approximateDeviceTextSize) &&
+    approximateDeviceTextSize > 0
+  ) {
+    const strikeScale = getTransformedMaskStrikeScale(groupTransform);
+    if (!cache.transformedMaskSubRun || cache.transformedMaskScale !== strikeScale) {
+      cache.transformedMaskSubRun = buildTransformedMaskSubRun(
+        state.host,
+        cache.translatedRun,
+        strikeScale,
+      );
+      cache.transformedMaskScale = strikeScale;
+    }
+    const { accepted } = partitionGlyphIndices(
+      remaining,
+      (index) => Boolean(cache.transformedMaskSubRun.glyphs[index]?.mask),
+    );
+    if (accepted.length > 0) {
+      resolvedRuns.push(
+        buildResolvedTransformedMaskState(
+          cache.transformedMaskSubRun,
+          accepted,
+          state.color,
+          groupTransform,
+        ),
+      );
+    }
+  }
+
+  return composeResolvedTextRuns(resolvedRuns, state.color, groupTransform);
+}
+
+function normalizeResolvedAutoTextState(state, groupTransform) {
+  const normalized = normalizeTextInit(state);
+  if (normalized.kind === "composite") {
+    return normalized;
+  }
+  return {
+    ...normalized,
+    transform: cloneTransform2d(groupTransform),
   };
 }
 
@@ -1723,7 +2309,9 @@ export class Text2d {
     this._state = normalizeTextInit(init);
     this._layoutState = null;
     this._groupTransform = [1, 0, 0, 1, 0, 0];
+    this._autoCache = createAutoTextCache();
     this._resolvedState = cloneTextState(this._state);
+    this._syncResolvedState();
   }
 
   _attachToScene(sceneId) {
@@ -1737,25 +2325,42 @@ export class Text2d {
 
   _syncResolvedState() {
     const layoutState = this._layoutState ?? {};
-    this._resolvedState = {
-      ...normalizeTextInit({
-      ...this._state,
-      x: layoutState.x ?? this._state.x,
-      y: layoutState.y ?? this._state.y,
-      }),
-      transform: cloneTransform2d(this._groupTransform),
-    };
+    if (this._state.kind === "auto") {
+      const resolved = resolveAutoTextState(
+        this._state,
+        layoutState,
+        this._groupTransform,
+        this._autoCache,
+      );
+      this._resolvedState = normalizeResolvedAutoTextState(
+        resolved,
+        this._groupTransform,
+      );
+    } else {
+      this._resolvedState = {
+        ...normalizeTextInit({
+          ...this._state,
+          x: layoutState.x ?? this._state.x,
+          y: layoutState.y ?? this._state.y,
+        }),
+        transform: cloneTransform2d(this._groupTransform),
+      };
+    }
     if (this.id !== null) {
       Deno.core.ops.op_goldlight_text_2d_update(this.id, this._resolvedState);
     }
   }
 
   set(patch = {}) {
+    const nextKind = patch.kind ?? this._state.kind;
     this._state = normalizeTextInit({
       ...this._state,
       ...patch,
       glyphs: Object.prototype.hasOwnProperty.call(patch, "glyphs") ? patch.glyphs : this._state.glyphs,
     });
+    if (nextKind !== "auto") {
+      this._autoCache = createAutoTextCache();
+    }
     this._syncResolvedState();
     return this;
   }

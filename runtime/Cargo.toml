@@ -5,7 +5,7 @@ edition = "2021"
 
 [features]
 default = []
-dev-runtime = []
+dev-runtime = ["dep:tracing", "dep:tracing-subscriber"]
 
 [[bin]]
 name = "goldlight-runtime-dev"
@@ -39,8 +39,8 @@ hyper-util = { version = "0.1", features = ["tokio"] }
 tokio = { version = "1", features = ["macros", "net", "rt", "sync", "time"] }
 tokio-rustls = "0.26"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
+tracing = { version = "0.1", optional = true }
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"], optional = true }
 uuid = { version = "1", features = ["v4"] }
 web-transport-proto = "0.2"
 webpki-roots = "0.26"
@@ -54,5 +54,5 @@ pathfinder_geometry = "0.5"
 ttf-parser = "0.25"
 usvg = "0.47"
 peniko = { version = "0.6", default-features = false }
-vello_encoding = { path = "../../../linebender/vello/vello_encoding", features = ["bump_estimate"] }
-vello_shaders = { path = "../../../linebender/vello/vello_shaders", default-features = false, features = ["wgsl"] }
+vello_encoding = { version = "0.8.0", features = ["bump_estimate"] }
+vello_shaders = { version = "0.8.0", default-features = false, features = ["wgsl"] }

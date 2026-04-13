@@ -81,6 +81,7 @@ use tokio_rustls::rustls::pki_types::ServerName;
 use tokio_rustls::rustls::ClientConfig;
 use tokio_rustls::rustls::RootCertStore;
 use tokio_rustls::TlsConnector;
+#[cfg(feature = "dev-runtime")]
 use tracing::debug;
 #[cfg(feature = "dev-runtime")]
 use uuid::Uuid;
@@ -4593,6 +4594,7 @@ impl GoldlightRuntime {
             let renderer_bootstrap = RendererBootstrap::new(window.clone())
                 .expect("failed to create window renderer bootstrap");
             let renderer = spawn_window_renderer(renderer_bootstrap, self.event_proxy.clone());
+            #[cfg(feature = "dev-runtime")]
             debug!(
                 id = pending_window.id,
                 title = pending_window.title,
@@ -4914,9 +4916,12 @@ impl ApplicationHandler<RuntimeUserEvent> for GoldlightRuntime {
 }
 
 pub fn init_logging() {
-    let env_filter =
-        tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "warn".into());
-    tracing_subscriber::fmt().with_env_filter(env_filter).init();
+    #[cfg(feature = "dev-runtime")]
+    {
+        let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| "warn".into());
+        tracing_subscriber::fmt().with_env_filter(env_filter).init();
+    }
 }
 
 pub fn resolve_dev_config(vite_origin: &str, entrypoint: Option<&str>) -> Result<RuntimeConfig> {
@@ -5134,7 +5139,9 @@ fn spawn_hmr_client(
 }
 
 pub fn run_runtime(config: RuntimeConfig) -> Result<RuntimeRunResult> {
+    #[cfg(feature = "dev-runtime")]
     let backend = wgpu::Backends::all();
+    #[cfg(feature = "dev-runtime")]
     debug!(
         ?backend,
         mode = ?config.mode,

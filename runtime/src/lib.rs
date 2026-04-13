@@ -593,6 +593,50 @@ fn window_keyboard_event_payload(
 mod tests {
     use super::*;
 
+    fn test_leaf(id: u32, width: f32, height: f32) -> LayoutNodeStateInput {
+        LayoutNodeStateInput {
+            id,
+            style: LayoutStyleInput {
+                width: Some(width),
+                height: Some(height),
+                ..LayoutStyleInput::default()
+            },
+            measure: None,
+        }
+    }
+
+    fn test_root() -> LayoutNodeStateInput {
+        LayoutNodeStateInput {
+            id: 1,
+            style: LayoutStyleInput {
+                display: Some(String::from("flex")),
+                ..LayoutStyleInput::default()
+            },
+            measure: None,
+        }
+    }
+
+    fn empty_layout_state() -> LayoutHostState {
+        LayoutHostState::default()
+    }
+
+    fn compute_test_layout(layout_state: &mut LayoutHostState, root_id: u32) {
+        let root = layout_state.nodes.get(&root_id).unwrap().taffy_node;
+        layout_state
+            .taffy
+            .compute_layout_with_measure(
+                root,
+                Size {
+                    width: AvailableSpace::MaxContent,
+                    height: AvailableSpace::MaxContent,
+                },
+                |known_dimensions, available_space, _node_id, node_context, _style| {
+                    layout_measure_function(known_dimensions, available_space, node_context)
+                },
+            )
+            .unwrap();
+    }
+
     #[test]
     fn dom_key_locations_use_standard_numeric_values() {
         assert_eq!(key_location_value(KeyLocation::Standard), 0);
@@ -624,6 +668,67 @@ mod tests {
         assert_eq!(logical_key_name(&Key::Named(NamedKey::Meta)), "Meta");
         assert_eq!(logical_key_name(&Key::Dead(Some('`'))), "Dead");
         assert_eq!(logical_key_name(&Key::Character("A".into())), "A");
+    }
+
+    #[test]
+    fn retained_layout_sync_keeps_clean_tree_clean_when_nothing_changes() {
+        let mut layout_state = empty_layout_state();
+        sync_layout_node(&mut layout_state, &test_root()).unwrap();
+        sync_layout_node(&mut layout_state, &test_leaf(2, 80.0, 24.0)).unwrap();
+        sync_layout_node(&mut layout_state, &test_leaf(3, 40.0, 24.0)).unwrap();
+        set_layout_children(
+            &mut layout_state,
+            &LayoutChildrenInput {
+                parent_id: 1,
+                child_ids: vec![2, 3],
+            },
+        )
+        .unwrap();
+
+        let root_node = layout_state.nodes.get(&1).unwrap().taffy_node;
+        compute_test_layout(&mut layout_state, 1);
+        assert!(!layout_state.taffy.dirty(root_node).unwrap());
+
+        sync_layout_node(&mut layout_state, &test_root()).unwrap();
+        sync_layout_node(&mut layout_state, &test_leaf(2, 80.0, 24.0)).unwrap();
+        sync_layout_node(&mut layout_state, &test_leaf(3, 40.0, 24.0)).unwrap();
+        set_layout_children(
+            &mut layout_state,
+            &LayoutChildrenInput {
+                parent_id: 1,
+                child_ids: vec![2, 3],
+            },
+        )
+        .unwrap();
+
+        assert!(!layout_state.taffy.dirty(root_node).unwrap());
+    }
+
+    #[test]
+    fn retained_layout_sync_only_marks_changed_branch_dirty() {
+        let mut layout_state = empty_layout_state();
+        sync_layout_node(&mut layout_state, &test_root()).unwrap();
+        sync_layout_node(&mut layout_state, &test_leaf(2, 80.0, 24.0)).unwrap();
+        sync_layout_node(&mut layout_state, &test_leaf(3, 40.0, 24.0)).unwrap();
+        set_layout_children(
+            &mut layout_state,
+            &LayoutChildrenInput {
+                parent_id: 1,
+                child_ids: vec![2, 3],
+            },
+        )
+        .unwrap();
+
+        let root_node = layout_state.nodes.get(&1).unwrap().taffy_node;
+        compute_test_layout(&mut layout_state, 1);
+
+        sync_layout_node(&mut layout_state, &test_leaf(2, 96.0, 24.0)).unwrap();
+
+        let changed_child = layout_state.nodes.get(&2).unwrap().taffy_node;
+        let unchanged_child = layout_state.nodes.get(&3).unwrap().taffy_node;
+        assert!(layout_state.taffy.dirty(root_node).unwrap());
+        assert!(layout_state.taffy.dirty(changed_child).unwrap());
+        assert!(!layout_state.taffy.dirty(unchanged_child).unwrap());
     }
 }
 
@@ -923,7 +1028,7 @@ struct WebTransportErrorOutput {
     stream_error_code: Option<u32>,
 }
 
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 struct LayoutStyleInput {
     #[serde(default)]
@@ -986,17 +1091,23 @@ struct LayoutStyleInput {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct LayoutNodeInput {
+struct LayoutNodeStateInput {
     id: u32,
     #[serde(default)]
     style: LayoutStyleInput,
     #[serde(default)]
     measure: Option<LayoutMeasureInput>,
-    #[serde(default)]
-    children: Vec<LayoutNodeInput>,
 }
 
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LayoutChildrenInput {
+    parent_id: u32,
+    #[serde(default)]
+    child_ids: Vec<u32>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 struct LayoutMeasureInput {
     #[serde(default)]
@@ -1019,6 +1130,28 @@ struct ComputedLayoutOutput {
 struct LayoutMeasureContext {
     width: f32,
     height: f32,
+}
+
+struct LayoutHostState {
+    taffy: TaffyTree<LayoutMeasureContext>,
+    nodes: HashMap<u32, RetainedLayoutNode>,
+}
+
+impl Default for LayoutHostState {
+    fn default() -> Self {
+        Self {
+            taffy: TaffyTree::<LayoutMeasureContext>::new(),
+            nodes: HashMap::new(),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct RetainedLayoutNode {
+    taffy_node: taffy::prelude::NodeId,
+    style: LayoutStyleInput,
+    measure: Option<LayoutMeasureInput>,
+    child_ids: Vec<u32>,
 }
 
 fn point_dimension(value: Option<f32>) -> Dimension {
@@ -1150,52 +1283,161 @@ fn layout_measure_function(
     }
 }
 
-fn add_layout_node(
-    taffy: &mut TaffyTree<LayoutMeasureContext>,
-    node: &LayoutNodeInput,
-    computed: &mut Vec<(u32, taffy::prelude::NodeId)>,
-) -> Result<taffy::prelude::NodeId> {
-    let child_ids = node
-        .children
-        .iter()
-        .map(|child| add_layout_node(taffy, child, computed))
-        .collect::<Result<Vec<_>>>()?;
+fn layout_measure_context(measure: &LayoutMeasureInput) -> LayoutMeasureContext {
+    LayoutMeasureContext {
+        width: measure.width.unwrap_or(0.0),
+        height: measure.height.unwrap_or(0.0),
+    }
+}
+
+fn sync_layout_node(
+    layout_state: &mut LayoutHostState,
+    node: &LayoutNodeStateInput,
+) -> Result<(), JsErrorBox> {
     let style = build_taffy_style(&node.style);
-    let node_id = if child_ids.is_empty() {
-        if let Some(measure) = &node.measure {
-            let context = LayoutMeasureContext {
-                width: measure.width.unwrap_or(0.0),
-                height: measure.height.unwrap_or(0.0),
-            };
-            taffy
-                .new_leaf_with_context(style, context)
-                .map_err(|error| anyhow!("failed to create measured taffy node: {error}"))?
-        } else {
-            taffy
-                .new_leaf(style)
-                .map_err(|error| anyhow!("failed to create taffy leaf node: {error}"))?
+    let measure = node.measure.clone();
+    match layout_state.nodes.get(&node.id).cloned() {
+        Some(existing) => {
+            if existing.style != node.style {
+                layout_state
+                    .taffy
+                    .set_style(existing.taffy_node, style)
+                    .map_err(|error| JsErrorBox::generic(format!("failed to update taffy style: {error}")))?;
+            }
+            if existing.measure != measure {
+                layout_state
+                    .taffy
+                    .set_node_context(
+                        existing.taffy_node,
+                        measure.as_ref().map(layout_measure_context),
+                    )
+                    .map_err(|error| JsErrorBox::generic(format!("failed to update taffy measure context: {error}")))?;
+            }
+            layout_state.nodes.insert(
+                node.id,
+                RetainedLayoutNode {
+                    taffy_node: existing.taffy_node,
+                    style: node.style.clone(),
+                    measure,
+                    child_ids: existing.child_ids,
+                },
+            );
         }
-    } else {
-        taffy
-            .new_with_children(style, &child_ids)
-            .map_err(|error| anyhow!("failed to create taffy node: {error}"))?
-    };
-    computed.push((node.id, node_id));
-    Ok(node_id)
+        None => {
+            let taffy_node = if let Some(measure) = measure.as_ref() {
+                layout_state
+                    .taffy
+                    .new_leaf_with_context(style, layout_measure_context(measure))
+                    .map_err(|error| JsErrorBox::generic(format!("failed to create measured taffy node: {error}")))?
+            } else {
+                layout_state
+                    .taffy
+                    .new_leaf(style)
+                    .map_err(|error| JsErrorBox::generic(format!("failed to create taffy leaf node: {error}")))?
+            };
+            layout_state.nodes.insert(
+                node.id,
+                RetainedLayoutNode {
+                    taffy_node,
+                    style: node.style.clone(),
+                    measure,
+                    child_ids: Vec::new(),
+                },
+            );
+        }
+    }
+    Ok(())
+}
+
+fn set_layout_children(
+    layout_state: &mut LayoutHostState,
+    input: &LayoutChildrenInput,
+) -> Result<(), JsErrorBox> {
+    let parent = layout_state
+        .nodes
+        .get(&input.parent_id)
+        .cloned()
+        .ok_or_else(|| JsErrorBox::generic(format!("unknown layout parent {}", input.parent_id)))?;
+    if parent.child_ids == input.child_ids {
+        return Ok(());
+    }
+
+    let child_nodes = input
+        .child_ids
+        .iter()
+        .map(|child_id| {
+            layout_state
+                .nodes
+                .get(child_id)
+                .map(|node| node.taffy_node)
+                .ok_or_else(|| JsErrorBox::generic(format!("unknown layout child {child_id}")))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    layout_state
+        .taffy
+        .set_children(parent.taffy_node, &child_nodes)
+        .map_err(|error| JsErrorBox::generic(format!("failed to update taffy children: {error}")))?;
+
+    if let Some(parent_state) = layout_state.nodes.get_mut(&input.parent_id) {
+        parent_state.child_ids = input.child_ids.clone();
+    }
+    Ok(())
+}
+
+fn collect_layout_subtree_ids(
+    layout_state: &LayoutHostState,
+    root_id: u32,
+    ordered_ids: &mut Vec<u32>,
+) -> Result<(), JsErrorBox> {
+    let node = layout_state
+        .nodes
+        .get(&root_id)
+        .ok_or_else(|| JsErrorBox::generic(format!("unknown layout node {root_id}")))?;
+    ordered_ids.push(root_id);
+    for child_id in &node.child_ids {
+        collect_layout_subtree_ids(layout_state, *child_id, ordered_ids)?;
+    }
+    Ok(())
+}
+
+#[deno_core::op2]
+#[serde]
+fn op_goldlight_layout_sync_node(
+    state: &mut OpState,
+    #[serde] node: LayoutNodeStateInput,
+) -> Result<(), JsErrorBox> {
+    let layout_state = state.borrow_mut::<LayoutHostState>();
+    sync_layout_node(layout_state, &node)
+}
+
+#[deno_core::op2]
+#[serde]
+fn op_goldlight_layout_set_children(
+    state: &mut OpState,
+    #[serde] input: LayoutChildrenInput,
+) -> Result<(), JsErrorBox> {
+    let layout_state = state.borrow_mut::<LayoutHostState>();
+    set_layout_children(layout_state, &input)
 }
 
 #[deno_core::op2]
 #[serde]
 fn op_goldlight_compute_layout(
-    #[serde] root: LayoutNodeInput,
+    state: &mut OpState,
+    root_id: u32,
 ) -> Result<Vec<ComputedLayoutOutput>, JsErrorBox> {
-    let mut taffy = TaffyTree::<LayoutMeasureContext>::new();
-    let mut nodes = Vec::new();
-    let root_id = add_layout_node(&mut taffy, &root, &mut nodes)
-        .map_err(|error| JsErrorBox::generic(error.to_string()))?;
-    taffy
+    let layout_state = state.borrow_mut::<LayoutHostState>();
+    let root = layout_state
+        .nodes
+        .get(&root_id)
+        .cloned()
+        .ok_or_else(|| JsErrorBox::generic(format!("unknown layout root {root_id}")))?;
+
+    layout_state
+        .taffy
         .compute_layout_with_measure(
-            root_id,
+            root.taffy_node,
             Size {
                 width: AvailableSpace::MaxContent,
                 height: AvailableSpace::MaxContent,
@@ -1206,11 +1448,19 @@ fn op_goldlight_compute_layout(
         )
         .map_err(|error| JsErrorBox::generic(format!("failed to compute layout: {error}")))?;
 
-    nodes.sort_by_key(|(id, _)| *id);
-    let mut results = Vec::with_capacity(nodes.len());
-    for (id, node_id) in nodes {
-        let TaffyLayout { size, location, .. } = taffy
-            .layout(node_id)
+    let mut ordered_ids = Vec::new();
+    collect_layout_subtree_ids(layout_state, root_id, &mut ordered_ids)?;
+    ordered_ids.sort_unstable();
+
+    let mut results = Vec::with_capacity(ordered_ids.len());
+    for id in ordered_ids {
+        let node = layout_state
+            .nodes
+            .get(&id)
+            .ok_or_else(|| JsErrorBox::generic(format!("missing retained layout node for id {id}")))?;
+        let TaffyLayout { size, location, .. } = layout_state
+            .taffy
+            .layout(node.taffy_node)
             .map_err(|error| JsErrorBox::generic(format!("failed to read layout: {error}")))?;
         results.push(ComputedLayoutOutput {
             id,
@@ -1220,6 +1470,7 @@ fn op_goldlight_compute_layout(
             height: size.height,
         });
     }
+
     Ok(results)
 }
 
@@ -3667,6 +3918,8 @@ deno_core::extension!(
         op_goldlight_worker_request_animation_frame,
         op_goldlight_worker_drain_events,
         op_goldlight_worker_get_window_info,
+        op_goldlight_layout_sync_node,
+        op_goldlight_layout_set_children,
         op_goldlight_compute_layout,
         op_goldlight_create_scene_2d,
         op_goldlight_scene_2d_set_clear_color,
@@ -3689,6 +3942,7 @@ deno_core::extension!(
     },
     state = |state, options| {
         state.put(options.runtime_op_context);
+        state.put(LayoutHostState::default());
     }
 );
 
@@ -3737,6 +3991,8 @@ deno_core::extension!(
         op_goldlight_worker_request_animation_frame,
         op_goldlight_worker_drain_events,
         op_goldlight_worker_get_window_info,
+        op_goldlight_layout_sync_node,
+        op_goldlight_layout_set_children,
         op_goldlight_compute_layout,
         op_goldlight_create_scene_2d,
         op_goldlight_scene_2d_set_clear_color,
@@ -3759,6 +4015,7 @@ deno_core::extension!(
     },
     state = |state, options| {
         state.put(options.runtime_op_context);
+        state.put(LayoutHostState::default());
     }
 );
 

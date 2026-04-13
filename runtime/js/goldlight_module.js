@@ -2196,6 +2196,7 @@ function markIntrinsicParentLayoutDirty(node, previousSize, nextSize) {
       current instanceof LayoutItem3d ||
       current instanceof LayoutGroup3d
     ) {
+      syncLayoutNodeState(current);
       markLayoutNodeDirty(current);
       return;
     }
@@ -2211,6 +2212,38 @@ function getLayoutContentChild(node) {
     return node._content;
   }
   return null;
+}
+
+function getLayoutNodeMeasure(node) {
+  if (!(node instanceof LayoutItem2d) && !(node instanceof LayoutItem3d)) {
+    return undefined;
+  }
+  if (getLayoutContentChild(node) !== null) {
+    return undefined;
+  }
+  const intrinsicSize = getNodeIntrinsicSize(node._content);
+  return intrinsicSize ?? undefined;
+}
+
+function syncLayoutNodeState(node) {
+  Deno.core.ops.op_goldlight_layout_sync_node({
+    id: node._layoutNodeId,
+    style: cloneLayout(node._layout),
+    measure: getLayoutNodeMeasure(node),
+  });
+}
+
+function syncLayoutNodeChildren(node) {
+  const childIds = node instanceof LayoutGroup2d || node instanceof LayoutGroup3d
+    ? node._children.map((child) => child._layoutNodeId)
+    : (() => {
+      const contentChild = getLayoutContentChild(node);
+      return contentChild ? [contentChild._layoutNodeId] : [];
+    })();
+  Deno.core.ops.op_goldlight_layout_set_children({
+    parentId: node._layoutNodeId,
+    childIds,
+  });
 }
 
 let nextLayoutNodeId = 1;
@@ -2289,28 +2322,8 @@ function collectLayoutRoots3d(nodes, roots = []) {
   return roots;
 }
 
-function buildLayoutTree(node) {
-  if (node instanceof LayoutGroup2d || node instanceof LayoutGroup3d) {
-    return {
-      id: node._layoutNodeId,
-      style: cloneLayout(node._layout),
-      children: node._children.map((child) => buildLayoutTree(child)),
-    };
-  }
-  if (node instanceof LayoutItem2d || node instanceof LayoutItem3d) {
-    const contentChild = getLayoutContentChild(node);
-    return {
-      id: node._layoutNodeId,
-      style: cloneLayout(node._layout),
-      measure: contentChild === null ? getNodeIntrinsicSize(node._content) : undefined,
-      children: contentChild ? [buildLayoutTree(contentChild)] : [],
-    };
-  }
-  throw new TypeError("buildLayoutTree expects a layout node");
-}
-
 function computeLayouts(root) {
-  const results = Deno.core.ops.op_goldlight_compute_layout(buildLayoutTree(root));
+  const results = Deno.core.ops.op_goldlight_compute_layout(root._layoutNodeId);
   const computedLayouts = new Map();
   for (const result of results) {
     computedLayouts.set(result.id, result);
@@ -2679,6 +2692,8 @@ export class LayoutGroup2d {
     this._layoutParent = null;
     this._layoutSubtreeDirty = true;
     this._parentNode2d = null;
+    syncLayoutNodeState(this);
+    syncLayoutNodeChildren(this);
   }
 
   set(_patch = {}) {
@@ -2692,6 +2707,7 @@ export class LayoutGroup2d {
   setLayout(layout = {}) {
     this._layout = { ...this._layout, ...cloneLayout(layout) };
     this._computedLayout = computeLayout(this._layout);
+    syncLayoutNodeState(this);
     markLayoutNodeDirty(this);
     return this;
   }
@@ -2714,6 +2730,7 @@ export class LayoutGroup2d {
     if (this._scene) {
       attachNodeToScene2d(this._scene, child);
     }
+    syncLayoutNodeChildren(this);
     markLayoutNodeDirty(this);
     return child;
   }
@@ -2764,11 +2781,14 @@ export class LayoutItem2d {
     this._layoutParent = null;
     this._layoutSubtreeDirty = true;
     this._parentNode2d = null;
+    syncLayoutNodeState(this);
+    syncLayoutNodeChildren(this);
   }
 
   setLayout(layout = {}) {
     this._layout = { ...this._layout, ...cloneLayout(layout) };
     this._computedLayout = computeLayout(this._layout);
+    syncLayoutNodeState(this);
     markLayoutNodeDirty(this);
     return this;
   }
@@ -2795,6 +2815,8 @@ export class LayoutItem2d {
     if (this._scene) {
       attachNodeToScene2d(this._scene, content);
     }
+    syncLayoutNodeState(this);
+    syncLayoutNodeChildren(this);
     markLayoutNodeDirty(this);
     return this;
   }
@@ -3249,6 +3271,8 @@ export class LayoutGroup3d {
     this._computedLayout = computeLayout(this._layout);
     this._layoutParent = null;
     this._layoutSubtreeDirty = true;
+    syncLayoutNodeState(this);
+    syncLayoutNodeChildren(this);
   }
 
   set(_patch = {}) {
@@ -3262,6 +3286,7 @@ export class LayoutGroup3d {
   setLayout(layout = {}) {
     this._layout = { ...this._layout, ...cloneLayout(layout) };
     this._computedLayout = computeLayout(this._layout);
+    syncLayoutNodeState(this);
     markLayoutNodeDirty(this);
     return this;
   }
@@ -3283,6 +3308,7 @@ export class LayoutGroup3d {
     if (this._scene) {
       attachNodeToScene3d(this._scene, child);
     }
+    syncLayoutNodeChildren(this);
     markLayoutNodeDirty(this);
     return child;
   }
@@ -3332,11 +3358,14 @@ export class LayoutItem3d {
     this._computedLayout = computeLayout();
     this._layoutParent = null;
     this._layoutSubtreeDirty = true;
+    syncLayoutNodeState(this);
+    syncLayoutNodeChildren(this);
   }
 
   setLayout(layout = {}) {
     this._layout = { ...this._layout, ...cloneLayout(layout) };
     this._computedLayout = computeLayout(this._layout);
+    syncLayoutNodeState(this);
     markLayoutNodeDirty(this);
     return this;
   }
@@ -3362,6 +3391,8 @@ export class LayoutItem3d {
     if (this._scene) {
       attachNodeToScene3d(this._scene, content);
     }
+    syncLayoutNodeState(this);
+    syncLayoutNodeChildren(this);
     markLayoutNodeDirty(this);
     return this;
   }

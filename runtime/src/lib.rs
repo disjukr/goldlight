@@ -94,10 +94,11 @@ use winit::{
 };
 
 use crate::render::{
-    ColorValue, Path2DHandle, Path2DOptions, Path2DUpdate, Rect2DHandle, Rect2DOptions,
-    Rect2DUpdate, RenderModel, RendererBootstrap, RendererState, Scene2DHandle, Scene2DOptions,
-    Scene3DHandle, Scene3DOptions, SceneCameraUpdate, SceneClearColorOptions, Text2DHandle,
-    Text2DOptions, Text2DUpdate, Triangle3DHandle, Triangle3DOptions, Triangle3DUpdate,
+    ColorValue, Group2DHandle, Group2DOptions, Group2DUpdate, Path2DHandle, Path2DOptions,
+    Path2DUpdate, Rect2DHandle, Rect2DOptions, Rect2DUpdate, RenderModel, RendererBootstrap,
+    RendererState, Scene2DHandle, Scene2DOptions, Scene3DHandle, Scene3DOptions,
+    SceneCameraUpdate, SceneClearColorOptions, Text2DHandle, Text2DOptions, Text2DUpdate,
+    Triangle3DHandle, Triangle3DOptions, Triangle3DUpdate,
 };
 use crate::text::{GlyphSubpixelOffsetInput, ShapeTextInput};
 
@@ -3720,6 +3721,55 @@ fn op_goldlight_scene_2d_set_clear_color(
 
 #[deno_core::op2]
 #[serde]
+fn op_goldlight_scene_2d_create_group(
+    state: &mut OpState,
+    scene_id: u32,
+    #[serde] options: Group2DOptions,
+) -> Result<Group2DHandle, JsErrorBox> {
+    with_worker_render_model_mutation(state, |worker_state| {
+        worker_state
+            .render_model
+            .scene_2d_create_group(scene_id, options)
+    })
+}
+
+#[deno_core::op2]
+fn op_goldlight_group_2d_update(
+    state: &mut OpState,
+    group_id: u32,
+    #[serde] options: Group2DUpdate,
+) -> Result<(), JsErrorBox> {
+    with_worker_render_model_mutation(state, |worker_state| {
+        worker_state.render_model.group_2d_update(group_id, options)
+    })
+}
+
+#[deno_core::op2]
+fn op_goldlight_scene_2d_set_root_items(
+    state: &mut OpState,
+    scene_id: u32,
+    #[serde] item_ids: Vec<u32>,
+) -> Result<(), JsErrorBox> {
+    with_worker_render_model_mutation(state, |worker_state| {
+        worker_state.render_model.scene_2d_set_root_items(scene_id, item_ids)
+    })
+}
+
+#[deno_core::op2]
+fn op_goldlight_group_2d_set_children(
+    state: &mut OpState,
+    group_id: u32,
+    #[serde] item_ids: Vec<u32>,
+) -> Result<(), JsErrorBox> {
+    with_worker_render_model_mutation(state, |worker_state| {
+        worker_state
+            .render_model
+            .group_2d_set_children(group_id, item_ids)
+    })
+}
+
+#[deno_core::op2]
+#[serde]
 fn op_goldlight_scene_2d_create_rect(
     state: &mut OpState,
     scene_id: u32,
@@ -3923,6 +3973,10 @@ deno_core::extension!(
         op_goldlight_compute_layout,
         op_goldlight_create_scene_2d,
         op_goldlight_scene_2d_set_clear_color,
+        op_goldlight_scene_2d_create_group,
+        op_goldlight_group_2d_update,
+        op_goldlight_scene_2d_set_root_items,
+        op_goldlight_group_2d_set_children,
         op_goldlight_scene_2d_create_rect,
         op_goldlight_rect_2d_update,
         op_goldlight_scene_2d_create_path,
@@ -3996,6 +4050,10 @@ deno_core::extension!(
         op_goldlight_compute_layout,
         op_goldlight_create_scene_2d,
         op_goldlight_scene_2d_set_clear_color,
+        op_goldlight_scene_2d_create_group,
+        op_goldlight_group_2d_update,
+        op_goldlight_scene_2d_set_root_items,
+        op_goldlight_group_2d_set_children,
         op_goldlight_scene_2d_create_rect,
         op_goldlight_rect_2d_update,
         op_goldlight_scene_2d_create_path,

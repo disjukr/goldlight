@@ -18,8 +18,8 @@ use crate::fill_patch::{
 };
 use crate::path_atlas::{AtlasProvider, CoverageMask};
 use crate::render::{
-    ColorValue, GradientStop2D, GradientTileMode2D, Path2D, PathFillRule2D, PathShader2D,
-    PathStrokeCap2D, PathStrokeJoin2D, PathStyle2D, PathVerb2D, Rect2D, Scene2D, Text2D,
+    ColorValue, GradientStop2D, GradientTileMode2D, PathFillRule2D, PathShader2D,
+    PathStrokeCap2D, PathStrokeJoin2D, PathStyle2D, PathVerb2D, RenderModel, Scene2D, Text2D,
 };
 use crate::stroke_patch::{
     prepare_stroke_patch_step, stroke_patch_shader_source, PreparedStrokePatchStep,
@@ -1264,6 +1264,10 @@ impl DrawingRecorder {
         self.commands.push(DrawingCommand::DrawSdfText(text));
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.commands.is_empty()
+    }
+
     pub fn finish(self) -> DrawingRecording {
         DrawingRecording {
             commands: self.commands,
@@ -1274,6 +1278,14 @@ impl DrawingRecorder {
 #[derive(Clone, Debug)]
 pub struct DrawingRecording {
     commands: Vec<DrawingCommand>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct RecordingBounds {
+    pub left: f32,
+    pub top: f32,
+    pub right: f32,
+    pub bottom: f32,
 }
 
 #[derive(Clone, Debug)]
@@ -1530,25 +1542,60 @@ impl PathMaskVertex {
     }
 }
 
-pub fn record_scene_2d(
-    scene: &Scene2D,
-    rects: &[Rect2D],
-    paths: &[Path2D],
-    texts: &[Text2D],
-) -> DrawingRecording {
+fn multiply_affine_transforms(left: [f32; 6], right: [f32; 6]) -> [f32; 6] {
+    [
+        (left[0] * right[0]) + (left[2] * right[1]),
+        (left[1] * right[0]) + (left[3] * right[1]),
+        (left[0] * right[2]) + (left[2] * right[3]),
+        (left[1] * right[2]) + (left[3] * right[3]),
+        (left[0] * right[4]) + (left[2] * right[5]) + left[4],
+        (left[1] * right[4]) + (left[3] * right[5]) + left[5],
+    ]
+}
+
+#[allow(dead_code)]
+pub fn record_scene_2d(scene: &Scene2D, model: &RenderModel) -> DrawingRecording {
     let mut recorder = DrawingRecorder::new();
     recorder.clear(scene.clear_color);
-    for rect in rects {
+    record_item_list_2d(
+        &mut recorder,
+        model,
+        &scene.root_item_ids,
+        [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+    );
+    recorder.finish()
+}
+
+pub(crate) fn record_item_list_2d(
+    recorder: &mut DrawingRecorder,
+    model: &RenderModel,
+    item_ids: &[u32],
+    inherited_transform: [f32; 6],
+) {
+    for item_id in item_ids {
+        record_item_2d(recorder, model, *item_id, inherited_transform);
+    }
+}
+
+pub(crate) fn record_item_2d(
+    recorder: &mut DrawingRecorder,
+    model: &RenderModel,
+    item_id: u32,
+    inherited_transform: [f32; 6],
+) {
+    if let Some(rect) = model.rects_2d.get(&item_id) {
         recorder.fill_rect(RectDrawCommand {
             x: rect.x,
             y: rect.y,
             width: rect.width,
             height: rect.height,
             color: rect.color,
-            transform: rect.transform,
+            transform: multiply_affine_transforms(inherited_transform, rect.transform),
         });
+        return;
     }
-    for path in paths {
+
+    if let Some(path) = model.paths_2d.get(&item_id) {
         recorder.draw_path(PathDrawCommand {
             x: path.x,
             y: path.y,
@@ -1562,16 +1609,23 @@ pub fn record_scene_2d(
             stroke_cap: path.stroke_cap,
             dash_array: path.dash_array.clone(),
             dash_offset: path.dash_offset,
-            transform: path.transform,
+            transform: multiply_affine_transforms(inherited_transform, path.transform),
         });
+        return;
     }
-    for text in texts {
-        record_text_2d(&mut recorder, text);
+
+    if let Some(text) = model.texts_2d.get(&item_id) {
+        record_text_2d(recorder, text, inherited_transform);
+        return;
     }
-    recorder.finish()
+
+    if let Some(group) = model.groups_2d.get(&item_id) {
+        let next_transform = multiply_affine_transforms(inherited_transform, group.transform);
+        record_item_list_2d(recorder, model, &group.child_item_ids, next_transform);
+    }
 }
 
-fn record_text_2d(recorder: &mut DrawingRecorder, text: &Text2D) {
+fn record_text_2d(recorder: &mut DrawingRecorder, text: &Text2D, inherited_transform: [f32; 6]) {
     match text {
         Text2D::DirectMask {
             x,
@@ -1585,7 +1639,7 @@ fn record_text_2d(recorder: &mut DrawingRecorder, text: &Text2D) {
             y: *y,
             color: *color,
             glyphs: glyphs.clone(),
-            transform: *transform,
+            transform: multiply_affine_transforms(inherited_transform, *transform),
         }),
         Text2D::TransformedMask {
             x,
@@ -1599,7 +1653,7 @@ fn record_text_2d(recorder: &mut DrawingRecorder, text: &Text2D) {
             y: *y,
             color: *color,
             glyphs: glyphs.clone(),
-            transform: *transform,
+            transform: multiply_affine_transforms(inherited_transform, *transform),
         }),
         Text2D::Sdf {
             x,
@@ -1613,7 +1667,7 @@ fn record_text_2d(recorder: &mut DrawingRecorder, text: &Text2D) {
             y: *y,
             color: *color,
             glyphs: glyphs.clone(),
-            transform: *transform,
+            transform: multiply_affine_transforms(inherited_transform, *transform),
         }),
         Text2D::Path {
             x,
@@ -1637,16 +1691,264 @@ fn record_text_2d(recorder: &mut DrawingRecorder, text: &Text2D) {
                     stroke_cap: PathStrokeCap2D::Butt,
                     dash_array: Vec::new(),
                     dash_offset: 0.0,
-                    transform: *transform,
+                    transform: multiply_affine_transforms(inherited_transform, *transform),
                 });
             }
         }
         Text2D::Composite { runs, .. } => {
             for run in runs {
-                record_text_2d(recorder, run);
+                record_text_2d(recorder, run, inherited_transform);
             }
         }
     }
+}
+
+fn transform_bounds_point(point: [f32; 2], matrix: [f32; 6]) -> [f32; 2] {
+    [
+        (matrix[0] * point[0]) + (matrix[2] * point[1]) + matrix[4],
+        (matrix[1] * point[0]) + (matrix[3] * point[1]) + matrix[5],
+    ]
+}
+
+fn include_point(bounds: &mut Option<RecordingBounds>, point: [f32; 2]) {
+    match bounds {
+        Some(existing) => {
+            existing.left = existing.left.min(point[0]);
+            existing.top = existing.top.min(point[1]);
+            existing.right = existing.right.max(point[0]);
+            existing.bottom = existing.bottom.max(point[1]);
+        }
+        None => {
+            *bounds = Some(RecordingBounds {
+                left: point[0],
+                top: point[1],
+                right: point[0],
+                bottom: point[1],
+            });
+        }
+    }
+}
+
+fn include_transformed_rect(
+    bounds: &mut Option<RecordingBounds>,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    transform: [f32; 6],
+) {
+    for point in [
+        [x, y],
+        [x + width, y],
+        [x + width, y + height],
+        [x, y + height],
+    ] {
+        include_point(bounds, transform_bounds_point(point, transform));
+    }
+}
+
+fn include_arc_bounds(
+    bounds: &mut Option<RecordingBounds>,
+    center: [f32; 2],
+    radius: f32,
+    transform: [f32; 6],
+) {
+    for point in [
+        [center[0] - radius, center[1] - radius],
+        [center[0] + radius, center[1] - radius],
+        [center[0] + radius, center[1] + radius],
+        [center[0] - radius, center[1] + radius],
+    ] {
+        include_point(bounds, transform_bounds_point(point, transform));
+    }
+}
+
+fn include_path_bounds(
+    bounds: &mut Option<RecordingBounds>,
+    path: &PathDrawCommand,
+) {
+    let mut local_bounds = None;
+    let mut current = [path.x, path.y];
+    include_point(&mut local_bounds, current);
+    for verb in &path.verbs {
+        match verb {
+            PathVerb2D::MoveTo { to } | PathVerb2D::LineTo { to } => {
+                current = [path.x + to[0], path.y + to[1]];
+                include_point(&mut local_bounds, current);
+            }
+            PathVerb2D::QuadTo { control, to } | PathVerb2D::ConicTo { control, to, .. } => {
+                include_point(
+                    &mut local_bounds,
+                    [path.x + control[0], path.y + control[1]],
+                );
+                current = [path.x + to[0], path.y + to[1]];
+                include_point(&mut local_bounds, current);
+            }
+            PathVerb2D::CubicTo {
+                control1,
+                control2,
+                to,
+            } => {
+                include_point(
+                    &mut local_bounds,
+                    [path.x + control1[0], path.y + control1[1]],
+                );
+                include_point(
+                    &mut local_bounds,
+                    [path.x + control2[0], path.y + control2[1]],
+                );
+                current = [path.x + to[0], path.y + to[1]];
+                include_point(&mut local_bounds, current);
+            }
+            PathVerb2D::ArcTo { center, radius, .. } => {
+                include_arc_bounds(
+                    &mut local_bounds,
+                    [path.x + center[0], path.y + center[1]],
+                    *radius,
+                    [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+                );
+            }
+            PathVerb2D::Close => {}
+        }
+    }
+
+    let Some(mut local_bounds) = local_bounds else {
+        return;
+    };
+    if matches!(path.style, PathStyle2D::Stroke) {
+        let half_width = path.stroke_width.max(0.5) * 0.5;
+        let join_outset = match path.stroke_join {
+            PathStrokeJoin2D::Miter => half_width * DEFAULT_MITER_LIMIT.max(1.0),
+            PathStrokeJoin2D::Bevel | PathStrokeJoin2D::Round => half_width,
+        };
+        let stroke_outset = join_outset + AA_FRINGE_WIDTH;
+        local_bounds.left -= stroke_outset;
+        local_bounds.top -= stroke_outset;
+        local_bounds.right += stroke_outset;
+        local_bounds.bottom += stroke_outset;
+    }
+
+    include_transformed_rect(
+        bounds,
+        local_bounds.left,
+        local_bounds.top,
+        (local_bounds.right - local_bounds.left).max(0.0),
+        (local_bounds.bottom - local_bounds.top).max(0.0),
+        path.transform,
+    );
+}
+
+fn include_direct_mask_text_bounds(
+    bounds: &mut Option<RecordingBounds>,
+    text: &DirectMaskTextDrawCommand,
+) {
+    for glyph in &text.glyphs {
+        if let Some(mask) = glyph.mask.as_ref() {
+            include_transformed_rect(
+                bounds,
+                text.x + glyph.x,
+                text.y + glyph.y,
+                mask.width as f32,
+                mask.height as f32,
+                text.transform,
+            );
+        } else {
+            include_point(
+                bounds,
+                transform_bounds_point([text.x + glyph.x, text.y + glyph.y], text.transform),
+            );
+        }
+    }
+}
+
+fn include_transformed_mask_text_bounds(
+    bounds: &mut Option<RecordingBounds>,
+    text: &TransformedMaskTextDrawCommand,
+) {
+    for glyph in &text.glyphs {
+        let scale = if glyph.strike_to_source_scale.is_finite() && glyph.strike_to_source_scale > 0.0
+        {
+            glyph.strike_to_source_scale
+        } else {
+            1.0
+        };
+        if let Some(mask) = glyph.mask.as_ref() {
+            include_transformed_rect(
+                bounds,
+                text.x + glyph.x,
+                text.y + glyph.y,
+                mask.width as f32 * scale,
+                mask.height as f32 * scale,
+                text.transform,
+            );
+        } else {
+            include_point(
+                bounds,
+                transform_bounds_point([text.x + glyph.x, text.y + glyph.y], text.transform),
+            );
+        }
+    }
+}
+
+fn include_sdf_text_bounds(bounds: &mut Option<RecordingBounds>, text: &SdfTextDrawCommand) {
+    for glyph in &text.glyphs {
+        let scale = if glyph.strike_to_source_scale.is_finite() && glyph.strike_to_source_scale > 0.0
+        {
+            glyph.strike_to_source_scale
+        } else {
+            1.0
+        };
+        if let Some(source) = glyph.sdf.as_ref() {
+            include_transformed_rect(
+                bounds,
+                text.x + glyph.x + (source.offset_x as f32 + glyph.sdf_inset as f32) * scale,
+                text.y + glyph.y + (source.offset_y as f32 + glyph.sdf_inset as f32) * scale,
+                source.width.saturating_sub(glyph.sdf_inset * 2) as f32 * scale,
+                source.height.saturating_sub(glyph.sdf_inset * 2) as f32 * scale,
+                text.transform,
+            );
+        } else {
+            include_point(
+                bounds,
+                transform_bounds_point([text.x + glyph.x, text.y + glyph.y], text.transform),
+            );
+        }
+    }
+}
+
+pub fn compute_recording_bounds(recording: &DrawingRecording) -> Option<RecordingBounds> {
+    let mut bounds = None;
+    for command in &recording.commands {
+        match command {
+            DrawingCommand::Clear { .. } => {}
+            DrawingCommand::FillRect(rect) => include_transformed_rect(
+                &mut bounds,
+                rect.x,
+                rect.y,
+                rect.width.max(0.0),
+                rect.height.max(0.0),
+                rect.transform,
+            ),
+            DrawingCommand::DrawPath(path) => include_path_bounds(&mut bounds, path),
+            DrawingCommand::DrawDirectMaskText(text) => {
+                include_direct_mask_text_bounds(&mut bounds, text)
+            }
+            DrawingCommand::DrawTransformedMaskText(text) => {
+                include_transformed_mask_text_bounds(&mut bounds, text)
+            }
+            DrawingCommand::DrawSdfText(text) => include_sdf_text_bounds(&mut bounds, text),
+        }
+    }
+
+    bounds.and_then(|value| {
+        (value.left.is_finite()
+            && value.top.is_finite()
+            && value.right.is_finite()
+            && value.bottom.is_finite()
+            && value.right > value.left
+            && value.bottom > value.top)
+            .then_some(value)
+    })
 }
 
 #[allow(dead_code)]
@@ -1707,6 +2009,21 @@ pub fn prepare_drawing_recording_with_providers(
         *current_load_op = wgpu::LoadOp::Load;
     };
 
+    let push_step = |passes: &mut Vec<DrawingDrawPass>,
+                     current_load_op: &mut wgpu::LoadOp<wgpu::Color>,
+                     current_steps: &mut Vec<DrawingPreparedStep>,
+                     step: DrawingPreparedStep| {
+        if let Some(current_requires_depth) =
+            current_steps.first().map(DrawingPreparedStep::requires_depth)
+        {
+            let next_requires_depth = step.requires_depth();
+            if current_requires_depth != next_requires_depth {
+                flush_pass(passes, current_load_op, current_steps);
+            }
+        }
+        current_steps.push(step);
+    };
+
     for command in &recording.commands {
         match command {
             DrawingCommand::Clear { color } => {
@@ -1716,18 +2033,23 @@ pub fn prepare_drawing_recording_with_providers(
             }
             DrawingCommand::FillRect(rect) => {
                 let painter_depth = next_painter_depth_as_float(&mut next_painters_depth);
-                current_steps.push(DrawingPreparedStep::Triangles {
+                push_step(
+                    &mut passes,
+                    &mut current_load_op,
+                    &mut current_steps,
+                    DrawingPreparedStep::Triangles {
                     vertices: with_vertex_depth(
                         build_rect_vertices(rect, width, height),
                         painter_depth,
                     ),
                     mode: TriangleStepMode::DirectDepth,
                     paint: vertex_colored_paint(),
-                });
+                },
+                );
             }
             DrawingCommand::DrawPath(path) => {
                 let painter_depth = next_painter_depth_as_float(&mut next_painters_depth);
-                current_steps.extend(build_path_steps(
+                for step in build_path_steps(
                     path,
                     width,
                     height,
@@ -1735,61 +2057,72 @@ pub fn prepare_drawing_recording_with_providers(
                     surface_width,
                     surface_height,
                     path_atlas_provider.as_deref_mut(),
-                ));
+                ) {
+                    push_step(&mut passes, &mut current_load_op, &mut current_steps, step);
+                }
             }
             DrawingCommand::DrawDirectMaskText(text) => {
                 let painter_depth = next_painter_depth_as_float(&mut next_painters_depth);
-                current_steps.extend(
-                    prepare_direct_mask_text_step(
-                        &text.glyphs,
-                        text.color,
-                        text.x,
-                        text.y,
-                        surface_width,
-                        surface_height,
-                        painter_depth,
-                        text.transform,
-                        text_atlas_provider.as_deref_mut(),
-                    )
-                    .into_iter()
-                    .map(DrawingPreparedStep::BitmapText),
-                );
+                for step in prepare_direct_mask_text_step(
+                    &text.glyphs,
+                    text.color,
+                    text.x,
+                    text.y,
+                    surface_width,
+                    surface_height,
+                    painter_depth,
+                    text.transform,
+                    text_atlas_provider.as_deref_mut(),
+                ) {
+                    push_step(
+                        &mut passes,
+                        &mut current_load_op,
+                        &mut current_steps,
+                        DrawingPreparedStep::BitmapText(step),
+                    );
+                }
             }
             DrawingCommand::DrawTransformedMaskText(text) => {
                 let painter_depth = next_painter_depth_as_float(&mut next_painters_depth);
-                current_steps.extend(
-                    prepare_transformed_mask_text_step(
-                        &text.glyphs,
-                        text.color,
-                        text.x,
-                        text.y,
-                        surface_width,
-                        surface_height,
-                        painter_depth,
-                        text.transform,
-                        text_atlas_provider.as_deref_mut(),
-                    )
-                    .into_iter()
-                    .map(DrawingPreparedStep::BitmapText),
-                );
+                for step in prepare_transformed_mask_text_step(
+                    &text.glyphs,
+                    text.color,
+                    text.x,
+                    text.y,
+                    surface_width,
+                    surface_height,
+                    painter_depth,
+                    text.transform,
+                    text_atlas_provider.as_deref_mut(),
+                ) {
+                    push_step(
+                        &mut passes,
+                        &mut current_load_op,
+                        &mut current_steps,
+                        DrawingPreparedStep::BitmapText(step),
+                    );
+                }
             }
             DrawingCommand::DrawSdfText(text) => {
                 let painter_depth = next_painter_depth_as_float(&mut next_painters_depth);
-                current_steps.extend(
-                    prepare_sdf_text_step(
-                        &text.glyphs,
-                        text.color,
-                        text.x,
-                        text.y,
-                        surface_width,
-                        surface_height,
-                        painter_depth,
-                        text.transform,
-                        text_atlas_provider.as_deref_mut(),
-                    )
-                    .into_iter()
-                    .map(DrawingPreparedStep::SdfText),
-                );
+                for step in prepare_sdf_text_step(
+                    &text.glyphs,
+                    text.color,
+                    text.x,
+                    text.y,
+                    surface_width,
+                    surface_height,
+                    painter_depth,
+                    text.transform,
+                    text_atlas_provider.as_deref_mut(),
+                ) {
+                    push_step(
+                        &mut passes,
+                        &mut current_load_op,
+                        &mut current_steps,
+                        DrawingPreparedStep::SdfText(step),
+                    );
+                }
             }
         }
     }
@@ -1890,6 +2223,13 @@ fn transform_point(point: Point, transform: [f32; 6]) -> Point {
 
 fn is_identity_affine_transform(transform: [f32; 6]) -> bool {
     transform == [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]
+}
+
+fn is_translation_only_affine_transform(transform: [f32; 6]) -> bool {
+    (transform[0] - 1.0).abs() <= EPSILON
+        && transform[1].abs() <= EPSILON
+        && transform[2].abs() <= EPSILON
+        && (transform[3] - 1.0).abs() <= EPSILON
 }
 
 fn create_linear_gradient_matrix(start: Point, end: Point) -> [f32; 6] {
@@ -2418,12 +2758,23 @@ fn build_path_steps(
             }
         }
         PathStyle2D::Stroke => {
-            let dashed_subpaths = apply_dash_pattern(flatten_subpaths(path), path);
             let stroke_style = resolve_stroke_style(path);
             let stroke_color = resolve_stroke_color(path);
-            if is_identity_affine_transform(path.transform) {
+            let stroke_patch_path = is_translation_only_affine_transform(path.transform).then(|| {
+                let mut translated = path.clone();
+                translated.x += path.transform[4];
+                translated.y += path.transform[5];
+                translated.transform = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+                translated
+            });
+            let dashed_subpaths = if let Some(stroke_patch_path) = stroke_patch_path.as_ref() {
+                apply_dash_pattern(flatten_subpaths(stroke_patch_path), stroke_patch_path)
+            } else {
+                apply_dash_pattern(flatten_subpaths(path), path)
+            };
+            if let Some(stroke_patch_path) = stroke_patch_path.as_ref() {
                 if let Some(step) = prepare_stroke_patch_step(
-                    path,
+                    stroke_patch_path,
                     stroke_style,
                     &dashed_subpaths,
                     stroke_color,
@@ -4407,13 +4758,25 @@ pub fn encode_drawing_command_buffer_with_providers(
 #[cfg(test)]
 mod tests {
     use super::{
-        prepare_drawing_recording, DirectMaskTextDrawCommand, DrawingPreparedStep, DrawingRecorder,
-        PathDrawCommand,
+        compute_recording_bounds, prepare_drawing_recording, DirectMaskTextDrawCommand,
+        DrawingPreparedStep, DrawingRecorder, PathDrawCommand,
     };
     use crate::render::{
         ColorValue, DirectMaskGlyph2D, GlyphMask2D, PathFillRule2D, PathStrokeCap2D,
         PathStrokeJoin2D, PathStyle2D, PathVerb2D,
     };
+    use crate::svg::parse_svg;
+
+    const SVG_STROKE_FIXTURE: &str = r##"
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <g transform="matrix(2,0,0,2,8,12)" stroke="#000" fill="none" stroke-width="2" stroke-linejoin="round">
+    <path d="M 0 0 L 18 8 L 6 24 Z" />
+    <path d="M 28 4 C 34 18 48 -6 56 12" />
+  </g>
+  <path d="M 8 88 L 44 88" stroke="#c33" stroke-width="0.5" fill="none" />
+  <path d="M 72 72 L 108 72 L 108 108 Z" fill="#fc6" />
+</svg>
+"##;
 
     fn stroke_path(verbs: Vec<PathVerb2D>, dash_array: Vec<f32>) -> PathDrawCommand {
         PathDrawCommand {
@@ -4433,6 +4796,29 @@ mod tests {
             stroke_join: PathStrokeJoin2D::Round,
             stroke_cap: PathStrokeCap2D::Round,
             dash_array,
+            dash_offset: 0.0,
+            transform: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+        }
+    }
+
+    fn fill_path(verbs: Vec<PathVerb2D>) -> PathDrawCommand {
+        PathDrawCommand {
+            x: 0.0,
+            y: 0.0,
+            verbs,
+            fill_rule: PathFillRule2D::Nonzero,
+            style: PathStyle2D::Fill,
+            color: ColorValue {
+                r: 1.0,
+                g: 1.0,
+                b: 1.0,
+                a: 1.0,
+            },
+            shader: None,
+            stroke_width: 1.0,
+            stroke_join: PathStrokeJoin2D::Round,
+            stroke_cap: PathStrokeCap2D::Round,
+            dash_array: Vec::new(),
             dash_offset: 0.0,
             transform: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
         }
@@ -4561,5 +4947,109 @@ mod tests {
         assert_eq!(prepared.passes.len(), 1);
         assert!(prepared.passes[0].requires_msaa);
         assert!(prepared.passes[0].requires_depth);
+    }
+
+    #[test]
+    fn translated_stroke_paths_can_share_depth_pass_with_fill() {
+        let mut recorder = DrawingRecorder::new();
+        recorder.draw_path(fill_path(vec![
+            PathVerb2D::MoveTo { to: [20.0, 20.0] },
+            PathVerb2D::LineTo { to: [140.0, 20.0] },
+            PathVerb2D::LineTo { to: [80.0, 120.0] },
+            PathVerb2D::Close,
+        ]));
+        let mut stroke = stroke_path(
+            vec![
+                PathVerb2D::MoveTo { to: [30.0, 150.0] },
+                PathVerb2D::LineTo { to: [200.0, 190.0] },
+            ],
+            vec![],
+        );
+        stroke.transform = [1.0, 0.0, 0.0, 1.0, 4.0, 0.0];
+        recorder.draw_path(stroke);
+
+        let prepared = prepare_drawing_recording(&recorder.finish(), 640, 480);
+
+        assert_eq!(prepared.passes.len(), 1);
+        assert!(prepared.passes[0].requires_depth);
+        assert!(prepared.passes[0].requires_msaa);
+    }
+
+    #[test]
+    fn stroke_bounds_include_aa_fringe_and_join_outset() {
+        let mut recorder = DrawingRecorder::new();
+        recorder.draw_path(stroke_path(
+            vec![
+                PathVerb2D::MoveTo { to: [10.0, 10.0] },
+                PathVerb2D::LineTo { to: [110.0, 10.0] },
+            ],
+            vec![],
+        ));
+
+        let bounds = compute_recording_bounds(&recorder.finish()).expect("stroke bounds");
+
+        assert_eq!(bounds.left, -7.0);
+        assert_eq!(bounds.top, -7.0);
+        assert_eq!(bounds.right, 117.0);
+        assert_eq!(bounds.bottom, 17.0);
+    }
+
+    #[test]
+    fn svg_fixture_strokes_prepare_stroke_patch_steps() {
+        let parsed = parse_svg(SVG_STROKE_FIXTURE).expect("parse svg stroke fixture");
+        let mut recorder = DrawingRecorder::new();
+
+        for path in parsed.paths {
+            recorder.draw_path(PathDrawCommand {
+                x: path.x,
+                y: path.y,
+                verbs: path.verbs,
+                fill_rule: path.fill_rule,
+                style: path.style,
+                color: path.color,
+                shader: path.shader,
+                stroke_width: path.stroke_width,
+                stroke_join: path.stroke_join,
+                stroke_cap: path.stroke_cap,
+                dash_array: path.dash_array,
+                dash_offset: path.dash_offset,
+                transform: path.transform,
+            });
+        }
+
+        let prepared = prepare_drawing_recording(&recorder.finish(), 900, 900);
+        let stroke_step_count = prepared
+            .passes
+            .iter()
+            .flat_map(|pass| pass.steps.iter())
+            .filter(|step| matches!(step, DrawingPreparedStep::StrokePatches(_)))
+            .count();
+
+        assert!(stroke_step_count > 0, "expected fixture stroke patch steps");
+    }
+
+    #[test]
+    fn translated_stroke_paths_still_use_stroke_patches() {
+        let mut path = stroke_path(vec![
+            PathVerb2D::MoveTo { to: [10.0, 10.0] },
+            PathVerb2D::LineTo { to: [110.0, 40.0] },
+        ], vec![]);
+        path.transform = [1.0, 0.0, 0.0, 1.0, 24.0, -12.0];
+
+        let mut recorder = DrawingRecorder::new();
+        recorder.draw_path(path);
+        let prepared = prepare_drawing_recording(&recorder.finish(), 640, 480);
+        let steps = prepared
+            .passes
+            .iter()
+            .flat_map(|pass| pass.steps.iter())
+            .collect::<Vec<_>>();
+
+        assert!(steps
+            .iter()
+            .any(|step| matches!(step, DrawingPreparedStep::StrokePatches(_))));
+        assert!(!steps
+            .iter()
+            .any(|step| matches!(step, DrawingPreparedStep::Triangles { .. })));
     }
 }

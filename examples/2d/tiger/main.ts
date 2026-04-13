@@ -5,6 +5,7 @@ createWindow({
   title: "2d tiger",
   width: 900,
   height: 900,
+  resizable: true,
   showPolicy: "after-first-paint",
   workerEntrypoint: windowWorkerEntrypoint,
 });

@@ -284,3 +284,43 @@ fn transform_stroke_scale(transform: usvg::tiny_skia_path::Transform) -> f32 {
         1.0
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::parse_svg;
+    use crate::render::PathStyle2D;
+
+    const SVG_STROKE_FIXTURE: &str = r##"
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <g transform="matrix(2,0,0,2,8,12)" stroke="#000" fill="none" stroke-width="2" stroke-linejoin="round">
+    <path d="M 0 0 L 18 8 L 6 24 Z" />
+    <path d="M 28 4 C 34 18 48 -6 56 12" />
+  </g>
+  <path d="M 8 88 L 44 88" stroke="#c33" stroke-width="0.5" fill="none" />
+  <path d="M 72 72 L 108 72 L 108 108 Z" fill="#fc6" />
+</svg>
+"##;
+
+    #[test]
+    fn svg_fixture_includes_stroke_paths() {
+        let parsed = parse_svg(SVG_STROKE_FIXTURE).expect("parse svg stroke fixture");
+        let stroke_count = parsed
+            .paths
+            .iter()
+            .filter(|path| matches!(path.style, PathStyle2D::Stroke))
+            .count();
+        let wide_stroke_count = parsed
+            .paths
+            .iter()
+            .filter(|path| {
+                matches!(path.style, PathStyle2D::Stroke) && path.stroke_width >= 1.0
+            })
+            .count();
+
+        assert!(stroke_count > 0, "expected fixture stroke paths");
+        assert!(
+            wide_stroke_count > 0,
+            "expected fixture to contain strokes wider than 1px after transform"
+        );
+    }
+}

@@ -83,10 +83,12 @@ export type Transform2d = [number, number, number, number, number, number];
 
 export interface Group2dInit {
   transform?: Transform2d;
+  cacheAsRaster?: boolean;
 }
 
 export interface Group2dState {
   transform: Transform2d;
+  cacheAsRaster: boolean;
 }
 
 export type Group2dPatch = Partial<Group2dState>;

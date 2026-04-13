@@ -10,8 +10,9 @@ use wgpu::TextureFormatFeatureFlags;
 use winit::{dpi::PhysicalSize, window::Window};
 
 use crate::drawing::{
-    encode_drawing_command_buffer_with_providers, prepare_drawing_recording_with_providers,
-    record_scene_2d, DawnSharedContext, DRAWING_DEPTH_FORMAT,
+    compute_recording_bounds, encode_drawing_command_buffer_with_providers,
+    prepare_drawing_recording_with_providers, record_item_2d, record_item_list_2d,
+    DawnSharedContext, DrawingRecorder, DrawingRecording, DRAWING_DEPTH_FORMAT,
 };
 use crate::path_atlas::AtlasProvider;
 use crate::text_atlas::TextAtlasProvider;
@@ -36,6 +37,32 @@ fn vs_main(
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
   return input.color;
+}
+"#;
+
+const RASTER_LAYER_SHADER_SOURCE: &str = r#"
+struct VertexOutput {
+  @builtin(position) position: vec4<f32>,
+  @location(0) uv: vec2<f32>,
+};
+
+@group(0) @binding(0) var layer_sampler: sampler;
+@group(0) @binding(1) var layer_texture: texture_2d<f32>;
+
+@vertex
+fn vs_main(
+  @location(0) position: vec2<f32>,
+  @location(1) uv: vec2<f32>,
+) -> VertexOutput {
+  var output: VertexOutput;
+  output.position = vec4<f32>(position, 0.0, 1.0);
+  output.uv = uv;
+  return output;
+}
+
+@fragment
+fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
+  return textureSample(layer_texture, layer_sampler, input.uv);
 }
 "#;
 
@@ -202,6 +229,11 @@ pub struct Text2DHandle {
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
+pub struct Group2DHandle {
+    pub id: u32,
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
 pub struct Scene3DHandle {
     pub id: u32,
 }
@@ -217,6 +249,17 @@ pub struct Scene2DOptions {
     #[serde(default)]
     pub clear_color: ColorValue,
 }
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Group2DOptions {
+    #[serde(default = "default_affine_transform_2d")]
+    pub transform: [f32; 6],
+    #[serde(default)]
+    pub cache_as_raster: bool,
+}
+
+pub type Group2DUpdate = Group2DOptions;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -596,6 +639,7 @@ pub struct SceneCameraUpdate {
 #[derive(Clone, Debug)]
 pub(crate) struct Rect2D {
     pub _scene_id: u32,
+    pub revision: u64,
     pub x: f32,
     pub y: f32,
     pub width: f32,
@@ -607,6 +651,7 @@ pub(crate) struct Rect2D {
 #[derive(Clone, Debug)]
 pub(crate) struct Path2D {
     pub _scene_id: u32,
+    pub revision: u64,
     pub x: f32,
     pub y: f32,
     pub verbs: Vec<PathVerb2D>,
@@ -675,6 +720,7 @@ pub(crate) struct PathTextGlyph2D {
 pub(crate) enum Text2D {
     DirectMask {
         _scene_id: u32,
+        revision: u64,
         x: f32,
         y: f32,
         color: ColorValue,
@@ -683,6 +729,7 @@ pub(crate) enum Text2D {
     },
     TransformedMask {
         _scene_id: u32,
+        revision: u64,
         x: f32,
         y: f32,
         color: ColorValue,
@@ -691,6 +738,7 @@ pub(crate) enum Text2D {
     },
     Sdf {
         _scene_id: u32,
+        revision: u64,
         x: f32,
         y: f32,
         color: ColorValue,
@@ -699,6 +747,7 @@ pub(crate) enum Text2D {
     },
     Path {
         _scene_id: u32,
+        revision: u64,
         x: f32,
         y: f32,
         color: ColorValue,
@@ -707,8 +756,19 @@ pub(crate) enum Text2D {
     },
     Composite {
         _scene_id: u32,
+        revision: u64,
         runs: Vec<Text2D>,
     },
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct Group2D {
+    pub scene_id: u32,
+    pub content_revision: u64,
+    pub transform_revision: u64,
+    pub transform: [f32; 6],
+    pub cache_as_raster: bool,
+    pub child_item_ids: Vec<u32>,
 }
 
 #[derive(Clone, Debug)]
@@ -721,9 +781,7 @@ struct Triangle3D {
 #[derive(Clone, Debug)]
 pub(crate) struct Scene2D {
     pub clear_color: ColorValue,
-    pub rect_ids: Vec<u32>,
-    pub path_ids: Vec<u32>,
-    pub text_ids: Vec<u32>,
+    pub root_item_ids: Vec<u32>,
 }
 
 #[derive(Clone, Debug)]
@@ -748,11 +806,13 @@ enum ActiveScene {
 pub struct RenderModel {
     next_scene_id: u32,
     next_object_id: u32,
+    next_revision: u64,
     active_scene: Option<ActiveScene>,
-    scenes_2d: HashMap<u32, Scene2D>,
-    rects_2d: HashMap<u32, Rect2D>,
-    paths_2d: HashMap<u32, Path2D>,
-    texts_2d: HashMap<u32, Text2D>,
+    pub(crate) scenes_2d: HashMap<u32, Scene2D>,
+    pub(crate) rects_2d: HashMap<u32, Rect2D>,
+    pub(crate) paths_2d: HashMap<u32, Path2D>,
+    pub(crate) texts_2d: HashMap<u32, Text2D>,
+    pub(crate) groups_2d: HashMap<u32, Group2D>,
     scenes_3d: HashMap<u32, Scene3D>,
     triangles_3d: HashMap<u32, Triangle3D>,
 }
@@ -762,11 +822,13 @@ impl Default for RenderModel {
         Self {
             next_scene_id: 1,
             next_object_id: 1,
+            next_revision: 1,
             active_scene: None,
             scenes_2d: HashMap::new(),
             rects_2d: HashMap::new(),
             paths_2d: HashMap::new(),
             texts_2d: HashMap::new(),
+            groups_2d: HashMap::new(),
             scenes_3d: HashMap::new(),
             triangles_3d: HashMap::new(),
         }
@@ -774,6 +836,12 @@ impl Default for RenderModel {
 }
 
 impl RenderModel {
+    fn allocate_revision(&mut self) -> u64 {
+        let revision = self.next_revision;
+        self.next_revision = self.next_revision.saturating_add(1);
+        revision
+    }
+
     pub fn create_scene_2d(&mut self, options: Scene2DOptions) -> Scene2DHandle {
         let id = self.next_scene_id;
         self.next_scene_id += 1;
@@ -781,9 +849,7 @@ impl RenderModel {
             id,
             Scene2D {
                 clear_color: options.clear_color,
-                rect_ids: Vec::new(),
-                path_ids: Vec::new(),
-                text_ids: Vec::new(),
+                root_item_ids: Vec::new(),
             },
         );
         Scene2DHandle { id }
@@ -807,16 +873,18 @@ impl RenderModel {
         scene_id: u32,
         options: Rect2DOptions,
     ) -> Result<Rect2DHandle> {
-        let scene = self
+        let _scene = self
             .scenes_2d
             .get_mut(&scene_id)
             .ok_or_else(|| anyhow!("unknown 2D scene {scene_id}"))?;
         let id = self.next_object_id;
         self.next_object_id += 1;
+        let revision = self.allocate_revision();
         self.rects_2d.insert(
             id,
             Rect2D {
                 _scene_id: scene_id,
+                revision,
                 x: options.x,
                 y: options.y,
                 width: options.width,
@@ -825,11 +893,14 @@ impl RenderModel {
                 transform: options.transform,
             },
         );
-        scene.rect_ids.push(id);
         Ok(Rect2DHandle { id })
     }
 
     pub fn rect_2d_update(&mut self, rect_id: u32, options: Rect2DUpdate) -> Result<()> {
+        if !self.rects_2d.contains_key(&rect_id) {
+            return Err(anyhow!("unknown 2D rect {rect_id}"));
+        }
+        let revision = self.allocate_revision();
         let rect = self
             .rects_2d
             .get_mut(&rect_id)
@@ -852,6 +923,7 @@ impl RenderModel {
         if let Some(transform) = options.transform {
             rect.transform = transform;
         }
+        rect.revision = revision;
         Ok(())
     }
 
@@ -860,16 +932,18 @@ impl RenderModel {
         scene_id: u32,
         options: Path2DOptions,
     ) -> Result<Path2DHandle> {
-        let scene = self
+        let _scene = self
             .scenes_2d
             .get_mut(&scene_id)
             .ok_or_else(|| anyhow!("unknown 2D scene {scene_id}"))?;
         let id = self.next_object_id;
         self.next_object_id += 1;
+        let revision = self.allocate_revision();
         self.paths_2d.insert(
             id,
             Path2D {
                 _scene_id: scene_id,
+                revision,
                 x: options.x,
                 y: options.y,
                 verbs: options.verbs,
@@ -885,11 +959,14 @@ impl RenderModel {
                 transform: options.transform,
             },
         );
-        scene.path_ids.push(id);
         Ok(Path2DHandle { id })
     }
 
     pub fn path_2d_update(&mut self, path_id: u32, options: Path2DUpdate) -> Result<()> {
+        if !self.paths_2d.contains_key(&path_id) {
+            return Err(anyhow!("unknown 2D path {path_id}"));
+        }
+        let revision = self.allocate_revision();
         let path = self
             .paths_2d
             .get_mut(&path_id)
@@ -907,6 +984,7 @@ impl RenderModel {
         path.dash_array = options.dash_array;
         path.dash_offset = options.dash_offset;
         path.transform = options.transform;
+        path.revision = revision;
         Ok(())
     }
 
@@ -915,29 +993,114 @@ impl RenderModel {
         scene_id: u32,
         options: Text2DOptions,
     ) -> Result<Text2DHandle> {
-        let scene = self
+        let _scene = self
             .scenes_2d
             .get_mut(&scene_id)
             .ok_or_else(|| anyhow!("unknown 2D scene {scene_id}"))?;
         let id = self.next_object_id;
         self.next_object_id += 1;
+        let revision = self.allocate_revision();
         self.texts_2d
-            .insert(id, text_from_options(scene_id, options));
-        scene.text_ids.push(id);
+            .insert(id, text_from_options(scene_id, options, revision));
         Ok(Text2DHandle { id })
     }
 
     pub fn text_2d_update(&mut self, text_id: u32, options: Text2DUpdate) -> Result<()> {
         let scene_id = match self.texts_2d.get(&text_id) {
-            Some(Text2D::DirectMask { _scene_id, .. })
-            | Some(Text2D::TransformedMask { _scene_id, .. })
-            | Some(Text2D::Sdf { _scene_id, .. })
-            | Some(Text2D::Path { _scene_id, .. })
-            | Some(Text2D::Composite { _scene_id, .. }) => *_scene_id,
+            Some(text) => text_scene_id(text),
             None => return Err(anyhow!("unknown 2D text {text_id}")),
         };
+        let revision = self.allocate_revision();
         self.texts_2d
-            .insert(text_id, text_from_options(scene_id, options));
+            .insert(text_id, text_from_options(scene_id, options, revision));
+        Ok(())
+    }
+
+    pub fn scene_2d_create_group(
+        &mut self,
+        scene_id: u32,
+        options: Group2DOptions,
+    ) -> Result<Group2DHandle> {
+        let _scene = self
+            .scenes_2d
+            .get(&scene_id)
+            .ok_or_else(|| anyhow!("unknown 2D scene {scene_id}"))?;
+        let id = self.next_object_id;
+        self.next_object_id += 1;
+        let revision = self.allocate_revision();
+        self.groups_2d.insert(
+            id,
+            Group2D {
+                scene_id,
+                content_revision: revision,
+                transform_revision: revision,
+                transform: options.transform,
+                cache_as_raster: options.cache_as_raster,
+                child_item_ids: Vec::new(),
+            },
+        );
+        Ok(Group2DHandle { id })
+    }
+
+    pub fn group_2d_update(&mut self, group_id: u32, options: Group2DUpdate) -> Result<()> {
+        if !self.groups_2d.contains_key(&group_id) {
+            return Err(anyhow!("unknown 2D group {group_id}"));
+        }
+        let revision = self.allocate_revision();
+        let group = self
+            .groups_2d
+            .get_mut(&group_id)
+            .ok_or_else(|| anyhow!("unknown 2D group {group_id}"))?;
+        if group.transform != options.transform {
+            group.transform_revision = revision;
+        }
+        group.transform = options.transform;
+        group.cache_as_raster = options.cache_as_raster;
+        Ok(())
+    }
+
+    pub fn scene_2d_set_root_items(&mut self, scene_id: u32, root_item_ids: Vec<u32>) -> Result<()> {
+        for item_id in &root_item_ids {
+            let item_scene_id = self
+                .item_2d_scene_id(*item_id)
+                .ok_or_else(|| anyhow!("unknown 2D item {item_id}"))?;
+            if item_scene_id != scene_id {
+                return Err(anyhow!(
+                    "2D item {item_id} belongs to scene {item_scene_id}, not {scene_id}"
+                ));
+            }
+        }
+        let scene = self
+            .scenes_2d
+            .get_mut(&scene_id)
+            .ok_or_else(|| anyhow!("unknown 2D scene {scene_id}"))?;
+        scene.root_item_ids = root_item_ids;
+        Ok(())
+    }
+
+    pub fn group_2d_set_children(&mut self, group_id: u32, child_item_ids: Vec<u32>) -> Result<()> {
+        let scene_id = self
+            .groups_2d
+            .get(&group_id)
+            .ok_or_else(|| anyhow!("unknown 2D group {group_id}"))?
+            .scene_id;
+        for item_id in &child_item_ids {
+            let item_scene_id = self
+                .item_2d_scene_id(*item_id)
+                .ok_or_else(|| anyhow!("unknown 2D item {item_id}"))?;
+            if item_scene_id != scene_id {
+                return Err(anyhow!(
+                    "2D item {item_id} belongs to scene {item_scene_id}, not {scene_id}"
+                ));
+            }
+        }
+        let revision = self.allocate_revision();
+        let group = self
+            .groups_2d
+            .get_mut(&group_id)
+            .ok_or_else(|| anyhow!("unknown 2D group {group_id}"))?;
+        group.child_item_ids = child_item_ids;
+        group.content_revision = revision;
         Ok(())
     }
 
@@ -1037,6 +1200,19 @@ impl RenderModel {
         self.active_scene = Some(ActiveScene::ThreeD(scene_id));
         Ok(())
     }
+
+    fn item_2d_scene_id(&self, item_id: u32) -> Option<u32> {
+        if let Some(rect) = self.rects_2d.get(&item_id) {
+            return Some(rect._scene_id);
+        }
+        if let Some(path) = self.paths_2d.get(&item_id) {
+            return Some(path._scene_id);
+        }
+        if let Some(text) = self.texts_2d.get(&item_id) {
+            return Some(text_scene_id(text));
+        }
+        self.groups_2d.get(&item_id).map(|group| group.scene_id)
+    }
 }
 
 fn glyph_mask_from_options(options: GlyphMask2DOptions) -> GlyphMask2D {
@@ -1052,7 +1228,27 @@ fn glyph_mask_from_options(options: GlyphMask2DOptions) -> GlyphMask2D {
     }
 }
 
-fn text_from_options(scene_id: u32, options: Text2DOptions) -> Text2D {
+fn text_scene_id(text: &Text2D) -> u32 {
+    match text {
+        Text2D::DirectMask { _scene_id, .. }
+        | Text2D::TransformedMask { _scene_id, .. }
+        | Text2D::Sdf { _scene_id, .. }
+        | Text2D::Path { _scene_id, .. }
+        | Text2D::Composite { _scene_id, .. } => *_scene_id,
+    }
+}
+
+fn text_revision(text: &Text2D) -> u64 {
+    match text {
+        Text2D::DirectMask { revision, .. }
+        | Text2D::TransformedMask { revision, .. }
+        | Text2D::Sdf { revision, .. }
+        | Text2D::Path { revision, .. }
+        | Text2D::Composite { revision, .. } => *revision,
+    }
+}
+
+fn text_from_options(scene_id: u32, options: Text2DOptions, revision: u64) -> Text2D {
     match options {
         Text2DOptions::DirectMask {
             x,
@@ -1062,6 +1258,7 @@ fn text_from_options(scene_id: u32, options: Text2DOptions) -> Text2D {
             transform,
         } => Text2D::DirectMask {
             _scene_id: scene_id,
+            revision,
             x,
             y,
             color,
@@ -1084,6 +1281,7 @@ fn text_from_options(scene_id: u32, options: Text2DOptions) -> Text2D {
             transform,
         } => Text2D::TransformedMask {
             _scene_id: scene_id,
+            revision,
             x,
             y,
             color,
@@ -1107,6 +1305,7 @@ fn text_from_options(scene_id: u32, options: Text2DOptions) -> Text2D {
             transform,
         } => Text2D::Sdf {
             _scene_id: scene_id,
+            revision,
             x,
             y,
             color,
@@ -1133,6 +1332,7 @@ fn text_from_options(scene_id: u32, options: Text2DOptions) -> Text2D {
             transform,
         } => Text2D::Path {
             _scene_id: scene_id,
+            revision,
             x,
             y,
             color,
@@ -1149,12 +1349,170 @@ fn text_from_options(scene_id: u32, options: Text2DOptions) -> Text2D {
         },
         Text2DOptions::Composite { runs } => Text2D::Composite {
             _scene_id: scene_id,
+            revision,
             runs: runs
                 .into_iter()
-                .map(|run| text_from_options(scene_id, run))
+                .map(|run| text_from_options(scene_id, run, revision))
                 .collect(),
         },
     }
+}
+
+const RASTER_CACHE_EPSILON: f32 = 1e-4;
+
+fn can_cache_group_as_raster(transform: [f32; 6]) -> Option<[i32; 2]> {
+    let integer_tx = transform[4].round();
+    let integer_ty = transform[5].round();
+    let is_translate_only = (transform[0] - 1.0).abs() <= RASTER_CACHE_EPSILON
+        && transform[1].abs() <= RASTER_CACHE_EPSILON
+        && transform[2].abs() <= RASTER_CACHE_EPSILON
+        && (transform[3] - 1.0).abs() <= RASTER_CACHE_EPSILON
+        && (transform[4] - integer_tx).abs() <= RASTER_CACHE_EPSILON
+        && (transform[5] - integer_ty).abs() <= RASTER_CACHE_EPSILON;
+    is_translate_only.then_some([integer_tx as i32, integer_ty as i32])
+}
+
+fn multiply_affine_transforms(left: [f32; 6], right: [f32; 6]) -> [f32; 6] {
+    [
+        (left[0] * right[0]) + (left[2] * right[1]),
+        (left[1] * right[0]) + (left[3] * right[1]),
+        (left[0] * right[2]) + (left[2] * right[3]),
+        (left[1] * right[2]) + (left[3] * right[3]),
+        (left[0] * right[4]) + (left[2] * right[5]) + left[4],
+        (left[1] * right[4]) + (left[3] * right[5]) + left[5],
+    ]
+}
+
+fn item_subtree_revision(model: &RenderModel, item_id: u32) -> Option<u64> {
+    if let Some(rect) = model.rects_2d.get(&item_id) {
+        return Some(rect.revision);
+    }
+    if let Some(path) = model.paths_2d.get(&item_id) {
+        return Some(path.revision);
+    }
+    if let Some(text) = model.texts_2d.get(&item_id) {
+        return Some(text_revision(text));
+    }
+    if let Some(group) = model.groups_2d.get(&item_id) {
+        return Some(group.transform_revision.max(group_content_revision(model, group)));
+    }
+    None
+}
+
+fn max_item_subtree_revision(model: &RenderModel, item_ids: &[u32]) -> u64 {
+    item_ids
+        .iter()
+        .filter_map(|item_id| item_subtree_revision(model, *item_id))
+        .max()
+        .unwrap_or(0)
+}
+
+fn group_content_revision(model: &RenderModel, group: &Group2D) -> u64 {
+    group
+        .content_revision
+        .max(max_item_subtree_revision(model, &group.child_item_ids))
+}
+
+#[derive(Clone)]
+enum Scene2DPlanStep {
+    Direct(DrawingRecording),
+    CachedLayer(CachedLayerPlanStep),
+}
+
+#[derive(Clone)]
+struct CachedLayerPlanStep {
+    group_id: u32,
+    content_revision: u64,
+    translation: [i32; 2],
+    local_origin: [i32; 2],
+    size: [u32; 2],
+    recording: DrawingRecording,
+}
+
+fn flush_scene_2d_recorder(recorder: &mut DrawingRecorder, steps: &mut Vec<Scene2DPlanStep>) {
+    if recorder.is_empty() {
+        return;
+    }
+    let finished = std::mem::replace(recorder, DrawingRecorder::new()).finish();
+    steps.push(Scene2DPlanStep::Direct(finished));
+}
+
+fn append_scene_2d_item_plan(
+    model: &RenderModel,
+    item_id: u32,
+    inherited_transform: [f32; 6],
+    recorder: &mut DrawingRecorder,
+    steps: &mut Vec<Scene2DPlanStep>,
+) {
+    if let Some(group) = model.groups_2d.get(&item_id) {
+        let group_transform = multiply_affine_transforms(inherited_transform, group.transform);
+        if group.cache_as_raster {
+            if let Some(translation) = can_cache_group_as_raster(group_transform) {
+                let mut bounds_recorder = DrawingRecorder::new();
+                record_item_list_2d(
+                    &mut bounds_recorder,
+                    model,
+                    &group.child_item_ids,
+                    [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+                );
+                let bounds_recording = bounds_recorder.finish();
+                if let Some(bounds) = compute_recording_bounds(&bounds_recording) {
+                    let left = bounds.left.floor() as i32;
+                    let top = bounds.top.floor() as i32;
+                    let right = bounds.right.ceil() as i32;
+                    let bottom = bounds.bottom.ceil() as i32;
+                    let width = (right - left).max(1) as u32;
+                    let height = (bottom - top).max(1) as u32;
+                    flush_scene_2d_recorder(recorder, steps);
+                    let mut layer_recorder = DrawingRecorder::new();
+                    layer_recorder.clear(ColorValue {
+                        r: 0.0,
+                        g: 0.0,
+                        b: 0.0,
+                        a: 0.0,
+                    });
+                    record_item_list_2d(
+                        &mut layer_recorder,
+                        model,
+                        &group.child_item_ids,
+                        [1.0, 0.0, 0.0, 1.0, -(left as f32), -(top as f32)],
+                    );
+                    steps.push(Scene2DPlanStep::CachedLayer(CachedLayerPlanStep {
+                        group_id: item_id,
+                        content_revision: group_content_revision(model, group),
+                        translation,
+                        local_origin: [left, top],
+                        size: [width, height],
+                        recording: layer_recorder.finish(),
+                    }));
+                    return;
+                }
+            }
+        }
+        for child_id in &group.child_item_ids {
+            append_scene_2d_item_plan(model, *child_id, group_transform, recorder, steps);
+        }
+        return;
+    }
+
+    record_item_2d(recorder, model, item_id, inherited_transform);
+}
+
+fn build_scene_2d_plan(scene: &Scene2D, model: &RenderModel) -> Vec<Scene2DPlanStep> {
+    let mut steps = Vec::new();
+    let mut recorder = DrawingRecorder::new();
+    recorder.clear(scene.clear_color);
+    for item_id in &scene.root_item_ids {
+        append_scene_2d_item_plan(
+            model,
+            *item_id,
+            [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+            &mut recorder,
+            &mut steps,
+        );
+    }
+    flush_scene_2d_recorder(&mut recorder, &mut steps);
+    steps
 }
 
 #[repr(C)]
@@ -1177,6 +1535,39 @@ impl Vertex {
     }
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct TexturedVertex {
+    position: [f32; 2],
+    uv: [f32; 2],
+}
+
+impl TexturedVertex {
+    const ATTRIBUTES: [wgpu::VertexAttribute; 2] =
+        wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2];
+
+    fn layout() -> wgpu::VertexBufferLayout<'static> {
+        wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<Self>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &Self::ATTRIBUTES,
+        }
+    }
+}
+
+struct RasterLayerResources {
+    bind_group_layout: wgpu::BindGroupLayout,
+    sampler: wgpu::Sampler,
+    pipeline: wgpu::RenderPipeline,
+}
+
+struct RasterLayerCacheEntry {
+    _texture: wgpu::Texture,
+    view: wgpu::TextureView,
+    content_revision: u64,
+    size: [u32; 2],
+}
+
 pub struct RendererState {
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
@@ -1190,6 +1581,8 @@ pub struct RendererState {
     path_atlas_provider: AtlasProvider,
     text_atlas_provider: TextAtlasProvider,
     geometry_pipeline: wgpu::RenderPipeline,
+    raster_layer_resources: RasterLayerResources,
+    raster_layer_cache: HashMap<u32, RasterLayerCacheEntry>,
     size: PhysicalSize<u32>,
 }
 
@@ -1213,33 +1606,10 @@ struct SceneCommandBuffer<'a> {
     device: &'a wgpu::Device,
     encoder: &'a mut wgpu::CommandEncoder,
     target_view: &'a wgpu::TextureView,
-    drawing_context: &'a DawnSharedContext,
     geometry_pipeline: &'a wgpu::RenderPipeline,
 }
 
 impl<'a> SceneCommandBuffer<'a> {
-    fn encode_drawing(
-        &mut self,
-        prepared: &crate::drawing::DrawingPreparedRecording,
-        path_atlas_provider: &mut AtlasProvider,
-        text_atlas_provider: &mut TextAtlasProvider,
-        msaa_target_view: Option<&'a wgpu::TextureView>,
-        depth_target_view: Option<&'a wgpu::TextureView>,
-        msaa_depth_target_view: Option<&'a wgpu::TextureView>,
-    ) -> Result<()> {
-        encode_drawing_command_buffer_with_providers(
-            self.drawing_context,
-            prepared,
-            Some(path_atlas_provider),
-            Some(text_atlas_provider),
-            self.encoder,
-            self.target_view,
-            msaa_target_view,
-            depth_target_view,
-            msaa_depth_target_view,
-        )
-    }
-
     fn encode_geometry_3d(&mut self, clear_color: ColorValue, vertices: &[Vertex]) {
         let vertex_buffer = if vertices.is_empty() {
             None
@@ -1291,6 +1661,89 @@ impl<'a> SceneCommandBuffer<'a> {
             occlusion_query_set: None,
             timestamp_writes: None,
         });
+    }
+
+    fn encode_raster_layer(
+        &mut self,
+        resources: &RasterLayerResources,
+        texture_view: &wgpu::TextureView,
+        origin: [f32; 2],
+        size: [u32; 2],
+        surface_width: u32,
+        surface_height: u32,
+    ) {
+        let width = surface_width.max(1) as f32;
+        let height = surface_height.max(1) as f32;
+        let left = -1.0 + (2.0 * origin[0] / width);
+        let top = 1.0 - (2.0 * origin[1] / height);
+        let right = -1.0 + (2.0 * (origin[0] + size[0] as f32) / width);
+        let bottom = 1.0 - (2.0 * (origin[1] + size[1] as f32) / height);
+        let vertices = [
+            TexturedVertex {
+                position: [left, top],
+                uv: [0.0, 0.0],
+            },
+            TexturedVertex {
+                position: [right, top],
+                uv: [1.0, 0.0],
+            },
+            TexturedVertex {
+                position: [right, bottom],
+                uv: [1.0, 1.0],
+            },
+            TexturedVertex {
+                position: [left, top],
+                uv: [0.0, 0.0],
+            },
+            TexturedVertex {
+                position: [right, bottom],
+                uv: [1.0, 1.0],
+            },
+            TexturedVertex {
+                position: [left, bottom],
+                uv: [0.0, 1.0],
+            },
+        ];
+        let vertex_buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("goldlight raster layer vertex buffer"),
+                contents: bytemuck::cast_slice(&vertices),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("goldlight raster layer bind group"),
+            layout: &resources.bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Sampler(&resources.sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(texture_view),
+                },
+            ],
+        });
+
+        let mut pass = self.encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("goldlight raster layer composite pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: self.target_view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            occlusion_query_set: None,
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(&resources.pipeline);
+        pass.set_bind_group(0, &bind_group, &[]);
+        pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+        pass.draw(0..vertices.len() as u32, 0..1);
     }
 }
 
@@ -1365,6 +1818,104 @@ impl RendererState {
         DepthTarget {
             _texture: texture,
             view,
+        }
+    }
+
+    fn create_raster_layer_texture(
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+        width: u32,
+        height: u32,
+    ) -> (wgpu::Texture, wgpu::TextureView) {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("goldlight raster layer cache texture"),
+            size: wgpu::Extent3d {
+                width: width.max(1),
+                height: height.max(1),
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        (texture, view)
+    }
+
+    fn create_raster_layer_resources(
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+    ) -> RasterLayerResources {
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("goldlight raster layer shader"),
+            source: wgpu::ShaderSource::Wgsl(RASTER_LAYER_SHADER_SOURCE.into()),
+        });
+        let bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("goldlight raster layer bind group layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("goldlight raster layer pipeline layout"),
+            bind_group_layouts: &[&bind_group_layout],
+            push_constant_ranges: &[],
+        });
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("goldlight raster layer pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[TexturedVertex::layout()],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("goldlight raster layer sampler"),
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..wgpu::SamplerDescriptor::default()
+        });
+        RasterLayerResources {
+            bind_group_layout,
+            sampler,
+            pipeline,
         }
     }
 
@@ -1468,6 +2019,7 @@ impl RendererState {
         let drawing_context = DawnSharedContext::new(&device, &queue, format, msaa_sample_count);
         let path_atlas_provider = AtlasProvider::new(&device);
         let text_atlas_provider = TextAtlasProvider::new(&device);
+        let raster_layer_resources = Self::create_raster_layer_resources(&device, format);
 
         Ok(Self {
             surface,
@@ -1482,6 +2034,8 @@ impl RendererState {
             path_atlas_provider,
             text_atlas_provider,
             geometry_pipeline,
+            raster_layer_resources,
+            raster_layer_cache: HashMap::new(),
             size,
         })
     }
@@ -1500,6 +2054,146 @@ impl RendererState {
         self.drawing_depth_target = Self::create_depth_target(&self.device, &self.config, 1);
         self.drawing_msaa_depth_target = (self.msaa_sample_count > 1)
             .then(|| Self::create_depth_target(&self.device, &self.config, self.msaa_sample_count));
+        self.raster_layer_cache.clear();
+    }
+
+    fn encode_recording_to_view(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        recording: &crate::drawing::DrawingRecording,
+        target_view: &wgpu::TextureView,
+        target_size: [u32; 2],
+        msaa_target_view: Option<&wgpu::TextureView>,
+        depth_target_view: Option<&wgpu::TextureView>,
+        msaa_depth_target_view: Option<&wgpu::TextureView>,
+    ) -> Result<()> {
+        let prepared = prepare_drawing_recording_with_providers(
+            recording,
+            target_size[0],
+            target_size[1],
+            Some(&mut self.path_atlas_provider),
+            Some(&mut self.text_atlas_provider),
+        );
+        encode_drawing_command_buffer_with_providers(
+            &self.drawing_context,
+            &prepared,
+            Some(&mut self.path_atlas_provider),
+            Some(&mut self.text_atlas_provider),
+            encoder,
+            target_view,
+            msaa_target_view,
+            depth_target_view,
+            msaa_depth_target_view,
+        )
+    }
+
+    fn prepare_cached_layer(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        step: &CachedLayerPlanStep,
+    ) -> Result<()> {
+        let mut needs_render = false;
+        {
+            let entry = self
+                .raster_layer_cache
+                .entry(step.group_id)
+                .or_insert_with(|| {
+                    let (texture, view) = Self::create_raster_layer_texture(
+                        &self.device,
+                        self.config.format,
+                        step.size[0],
+                        step.size[1],
+                    );
+                    RasterLayerCacheEntry {
+                        _texture: texture,
+                        view,
+                        content_revision: u64::MAX,
+                        size: step.size,
+                    }
+                });
+            if entry.size != step.size {
+                let (texture, view) = Self::create_raster_layer_texture(
+                    &self.device,
+                    self.config.format,
+                    step.size[0],
+                    step.size[1],
+                );
+                *entry = RasterLayerCacheEntry {
+                    _texture: texture,
+                    view,
+                    content_revision: u64::MAX,
+                    size: step.size,
+                };
+            }
+            if entry.content_revision != step.content_revision {
+                entry.content_revision = step.content_revision;
+                needs_render = true;
+            }
+        }
+
+        if needs_render {
+            let msaa_color = Self::create_msaa_color_target(
+                &self.device,
+                &wgpu::SurfaceConfiguration {
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                    format: self.config.format,
+                    width: step.size[0].max(1),
+                    height: step.size[1].max(1),
+                    present_mode: self.config.present_mode,
+                    alpha_mode: self.config.alpha_mode,
+                    view_formats: vec![],
+                    desired_maximum_frame_latency: self.config.desired_maximum_frame_latency,
+                },
+                self.msaa_sample_count,
+            );
+            let depth_target = Self::create_depth_target(
+                &self.device,
+                &wgpu::SurfaceConfiguration {
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                    format: self.config.format,
+                    width: step.size[0].max(1),
+                    height: step.size[1].max(1),
+                    present_mode: self.config.present_mode,
+                    alpha_mode: self.config.alpha_mode,
+                    view_formats: vec![],
+                    desired_maximum_frame_latency: self.config.desired_maximum_frame_latency,
+                },
+                1,
+            );
+            let msaa_depth_target = (self.msaa_sample_count > 1).then(|| {
+                Self::create_depth_target(
+                    &self.device,
+                    &wgpu::SurfaceConfiguration {
+                        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                        format: self.config.format,
+                        width: step.size[0].max(1),
+                        height: step.size[1].max(1),
+                        present_mode: self.config.present_mode,
+                        alpha_mode: self.config.alpha_mode,
+                        view_formats: vec![],
+                        desired_maximum_frame_latency: self.config.desired_maximum_frame_latency,
+                    },
+                    self.msaa_sample_count,
+                )
+            });
+            let target_view = self
+                .raster_layer_cache
+                .get(&step.group_id)
+                .ok_or_else(|| anyhow!("missing raster layer cache entry"))?
+                .view
+                .clone();
+            self.encode_recording_to_view(
+                encoder,
+                &step.recording,
+                &target_view,
+                step.size,
+                msaa_color.as_ref().map(|t| &t.view),
+                Some(&depth_target.view),
+                msaa_depth_target.as_ref().map(|t| &t.view),
+            )?;
+        }
+
+        Ok(())
     }
 
     pub fn render_clear(&mut self, clear_color: ColorValue) -> Result<bool> {
@@ -1540,7 +2234,6 @@ impl RendererState {
             device: &self.device,
             encoder: &mut encoder,
             target_view: &view,
-            drawing_context: &self.drawing_context,
             geometry_pipeline: &self.geometry_pipeline,
         };
         command_buffer.encode_clear(clear_color);
@@ -1584,55 +2277,64 @@ impl RendererState {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("goldlight render encoder"),
             });
-        let mut command_buffer = SceneCommandBuffer {
-            device: &self.device,
-            encoder: &mut encoder,
-            target_view: &view,
-            drawing_context: &self.drawing_context,
-            geometry_pipeline: &self.geometry_pipeline,
-        };
         match model.active_scene {
             Some(ActiveScene::TwoD(scene_id)) => {
                 let scene = model
                     .scenes_2d
                     .get(&scene_id)
                     .ok_or_else(|| anyhow!("missing active 2D scene {scene_id}"))?;
-                let rects = scene
-                    .rect_ids
-                    .iter()
-                    .filter_map(|rect_id| model.rects_2d.get(rect_id))
-                    .cloned()
-                    .collect::<Vec<_>>();
-                let paths = scene
-                    .path_ids
-                    .iter()
-                    .filter_map(|path_id| model.paths_2d.get(path_id))
-                    .cloned()
-                    .collect::<Vec<_>>();
-                let texts = scene
-                    .text_ids
-                    .iter()
-                    .filter_map(|text_id| model.texts_2d.get(text_id))
-                    .cloned()
-                    .collect::<Vec<_>>();
-                let recording = record_scene_2d(scene, &rects, &paths, &texts);
                 self.path_atlas_provider.begin_frame();
                 self.text_atlas_provider.begin_frame();
-                let prepared = prepare_drawing_recording_with_providers(
-                    &recording,
-                    self.config.width,
-                    self.config.height,
-                    Some(&mut self.path_atlas_provider),
-                    Some(&mut self.text_atlas_provider),
-                );
-                command_buffer.encode_drawing(
-                    &prepared,
-                    &mut self.path_atlas_provider,
-                    &mut self.text_atlas_provider,
-                    self.msaa_color_target.as_ref().map(|t| &t.view),
-                    Some(&self.drawing_depth_target.view),
-                    self.drawing_msaa_depth_target.as_ref().map(|t| &t.view),
-                )?;
+                let plan = build_scene_2d_plan(scene, model);
+                for step in &plan {
+                    match step {
+                        Scene2DPlanStep::Direct(recording) => {
+                            let msaa_color_view =
+                                self.msaa_color_target.as_ref().map(|t| t.view.clone());
+                            let depth_view = self.drawing_depth_target.view.clone();
+                            let msaa_depth_view = self
+                                .drawing_msaa_depth_target
+                                .as_ref()
+                                .map(|t| t.view.clone());
+                            self.encode_recording_to_view(
+                                &mut encoder,
+                                recording,
+                                &view,
+                                [self.config.width, self.config.height],
+                                msaa_color_view.as_ref(),
+                                Some(&depth_view),
+                                msaa_depth_view.as_ref(),
+                            )?;
+                        }
+                        Scene2DPlanStep::CachedLayer(cached_step) => {
+                            self.prepare_cached_layer(&mut encoder, cached_step)?;
+                            let cached_view = &self
+                                .raster_layer_cache
+                                .get(&cached_step.group_id)
+                                .ok_or_else(|| anyhow!("missing raster layer cache entry"))?
+                                .view;
+                            {
+                                let mut command_buffer = SceneCommandBuffer {
+                                    device: &self.device,
+                                    encoder: &mut encoder,
+                                    target_view: &view,
+                                    geometry_pipeline: &self.geometry_pipeline,
+                                };
+                                command_buffer.encode_raster_layer(
+                                    &self.raster_layer_resources,
+                                    cached_view,
+                                    [
+                                        (cached_step.translation[0] + cached_step.local_origin[0]) as f32,
+                                        (cached_step.translation[1] + cached_step.local_origin[1]) as f32,
+                                    ],
+                                    cached_step.size,
+                                    self.config.width,
+                                    self.config.height,
+                                );
+                            }
+                        }
+                    }
+                }
             }
             Some(ActiveScene::ThreeD(scene_id)) => {
                 let scene = model
@@ -1640,9 +2342,21 @@ impl RendererState {
                     .get(&scene_id)
                     .ok_or_else(|| anyhow!("missing active 3D scene {scene_id}"))?;
                 let vertices = self.build_scene_3d_vertices(model, scene);
+                let mut command_buffer = SceneCommandBuffer {
+                    device: &self.device,
+                    encoder: &mut encoder,
+                    target_view: &view,
+                    geometry_pipeline: &self.geometry_pipeline,
+                };
                 command_buffer.encode_geometry_3d(scene.clear_color, &vertices);
             }
             None => {
+                let mut command_buffer = SceneCommandBuffer {
+                    device: &self.device,
+                    encoder: &mut encoder,
+                    target_view: &view,
+                    geometry_pipeline: &self.geometry_pipeline,
+                };
                 command_buffer.encode_clear(ColorValue::default());
             }
         }
@@ -1690,5 +2404,219 @@ impl RendererBootstrap {
             surface,
             size,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        group_content_revision, ColorValue, Group2DOptions, Rect2DOptions, RenderModel,
+        Scene2DOptions,
+    };
+
+    fn test_scene_options() -> Scene2DOptions {
+        Scene2DOptions {
+            clear_color: ColorValue {
+                r: 0.0,
+                g: 0.0,
+                b: 0.0,
+                a: 1.0,
+            },
+        }
+    }
+
+    fn test_rect_options() -> Rect2DOptions {
+        Rect2DOptions {
+            x: 0.0,
+            y: 0.0,
+            width: 64.0,
+            height: 48.0,
+            color: ColorValue {
+                r: 1.0,
+                g: 1.0,
+                b: 1.0,
+                a: 1.0,
+            },
+            transform: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+        }
+    }
+
+    #[test]
+    fn group_content_revision_ignores_root_group_transform() {
+        let mut model = RenderModel::default();
+        let scene_id = model.create_scene_2d(test_scene_options()).id;
+        let group_id = model
+            .scene_2d_create_group(
+                scene_id,
+                Group2DOptions {
+                    transform: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+                    cache_as_raster: true,
+                },
+            )
+            .unwrap()
+            .id;
+        let rect_id = model
+            .scene_2d_create_rect(scene_id, test_rect_options())
+            .unwrap()
+            .id;
+        model.group_2d_set_children(group_id, vec![rect_id]).unwrap();
+
+        let first = {
+            let group = model.groups_2d.get(&group_id).unwrap();
+            group_content_revision(&model, group)
+        };
+
+        model
+            .group_2d_update(
+                group_id,
+                Group2DOptions {
+                    transform: [1.0, 0.0, 0.0, 1.0, 24.0, -18.0],
+                    cache_as_raster: true,
+                },
+            )
+            .unwrap();
+
+        let second = {
+            let group = model.groups_2d.get(&group_id).unwrap();
+            group_content_revision(&model, group)
+        };
+
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn group_content_revision_tracks_child_and_nested_group_updates() {
+        let mut model = RenderModel::default();
+        let scene_id = model.create_scene_2d(test_scene_options()).id;
+        let root_group_id = model
+            .scene_2d_create_group(
+                scene_id,
+                Group2DOptions {
+                    transform: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+                    cache_as_raster: true,
+                },
+            )
+            .unwrap()
+            .id;
+        let nested_group_id = model
+            .scene_2d_create_group(
+                scene_id,
+                Group2DOptions {
+                    transform: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+                    cache_as_raster: false,
+                },
+            )
+            .unwrap()
+            .id;
+        let rect_id = model
+            .scene_2d_create_rect(scene_id, test_rect_options())
+            .unwrap()
+            .id;
+
+        model.group_2d_set_children(nested_group_id, vec![rect_id]).unwrap();
+        model
+            .group_2d_set_children(root_group_id, vec![nested_group_id])
+            .unwrap();
+
+        let initial = {
+            let group = model.groups_2d.get(&root_group_id).unwrap();
+            group_content_revision(&model, group)
+        };
+
+        model
+            .group_2d_update(
+                nested_group_id,
+                Group2DOptions {
+                    transform: [1.0, 0.0, 0.0, 1.0, 12.0, 8.0],
+                    cache_as_raster: false,
+                },
+            )
+            .unwrap();
+
+        let after_nested_group = {
+            let group = model.groups_2d.get(&root_group_id).unwrap();
+            group_content_revision(&model, group)
+        };
+
+        model
+            .rect_2d_update(
+                rect_id,
+                super::Rect2DUpdate {
+                    x: None,
+                    y: None,
+                    width: None,
+                    height: None,
+                    color: Some(ColorValue {
+                        r: 0.2,
+                        g: 0.4,
+                        b: 0.8,
+                        a: 1.0,
+                    }),
+                    transform: None,
+                },
+            )
+            .unwrap();
+
+        let after_rect = {
+            let group = model.groups_2d.get(&root_group_id).unwrap();
+            group_content_revision(&model, group)
+        };
+
+        assert!(after_nested_group > initial);
+        assert!(after_rect > after_nested_group);
+    }
+
+    #[test]
+    fn group_content_revision_tracks_root_group_structure_updates() {
+        let mut model = RenderModel::default();
+        let scene_id = model.create_scene_2d(test_scene_options()).id;
+        let group_id = model
+            .scene_2d_create_group(
+                scene_id,
+                Group2DOptions {
+                    transform: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+                    cache_as_raster: true,
+                },
+            )
+            .unwrap()
+            .id;
+        let first_rect_id = model
+            .scene_2d_create_rect(scene_id, test_rect_options())
+            .unwrap()
+            .id;
+        let second_rect_id = model
+            .scene_2d_create_rect(scene_id, test_rect_options())
+            .unwrap()
+            .id;
+
+        model
+            .group_2d_set_children(group_id, vec![first_rect_id, second_rect_id])
+            .unwrap();
+
+        let initial = {
+            let group = model.groups_2d.get(&group_id).unwrap();
+            group_content_revision(&model, group)
+        };
+
+        model
+            .group_2d_set_children(group_id, vec![second_rect_id, first_rect_id])
+            .unwrap();
+
+        let after_reorder = {
+            let group = model.groups_2d.get(&group_id).unwrap();
+            group_content_revision(&model, group)
+        };
+
+        model
+            .group_2d_set_children(group_id, vec![first_rect_id])
+            .unwrap();
+
+        let after_remove = {
+            let group = model.groups_2d.get(&group_id).unwrap();
+            group_content_revision(&model, group)
+        };
+
+        assert!(after_reorder > initial);
+        assert!(after_remove > after_reorder);
     }
 }

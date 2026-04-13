@@ -7,6 +7,7 @@ import {
   addWindowEventListener,
   cancelAnimationFrame,
   createTextHost,
+  getWindowInfo,
   requestAnimationFrame,
   setWindowScene,
   type ShapedRun,
@@ -14,9 +15,6 @@ import {
   type TypefaceHandle,
 } from "goldlight";
 import { matchCandidateTypeface } from "../../2d/text_shared";
-
-const INITIAL_WIDTH = 960;
-const INITIAL_HEIGHT = 640;
 
 type LayoutTextLine = {
   run: ShapedRun;
@@ -88,6 +86,7 @@ function formatFpsLabel(fps: number) {
 }
 
 function mount() {
+  const initialWindowInfo = getWindowInfo();
   const host = createTextHost();
   const face = matchCandidateTypeface(host, ["Segoe UI", "Calibri", "Arial", "Helvetica"]);
   if (!face) {
@@ -103,16 +102,16 @@ function mount() {
   }));
 
   const root = scene.add(new LayoutGroup2d().setLayout({
-    width: INITIAL_WIDTH,
-    height: INITIAL_HEIGHT,
+    width: initialWindowInfo.width,
+    height: initialWindowInfo.height,
   }));
 
   const backdropItem = root.add(new LayoutItem2d().setLayout({
     position: "absolute",
     x: 0,
     y: 0,
-    width: INITIAL_WIDTH,
-    height: INITIAL_HEIGHT,
+    width: initialWindowInfo.width,
+    height: initialWindowInfo.height,
   }));
   backdropItem.setContent(new Rect2d({
     color: { r: 0.06, g: 0.08, b: 0.11, a: 1 },
@@ -122,8 +121,8 @@ function mount() {
     position: "absolute",
     x: 0,
     y: 0,
-    width: INITIAL_WIDTH,
-    height: INITIAL_HEIGHT,
+    width: initialWindowInfo.width,
+    height: initialWindowInfo.height,
     display: "flex",
     justifyContent: "center",
     alignItems: "center",
@@ -133,8 +132,8 @@ function mount() {
     position: "absolute",
     x: 0,
     y: 0,
-    width: INITIAL_WIDTH,
-    height: INITIAL_HEIGHT,
+    width: initialWindowInfo.width,
+    height: initialWindowInfo.height,
     display: "flex",
     justifyContent: "end",
     alignItems: "start",
@@ -202,7 +201,16 @@ function mount() {
   })).getContent() as Text2d;
 
   const valueItem = panel.add(new LayoutItem2d());
-  const initialValueLine = getLine(typeface, `${INITIAL_WIDTH} x ${INITIAL_HEIGHT}`, 78);
+  const initialValueSize = clamp(
+    Math.round(Math.min(initialWindowInfo.width, initialWindowInfo.height) * 0.12),
+    44,
+    92,
+  );
+  const initialValueLine = getLine(
+    typeface,
+    `${initialWindowInfo.width} x ${initialWindowInfo.height}`,
+    initialValueSize,
+  );
   const valueText = valueItem.setContent(new Text2d({
     kind: "auto",
     host,
@@ -224,7 +232,7 @@ function mount() {
   let lastFrameTimestamp = 0;
   let smoothedDeltaMs = 1000 / 60;
   let displayedFpsLabel = formatFpsLabel(0);
-  let displayedValueKey = `${INITIAL_WIDTH}x${INITIAL_HEIGHT}:78`;
+  let displayedValueKey = `${initialWindowInfo.width}x${initialWindowInfo.height}:${initialValueSize}`;
   let lightValueColor = false;
   let frameHandle = 0;
   let disposed = false;
@@ -300,11 +308,16 @@ function mount() {
     root.flushLayout();
   }
 
-  updateLayout(INITIAL_WIDTH, INITIAL_HEIGHT);
+  function updateLayoutFromWindow() {
+    const windowInfo = getWindowInfo();
+    updateLayout(windowInfo.width, windowInfo.height);
+  }
+
+  updateLayoutFromWindow();
   frameHandle = requestAnimationFrame(tick);
 
-  addWindowEventListener("resize", (event) => {
-    updateLayout(event.width, event.height);
+  addWindowEventListener("resize", () => {
+    updateLayoutFromWindow();
   });
 
   return {

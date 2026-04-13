@@ -21,6 +21,7 @@ export interface WindowInit {
   title?: string;
   width?: number;
   height?: number;
+  resizable?: boolean;
   initialClearColor?: ColorValue;
   showPolicy?: WindowShowPolicy;
   workerEntrypoint?: string;
@@ -542,6 +543,14 @@ export interface WindowResizeEvent {
   height: number;
 }
 
+export interface WindowInfo {
+  width: number;
+  height: number;
+  title: string;
+  resizable: boolean;
+  initialClearColor: ResolvedColorValue;
+}
+
 export interface WindowAnimationFrameEvent {
   type: 'animationFrame';
   timestampMs: number;
@@ -921,5 +930,9 @@ export function addWindowEventListener<T extends keyof WindowEventMap>(
   _type: T,
   _listener: (event: WindowEventMap[T]) => void,
 ): void {
+  throw new Error(RUNTIME_ONLY_ERROR);
+}
+
+export function getWindowInfo(): WindowInfo {
   throw new Error(RUNTIME_ONLY_ERROR);
 }

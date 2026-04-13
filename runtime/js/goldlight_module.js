@@ -3,10 +3,15 @@ function normalizeWindowInit(init = {}) {
     title = "untitled",
     width = 640,
     height = 480,
+    resizable = false,
     initialClearColor = { r: 1, g: 1, b: 1, a: 1 },
     showPolicy = "after-initial-clear",
     workerEntrypoint = undefined,
   } = init;
+
+  if (typeof resizable !== "boolean") {
+    throw new TypeError(`window resizable flag must be a boolean: ${resizable}`);
+  }
 
   if (
     showPolicy !== "immediate" &&
@@ -20,6 +25,7 @@ function normalizeWindowInit(init = {}) {
     title,
     width,
     height,
+    resizable,
     initialClearColor: normalizeColor(initialClearColor),
     showPolicy,
     workerEntrypoint,
@@ -3405,6 +3411,10 @@ export function addWindowEventListener(type, listener) {
   const listeners = windowEventListeners.get(type) ?? [];
   listeners.push(listener);
   windowEventListeners.set(type, listeners);
+}
+
+export function getWindowInfo() {
+  return Deno.core.ops.op_goldlight_worker_get_window_info();
 }
 
 function dispatchWindowEvent(event) {

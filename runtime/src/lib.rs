@@ -261,6 +261,8 @@ struct WindowOptions {
     title: String,
     width: u32,
     height: u32,
+    #[serde(default = "default_window_resizable")]
+    resizable: bool,
     #[serde(default = "default_window_initial_clear_color")]
     initial_clear_color: ColorValue,
     #[serde(default = "default_window_show_policy")]
@@ -288,6 +290,10 @@ fn default_window_initial_clear_color() -> ColorValue {
 
 fn default_window_show_policy() -> WindowShowPolicy {
     WindowShowPolicy::AfterInitialClear
+}
+
+fn default_window_resizable() -> bool {
+    false
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -447,6 +453,7 @@ struct PendingWindow {
     title: String,
     width: u32,
     height: u32,
+    resizable: bool,
     initial_clear_color: ColorValue,
     show_policy: WindowShowPolicy,
     worker_entrypoint: Option<String>,
@@ -492,9 +499,20 @@ enum WebSocketEventPayload {
     },
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WindowInfoValue {
+    width: u32,
+    height: u32,
+    title: String,
+    resizable: bool,
+    initial_clear_color: ColorValue,
+}
+
 #[derive(Default)]
 struct WorkerHostState {
     pending_events: Vec<WorkerEventPayload>,
+    window_info: Option<WindowInfoValue>,
     animation_frame_requested: bool,
     render_model: RenderModel,
     render_model_revision: u64,
@@ -521,6 +539,10 @@ impl WindowWorkerHandle {
         if let Ok(mut state) = self.state.lock() {
             match event {
                 WorkerEventPayload::Resize { width, height } => {
+                    if let Some(window_info) = state.window_info.as_mut() {
+                        window_info.width = width;
+                        window_info.height = height;
+                    }
                     let mut merged = false;
                     for pending_event in state.pending_events.iter_mut().rev() {
                         if let WorkerEventPayload::Resize {
@@ -1100,6 +1122,7 @@ fn op_goldlight_create_window(
         title: options.title,
         width: options.width,
         height: options.height,
+        resizable: options.resizable,
         initial_clear_color: options.initial_clear_color,
         show_policy: options.show_policy,
         worker_entrypoint: options.worker_entrypoint,
@@ -1136,6 +1159,22 @@ fn op_goldlight_worker_drain_events(
         .lock()
         .map_err(|_| JsErrorBox::generic("worker state mutex poisoned"))?;
     Ok(std::mem::take(&mut worker_state.pending_events))
+}
+
+#[deno_core::op2]
+#[serde]
+fn op_goldlight_worker_get_window_info(state: &mut OpState) -> Result<WindowInfoValue, JsErrorBox> {
+    let op_context = state.borrow::<RuntimeOpContext>().clone();
+    let worker_state = op_context
+        .worker_state
+        .ok_or_else(|| JsErrorBox::generic("window info is only available in a window worker"))?;
+    let worker_state = worker_state
+        .lock()
+        .map_err(|_| JsErrorBox::generic("worker state mutex poisoned"))?;
+    worker_state
+        .window_info
+        .clone()
+        .ok_or_else(|| JsErrorBox::generic("window info is not available yet"))
 }
 
 #[cfg(feature = "dev-runtime")]
@@ -3468,6 +3507,7 @@ deno_core::extension!(
         op_goldlight_hmr_request_restart,
         op_goldlight_worker_request_animation_frame,
         op_goldlight_worker_drain_events,
+        op_goldlight_worker_get_window_info,
         op_goldlight_compute_layout,
         op_goldlight_create_scene_2d,
         op_goldlight_scene_2d_set_clear_color,
@@ -3537,6 +3577,7 @@ deno_core::extension!(
         op_goldlight_svg_parse,
         op_goldlight_worker_request_animation_frame,
         op_goldlight_worker_drain_events,
+        op_goldlight_worker_get_window_info,
         op_goldlight_compute_layout,
         op_goldlight_create_scene_2d,
         op_goldlight_scene_2d_set_clear_color,
@@ -3994,12 +4035,23 @@ impl GoldlightRuntime {
                     pending_window.width,
                     pending_window.height,
                 ))
+                .with_resizable(pending_window.resizable)
                 .with_visible(startup_presented);
             let window = Arc::new(
                 event_loop
                     .create_window(attributes)
                     .expect("failed to create runtime window"),
             );
+            let initial_window_info = {
+                let size = window.inner_size();
+                WindowInfoValue {
+                    width: size.width,
+                    height: size.height,
+                    title: pending_window.title.clone(),
+                    resizable: pending_window.resizable,
+                    initial_clear_color: pending_window.initial_clear_color,
+                }
+            };
             let window_id = window.id();
             let renderer_bootstrap = RendererBootstrap::new(window.clone())
                 .expect("failed to create window renderer bootstrap");
@@ -4018,13 +4070,14 @@ impl GoldlightRuntime {
                         self.entrypoint_specifier.clone(),
                         pending_window.id,
                         worker_entrypoint,
+                        initial_window_info.clone(),
                         self.event_proxy.clone(),
                         self.inspector_registry.clone(),
                         self.hmr_registry.clone(),
                     );
                     worker.push_event(WorkerEventPayload::Resize {
-                        width: pending_window.width,
-                        height: pending_window.height,
+                        width: initial_window_info.width,
+                        height: initial_window_info.height,
                     });
                     worker
                 });
@@ -4612,13 +4665,17 @@ fn spawn_window_worker(
     base_specifier: ModuleSpecifier,
     window_id: u32,
     worker_entrypoint: String,
+    initial_window_info: WindowInfoValue,
     event_proxy: EventLoopProxy<RuntimeUserEvent>,
     inspector_registry: Option<InspectorRegistryHandle>,
     hmr_registry: Option<HmrRegistryHandle>,
 ) -> WindowWorkerHandle {
     #[cfg(not(feature = "dev-runtime"))]
     let _ = window_id;
-    let worker_state = Arc::new(Mutex::new(WorkerHostState::default()));
+    let worker_state = Arc::new(Mutex::new(WorkerHostState {
+        window_info: Some(initial_window_info),
+        ..WorkerHostState::default()
+    }));
     let timer_state = Arc::new(Mutex::new(TimerHostState::default()));
     let (control_tx, control_rx) = std_mpsc::channel::<WindowWorkerControl>();
     let thread_worker_state = worker_state.clone();

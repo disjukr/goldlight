@@ -5,6 +5,7 @@ Examples for the new goldlight runtime live here.
 ## Categories
 
 - [`window`](./window): window lifecycle and app shell examples
+- [`input`](./input): keyboard and future input handling examples
 - [`2d`](./2d): 2D scene, layout, path drawing, and text rendering examples
 - [`3d`](./3d): 3D scene and camera examples
 
@@ -22,6 +23,7 @@ local Rust dev runtime.
 
 ## Rendering examples
 
+- [`examples/input/keyboard_input`](./input/keyboard_input): keyboard event inspector with highlighted keycaps
 - [`examples/2d/basic_rect`](./2d/basic_rect): animated 2D rectangles
 - [`examples/2d/fills`](./2d/fills): multiple filled path compositions
 - [`examples/2d/tiger`](./2d/tiger): `usvg`-parsed SVG tiger rendering

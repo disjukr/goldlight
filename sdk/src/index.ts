@@ -551,6 +551,36 @@ export interface WindowInfo {
   initialClearColor: ResolvedColorValue;
 }
 
+export const DOM_KEY_LOCATION_STANDARD = 0;
+export const DOM_KEY_LOCATION_LEFT = 1;
+export const DOM_KEY_LOCATION_RIGHT = 2;
+export const DOM_KEY_LOCATION_NUMPAD = 3;
+
+export type WindowKeyLocation =
+  | typeof DOM_KEY_LOCATION_STANDARD
+  | typeof DOM_KEY_LOCATION_LEFT
+  | typeof DOM_KEY_LOCATION_RIGHT
+  | typeof DOM_KEY_LOCATION_NUMPAD;
+
+export interface WindowKeyboardEventBase {
+  code: string;
+  key: string;
+  location: WindowKeyLocation;
+  repeat: boolean;
+  shiftKey: boolean;
+  ctrlKey: boolean;
+  altKey: boolean;
+  metaKey: boolean;
+}
+
+export interface WindowKeyDownEvent extends WindowKeyboardEventBase {
+  type: 'keydown';
+}
+
+export interface WindowKeyUpEvent extends WindowKeyboardEventBase {
+  type: 'keyup';
+}
+
 export interface WindowAnimationFrameEvent {
   type: 'animationFrame';
   timestampMs: number;
@@ -562,11 +592,15 @@ export interface WindowCloseRequestedEvent {
 
 export type WindowEvent =
   | WindowResizeEvent
+  | WindowKeyDownEvent
+  | WindowKeyUpEvent
   | WindowAnimationFrameEvent
   | WindowCloseRequestedEvent;
 
 export interface WindowEventMap {
   resize: WindowResizeEvent;
+  keydown: WindowKeyDownEvent;
+  keyup: WindowKeyUpEvent;
   animationFrame: WindowAnimationFrameEvent;
   closeRequested: WindowCloseRequestedEvent;
 }

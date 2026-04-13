@@ -87,8 +87,9 @@ use uuid::Uuid;
 use web_transport_proto::{ConnectRequest, ConnectResponse, Settings, SettingsError};
 use winit::{
     application::ApplicationHandler,
-    event::WindowEvent,
+    event::{ElementState, WindowEvent},
     event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy},
+    keyboard::{Key, KeyCode, KeyLocation, ModifiersState, NamedKey, PhysicalKey},
     window::{Window, WindowAttributes, WindowId},
 };
 
@@ -470,6 +471,160 @@ enum WorkerEventPayload {
         #[serde(rename = "timestampMs")]
         timestamp_ms: f64,
     },
+    #[serde(rename = "keydown")]
+    KeyDown {
+        #[serde(flatten)]
+        event: WorkerKeyboardEventPayload,
+    },
+    #[serde(rename = "keyup")]
+    KeyUp {
+        #[serde(flatten)]
+        event: WorkerKeyboardEventPayload,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct KeyboardModifiersValue {
+    shift_key: bool,
+    ctrl_key: bool,
+    alt_key: bool,
+    meta_key: bool,
+}
+
+impl From<ModifiersState> for KeyboardModifiersValue {
+    fn from(value: ModifiersState) -> Self {
+        Self {
+            shift_key: value.shift_key(),
+            ctrl_key: value.control_key(),
+            alt_key: value.alt_key(),
+            meta_key: value.super_key(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkerKeyboardEventPayload {
+    code: String,
+    key: String,
+    location: u8,
+    repeat: bool,
+    shift_key: bool,
+    ctrl_key: bool,
+    alt_key: bool,
+    meta_key: bool,
+}
+
+fn key_location_value(location: KeyLocation) -> u8 {
+    match location {
+        KeyLocation::Standard => 0,
+        KeyLocation::Left => 1,
+        KeyLocation::Right => 2,
+        KeyLocation::Numpad => 3,
+    }
+}
+
+fn physical_key_code_name(key: &PhysicalKey) -> String {
+    match key {
+        PhysicalKey::Code(KeyCode::SuperLeft) => String::from("MetaLeft"),
+        PhysicalKey::Code(KeyCode::SuperRight) => String::from("MetaRight"),
+        PhysicalKey::Code(code) => format!("{code:?}"),
+        PhysicalKey::Unidentified(_) => String::from("Unidentified"),
+    }
+}
+
+fn logical_key_name(key: &Key) -> String {
+    match key {
+        Key::Named(NamedKey::Space) => String::from(" "),
+        Key::Named(NamedKey::Super | NamedKey::Meta) => String::from("Meta"),
+        Key::Named(named) => format!("{named:?}"),
+        Key::Character(text) => text.to_string(),
+        Key::Unidentified(_) => String::from("Unidentified"),
+        Key::Dead(_) => String::from("Dead"),
+    }
+}
+
+fn modifiers_state_for_key_event(
+    base: ModifiersState,
+    physical_key: &PhysicalKey,
+    element_state: ElementState,
+) -> ModifiersState {
+    let mut modifiers = base;
+    let pressed = element_state == ElementState::Pressed;
+    if let PhysicalKey::Code(code) = physical_key {
+        match code {
+            KeyCode::ShiftLeft | KeyCode::ShiftRight => {
+                modifiers.set(ModifiersState::SHIFT, pressed);
+            }
+            KeyCode::ControlLeft | KeyCode::ControlRight => {
+                modifiers.set(ModifiersState::CONTROL, pressed);
+            }
+            KeyCode::AltLeft | KeyCode::AltRight => {
+                modifiers.set(ModifiersState::ALT, pressed);
+            }
+            KeyCode::SuperLeft | KeyCode::SuperRight => {
+                modifiers.set(ModifiersState::SUPER, pressed);
+            }
+            _ => {}
+        }
+    }
+    modifiers
+}
+
+fn window_keyboard_event_payload(
+    event: &winit::event::KeyEvent,
+    modifiers: ModifiersState,
+) -> WorkerKeyboardEventPayload {
+    let modifiers = KeyboardModifiersValue::from(modifiers);
+    WorkerKeyboardEventPayload {
+        code: physical_key_code_name(&event.physical_key),
+        key: logical_key_name(&event.logical_key),
+        location: key_location_value(event.location),
+        repeat: event.repeat,
+        shift_key: modifiers.shift_key,
+        ctrl_key: modifiers.ctrl_key,
+        alt_key: modifiers.alt_key,
+        meta_key: modifiers.meta_key,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dom_key_locations_use_standard_numeric_values() {
+        assert_eq!(key_location_value(KeyLocation::Standard), 0);
+        assert_eq!(key_location_value(KeyLocation::Left), 1);
+        assert_eq!(key_location_value(KeyLocation::Right), 2);
+        assert_eq!(key_location_value(KeyLocation::Numpad), 3);
+    }
+
+    #[test]
+    fn physical_key_codes_match_dom_meta_names() {
+        assert_eq!(
+            physical_key_code_name(&PhysicalKey::Code(KeyCode::SuperLeft)),
+            "MetaLeft"
+        );
+        assert_eq!(
+            physical_key_code_name(&PhysicalKey::Code(KeyCode::SuperRight)),
+            "MetaRight"
+        );
+        assert_eq!(
+            physical_key_code_name(&PhysicalKey::Code(KeyCode::KeyA)),
+            "KeyA"
+        );
+    }
+
+    #[test]
+    fn logical_keys_match_dom_key_values() {
+        assert_eq!(logical_key_name(&Key::Named(NamedKey::Space)), " ");
+        assert_eq!(logical_key_name(&Key::Named(NamedKey::Super)), "Meta");
+        assert_eq!(logical_key_name(&Key::Named(NamedKey::Meta)), "Meta");
+        assert_eq!(logical_key_name(&Key::Dead(Some('`'))), "Dead");
+        assert_eq!(logical_key_name(&Key::Character("A".into())), "A");
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -580,6 +735,9 @@ impl WindowWorkerHandle {
                             .push(WorkerEventPayload::AnimationFrame { timestamp_ms });
                     }
                 }
+                event => {
+                    state.pending_events.push(event);
+                }
             }
         }
         let _ = self.control_tx.send(WindowWorkerControl::Wake);
@@ -633,6 +791,7 @@ struct WindowRecord {
     renderer: WindowRendererState,
     render_model_snapshot: Option<Arc<RenderModel>>,
     pending_resize: Option<winit::dpi::PhysicalSize<u32>>,
+    modifiers: ModifiersState,
     initial_clear_color: ColorValue,
     show_policy: WindowShowPolicy,
     startup_presented: bool,
@@ -4089,6 +4248,7 @@ impl GoldlightRuntime {
                     renderer: WindowRendererState::Pending(renderer),
                     render_model_snapshot: None,
                     pending_resize: None,
+                    modifiers: ModifiersState::default(),
                     initial_clear_color: pending_window.initial_clear_color,
                     show_policy: pending_window.show_policy,
                     startup_presented,
@@ -4308,6 +4468,28 @@ impl ApplicationHandler<RuntimeUserEvent> for GoldlightRuntime {
                     worker.push_event(WorkerEventPayload::Resize {
                         width: size.width,
                         height: size.height,
+                    });
+                }
+            }
+            WindowEvent::ModifiersChanged(modifiers) => {
+                record.modifiers = modifiers.state();
+            }
+            WindowEvent::KeyboardInput {
+                event,
+                ..
+            } => {
+                if let Some(worker) = record.worker.as_ref() {
+                    let modifiers =
+                        modifiers_state_for_key_event(record.modifiers, &event.physical_key, event.state);
+                    record.modifiers = modifiers;
+                    let keyboard_event = window_keyboard_event_payload(&event, modifiers);
+                    worker.push_event(match event.state {
+                        ElementState::Pressed => WorkerEventPayload::KeyDown {
+                            event: keyboard_event,
+                        },
+                        ElementState::Released => WorkerEventPayload::KeyUp {
+                            event: keyboard_event,
+                        },
                     });
                 }
             }

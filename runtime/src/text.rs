@@ -168,6 +168,26 @@ struct ShapedRunState {
     utf8_range_end: u32,
 }
 
+fn empty_shaped_run_state(input: &ShapeTextInput, script_tag: u32) -> ShapedRunState {
+    ShapedRunState {
+        glyph_ids: Vec::new(),
+        positions: vec![0.0, 0.0],
+        offsets: vec![0.0, 0.0],
+        cluster_indices: vec![if matches!(input.direction, TextDirection::Rtl) {
+            0
+        } else {
+            input.text.len() as u32
+        }],
+        bidi_level: input.direction.bidi_level(),
+        direction: input.direction,
+        script_tag,
+        advance_x: 0.0,
+        advance_y: 0.0,
+        utf8_range_start: 0,
+        utf8_range_end: input.text.len() as u32,
+    }
+}
+
 #[derive(Clone, Hash, PartialEq, Eq)]
 struct ShapeCacheKey {
     typeface_handle: u64,
@@ -1430,7 +1450,7 @@ pub fn get_font_metrics(typeface: &str, size: f32) -> Result<Option<FontMetricsV
 
 pub fn shape_text(input: ShapeTextInput) -> Result<Option<ShapedRunValue>> {
     let typeface_handle = parse_typeface_handle(&input.typeface)?;
-    let language = input.language.unwrap_or_default();
+    let language = input.language.clone().unwrap_or_default();
     let script_tag = fourcc_from_script_tag(input.script_tag.as_deref());
     with_state_mut(|state| {
         let cache_key = shape_cache_key(
@@ -1510,67 +1530,80 @@ pub fn shape_text(input: ShapeTextInput) -> Result<Option<ShapedRunValue>> {
                 let mut glyph_count = 0u32;
                 let infos = hb_buffer_get_glyph_infos(buffer, &mut glyph_count);
                 let positions = hb_buffer_get_glyph_positions(buffer, &mut glyph_count);
-                if infos.is_null() || positions.is_null() {
+                if glyph_count == 0 {
+                    let resolved_script_tag = hb_buffer_get_script(buffer);
+                    hb_buffer_destroy(buffer);
+                    hb_font_destroy(hb_font);
+                    empty_shaped_run_state(
+                        &input,
+                        if script_tag != 0 {
+                            script_tag
+                        } else {
+                            resolved_script_tag
+                        },
+                    )
+                } else if infos.is_null() || positions.is_null() {
                     hb_buffer_destroy(buffer);
                     hb_font_destroy(hb_font);
                     return Ok(None);
-                }
-                let infos_slice = std::slice::from_raw_parts(infos, glyph_count as usize);
-                let positions_slice = std::slice::from_raw_parts(positions, glyph_count as usize);
-                let mut glyph_ids = Vec::with_capacity(glyph_count as usize);
-                let mut glyph_positions = Vec::with_capacity((glyph_count as usize + 1) * 2);
-                let mut glyph_offsets = Vec::with_capacity((glyph_count as usize + 1) * 2);
-                let mut cluster_indices = Vec::with_capacity(glyph_count as usize + 1);
-                let mut pen_x = 0f32;
-                let mut pen_y = 0f32;
-                for index in 0..glyph_count as usize {
-                    let info = infos_slice[index];
-                    let position = positions_slice[index];
-                    glyph_ids.push(info.codepoint);
+                } else {
+                    let infos_slice = std::slice::from_raw_parts(infos, glyph_count as usize);
+                    let positions_slice = std::slice::from_raw_parts(positions, glyph_count as usize);
+                    let mut glyph_ids = Vec::with_capacity(glyph_count as usize);
+                    let mut glyph_positions = Vec::with_capacity((glyph_count as usize + 1) * 2);
+                    let mut glyph_offsets = Vec::with_capacity((glyph_count as usize + 1) * 2);
+                    let mut cluster_indices = Vec::with_capacity(glyph_count as usize + 1);
+                    let mut pen_x = 0f32;
+                    let mut pen_y = 0f32;
+                    for index in 0..glyph_count as usize {
+                        let info = infos_slice[index];
+                        let position = positions_slice[index];
+                        glyph_ids.push(info.codepoint);
+                        glyph_positions.push(pen_x);
+                        glyph_positions.push(pen_y);
+                        glyph_offsets.push(scale_hb_position(
+                            position.x_offset,
+                            units_per_em,
+                            input.size,
+                        ));
+                        glyph_offsets.push(scale_hb_position(
+                            position.y_offset,
+                            units_per_em,
+                            input.size,
+                        ));
+                        cluster_indices.push(info.cluster);
+                        pen_x += scale_hb_position(position.x_advance, units_per_em, input.size);
+                        pen_y += scale_hb_position(position.y_advance, units_per_em, input.size);
+                    }
                     glyph_positions.push(pen_x);
                     glyph_positions.push(pen_y);
-                    glyph_offsets.push(scale_hb_position(
-                        position.x_offset,
-                        units_per_em,
-                        input.size,
-                    ));
-                    glyph_offsets.push(scale_hb_position(
-                        position.y_offset,
-                        units_per_em,
-                        input.size,
-                    ));
-                    cluster_indices.push(info.cluster);
-                    pen_x += scale_hb_position(position.x_advance, units_per_em, input.size);
-                    pen_y += scale_hb_position(position.y_advance, units_per_em, input.size);
-                }
-                glyph_positions.push(pen_x);
-                glyph_positions.push(pen_y);
-                glyph_offsets.push(0.0);
-                glyph_offsets.push(0.0);
-                cluster_indices.push(if matches!(input.direction, TextDirection::Rtl) {
-                    0
-                } else {
-                    input.text.len() as u32
-                });
-                let resolved_script_tag = hb_buffer_get_script(buffer);
-                hb_buffer_destroy(buffer);
-                hb_font_destroy(hb_font);
-                ShapedRunState {
-                    glyph_ids,
-                    positions: glyph_positions,
-                    offsets: glyph_offsets,
-                    cluster_indices,
-                    bidi_level: input.direction.bidi_level(),
-                    direction: input.direction,
-                    script_tag: if script_tag != 0 {
-                        script_tag
+                    glyph_offsets.push(0.0);
+                    glyph_offsets.push(0.0);
+                    cluster_indices.push(if matches!(input.direction, TextDirection::Rtl) {
+                        0
                     } else {
-                        resolved_script_tag
-                    },
-                    advance_x: pen_x,
-                    advance_y: pen_y,
-                    utf8_range_start: 0,
-                    utf8_range_end: input.text.len() as u32,
+                        input.text.len() as u32
+                    });
+                    let resolved_script_tag = hb_buffer_get_script(buffer);
+                    hb_buffer_destroy(buffer);
+                    hb_font_destroy(hb_font);
+                    ShapedRunState {
+                        glyph_ids,
+                        positions: glyph_positions,
+                        offsets: glyph_offsets,
+                        cluster_indices,
+                        bidi_level: input.direction.bidi_level(),
+                        direction: input.direction,
+                        script_tag: if script_tag != 0 {
+                            script_tag
+                        } else {
+                            resolved_script_tag
+                        },
+                        advance_x: pen_x,
+                        advance_y: pen_y,
+                        utf8_range_start: 0,
+                        utf8_range_end: input.text.len() as u32,
+                    }
                 }
             };
             let byte_size = shaped_run_byte_size(&shaped_run);

@@ -731,6 +731,39 @@ mod tests {
         assert!(layout_state.taffy.dirty(changed_child).unwrap());
         assert!(!layout_state.taffy.dirty(unchanged_child).unwrap());
     }
+
+    #[test]
+    fn retained_layout_compute_reports_only_changed_nodes() {
+        let mut layout_state = empty_layout_state();
+        sync_layout_node(&mut layout_state, &test_root()).unwrap();
+        sync_layout_node(&mut layout_state, &test_leaf(2, 80.0, 24.0)).unwrap();
+        sync_layout_node(&mut layout_state, &test_leaf(3, 40.0, 24.0)).unwrap();
+        set_layout_children(
+            &mut layout_state,
+            &LayoutChildrenInput {
+                parent_id: 1,
+                child_ids: vec![2, 3],
+            },
+        )
+        .unwrap();
+
+        let initial = compute_layout_outputs(&mut layout_state, 1).unwrap();
+        assert_eq!(
+            initial.iter().map(|layout| layout.id).collect::<Vec<_>>(),
+            vec![1, 2, 3]
+        );
+
+        let no_change = compute_layout_outputs(&mut layout_state, 1).unwrap();
+        assert!(no_change.is_empty());
+
+        sync_layout_node(&mut layout_state, &test_leaf(3, 56.0, 24.0)).unwrap();
+
+        let changed = compute_layout_outputs(&mut layout_state, 1).unwrap();
+        assert_eq!(
+            changed.iter().map(|layout| layout.id).collect::<Vec<_>>(),
+            vec![1, 3]
+        );
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -1153,6 +1186,16 @@ struct RetainedLayoutNode {
     style: LayoutStyleInput,
     measure: Option<LayoutMeasureInput>,
     child_ids: Vec<u32>,
+    computed_layout: Option<ComputedLayoutOutput>,
+}
+
+const COMPUTED_LAYOUT_EPSILON: f32 = 1e-4;
+
+fn same_computed_layout(left: &ComputedLayoutOutput, right: &ComputedLayoutOutput) -> bool {
+    (left.x - right.x).abs() <= COMPUTED_LAYOUT_EPSILON
+        && (left.y - right.y).abs() <= COMPUTED_LAYOUT_EPSILON
+        && (left.width - right.width).abs() <= COMPUTED_LAYOUT_EPSILON
+        && (left.height - right.height).abs() <= COMPUTED_LAYOUT_EPSILON
 }
 
 fn point_dimension(value: Option<f32>) -> Dimension {
@@ -1321,6 +1364,7 @@ fn sync_layout_node(
                     style: node.style.clone(),
                     measure,
                     child_ids: existing.child_ids,
+                    computed_layout: existing.computed_layout,
                 },
             );
         }
@@ -1343,6 +1387,7 @@ fn sync_layout_node(
                     style: node.style.clone(),
                     measure,
                     child_ids: Vec::new(),
+                    computed_layout: None,
                 },
             );
         }
@@ -1402,6 +1447,67 @@ fn collect_layout_subtree_ids(
     Ok(())
 }
 
+fn compute_layout_outputs(
+    layout_state: &mut LayoutHostState,
+    root_id: u32,
+) -> Result<Vec<ComputedLayoutOutput>, JsErrorBox> {
+    let root = layout_state
+        .nodes
+        .get(&root_id)
+        .cloned()
+        .ok_or_else(|| JsErrorBox::generic(format!("unknown layout root {root_id}")))?;
+
+    layout_state
+        .taffy
+        .compute_layout_with_measure(
+            root.taffy_node,
+            Size {
+                width: AvailableSpace::MaxContent,
+                height: AvailableSpace::MaxContent,
+            },
+            |known_dimensions, available_space, _node_id, node_context, _style| {
+                layout_measure_function(known_dimensions, available_space, node_context)
+            },
+        )
+        .map_err(|error| JsErrorBox::generic(format!("failed to compute layout: {error}")))?;
+
+    let mut ordered_ids = Vec::new();
+    collect_layout_subtree_ids(layout_state, root_id, &mut ordered_ids)?;
+    ordered_ids.sort_unstable();
+
+    let mut results = Vec::new();
+    for id in ordered_ids {
+        let node = layout_state
+            .nodes
+            .get(&id)
+            .ok_or_else(|| JsErrorBox::generic(format!("missing retained layout node for id {id}")))?;
+        let TaffyLayout { size, location, .. } = layout_state
+            .taffy
+            .layout(node.taffy_node)
+            .map_err(|error| JsErrorBox::generic(format!("failed to read layout: {error}")))?;
+        let computed = ComputedLayoutOutput {
+            id,
+            x: location.x,
+            y: location.y,
+            width: size.width,
+            height: size.height,
+        };
+        let changed = node
+            .computed_layout
+            .as_ref()
+            .map(|previous| !same_computed_layout(previous, &computed))
+            .unwrap_or(true);
+        if changed {
+            results.push(computed.clone());
+        }
+        if let Some(existing) = layout_state.nodes.get_mut(&id) {
+            existing.computed_layout = Some(computed);
+        }
+    }
+
+    Ok(results)
+}
+
 #[deno_core::op2]
 #[serde]
 fn op_goldlight_layout_sync_node(
@@ -1429,50 +1535,7 @@ fn op_goldlight_compute_layout(
     root_id: u32,
 ) -> Result<Vec<ComputedLayoutOutput>, JsErrorBox> {
     let layout_state = state.borrow_mut::<LayoutHostState>();
-    let root = layout_state
-        .nodes
-        .get(&root_id)
-        .cloned()
-        .ok_or_else(|| JsErrorBox::generic(format!("unknown layout root {root_id}")))?;
-
-    layout_state
-        .taffy
-        .compute_layout_with_measure(
-            root.taffy_node,
-            Size {
-                width: AvailableSpace::MaxContent,
-                height: AvailableSpace::MaxContent,
-            },
-            |known_dimensions, available_space, _node_id, node_context, _style| {
-                layout_measure_function(known_dimensions, available_space, node_context)
-            },
-        )
-        .map_err(|error| JsErrorBox::generic(format!("failed to compute layout: {error}")))?;
-
-    let mut ordered_ids = Vec::new();
-    collect_layout_subtree_ids(layout_state, root_id, &mut ordered_ids)?;
-    ordered_ids.sort_unstable();
-
-    let mut results = Vec::with_capacity(ordered_ids.len());
-    for id in ordered_ids {
-        let node = layout_state
-            .nodes
-            .get(&id)
-            .ok_or_else(|| JsErrorBox::generic(format!("missing retained layout node for id {id}")))?;
-        let TaffyLayout { size, location, .. } = layout_state
-            .taffy
-            .layout(node.taffy_node)
-            .map_err(|error| JsErrorBox::generic(format!("failed to read layout: {error}")))?;
-        results.push(ComputedLayoutOutput {
-            id,
-            x: location.x,
-            y: location.y,
-            width: size.width,
-            height: size.height,
-        });
-    }
-
-    Ok(results)
+    compute_layout_outputs(layout_state, root_id)
 }
 
 #[derive(Clone, Debug)]

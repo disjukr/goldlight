@@ -2181,6 +2181,49 @@ function sameIntrinsicSize(left, right) {
     Math.abs(left.height - right.height) <= 1e-4;
 }
 
+function sameComputedLayout(left, right) {
+  if (!left || !right) {
+    return left === right;
+  }
+  return Math.abs(left.x - right.x) <= 1e-4 &&
+    Math.abs(left.y - right.y) <= 1e-4 &&
+    Math.abs(left.width - right.width) <= 1e-4 &&
+    Math.abs(left.height - right.height) <= 1e-4;
+}
+
+function sameLayoutOffset(left, right) {
+  if (left === null || right === null) {
+    return left === right;
+  }
+  return Math.abs(left.x - right.x) <= 1e-4 &&
+    Math.abs(left.y - right.y) <= 1e-4;
+}
+
+function sameRectLayoutState(left, right) {
+  if (left === null || right === null) {
+    return left === right;
+  }
+  return Math.abs(left.x - right.x) <= 1e-4 &&
+    Math.abs(left.y - right.y) <= 1e-4 &&
+    Math.abs(left.width - right.width) <= 1e-4 &&
+    Math.abs(left.height - right.height) <= 1e-4;
+}
+
+function sameAffineTransform2d(left, right) {
+  if (left === right) {
+    return true;
+  }
+  if (!left || !right || left.length !== right.length) {
+    return false;
+  }
+  for (let index = 0; index < left.length; index += 1) {
+    if (Math.abs(left[index] - right[index]) > 1e-4) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function markIntrinsicParentLayoutDirty(node, previousSize, nextSize) {
   if (sameIntrinsicSize(previousSize, nextSize)) {
     return;
@@ -2382,19 +2425,17 @@ globalThis.__goldlightFlushLayout = function () {
 
 function applyOffsetToNode2d(node, offsetX, offsetY) {
   if (node instanceof Rect2d) {
-    const current = node.get();
     node._applyLayoutState({
-      ...current,
       x: offsetX,
       y: offsetY,
+      width: node._state.width,
+      height: node._state.height,
     });
     return;
   }
 
   if (node instanceof Path2d) {
-    const current = node.get();
     node._applyLayoutState({
-      ...current,
       x: offsetX,
       y: offsetY,
     });
@@ -2402,9 +2443,7 @@ function applyOffsetToNode2d(node, offsetX, offsetY) {
   }
 
   if (node instanceof Text2d) {
-    const current = node.get();
     node._applyLayoutState({
-      ...current,
       x: offsetX,
       y: offsetY,
     });
@@ -2662,6 +2701,10 @@ export class Scene2d {
       return;
     }
     const computedLayouts = computeLayouts(root);
+    if (computedLayouts.size === 0) {
+      clearLayoutNodeDirty(root);
+      return;
+    }
     root._setComputedLayouts(computedLayouts);
     root._applyComputedLayouts(0, 0);
     clearLayoutNodeDirty(root);
@@ -2814,7 +2857,10 @@ export class LayoutGroup2d {
 
   _setComputedLayouts(computedLayouts) {
     if (computedLayouts.has(this._layoutNodeId)) {
-      this._computedLayout = computedLayouts.get(this._layoutNodeId);
+      const nextLayout = computedLayouts.get(this._layoutNodeId);
+      if (!sameComputedLayout(this._computedLayout, nextLayout)) {
+        this._computedLayout = nextLayout;
+      }
     }
     for (const child of this._children) {
       child._setComputedLayouts(computedLayouts);
@@ -2905,7 +2951,10 @@ export class LayoutItem2d {
 
   _setComputedLayouts(computedLayouts) {
     if (computedLayouts.has(this._layoutNodeId)) {
-      this._computedLayout = computedLayouts.get(this._layoutNodeId);
+      const nextLayout = computedLayouts.get(this._layoutNodeId);
+      if (!sameComputedLayout(this._computedLayout, nextLayout)) {
+        this._computedLayout = nextLayout;
+      }
     }
     const contentChild = getLayoutContentChild(this);
     if (contentChild) {
@@ -2921,12 +2970,11 @@ export class LayoutItem2d {
     const y = offsetY + this._computedLayout.y;
     const groupTransform = getParentGroupTransform2d(this._content);
     if (this._content instanceof Rect2d) {
-      const current = this._content.get();
       this._content._applyLayoutState({
         x,
         y,
-        width: this._computedLayout.width || current.width,
-        height: this._computedLayout.height || current.height,
+        width: this._computedLayout.width || this._content._state.width,
+        height: this._computedLayout.height || this._content._state.height,
       });
       this._content._applyGroupTransform(groupTransform);
       return;
@@ -2996,16 +3044,23 @@ export class Rect2d {
   }
 
   _applyLayoutState(state) {
-    this._layoutState = {
+    const nextLayoutState = {
       x: state.x,
       y: state.y,
       width: state.width,
       height: state.height,
     };
+    if (sameRectLayoutState(this._layoutState, nextLayoutState)) {
+      return;
+    }
+    this._layoutState = nextLayoutState;
     this._syncResolvedState();
   }
 
   _applyGroupTransform(transform) {
+    if (sameAffineTransform2d(this._groupTransform, transform)) {
+      return;
+    }
     this._groupTransform = cloneTransform2d(transform);
   }
 
@@ -3071,14 +3126,21 @@ export class Path2d {
   }
 
   _applyLayoutState(state) {
-    this._layoutState = {
+    const nextLayoutState = {
       x: state.x,
       y: state.y,
     };
+    if (sameLayoutOffset(this._layoutState, nextLayoutState)) {
+      return;
+    }
+    this._layoutState = nextLayoutState;
     this._syncResolvedState();
   }
 
   _applyGroupTransform(transform) {
+    if (sameAffineTransform2d(this._groupTransform, transform)) {
+      return;
+    }
     this._groupTransform = cloneTransform2d(transform);
   }
 
@@ -3155,14 +3217,21 @@ export class Text2d {
   }
 
   _applyLayoutState(state) {
-    this._layoutState = {
+    const nextLayoutState = {
       x: state.x,
       y: state.y,
     };
+    if (sameLayoutOffset(this._layoutState, nextLayoutState)) {
+      return;
+    }
+    this._layoutState = nextLayoutState;
     this._syncResolvedState();
   }
 
   _applyGroupTransform(transform) {
+    if (sameAffineTransform2d(this._groupTransform, transform)) {
+      return;
+    }
     this._groupTransform = cloneTransform2d(transform);
     if (this._state.kind === "auto") {
       this._syncResolvedState();
@@ -3226,6 +3295,10 @@ export class Scene3d {
       return;
     }
     const computedLayouts = computeLayouts(root);
+    if (computedLayouts.size === 0) {
+      clearLayoutNodeDirty(root);
+      return;
+    }
     root._setComputedLayouts(computedLayouts);
     root._applyComputedLayouts(0, 0);
     clearLayoutNodeDirty(root);
@@ -3298,6 +3371,15 @@ export class Triangle3d {
       y - bounds.minY + offsetY,
       z,
     ]);
+    if (
+      this._state.positions.length === translated.length &&
+      this._state.positions.every((position, index) =>
+        Math.abs(position[0] - translated[index][0]) <= 1e-4 &&
+        Math.abs(position[1] - translated[index][1]) <= 1e-4 &&
+        Math.abs(position[2] - translated[index][2]) <= 1e-4)
+    ) {
+      return;
+    }
     this._state.positions = translated;
     if (this.id !== null) {
       Deno.core.ops.op_goldlight_triangle_3d_update(this.id, {
@@ -3393,7 +3475,10 @@ export class LayoutGroup3d {
 
   _setComputedLayouts(computedLayouts) {
     if (computedLayouts.has(this._layoutNodeId)) {
-      this._computedLayout = computedLayouts.get(this._layoutNodeId);
+      const nextLayout = computedLayouts.get(this._layoutNodeId);
+      if (!sameComputedLayout(this._computedLayout, nextLayout)) {
+        this._computedLayout = nextLayout;
+      }
     }
     for (const child of this._children) {
       child._setComputedLayouts(computedLayouts);
@@ -3481,7 +3566,10 @@ export class LayoutItem3d {
 
   _setComputedLayouts(computedLayouts) {
     if (computedLayouts.has(this._layoutNodeId)) {
-      this._computedLayout = computedLayouts.get(this._layoutNodeId);
+      const nextLayout = computedLayouts.get(this._layoutNodeId);
+      if (!sameComputedLayout(this._computedLayout, nextLayout)) {
+        this._computedLayout = nextLayout;
+      }
     }
     const contentChild = getLayoutContentChild(this);
     if (contentChild) {

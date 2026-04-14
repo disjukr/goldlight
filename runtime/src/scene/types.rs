@@ -120,6 +120,11 @@ pub struct Group2DHandle {
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
+pub struct ScrollContainer2DHandle {
+    pub id: u32,
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
 pub struct Scene3DHandle {
     pub id: u32,
 }
@@ -144,6 +149,23 @@ pub struct Group2DOptions {
 }
 
 pub type Group2DUpdate = Group2DOptions;
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScrollContainer2DOptions {
+    #[serde(default = "default_affine_transform_2d")]
+    pub transform: [f32; 6],
+    #[serde(default)]
+    pub width: f32,
+    #[serde(default)]
+    pub height: f32,
+    #[serde(default)]
+    pub scroll_x: f32,
+    #[serde(default)]
+    pub scroll_y: f32,
+}
+
+pub type ScrollContainer2DUpdate = ScrollContainer2DOptions;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]

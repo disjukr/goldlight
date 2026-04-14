@@ -1,6 +1,6 @@
 use super::{
-    DirectMaskTextDrawCommand, DrawingRecorder, DrawingRecording, PathDrawCommand, RectDrawCommand,
-    SdfTextDrawCommand, TransformedMaskTextDrawCommand,
+    ClipRectCommand, DirectMaskTextDrawCommand, DrawingRecorder, DrawingRecording, PathDrawCommand,
+    RectDrawCommand, SdfTextDrawCommand, TransformedMaskTextDrawCommand,
 };
 use crate::scene::{
     PathFillRule2D, PathStrokeCap2D, PathStrokeJoin2D, PathStyle2D, RenderModel, Text2D,
@@ -73,6 +73,37 @@ fn record_item_2d(
     if let Some(group) = model.groups_2d.get(&item_id) {
         let next_transform = multiply_affine_transforms(inherited_transform, group.transform);
         record_item_list_2d(recorder, model, &group.child_item_ids, next_transform);
+        return;
+    }
+
+    if let Some(scroll_container) = model.scroll_containers_2d.get(&item_id) {
+        let viewport_transform =
+            multiply_affine_transforms(inherited_transform, scroll_container.transform);
+        recorder.push_clip_rect(ClipRectCommand {
+            x: 0.0,
+            y: 0.0,
+            width: scroll_container.width.max(0.0),
+            height: scroll_container.height.max(0.0),
+            transform: viewport_transform,
+        });
+        let content_transform = multiply_affine_transforms(
+            viewport_transform,
+            [
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                -scroll_container.scroll_x,
+                -scroll_container.scroll_y,
+            ],
+        );
+        record_item_list_2d(
+            recorder,
+            model,
+            &scroll_container.child_item_ids,
+            content_transform,
+        );
+        recorder.pop_clip();
     }
 }
 
@@ -163,4 +194,61 @@ pub(crate) fn lower_scene_2d_to_recording(
     let root_transform = [device_pixel_ratio, 0.0, 0.0, device_pixel_ratio, 0.0, 0.0];
     record_item_list_2d(&mut recorder, model, root_item_ids, root_transform);
     recorder.finish()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::lower_scene_2d_to_recording;
+    use crate::scene::content_2d::compute_recording_bounds;
+    use crate::scene::{
+        ColorValue, Rect2DOptions, RenderModel, Scene2DOptions, ScrollContainer2DOptions,
+    };
+
+    #[test]
+    fn scroll_container_applies_viewport_clip_and_scroll_offset() {
+        let mut model = RenderModel::default();
+        let scene = model.create_scene_2d(Scene2DOptions {
+            clear_color: ColorValue::default(),
+        });
+        let rect = model
+            .scene_2d_create_rect(
+                scene.id,
+                Rect2DOptions {
+                    x: 1.0,
+                    y: 2.0,
+                    width: 20.0,
+                    height: 20.0,
+                    color: ColorValue {
+                        r: 1.0,
+                        g: 0.0,
+                        b: 0.0,
+                        a: 1.0,
+                    },
+                    transform: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+                },
+            )
+            .expect("create rect");
+        let scroll_container = model
+            .scene_2d_create_scroll_container(
+                scene.id,
+                ScrollContainer2DOptions {
+                    transform: [1.0, 0.0, 0.0, 1.0, 5.0, 7.0],
+                    width: 10.0,
+                    height: 10.0,
+                    scroll_x: 3.0,
+                    scroll_y: 4.0,
+                },
+            )
+            .expect("create scroll container");
+        model
+            .scroll_container_2d_set_children(scroll_container.id, vec![rect.id])
+            .expect("set scroll container children");
+
+        let recording = lower_scene_2d_to_recording(&model, &[scroll_container.id], 1.0);
+        let bounds = compute_recording_bounds(&recording).expect("recording bounds");
+        assert_eq!(bounds.left, 5.0);
+        assert_eq!(bounds.top, 7.0);
+        assert_eq!(bounds.right, 15.0);
+        assert_eq!(bounds.bottom, 17.0);
+    }
 }

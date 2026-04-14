@@ -1283,6 +1283,14 @@ impl DrawingRecorder {
         self.commands.push(DrawingCommand::DrawSdfText(text));
     }
 
+    pub fn push_clip_rect(&mut self, clip_rect: ClipRectCommand) {
+        self.commands.push(DrawingCommand::PushClipRect(clip_rect));
+    }
+
+    pub fn pop_clip(&mut self) {
+        self.commands.push(DrawingCommand::PopClip);
+    }
+
     pub fn finish(self) -> DrawingRecording {
         DrawingRecording {
             commands: self.commands,
@@ -1297,7 +1305,6 @@ pub struct DrawingRecording {
 
 impl DrawingRecording {}
 
-#[cfg(test)]
 #[derive(Clone, Copy, Debug)]
 pub struct RecordingBounds {
     pub left: f32,
@@ -1313,6 +1320,8 @@ enum DrawingCommand {
     DrawDirectMaskText(DirectMaskTextDrawCommand),
     DrawTransformedMaskText(TransformedMaskTextDrawCommand),
     DrawSdfText(SdfTextDrawCommand),
+    PushClipRect(ClipRectCommand),
+    PopClip,
 }
 
 #[derive(Clone, Debug)]
@@ -1339,6 +1348,15 @@ pub struct PathDrawCommand {
     pub stroke_cap: PathStrokeCap2D,
     pub dash_array: Vec<f32>,
     pub dash_offset: f32,
+    pub transform: [f32; 6],
+}
+
+#[derive(Clone, Debug)]
+pub struct ClipRectCommand {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
     pub transform: [f32; 6],
 }
 
@@ -1404,6 +1422,7 @@ pub struct DrawingDrawPass {
     pub load_op: wgpu::LoadOp<wgpu::Color>,
     pub requires_msaa: bool,
     pub requires_depth: bool,
+    pub clip_rect: Option<DeviceClipRect>,
     pub steps: Vec<DrawingPreparedStep>,
 }
 
@@ -1462,6 +1481,30 @@ impl DrawingPreparedStep {
                 | Self::BitmapText(_)
                 | Self::SdfText(_)
         )
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DeviceClipRect {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ActiveClip {
+    None,
+    Empty,
+    Rect(DeviceClipRect),
+}
+
+impl ActiveClip {
+    fn device_rect(self) -> Option<DeviceClipRect> {
+        match self {
+            Self::Rect(rect) => Some(rect),
+            Self::None | Self::Empty => None,
+        }
     }
 }
 
@@ -1796,24 +1839,48 @@ fn include_sdf_text_bounds(bounds: &mut Option<RecordingBounds>, text: &SdfTextD
 #[cfg(test)]
 pub fn compute_recording_bounds(recording: &DrawingRecording) -> Option<RecordingBounds> {
     let mut bounds = None;
+    let mut clip_stack = Vec::new();
+    let mut current_clip = None;
     for command in &recording.commands {
+        let mut command_bounds = None;
         match command {
             DrawingCommand::FillRect(rect) => include_transformed_rect(
-                &mut bounds,
+                &mut command_bounds,
                 rect.x,
                 rect.y,
                 rect.width.max(0.0),
                 rect.height.max(0.0),
                 rect.transform,
             ),
-            DrawingCommand::DrawPath(path) => include_path_bounds(&mut bounds, path),
+            DrawingCommand::DrawPath(path) => include_path_bounds(&mut command_bounds, path),
             DrawingCommand::DrawDirectMaskText(text) => {
-                include_direct_mask_text_bounds(&mut bounds, text)
+                include_direct_mask_text_bounds(&mut command_bounds, text)
             }
             DrawingCommand::DrawTransformedMaskText(text) => {
-                include_transformed_mask_text_bounds(&mut bounds, text)
+                include_transformed_mask_text_bounds(&mut command_bounds, text)
             }
-            DrawingCommand::DrawSdfText(text) => include_sdf_text_bounds(&mut bounds, text),
+            DrawingCommand::DrawSdfText(text) => include_sdf_text_bounds(&mut command_bounds, text),
+            DrawingCommand::PushClipRect(clip_rect) => {
+                let mut next_clip = None;
+                include_transformed_rect(
+                    &mut next_clip,
+                    clip_rect.x,
+                    clip_rect.y,
+                    clip_rect.width.max(0.0),
+                    clip_rect.height.max(0.0),
+                    clip_rect.transform,
+                );
+                clip_stack.push(current_clip);
+                current_clip = intersect_recording_bounds(current_clip, next_clip);
+                continue;
+            }
+            DrawingCommand::PopClip => {
+                current_clip = clip_stack.pop().flatten();
+                continue;
+            }
+        }
+        if let Some(clipped_bounds) = intersect_recording_bounds(current_clip, command_bounds) {
+            merge_recording_bounds(&mut bounds, clipped_bounds);
         }
     }
 
@@ -1825,6 +1892,156 @@ pub fn compute_recording_bounds(recording: &DrawingRecording) -> Option<Recordin
             && value.right > value.left
             && value.bottom > value.top)
             .then_some(value)
+    })
+}
+
+fn transform_clip_point(point: [f32; 2], matrix: [f32; 6]) -> [f32; 2] {
+    [
+        (matrix[0] * point[0]) + (matrix[2] * point[1]) + matrix[4],
+        (matrix[1] * point[0]) + (matrix[3] * point[1]) + matrix[5],
+    ]
+}
+
+fn transformed_rect_bounds(
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    transform: [f32; 6],
+) -> Option<RecordingBounds> {
+    if !width.is_finite() || !height.is_finite() || width <= 0.0 || height <= 0.0 {
+        return None;
+    }
+    let mut bounds = RecordingBounds {
+        left: f32::INFINITY,
+        top: f32::INFINITY,
+        right: f32::NEG_INFINITY,
+        bottom: f32::NEG_INFINITY,
+    };
+    for point in [
+        [x, y],
+        [x + width, y],
+        [x + width, y + height],
+        [x, y + height],
+    ] {
+        let transformed = transform_clip_point(point, transform);
+        bounds.left = bounds.left.min(transformed[0]);
+        bounds.top = bounds.top.min(transformed[1]);
+        bounds.right = bounds.right.max(transformed[0]);
+        bounds.bottom = bounds.bottom.max(transformed[1]);
+    }
+    is_valid_recording_bounds(bounds).then_some(bounds)
+}
+
+#[cfg(test)]
+fn merge_recording_bounds(bounds: &mut Option<RecordingBounds>, next: RecordingBounds) {
+    match bounds {
+        Some(existing) => {
+            existing.left = existing.left.min(next.left);
+            existing.top = existing.top.min(next.top);
+            existing.right = existing.right.max(next.right);
+            existing.bottom = existing.bottom.max(next.bottom);
+        }
+        None => *bounds = Some(next),
+    }
+}
+
+#[cfg(test)]
+fn intersect_recording_bounds(
+    left: Option<RecordingBounds>,
+    right: Option<RecordingBounds>,
+) -> Option<RecordingBounds> {
+    match (left, right) {
+        (Some(left), Some(right)) => {
+            let bounds = RecordingBounds {
+                left: left.left.max(right.left),
+                top: left.top.max(right.top),
+                right: left.right.min(right.right),
+                bottom: left.bottom.min(right.bottom),
+            };
+            is_valid_recording_bounds(bounds).then_some(bounds)
+        }
+        (Some(bounds), None) | (None, Some(bounds)) => Some(bounds),
+        (None, None) => None,
+    }
+}
+
+fn is_valid_recording_bounds(bounds: RecordingBounds) -> bool {
+    bounds.left.is_finite()
+        && bounds.top.is_finite()
+        && bounds.right.is_finite()
+        && bounds.bottom.is_finite()
+        && bounds.right > bounds.left
+        && bounds.bottom > bounds.top
+}
+
+fn clip_rect_to_device_rect(
+    clip_rect: &ClipRectCommand,
+    surface_width: u32,
+    surface_height: u32,
+) -> ActiveClip {
+    let Some(bounds) = transformed_rect_bounds(
+        clip_rect.x,
+        clip_rect.y,
+        clip_rect.width.max(0.0),
+        clip_rect.height.max(0.0),
+        clip_rect.transform,
+    ) else {
+        return ActiveClip::Empty;
+    };
+    recording_bounds_to_device_clip_rect(bounds, surface_width, surface_height)
+        .map(ActiveClip::Rect)
+        .unwrap_or(ActiveClip::Empty)
+}
+
+fn intersect_active_clips(left: ActiveClip, right: ActiveClip) -> ActiveClip {
+    match (left, right) {
+        (ActiveClip::Empty, _) | (_, ActiveClip::Empty) => ActiveClip::Empty,
+        (ActiveClip::None, clip) | (clip, ActiveClip::None) => clip,
+        (ActiveClip::Rect(left), ActiveClip::Rect(right)) => {
+            let x0 = left.x.max(right.x);
+            let y0 = left.y.max(right.y);
+            let x1 = left
+                .x
+                .saturating_add(left.width)
+                .min(right.x.saturating_add(right.width));
+            let y1 = left
+                .y
+                .saturating_add(left.height)
+                .min(right.y.saturating_add(right.height));
+            if x1 <= x0 || y1 <= y0 {
+                ActiveClip::Empty
+            } else {
+                ActiveClip::Rect(DeviceClipRect {
+                    x: x0,
+                    y: y0,
+                    width: x1 - x0,
+                    height: y1 - y0,
+                })
+            }
+        }
+    }
+}
+
+fn recording_bounds_to_device_clip_rect(
+    bounds: RecordingBounds,
+    surface_width: u32,
+    surface_height: u32,
+) -> Option<DeviceClipRect> {
+    let max_width = surface_width.max(1) as f32;
+    let max_height = surface_height.max(1) as f32;
+    let left = bounds.left.floor().clamp(0.0, max_width);
+    let top = bounds.top.floor().clamp(0.0, max_height);
+    let right = bounds.right.ceil().clamp(0.0, max_width);
+    let bottom = bounds.bottom.ceil().clamp(0.0, max_height);
+    if right <= left || bottom <= top {
+        return None;
+    }
+    Some(DeviceClipRect {
+        x: left as u32,
+        y: top as u32,
+        width: (right - left) as u32,
+        height: (bottom - top) as u32,
     })
 }
 
@@ -1883,11 +2100,15 @@ pub fn prepare_drawing_recording_with_providers_and_initial_clear(
     let mut passes = Vec::new();
     let mut current_load_op = wgpu::LoadOp::Load;
     let mut current_steps = Vec::new();
+    let mut clip_stack = Vec::new();
+    let mut current_clip = ActiveClip::None;
+    let mut current_pass_clip = ActiveClip::None;
     let mut next_painters_depth = 1u16;
 
     let flush_pass = |passes: &mut Vec<DrawingDrawPass>,
                       current_load_op: &mut wgpu::LoadOp<wgpu::Color>,
-                      current_steps: &mut Vec<DrawingPreparedStep>| {
+                      current_steps: &mut Vec<DrawingPreparedStep>,
+                      current_pass_clip: &mut ActiveClip| {
         if matches!(current_load_op, wgpu::LoadOp::Load) && current_steps.is_empty() {
             return;
         }
@@ -1899,22 +2120,36 @@ pub fn prepare_drawing_recording_with_providers_and_initial_clear(
             load_op: *current_load_op,
             requires_msaa,
             requires_depth,
+            clip_rect: current_pass_clip.device_rect(),
             steps: std::mem::take(current_steps),
         });
         *current_load_op = wgpu::LoadOp::Load;
+        *current_pass_clip = ActiveClip::None;
     };
 
     let push_step = |passes: &mut Vec<DrawingDrawPass>,
                      current_load_op: &mut wgpu::LoadOp<wgpu::Color>,
                      current_steps: &mut Vec<DrawingPreparedStep>,
+                     current_clip: ActiveClip,
+                     current_pass_clip: &mut ActiveClip,
                      step: DrawingPreparedStep| {
+        if matches!(current_clip, ActiveClip::Empty) {
+            return;
+        }
+        if current_steps.is_empty() {
+            *current_pass_clip = current_clip;
+        } else if *current_pass_clip != current_clip {
+            flush_pass(passes, current_load_op, current_steps, current_pass_clip);
+            *current_pass_clip = current_clip;
+        }
         if let Some(current_requires_depth) = current_steps
             .first()
             .map(DrawingPreparedStep::requires_depth)
         {
             let next_requires_depth = step.requires_depth();
             if current_requires_depth != next_requires_depth {
-                flush_pass(passes, current_load_op, current_steps);
+                flush_pass(passes, current_load_op, current_steps, current_pass_clip);
+                *current_pass_clip = current_clip;
             }
         }
         current_steps.push(step);
@@ -1922,12 +2157,36 @@ pub fn prepare_drawing_recording_with_providers_and_initial_clear(
 
     for command in &recording.commands {
         match command {
+            DrawingCommand::PushClipRect(clip_rect) => {
+                flush_pass(
+                    &mut passes,
+                    &mut current_load_op,
+                    &mut current_steps,
+                    &mut current_pass_clip,
+                );
+                clip_stack.push(current_clip);
+                current_clip = intersect_active_clips(
+                    current_clip,
+                    clip_rect_to_device_rect(clip_rect, surface_width, surface_height),
+                );
+            }
+            DrawingCommand::PopClip => {
+                flush_pass(
+                    &mut passes,
+                    &mut current_load_op,
+                    &mut current_steps,
+                    &mut current_pass_clip,
+                );
+                current_clip = clip_stack.pop().unwrap_or(ActiveClip::None);
+            }
             DrawingCommand::FillRect(rect) => {
                 let painter_depth = next_painter_depth_as_float(&mut next_painters_depth);
                 push_step(
                     &mut passes,
                     &mut current_load_op,
                     &mut current_steps,
+                    current_clip,
+                    &mut current_pass_clip,
                     DrawingPreparedStep::Triangles {
                         vertices: with_vertex_depth(
                             build_rect_vertices(rect, width, height),
@@ -1939,6 +2198,9 @@ pub fn prepare_drawing_recording_with_providers_and_initial_clear(
                 );
             }
             DrawingCommand::DrawPath(path) => {
+                if matches!(current_clip, ActiveClip::Empty) {
+                    continue;
+                }
                 let painter_depth = next_painter_depth_as_float(&mut next_painters_depth);
                 for step in build_path_steps(
                     path,
@@ -1949,10 +2211,20 @@ pub fn prepare_drawing_recording_with_providers_and_initial_clear(
                     surface_height,
                     path_atlas_provider.as_deref_mut(),
                 ) {
-                    push_step(&mut passes, &mut current_load_op, &mut current_steps, step);
+                    push_step(
+                        &mut passes,
+                        &mut current_load_op,
+                        &mut current_steps,
+                        current_clip,
+                        &mut current_pass_clip,
+                        step,
+                    );
                 }
             }
             DrawingCommand::DrawDirectMaskText(text) => {
+                if matches!(current_clip, ActiveClip::Empty) {
+                    continue;
+                }
                 let painter_depth = next_painter_depth_as_float(&mut next_painters_depth);
                 for step in prepare_direct_mask_text_step(
                     &text.glyphs,
@@ -1969,11 +2241,16 @@ pub fn prepare_drawing_recording_with_providers_and_initial_clear(
                         &mut passes,
                         &mut current_load_op,
                         &mut current_steps,
+                        current_clip,
+                        &mut current_pass_clip,
                         DrawingPreparedStep::BitmapText(step),
                     );
                 }
             }
             DrawingCommand::DrawTransformedMaskText(text) => {
+                if matches!(current_clip, ActiveClip::Empty) {
+                    continue;
+                }
                 let painter_depth = next_painter_depth_as_float(&mut next_painters_depth);
                 for step in prepare_transformed_mask_text_step(
                     &text.glyphs,
@@ -1990,11 +2267,16 @@ pub fn prepare_drawing_recording_with_providers_and_initial_clear(
                         &mut passes,
                         &mut current_load_op,
                         &mut current_steps,
+                        current_clip,
+                        &mut current_pass_clip,
                         DrawingPreparedStep::BitmapText(step),
                     );
                 }
             }
             DrawingCommand::DrawSdfText(text) => {
+                if matches!(current_clip, ActiveClip::Empty) {
+                    continue;
+                }
                 let painter_depth = next_painter_depth_as_float(&mut next_painters_depth);
                 for step in prepare_sdf_text_step(
                     &text.glyphs,
@@ -2011,6 +2293,8 @@ pub fn prepare_drawing_recording_with_providers_and_initial_clear(
                         &mut passes,
                         &mut current_load_op,
                         &mut current_steps,
+                        current_clip,
+                        &mut current_pass_clip,
                         DrawingPreparedStep::SdfText(step),
                     );
                 }
@@ -2018,7 +2302,12 @@ pub fn prepare_drawing_recording_with_providers_and_initial_clear(
         }
     }
 
-    flush_pass(&mut passes, &mut current_load_op, &mut current_steps);
+    flush_pass(
+        &mut passes,
+        &mut current_load_op,
+        &mut current_steps,
+        &mut current_pass_clip,
+    );
 
     if let Some(clear_color) = initial_clear {
         if let Some(first_pass) = passes.first_mut() {
@@ -2028,6 +2317,7 @@ pub fn prepare_drawing_recording_with_providers_and_initial_clear(
                 load_op: wgpu::LoadOp::Clear(to_wgpu_color(clear_color)),
                 requires_msaa: false,
                 requires_depth: false,
+                clip_rect: None,
                 steps: Vec::new(),
             });
         }
@@ -4517,6 +4807,14 @@ pub fn encode_drawing_command_buffer_with_providers(
             occlusion_query_set: None,
             timestamp_writes: None,
         });
+        if let Some(clip_rect) = pass.clip_rect {
+            render_pass.set_scissor_rect(
+                clip_rect.x,
+                clip_rect.y,
+                clip_rect.width,
+                clip_rect.height,
+            );
+        }
         for step in &pass.steps {
             match step {
                 DrawingPreparedStep::Triangles {
@@ -4657,8 +4955,8 @@ pub fn encode_drawing_command_buffer_with_providers(
 #[cfg(test)]
 mod tests {
     use super::{
-        compute_recording_bounds, prepare_drawing_recording, DirectMaskTextDrawCommand,
-        DrawingPreparedStep, DrawingRecorder, PathDrawCommand,
+        compute_recording_bounds, prepare_drawing_recording, ClipRectCommand, DeviceClipRect,
+        DirectMaskTextDrawCommand, DrawingPreparedStep, DrawingRecorder, PathDrawCommand,
     };
     use crate::scene::content_2d::svg::parse_svg;
     use crate::scene::{
@@ -4931,5 +5229,36 @@ mod tests {
         assert!(!steps
             .iter()
             .any(|step| matches!(step, DrawingPreparedStep::Triangles { .. })));
+    }
+
+    #[test]
+    fn clip_rect_prepares_scissored_pass() {
+        let mut recorder = DrawingRecorder::new();
+        recorder.push_clip_rect(ClipRectCommand {
+            x: 10.0,
+            y: 20.0,
+            width: 30.0,
+            height: 40.0,
+            transform: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+        });
+        recorder.draw_path(fill_path(vec![
+            PathVerb2D::MoveTo { to: [0.0, 0.0] },
+            PathVerb2D::LineTo { to: [100.0, 0.0] },
+            PathVerb2D::LineTo { to: [100.0, 100.0] },
+            PathVerb2D::Close,
+        ]));
+        recorder.pop_clip();
+
+        let prepared = prepare_drawing_recording(&recorder.finish(), 100, 100);
+        assert_eq!(prepared.passes.len(), 1);
+        assert_eq!(
+            prepared.passes[0].clip_rect,
+            Some(DeviceClipRect {
+                x: 10,
+                y: 20,
+                width: 30,
+                height: 40,
+            })
+        );
     }
 }

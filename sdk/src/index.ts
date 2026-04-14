@@ -98,6 +98,24 @@ export interface Group2dState {
 
 export type Group2dPatch = Partial<Group2dState>;
 
+export interface ScrollContainer2dInit {
+  transform?: Transform2d;
+  width?: number;
+  height?: number;
+  scrollX?: number;
+  scrollY?: number;
+}
+
+export interface ScrollContainer2dState {
+  transform: Transform2d;
+  width: number;
+  height: number;
+  scrollX: number;
+  scrollY: number;
+}
+
+export type ScrollContainer2dPatch = Partial<ScrollContainer2dState>;
+
 export interface LayoutGroup2dInit extends LayoutStyle {}
 
 export interface LayoutGroup2dState {}
@@ -661,6 +679,24 @@ export class Group2d {
   }
 }
 
+export class ScrollContainer2d {
+  constructor(_init: ScrollContainer2dInit = {}) {
+    throw new Error(RUNTIME_ONLY_ERROR);
+  }
+
+  set(_patch: ScrollContainer2dPatch = {}): this {
+    throw new Error(RUNTIME_ONLY_ERROR);
+  }
+
+  get(): ScrollContainer2dState {
+    throw new Error(RUNTIME_ONLY_ERROR);
+  }
+
+  add<T extends Node2d>(_child: T): T {
+    throw new Error(RUNTIME_ONLY_ERROR);
+  }
+}
+
 export class LayoutGroup2d {
   constructor(_init: LayoutGroup2dInit = {}) {
     throw new Error(RUNTIME_ONLY_ERROR);
@@ -753,7 +789,14 @@ export class Text2d {
   }
 }
 
-export type Node2d = Rect2d | Path2d | Text2d | Group2d | LayoutGroup2d | LayoutItem2d;
+export type Node2d =
+  | Rect2d
+  | Path2d
+  | Text2d
+  | Group2d
+  | ScrollContainer2d
+  | LayoutGroup2d
+  | LayoutItem2d;
 
 export class Scene2d {
   readonly id!: number;

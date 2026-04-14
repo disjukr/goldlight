@@ -8,8 +8,8 @@ use super::types::{
     Path2DOptions, Path2DUpdate, PathFillRule2D, PathShader2D, PathStrokeCap2D, PathStrokeJoin2D,
     PathStyle2D, PathVerb2D, Rect2DHandle, Rect2DOptions, Rect2DUpdate, Scene2DHandle,
     Scene2DOptions, Scene3DHandle, Scene3DOptions, SceneCameraUpdate, SceneClearColorOptions,
-    Text2DHandle, Text2DOptions, Text2DUpdate, Triangle3DHandle, Triangle3DOptions,
-    Triangle3DUpdate,
+    ScrollContainer2DHandle, ScrollContainer2DOptions, ScrollContainer2DUpdate, Text2DHandle,
+    Text2DOptions, Text2DUpdate, Triangle3DHandle, Triangle3DOptions, Triangle3DUpdate,
 };
 
 #[derive(Clone, Debug)]
@@ -138,6 +138,17 @@ pub(crate) struct Group2D {
 }
 
 #[derive(Clone, Debug)]
+pub(crate) struct ScrollContainer2D {
+    pub scene_id: u32,
+    pub transform: [f32; 6],
+    pub width: f32,
+    pub height: f32,
+    pub scroll_x: f32,
+    pub scroll_y: f32,
+    pub child_item_ids: Vec<u32>,
+}
+
+#[derive(Clone, Debug)]
 pub(crate) struct Triangle3D {
     pub scene_id: u32,
     pub positions: [[f32; 3]; 3],
@@ -207,6 +218,7 @@ pub struct RenderModel {
     pub(crate) paths_2d: HashMap<u32, Path2D>,
     pub(crate) texts_2d: HashMap<u32, Text2D>,
     pub(crate) groups_2d: HashMap<u32, Group2D>,
+    pub(crate) scroll_containers_2d: HashMap<u32, ScrollContainer2D>,
     pub(crate) scenes_3d: HashMap<u32, Scene3D>,
     pub(crate) triangles_3d: HashMap<u32, Triangle3D>,
 }
@@ -224,6 +236,7 @@ impl Default for RenderModel {
             paths_2d: HashMap::new(),
             texts_2d: HashMap::new(),
             groups_2d: HashMap::new(),
+            scroll_containers_2d: HashMap::new(),
             scenes_3d: HashMap::new(),
             triangles_3d: HashMap::new(),
         }
@@ -462,6 +475,53 @@ impl RenderModel {
         Ok(())
     }
 
+    pub fn scene_2d_create_scroll_container(
+        &mut self,
+        scene_id: u32,
+        options: ScrollContainer2DOptions,
+    ) -> Result<ScrollContainer2DHandle> {
+        if !self.scenes_2d.contains_key(&scene_id) {
+            return Err(anyhow!("unknown 2D scene {scene_id}"));
+        }
+        let id = self.next_object_id;
+        self.next_object_id += 1;
+        self.scroll_containers_2d.insert(
+            id,
+            ScrollContainer2D {
+                scene_id,
+                transform: options.transform,
+                width: options.width,
+                height: options.height,
+                scroll_x: options.scroll_x,
+                scroll_y: options.scroll_y,
+                child_item_ids: Vec::new(),
+            },
+        );
+        self.touch_scene_2d(scene_id);
+        Ok(ScrollContainer2DHandle { id })
+    }
+
+    pub fn scroll_container_2d_update(
+        &mut self,
+        scroll_container_id: u32,
+        options: ScrollContainer2DUpdate,
+    ) -> Result<()> {
+        let scene_id = {
+            let scroll_container = self
+                .scroll_containers_2d
+                .get_mut(&scroll_container_id)
+                .ok_or_else(|| anyhow!("unknown 2D scroll container {scroll_container_id}"))?;
+            scroll_container.transform = options.transform;
+            scroll_container.width = options.width;
+            scroll_container.height = options.height;
+            scroll_container.scroll_x = options.scroll_x;
+            scroll_container.scroll_y = options.scroll_y;
+            scroll_container.scene_id
+        };
+        self.touch_scene_2d(scene_id);
+        Ok(())
+    }
+
     pub fn scene_2d_set_root_items(
         &mut self,
         scene_id: u32,
@@ -510,6 +570,37 @@ impl RenderModel {
                 .get_mut(&group_id)
                 .ok_or_else(|| anyhow!("unknown 2D group {group_id}"))?;
             group.child_item_ids = child_item_ids;
+        }
+        self.touch_scene_2d(scene_id);
+        Ok(())
+    }
+
+    pub fn scroll_container_2d_set_children(
+        &mut self,
+        scroll_container_id: u32,
+        child_item_ids: Vec<u32>,
+    ) -> Result<()> {
+        let scene_id = self
+            .scroll_containers_2d
+            .get(&scroll_container_id)
+            .ok_or_else(|| anyhow!("unknown 2D scroll container {scroll_container_id}"))?
+            .scene_id;
+        for item_id in &child_item_ids {
+            let item_scene_id = self
+                .item_2d_scene_id(*item_id)
+                .ok_or_else(|| anyhow!("unknown 2D item {item_id}"))?;
+            if item_scene_id != scene_id {
+                return Err(anyhow!(
+                    "2D item {item_id} belongs to scene {item_scene_id}, not {scene_id}"
+                ));
+            }
+        }
+        {
+            let scroll_container = self
+                .scroll_containers_2d
+                .get_mut(&scroll_container_id)
+                .ok_or_else(|| anyhow!("unknown 2D scroll container {scroll_container_id}"))?;
+            scroll_container.child_item_ids = child_item_ids;
         }
         self.touch_scene_2d(scene_id);
         Ok(())
@@ -643,7 +734,12 @@ impl RenderModel {
         if let Some(text) = self.texts_2d.get(&item_id) {
             return Some(text_scene_id(text));
         }
-        self.groups_2d.get(&item_id).map(|group| group.scene_id)
+        if let Some(group) = self.groups_2d.get(&item_id) {
+            return Some(group.scene_id);
+        }
+        self.scroll_containers_2d
+            .get(&item_id)
+            .map(|scroll_container| scroll_container.scene_id)
     }
 }
 

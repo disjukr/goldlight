@@ -23,7 +23,7 @@ import type {
   WindowInit,
 } from 'goldlight';
 import { Rect2d as Rect2dClass, Scene2d as Scene2dClass, Scene3d as Scene3dClass, Triangle3d as Triangle3dClass, createOrthographicCamera3d, createPerspectiveCamera3d, createWindow, setWindowScene } from 'goldlight';
-import { Group2d as Group2dClass, Group3d as Group3dClass, LayoutGroup2d as LayoutGroup2dClass, LayoutGroup3d as LayoutGroup3dClass, LayoutItem2d as LayoutItem2dClass, LayoutItem3d as LayoutItem3dClass } from 'goldlight';
+import { Group2d as Group2dClass, Group3d as Group3dClass, LayoutGroup2d as LayoutGroup2dClass, LayoutGroup3d as LayoutGroup3dClass, LayoutItem2d as LayoutItem2dClass, LayoutItem3d as LayoutItem3dClass, ScrollContainer2d as ScrollContainer2dClass } from 'goldlight';
 
 describe('goldlight sdk contract', () => {
   it('exports createWindow as a function', () => {
@@ -75,6 +75,7 @@ describe('goldlight sdk contract', () => {
     expect(typeof Scene2dClass).toBe('function');
     expect(typeof Rect2dClass).toBe('function');
     expect(typeof Group2dClass).toBe('function');
+    expect(typeof ScrollContainer2dClass).toBe('function');
     expect(typeof LayoutGroup2dClass).toBe('function');
     expect(typeof LayoutItem2dClass).toBe('function');
     expect(typeof scene.set).toBe('function');

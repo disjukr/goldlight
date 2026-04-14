@@ -408,6 +408,10 @@ function cloneTransform2d(transform) {
   return [...transform];
 }
 
+function createTranslationTransform2d(x, y) {
+  return [1, 0, 0, 1, Number(x) || 0, Number(y) || 0];
+}
+
 function multiplyAffineTransforms(left, right) {
   return [
     (left[0] * right[0]) + (left[2] * right[1]),
@@ -441,6 +445,26 @@ function normalizeGroupInit(init = {}) {
 function cloneGroupState(state) {
   return {
     transform: cloneTransform2d(state.transform),
+  };
+}
+
+function normalizeScrollContainerInit(init = {}) {
+  return {
+    transform: normalizeTransform2d(init.transform),
+    width: Number(init.width ?? 0),
+    height: Number(init.height ?? 0),
+    scrollX: Number(init.scrollX ?? 0),
+    scrollY: Number(init.scrollY ?? 0),
+  };
+}
+
+function cloneScrollContainerState(state) {
+  return {
+    transform: cloneTransform2d(state.transform),
+    width: state.width,
+    height: state.height,
+    scrollX: state.scrollX,
+    scrollY: state.scrollY,
   };
 }
 
@@ -2300,6 +2324,12 @@ function getNodeIntrinsicSize(node) {
   if (node instanceof Text2d) {
     return measureTextIntrinsicSize(node._state);
   }
+  if (node instanceof ScrollContainer2d) {
+    return {
+      width: Math.max(0, Number(node._state.width ?? 0)),
+      height: Math.max(0, Number(node._state.height ?? 0)),
+    };
+  }
   return null;
 }
 
@@ -2434,10 +2464,11 @@ function ensureNode2d(node) {
     !(node instanceof Path2d) &&
     !(node instanceof Text2d) &&
     !(node instanceof Group2d) &&
+    !(node instanceof ScrollContainer2d) &&
     !(node instanceof LayoutGroup2d) &&
     !(node instanceof LayoutItem2d)
   ) {
-    throw new TypeError("Scene2d.add expects a Rect2d, Path2d, Text2d, Group2d, LayoutGroup2d, or LayoutItem2d");
+    throw new TypeError("Scene2d.add expects a Rect2d, Path2d, Text2d, Group2d, ScrollContainer2d, LayoutGroup2d, or LayoutItem2d");
   }
 }
 
@@ -2472,7 +2503,7 @@ function collectLayoutRoots2d(nodes, roots = []) {
       roots.push(node);
       continue;
     }
-    if (node instanceof Group2d) {
+    if (node instanceof Group2d || node instanceof ScrollContainer2d) {
       collectLayoutRoots2d(node._children, roots);
     }
   }
@@ -2587,6 +2618,16 @@ function applyOffsetToNode2d(node, offsetX, offsetY) {
     return;
   }
 
+  if (node instanceof ScrollContainer2d) {
+    node._applyLayoutState({
+      x: offsetX,
+      y: offsetY,
+      width: node._state.width,
+      height: node._state.height,
+    });
+    return;
+  }
+
   if (node instanceof LayoutGroup2d) {
     node._applyComputedLayouts(offsetX, offsetY);
     return;
@@ -2611,6 +2652,14 @@ function applyGroupTransformToNode2d(node, transform) {
     return;
   }
 
+  if (node instanceof ScrollContainer2d) {
+    const nextTransform = multiplyAffineTransforms(transform, node._resolvedContentTransform);
+    for (const child of node._children) {
+      applyGroupTransformToNode2d(child, nextTransform);
+    }
+    return;
+  }
+
   if (node instanceof LayoutGroup2d) {
     for (const child of node._children) {
       applyGroupTransformToNode2d(child, transform);
@@ -2629,6 +2678,8 @@ function getParentGroupTransform2d(node) {
   while (current !== null) {
     if (current instanceof Group2d) {
       transforms.push(current._state.transform);
+    } else if (current instanceof ScrollContainer2d) {
+      transforms.push(current._resolvedContentTransform);
     }
     current = current._parentNode2d ?? null;
   }
@@ -2640,7 +2691,13 @@ function getParentGroupTransform2d(node) {
 }
 
 function collectRenderItemIds2d(node) {
-  if (node instanceof Rect2d || node instanceof Path2d || node instanceof Text2d || node instanceof Group2d) {
+  if (
+    node instanceof Rect2d ||
+    node instanceof Path2d ||
+    node instanceof Text2d ||
+    node instanceof Group2d ||
+    node instanceof ScrollContainer2d
+  ) {
     return node.id === null ? [] : [node.id];
   }
 
@@ -2658,7 +2715,7 @@ function collectRenderItemIds2d(node) {
 function syncOwningContainerChildren2d(node) {
   let current = node;
   while (current !== null) {
-    if (current instanceof Group2d) {
+    if (current instanceof Group2d || current instanceof ScrollContainer2d) {
       current._syncChildren();
     }
     current = current._parentNode2d ?? null;
@@ -2705,6 +2762,15 @@ function attachNodeToScene2d(scene, node) {
   }
 
   if (node instanceof Group2d) {
+    node._attachToScene(scene.id);
+    for (const child of node._children) {
+      attachNodeToScene2d(scene, child);
+    }
+    node._syncChildren();
+    return;
+  }
+
+  if (node instanceof ScrollContainer2d) {
     node._attachToScene(scene.id);
     for (const child of node._children) {
       attachNodeToScene2d(scene, child);
@@ -2933,6 +2999,118 @@ export class Group2d {
   }
 }
 
+export class ScrollContainer2d {
+  constructor(init = {}) {
+    this.id = null;
+    this._children = [];
+    this._sceneId = null;
+    this._scene = null;
+    this._parentNode2d = null;
+    this._state = normalizeScrollContainerInit(init);
+    this._layoutState = null;
+    this._resolvedState = cloneScrollContainerState(this._state);
+    this._resolvedContentTransform = cloneTransform2d(this._state.transform);
+    this._syncResolvedState();
+  }
+
+  _attachToScene(sceneId) {
+    if (this.id !== null) {
+      return;
+    }
+    const handle = Deno.core.ops.op_goldlight_scene_2d_create_scroll_container(sceneId, this._resolvedState);
+    this.id = handle.id;
+    this._sceneId = sceneId;
+  }
+
+  _syncResolvedState() {
+    const layoutState = this._layoutState ?? {};
+    const viewportTransform = multiplyAffineTransforms(
+      createTranslationTransform2d(layoutState.x ?? 0, layoutState.y ?? 0),
+      this._state.transform,
+    );
+    this._resolvedState = {
+      transform: viewportTransform,
+      width: Math.max(0, Number(layoutState.width ?? this._state.width)),
+      height: Math.max(0, Number(layoutState.height ?? this._state.height)),
+      scrollX: this._state.scrollX,
+      scrollY: this._state.scrollY,
+    };
+    this._resolvedContentTransform = multiplyAffineTransforms(
+      viewportTransform,
+      createTranslationTransform2d(-this._state.scrollX, -this._state.scrollY),
+    );
+    if (this.id !== null) {
+      Deno.core.ops.op_goldlight_scroll_container_2d_update(this.id, this._resolvedState);
+    }
+  }
+
+  _syncChildren() {
+    if (this.id !== null) {
+      Deno.core.ops.op_goldlight_scroll_container_2d_set_children(
+        this.id,
+        this._children.flatMap(collectRenderItemIds2d),
+      );
+    }
+  }
+
+  set(patch = {}) {
+    const previousIntrinsicSize = getNodeIntrinsicSize(this);
+    const updateState =
+      Object.prototype.hasOwnProperty.call(patch, "transform") ||
+      Object.prototype.hasOwnProperty.call(patch, "width") ||
+      Object.prototype.hasOwnProperty.call(patch, "height") ||
+      Object.prototype.hasOwnProperty.call(patch, "scrollX") ||
+      Object.prototype.hasOwnProperty.call(patch, "scrollY");
+    if (!updateState) {
+      return this;
+    }
+    this._state = normalizeScrollContainerInit({
+      ...this._state,
+      ...patch,
+    });
+    this._syncResolvedState();
+    applyGroupTransformToNode2d(this, getParentGroupTransform2d(this));
+    markIntrinsicParentLayoutDirty(this, previousIntrinsicSize, getNodeIntrinsicSize(this));
+    return this;
+  }
+
+  _applyLayoutState(state) {
+    const nextLayoutState = {
+      x: state.x,
+      y: state.y,
+      width: state.width,
+      height: state.height,
+    };
+    if (sameRectLayoutState(this._layoutState, nextLayoutState)) {
+      return;
+    }
+    this._layoutState = nextLayoutState;
+    this._syncResolvedState();
+    applyGroupTransformToNode2d(this, getParentGroupTransform2d(this));
+  }
+
+  get() {
+    return cloneScrollContainerState(this._state);
+  }
+
+  add(child) {
+    ensureNode2d(child);
+    if (isLayoutNode(child)) {
+      child._layoutParent = null;
+    }
+    child._parentNode2d = this;
+    this._children.push(child);
+    if (this._scene) {
+      attachNodeToScene2d(this._scene, child);
+      this._syncChildren();
+      syncOwningContainerChildren2d(this);
+      applyGroupTransformToNode2d(child, getParentGroupTransform2d(child));
+      markSceneLayoutDirty(this._scene);
+    }
+    return child;
+  }
+}
+
 export class LayoutGroup2d {
   constructor(init = {}) {
     this._children = [];
@@ -3119,6 +3297,16 @@ export class LayoutItem2d {
     if (this._content instanceof Text2d) {
       this._content._applyLayoutState({ x, y });
       this._content._applyGroupTransform(groupTransform);
+      return;
+    }
+    if (this._content instanceof ScrollContainer2d) {
+      this._content._applyLayoutState({
+        x,
+        y,
+        width: this._computedLayout.width || this._content._state.width,
+        height: this._computedLayout.height || this._content._state.height,
+      });
+      applyGroupTransformToNode2d(this._content, groupTransform);
       return;
     }
     applyOffsetToNode2d(this._content, x, y);

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use anyhow::{anyhow, Result};
 use serde::Deserialize;
 
-use super::display::{
+use super::types::{
     ColorValue, GlyphMask2DOptions, Group2DHandle, Group2DOptions, Group2DUpdate, Path2DHandle,
     Path2DOptions, Path2DUpdate, PathFillRule2D, PathShader2D, PathStrokeCap2D, PathStrokeJoin2D,
     PathStyle2D, PathVerb2D, Rect2DHandle, Rect2DOptions, Rect2DUpdate, Scene2DHandle,

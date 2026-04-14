@@ -1283,9 +1283,6 @@ pub struct DrawingRecording {
 }
 
 impl DrawingRecording {
-    pub fn is_empty(&self) -> bool {
-        self.commands.is_empty()
-    }
 }
 
 #[cfg(test)]

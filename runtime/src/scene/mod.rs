@@ -5,6 +5,8 @@ pub(crate) mod frame;
 mod lowering_2d;
 mod lowering_3d;
 mod model;
+mod types;
 
+pub(crate) use self::display::{DisplayBootstrap, DisplayState};
 pub(crate) use self::model::*;
-pub use self::display::*;
+pub use self::types::*;

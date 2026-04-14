@@ -1,7 +1,4 @@
-use std::sync::Arc;
-
-use super::display::ColorValue;
-use super::drawing::DrawingRecording;
+use super::types::ColorValue;
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ClipSpaceVertex {
@@ -21,12 +18,17 @@ pub(crate) enum SurfaceId {
     Scene3D(u32),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum RenderContent {
+    Scene2D(u32),
+    Scene3D(u32),
+}
+
 #[derive(Clone, Debug)]
 pub(crate) enum CompositorQuad {
     Empty,
     Surface(SurfaceId),
-    VectorRecording(Arc<DrawingRecording>),
-    ClipSpaceGeometry(Arc<Vec<ClipSpaceVertex>>),
+    Content(RenderContent),
 }
 
 #[derive(Clone, Debug)]
@@ -53,8 +55,7 @@ impl CompositorFrame {
 #[derive(Clone, Debug)]
 pub(crate) enum AggregatedQuad {
     Empty,
-    VectorRecording(Arc<DrawingRecording>),
-    ClipSpaceGeometry(Arc<Vec<ClipSpaceVertex>>),
+    Content(RenderContent),
 }
 
 #[derive(Clone, Debug)]

@@ -1062,18 +1062,18 @@ fn coverage_fine_shader_source(source: &str) -> String {
 pub fn stroke_from_parts(
     width: f32,
     miter_limit: f32,
-    cap: super::super::render::PathStrokeCap2D,
-    join: super::super::render::PathStrokeJoin2D,
+    cap: super::super::PathStrokeCap2D,
+    join: super::super::PathStrokeJoin2D,
 ) -> Stroke {
     let cap = match cap {
-        super::super::render::PathStrokeCap2D::Butt => Cap::Butt,
-        super::super::render::PathStrokeCap2D::Square => Cap::Square,
-        super::super::render::PathStrokeCap2D::Round => Cap::Round,
+        super::super::PathStrokeCap2D::Butt => Cap::Butt,
+        super::super::PathStrokeCap2D::Square => Cap::Square,
+        super::super::PathStrokeCap2D::Round => Cap::Round,
     };
     let join = match join {
-        super::super::render::PathStrokeJoin2D::Miter => Join::Miter,
-        super::super::render::PathStrokeJoin2D::Bevel => Join::Bevel,
-        super::super::render::PathStrokeJoin2D::Round => Join::Round,
+        super::super::PathStrokeJoin2D::Miter => Join::Miter,
+        super::super::PathStrokeJoin2D::Bevel => Join::Bevel,
+        super::super::PathStrokeJoin2D::Round => Join::Round,
     };
     Stroke {
         width: width as f64,

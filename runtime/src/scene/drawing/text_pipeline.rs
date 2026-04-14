@@ -3,7 +3,7 @@ use std::sync::{Arc, OnceLock};
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 
-use super::super::render::ColorValue;
+use super::super::ColorValue;
 use super::super::{DirectMaskGlyph2D, GlyphMask2D, SdfGlyph2D, TransformedMaskGlyph2D};
 use super::text_atlas::{TextAtlasPlacement, TextAtlasProvider};
 use super::DRAWING_DEPTH_FORMAT;

@@ -1,6 +1,6 @@
 use bytemuck::{Pod, Zeroable};
 
-use super::super::render::{PathFillRule2D, PathVerb2D};
+use super::super::{PathFillRule2D, PathVerb2D};
 use super::{PathDrawCommand, Point};
 
 const EPSILON: f32 = 1e-5;

@@ -2,8 +2,9 @@ use super::drawing::{
     DirectMaskTextDrawCommand, DrawingRecorder, DrawingRecording, PathDrawCommand, RectDrawCommand,
     SdfTextDrawCommand, TransformedMaskTextDrawCommand,
 };
-use super::render::{PathFillRule2D, PathStrokeCap2D, PathStrokeJoin2D, PathStyle2D};
-use super::{RenderModel, Text2D};
+use super::{
+    PathFillRule2D, PathStrokeCap2D, PathStrokeJoin2D, PathStyle2D, RenderModel, Text2D,
+};
 
 fn multiply_affine_transforms(left: [f32; 6], right: [f32; 6]) -> [f32; 6] {
     [

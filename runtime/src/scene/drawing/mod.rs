@@ -32,7 +32,7 @@ use self::text_pipeline::{
     prepare_sdf_text_step, prepare_transformed_mask_text_step, PreparedBitmapTextStep,
     PreparedSdfTextStep, TextPipelineResources,
 };
-use super::render::{
+use super::{
     ColorValue, GradientStop2D, GradientTileMode2D, PathFillRule2D, PathShader2D, PathStrokeCap2D,
     PathStrokeJoin2D, PathStyle2D, PathVerb2D,
 };
@@ -4652,7 +4652,7 @@ mod tests {
         DrawingPreparedStep, DrawingRecorder, PathDrawCommand,
     };
     use crate::scene::drawing::svg::parse_svg;
-    use crate::scene::render::{
+    use crate::scene::{
         ColorValue, PathFillRule2D, PathStrokeCap2D, PathStrokeJoin2D, PathStyle2D, PathVerb2D,
     };
     use crate::scene::{DirectMaskGlyph2D, GlyphMask2D};

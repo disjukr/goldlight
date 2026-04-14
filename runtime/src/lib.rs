@@ -88,15 +88,13 @@ use winit::{
 
 use crate::scene::drawing::text::{GlyphSubpixelOffsetInput, ShapeTextInput};
 use crate::scene::drawing::{svg, text};
-use crate::scene::render;
-use crate::scene::render::{
-    ColorValue, Group2DHandle, Group2DOptions, Group2DUpdate, Path2DHandle, Path2DOptions,
-    Path2DUpdate, Rect2DHandle, Rect2DOptions, Rect2DUpdate, RendererBootstrap, RendererState,
-    Scene2DHandle, Scene2DOptions, Scene3DHandle, Scene3DOptions, SceneCameraUpdate,
-    SceneClearColorOptions, Text2DHandle, Text2DOptions, Text2DUpdate, Triangle3DHandle,
-    Triangle3DOptions, Triangle3DUpdate,
+use crate::scene::{
+    ColorValue, DisplayBootstrap, DisplayState, Group2DHandle, Group2DOptions, Group2DUpdate,
+    Path2DHandle, Path2DOptions, Path2DUpdate, PathVerb2D, Rect2DHandle, Rect2DOptions,
+    Rect2DUpdate, RenderModel, Scene2DHandle, Scene2DOptions, Scene3DHandle, Scene3DOptions,
+    SceneCameraUpdate, SceneClearColorOptions, Text2DHandle, Text2DOptions, Text2DUpdate,
+    Triangle3DHandle, Triangle3DOptions, Triangle3DUpdate, WindowRoot,
 };
-use crate::scene::{RenderModel, WindowRoot};
 
 pub const GOLDLIGHT_MODULE_SPECIFIER: &str = "ext:goldlight/mod.js";
 pub const GOLDLIGHT_APP_MANIFEST: &str = "goldlight.manifest.json";
@@ -1091,13 +1089,13 @@ impl WindowWorkerHandle {
     }
 }
 
-struct WindowRendererInitHandle {
-    result_rx: std_mpsc::Receiver<Result<RendererState>>,
+struct WindowDisplayInitHandle {
+    result_rx: std_mpsc::Receiver<Result<DisplayState>>,
 }
 
-enum WindowRendererState {
-    Pending(WindowRendererInitHandle),
-    Ready(RendererState),
+enum WindowDisplayState {
+    Pending(WindowDisplayInitHandle),
+    Ready(DisplayState),
     Failed,
 }
 
@@ -1105,7 +1103,7 @@ struct WindowRecord {
     runtime_window_id: u32,
     window: Arc<Window>,
     worker: Option<WindowWorkerHandle>,
-    renderer: WindowRendererState,
+    display: WindowDisplayState,
     render_model_snapshot: Option<Arc<RenderModel>>,
     pending_resize: Option<winit::dpi::PhysicalSize<u32>>,
     modifiers: ModifiersState,
@@ -1114,16 +1112,16 @@ struct WindowRecord {
     startup_presented: bool,
 }
 
-fn spawn_window_renderer(
-    bootstrap: RendererBootstrap,
+fn spawn_window_display(
+    bootstrap: DisplayBootstrap,
     event_proxy: EventLoopProxy<RuntimeUserEvent>,
-) -> WindowRendererInitHandle {
+) -> WindowDisplayInitHandle {
     let (result_tx, result_rx) = std_mpsc::channel();
     thread::spawn(move || {
-        let _ = result_tx.send(RendererState::new(bootstrap));
+        let _ = result_tx.send(DisplayState::new(bootstrap));
         let _ = event_proxy.send_event(RuntimeUserEvent::Wake);
     });
-    WindowRendererInitHandle { result_rx }
+    WindowDisplayInitHandle { result_rx }
 }
 
 #[derive(Clone)]
@@ -3989,7 +3987,7 @@ fn op_goldlight_text_get_glyph_path(
     #[string] typeface: String,
     glyph_id: u32,
     size: f32,
-) -> Result<Option<Vec<render::PathVerb2D>>, JsErrorBox> {
+) -> Result<Option<Vec<PathVerb2D>>, JsErrorBox> {
     text::get_glyph_path(&typeface, glyph_id, size)
         .map_err(|error| JsErrorBox::generic(error.to_string()))
 }
@@ -4894,9 +4892,9 @@ impl GoldlightRuntime {
                 pending_window.initial_clear_color,
             );
             let window_id = window.id();
-            let renderer_bootstrap = RendererBootstrap::new(window.clone())
-                .expect("failed to create window renderer bootstrap");
-            let renderer = spawn_window_renderer(renderer_bootstrap, self.event_proxy.clone());
+            let display_bootstrap = DisplayBootstrap::new(window.clone())
+                .expect("failed to create window display bootstrap");
+            let display = spawn_window_display(display_bootstrap, self.event_proxy.clone());
             #[cfg(feature = "dev-runtime")]
             debug!(
                 id = pending_window.id,
@@ -4931,7 +4929,7 @@ impl GoldlightRuntime {
                     runtime_window_id: pending_window.id,
                     window,
                     worker,
-                    renderer: WindowRendererState::Pending(renderer),
+                    display: WindowDisplayState::Pending(display),
                     render_model_snapshot: None,
                     pending_resize: None,
                     modifiers: ModifiersState::default(),
@@ -5032,28 +5030,28 @@ impl GoldlightRuntime {
         }
     }
 
-    fn promote_pending_renderers(&mut self) {
+    fn promote_pending_displays(&mut self) {
         for record in self.windows.values_mut() {
-            let init_result = match &mut record.renderer {
-                WindowRendererState::Pending(handle) => Some(handle.result_rx.try_recv()),
-                WindowRendererState::Ready(_) | WindowRendererState::Failed => None,
+            let init_result = match &mut record.display {
+                WindowDisplayState::Pending(handle) => Some(handle.result_rx.try_recv()),
+                WindowDisplayState::Ready(_) | WindowDisplayState::Failed => None,
             };
             let Some(init_result) = init_result else {
                 continue;
             };
             match init_result {
-                Ok(Ok(renderer)) => {
-                    record.renderer = WindowRendererState::Ready(renderer);
+                Ok(Ok(display)) => {
+                    record.display = WindowDisplayState::Ready(display);
                     record.window.request_redraw();
                 }
                 Ok(Err(error)) => {
-                    eprintln!("goldlight renderer init failed: {error:?}");
-                    record.renderer = WindowRendererState::Failed;
+                    eprintln!("goldlight display init failed: {error:?}");
+                    record.display = WindowDisplayState::Failed;
                 }
                 Err(std_mpsc::TryRecvError::Empty) => {}
                 Err(std_mpsc::TryRecvError::Disconnected) => {
-                    eprintln!("goldlight renderer init failed: renderer init thread disconnected");
-                    record.renderer = WindowRendererState::Failed;
+                    eprintln!("goldlight display init failed: display init thread disconnected");
+                    record.display = WindowDisplayState::Failed;
                 }
             }
         }
@@ -5091,19 +5089,19 @@ impl GoldlightRuntime {
         let Some(size) = record.pending_resize.take() else {
             return;
         };
-        let WindowRendererState::Ready(renderer) = &mut record.renderer else {
+        let WindowDisplayState::Ready(display) = &mut record.display else {
             record.pending_resize = Some(size);
             return;
         };
-        renderer.resize(size);
+        display.resize(size);
     }
 
     fn render_window(record: &mut WindowRecord) -> bool {
         Self::apply_pending_resize(record);
-        if let (WindowRendererState::Ready(renderer), Some(render_model)) =
-            (&mut record.renderer, record.render_model_snapshot.as_ref())
+        if let (WindowDisplayState::Ready(display), Some(render_model)) =
+            (&mut record.display, record.render_model_snapshot.as_ref())
         {
-            match renderer.render(render_model.as_ref(), record.window.scale_factor() as f32) {
+            match display.render(render_model.as_ref(), record.window.scale_factor() as f32) {
                 Ok(rendered) => {
                     if rendered {
                         Self::complete_startup_presentation(record);
@@ -5144,10 +5142,10 @@ impl GoldlightRuntime {
             return false;
         }
         Self::apply_pending_resize(record);
-        let WindowRendererState::Ready(renderer) = &mut record.renderer else {
+        let WindowDisplayState::Ready(display) = &mut record.display else {
             return false;
         };
-        match renderer.render_clear(record.window_info.initial_clear_color) {
+        match display.render_clear(record.window_info.initial_clear_color) {
             Ok(rendered) => {
                 if rendered {
                     Self::complete_startup_presentation(record);
@@ -5319,7 +5317,7 @@ impl ApplicationHandler<RuntimeUserEvent> for GoldlightRuntime {
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         self.drain_pending_windows(event_loop);
         self.drain_pending_window_updates();
-        self.promote_pending_renderers();
+        self.promote_pending_displays();
         self.present_pending_startup_frames();
         self.sync_window_redraws();
         self.maybe_exit(event_loop);
@@ -5330,7 +5328,7 @@ impl ApplicationHandler<RuntimeUserEvent> for GoldlightRuntime {
             RuntimeUserEvent::Wake => {
                 self.drain_pending_windows(event_loop);
                 self.drain_pending_window_updates();
-                self.promote_pending_renderers();
+                self.promote_pending_displays();
                 self.present_pending_startup_frames();
                 self.sync_window_redraws();
                 self.maybe_exit(event_loop);

@@ -1,6 +1,6 @@
 use glam::{Mat4, Vec4};
 
-use super::frame_graph::ClipSpaceVertex;
+use super::frame::ClipSpaceVertex;
 use super::{RenderModel, Scene3D};
 
 pub(crate) fn lower_scene_3d_to_geometry(

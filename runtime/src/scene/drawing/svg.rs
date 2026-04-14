@@ -2,7 +2,7 @@ use anyhow::Result;
 use serde::Serialize;
 use usvg::{FillRule, Node, Paint, Tree};
 
-use super::super::render::{
+use super::super::{
     ColorValue, Path2DOptions, PathFillRule2D, PathStrokeCap2D, PathStrokeJoin2D, PathStyle2D,
     PathVerb2D,
 };
@@ -288,7 +288,7 @@ fn transform_stroke_scale(transform: usvg::tiny_skia_path::Transform) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::parse_svg;
-    use crate::scene::render::PathStyle2D;
+    use crate::scene::PathStyle2D;
 
     const SVG_STROKE_FIXTURE: &str = r##"
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">

@@ -9,7 +9,7 @@ use peniko::{
     Color, Fill,
 };
 
-use super::super::render::{
+use super::super::{
     PathFillRule2D, PathStrokeCap2D, PathStrokeJoin2D, PathStyle2D, PathVerb2D,
 };
 use super::vello_compute::{
@@ -2576,7 +2576,7 @@ fn hash_f32_bits(value: f32, hasher: &mut impl Hasher) {
 mod tests {
     use super::PathDrawCommand;
     use super::{build_path_mask_key, local_to_device_transform, PreparedMaskShape};
-    use crate::scene::render::{
+    use crate::scene::{
         ColorValue, PathFillRule2D, PathStrokeCap2D, PathStrokeJoin2D, PathStyle2D, PathVerb2D,
     };
 

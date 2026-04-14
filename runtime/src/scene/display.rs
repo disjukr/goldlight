@@ -14,10 +14,9 @@ use super::drawing::{
     prepare_drawing_recording_with_providers_and_initial_clear, AtlasProvider, DawnSharedContext,
     DrawingPreparedRecording, DrawingRecording, TextAtlasProvider, DRAWING_DEPTH_FORMAT,
 };
-pub use super::RenderModel;
-use super::{
-    build_presented_frame_graph, ClipSpaceVertex, ColorLoadOp, DrawPayload, FrameGraphPass,
-};
+use super::compositor::CompositorState;
+use super::frame::{AggregatedQuad, AggregatedRenderPass, ClipSpaceVertex, ColorLoadOp};
+use super::model::RenderModel;
 
 const SHADER_SOURCE: &str = r#"
 struct VertexOutput {
@@ -639,7 +638,7 @@ impl From<ClipSpaceVertex> for Vertex {
     }
 }
 
-pub struct RendererState {
+pub struct DisplayState {
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -652,11 +651,12 @@ pub struct RendererState {
     path_atlas_provider: AtlasProvider,
     text_atlas_provider: TextAtlasProvider,
     prepared_recording_cache: HashMap<PreparedRecordingCacheKey, PreparedRecordingCacheEntry>,
+    compositor: CompositorState,
     geometry_pipeline: wgpu::RenderPipeline,
     size: PhysicalSize<u32>,
 }
 
-pub struct RendererBootstrap {
+pub struct DisplayBootstrap {
     instance: wgpu::Instance,
     surface: wgpu::Surface<'static>,
     size: PhysicalSize<u32>,
@@ -751,7 +751,7 @@ impl<'a> SceneCommandBuffer<'a> {
     }
 }
 
-impl RendererState {
+impl DisplayState {
     fn choose_sample_count(adapter: &wgpu::Adapter, format: wgpu::TextureFormat) -> u32 {
         let color_features = adapter.get_texture_format_features(format).flags;
         let depth_features = adapter
@@ -825,8 +825,8 @@ impl RendererState {
         }
     }
 
-    pub fn new(bootstrap: RendererBootstrap) -> Result<Self> {
-        let RendererBootstrap {
+    pub fn new(bootstrap: DisplayBootstrap) -> Result<Self> {
+        let DisplayBootstrap {
             instance,
             surface,
             size,
@@ -939,6 +939,7 @@ impl RendererState {
             path_atlas_provider,
             text_atlas_provider,
             prepared_recording_cache: HashMap::new(),
+            compositor: CompositorState::default(),
             geometry_pipeline,
             size,
         })
@@ -1051,19 +1052,23 @@ impl RendererState {
 
     fn execute_frame_pass(
         &mut self,
-        pass: &FrameGraphPass,
+        pass: &AggregatedRenderPass,
         encoder: &mut wgpu::CommandEncoder,
         target_view: &wgpu::TextureView,
     ) -> Result<()> {
-        match pass {
-            FrameGraphPass::Clear { color } => {
+        match &pass.quad {
+            AggregatedQuad::Empty => {
                 let mut command_buffer = SceneCommandBuffer {
                     device: &self.device,
                     encoder,
                     target_view,
                     geometry_pipeline: &self.geometry_pipeline,
                 };
-                command_buffer.encode_clear(*color);
+                let clear_color = match pass.color_load_op {
+                    ColorLoadOp::Load => ColorValue::default(),
+                    ColorLoadOp::Clear(color) => color,
+                };
+                command_buffer.encode_clear(clear_color);
                 if let Some(msaa_target) = self.msaa_color_target.as_ref() {
                     let mut msaa_command_buffer = SceneCommandBuffer {
                         device: &self.device,
@@ -1071,53 +1076,51 @@ impl RendererState {
                         target_view: &msaa_target.view,
                         geometry_pipeline: &self.geometry_pipeline,
                     };
-                    msaa_command_buffer.encode_clear(*color);
+                    msaa_command_buffer.encode_clear(clear_color);
                 }
             }
-            FrameGraphPass::Draw(draw_pass) => match &draw_pass.payload {
-                DrawPayload::VectorRecording(recording) => {
-                    self.path_atlas_provider.begin_frame();
-                    self.text_atlas_provider.begin_frame();
-                    let msaa_color_view = self.msaa_color_target.as_ref().map(|t| t.view.clone());
-                    let depth_view = self.drawing_depth_target.view.clone();
-                    let msaa_depth_view = self
-                        .drawing_msaa_depth_target
-                        .as_ref()
-                        .map(|t| t.view.clone());
-                    let initial_clear = match draw_pass.color_load_op {
-                        ColorLoadOp::Load => None,
-                        ColorLoadOp::Clear(color) => Some(color),
-                    };
-                    self.encode_recording_to_view(
-                        encoder,
-                        recording,
-                        initial_clear,
-                        target_view,
-                        [self.config.width, self.config.height],
-                        msaa_color_view.as_ref(),
-                        Some(&depth_view),
-                        msaa_depth_view.as_ref(),
-                    )?;
-                }
-                DrawPayload::ClipSpaceGeometry(vertices) => {
-                    let vertices = vertices
-                        .iter()
-                        .copied()
-                        .map(Vertex::from)
-                        .collect::<Vec<_>>();
-                    let mut command_buffer = SceneCommandBuffer {
-                        device: &self.device,
-                        encoder,
-                        target_view,
-                        geometry_pipeline: &self.geometry_pipeline,
-                    };
-                    let load_op = match draw_pass.color_load_op {
-                        ColorLoadOp::Load => wgpu::LoadOp::Load,
-                        ColorLoadOp::Clear(color) => wgpu::LoadOp::Clear(color.to_wgpu()),
-                    };
-                    command_buffer.encode_geometry_3d(load_op, &vertices);
-                }
-            },
+            AggregatedQuad::VectorRecording(recording) => {
+                self.path_atlas_provider.begin_frame();
+                self.text_atlas_provider.begin_frame();
+                let msaa_color_view = self.msaa_color_target.as_ref().map(|t| t.view.clone());
+                let depth_view = self.drawing_depth_target.view.clone();
+                let msaa_depth_view = self
+                    .drawing_msaa_depth_target
+                    .as_ref()
+                    .map(|t| t.view.clone());
+                let initial_clear = match pass.color_load_op {
+                    ColorLoadOp::Load => None,
+                    ColorLoadOp::Clear(color) => Some(color),
+                };
+                self.encode_recording_to_view(
+                    encoder,
+                    recording,
+                    initial_clear,
+                    target_view,
+                    [self.config.width, self.config.height],
+                    msaa_color_view.as_ref(),
+                    Some(&depth_view),
+                    msaa_depth_view.as_ref(),
+                )?;
+            }
+            AggregatedQuad::ClipSpaceGeometry(vertices) => {
+                let vertices = vertices
+                    .iter()
+                    .copied()
+                    .map(Vertex::from)
+                    .collect::<Vec<_>>();
+                let mut command_buffer = SceneCommandBuffer {
+                    device: &self.device,
+                    encoder,
+                    target_view,
+                    geometry_pipeline: &self.geometry_pipeline,
+                };
+                let load_op = match pass.color_load_op {
+                    ColorLoadOp::Load => wgpu::LoadOp::Load,
+                    ColorLoadOp::Clear(color) => wgpu::LoadOp::Clear(color.to_wgpu()),
+                };
+                command_buffer.encode_geometry_3d(load_op, &vertices);
+            }
         }
 
         Ok(())
@@ -1204,8 +1207,8 @@ impl RendererState {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("goldlight render encoder"),
             });
-        let frame_graph = build_presented_frame_graph(model, device_pixel_ratio)?;
-        for pass in frame_graph.passes() {
+        let aggregated_frame = self.compositor.composite(model, device_pixel_ratio)?;
+        for pass in aggregated_frame.passes() {
             self.execute_frame_pass(pass, &mut encoder, &view)?;
         }
 
@@ -1215,7 +1218,7 @@ impl RendererState {
     }
 }
 
-impl RendererBootstrap {
+impl DisplayBootstrap {
     pub fn new(window: Arc<Window>) -> Result<Self> {
         let size = window.inner_size();
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {

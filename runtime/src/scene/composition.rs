@@ -3,7 +3,6 @@ use std::sync::Arc;
 use anyhow::{anyhow, Result};
 
 use super::frame::{ColorLoadOp, CompositorFrame, CompositorQuad, CompositorRenderPass, SurfaceId};
-use super::surfaces::SurfaceStore;
 use super::{ColorValue, CompositionNode, RenderModel};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -30,18 +29,12 @@ pub(crate) struct RootComposer {
 }
 
 impl RootComposer {
-    pub(crate) fn compose(
-        &mut self,
-        model: &RenderModel,
-        surfaces: &mut SurfaceStore,
-    ) -> Result<(RootFrameCacheKey, Arc<CompositorFrame>)> {
+    pub(crate) fn compose(&mut self, model: &RenderModel) -> Result<(RootFrameCacheKey, Arc<CompositorFrame>)> {
         let mut passes = Vec::new();
         let mut pass_keys = Vec::new();
 
         match model.presented_root.as_ref() {
-            Some(root) => {
-                self.append_root_passes(&mut passes, &mut pass_keys, root, model, surfaces)?
-            }
+            Some(root) => self.append_root_passes(&mut passes, &mut pass_keys, root, model)?,
             None => passes.push(CompositorRenderPass {
                 color_load_op: ColorLoadOp::Clear(ColorValue::default()),
                 quad: CompositorQuad::Empty,
@@ -69,12 +62,11 @@ impl RootComposer {
         pass_keys: &mut Vec<RootPassCacheKey>,
         node: &CompositionNode,
         model: &RenderModel,
-        surfaces: &mut SurfaceStore,
     ) -> Result<()> {
         match node {
             CompositionNode::Stack { children } => {
                 for child in children {
-                    self.append_root_passes(passes, pass_keys, child, model, surfaces)?;
+                    self.append_root_passes(passes, pass_keys, child, model)?;
                 }
             }
             CompositionNode::Scene2D { scene_id, clear } => {
@@ -83,7 +75,6 @@ impl RootComposer {
                     .get(scene_id)
                     .ok_or_else(|| anyhow!("missing presented 2D scene {scene_id}"))?;
                 let surface_id = SurfaceId::Scene2D(*scene_id);
-                let surface_frame = surfaces.ensure_scene_2d_surface(*scene_id, scene.revision);
                 let color_load_op = if *clear {
                     ColorLoadOp::Clear(scene.clear_color)
                 } else {
@@ -95,11 +86,7 @@ impl RootComposer {
                 });
                 passes.push(CompositorRenderPass {
                     color_load_op,
-                    quad: if surface_frame.passes().is_empty() {
-                        CompositorQuad::Empty
-                    } else {
-                        CompositorQuad::Surface(surface_id)
-                    },
+                    quad: CompositorQuad::SurfaceRef(surface_id),
                 });
             }
             CompositionNode::Scene3D { scene_id, clear } => {
@@ -108,7 +95,6 @@ impl RootComposer {
                     .get(scene_id)
                     .ok_or_else(|| anyhow!("missing presented 3D scene {scene_id}"))?;
                 let surface_id = SurfaceId::Scene3D(*scene_id);
-                let surface_frame = surfaces.ensure_scene_3d_surface(*scene_id, scene.revision);
                 let color_load_op = if *clear {
                     ColorLoadOp::Clear(scene.clear_color)
                 } else {
@@ -120,11 +106,7 @@ impl RootComposer {
                 });
                 passes.push(CompositorRenderPass {
                     color_load_op,
-                    quad: if surface_frame.passes().is_empty() {
-                        CompositorQuad::Empty
-                    } else {
-                        CompositorQuad::Surface(surface_id)
-                    },
+                    quad: CompositorQuad::SurfaceRef(surface_id),
                 });
             }
         }

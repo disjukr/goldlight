@@ -11,13 +11,14 @@ use super::aggregator::FrameAggregator;
 use super::color::to_linear_array;
 use super::composition::RootComposer;
 use super::content_2d::{
-    encode_drawing_command_buffer_with_providers, lower_scene_2d_to_recording,
+    encode_drawing_command_buffer_with_providers,
     prepare_drawing_recording_with_providers_and_initial_clear, AtlasProvider, DawnSharedContext,
     DrawingPreparedRecording, DrawingRecording, TextAtlasProvider, DRAWING_DEPTH_FORMAT,
 };
 use super::content_3d::lower_scene_3d_to_geometry;
 use super::frame::{
-    AggregatedQuad, AggregatedRenderPass, ClipSpaceVertex, ColorLoadOp, RenderContent,
+    AggregatedQuad, AggregatedRenderPass, ClipSpaceVertex, ColorLoadOp, CompositorQuad,
+    RenderContent, RetainedSurfaceQuad, SurfaceId,
 };
 use super::model::RenderModel;
 use super::surfaces::SurfaceStore;
@@ -43,6 +44,41 @@ fn vs_main(
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
   return input.color;
+}
+"#;
+
+const SURFACE_COMPOSITE_SHADER_SOURCE: &str = r#"
+struct VertexOutput {
+  @builtin(position) position: vec4<f32>,
+  @location(0) source_pixel: vec2<f32>,
+  @location(1) texture_size: vec2<f32>,
+};
+
+@group(0) @binding(0) var surface_sampler: sampler;
+@group(0) @binding(1) var surface_texture: texture_2d<f32>;
+
+@vertex
+fn vs_main(
+  @location(0) position: vec4<f32>,
+  @location(1) source_pixel: vec2<f32>,
+  @location(2) texture_size: vec2<f32>,
+) -> VertexOutput {
+  var output: VertexOutput;
+  output.position = position;
+  output.source_pixel = source_pixel;
+  output.texture_size = texture_size;
+  return output;
+}
+
+@fragment
+fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
+  if (input.source_pixel.x < 0.0 || input.source_pixel.y < 0.0 ||
+      input.source_pixel.x >= input.texture_size.x ||
+      input.source_pixel.y >= input.texture_size.y) {
+    return vec4<f32>(0.0, 0.0, 0.0, 0.0);
+  }
+  let uv = input.source_pixel / input.texture_size;
+  return textureSample(surface_texture, surface_sampler, uv);
 }
 "#;
 
@@ -102,6 +138,27 @@ impl From<ClipSpaceVertex> for Vertex {
     }
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct SurfaceCompositeVertex {
+    position: [f32; 4],
+    source_pixel: [f32; 2],
+    texture_size: [f32; 2],
+}
+
+impl SurfaceCompositeVertex {
+    const ATTRIBUTES: [wgpu::VertexAttribute; 3] =
+        wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x2, 2 => Float32x2];
+
+    fn layout() -> wgpu::VertexBufferLayout<'static> {
+        wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<SurfaceCompositeVertex>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &Self::ATTRIBUTES,
+        }
+    }
+}
+
 pub struct DisplayState {
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
@@ -114,13 +171,17 @@ pub struct DisplayState {
     drawing_context: DawnSharedContext,
     path_atlas_provider: AtlasProvider,
     text_atlas_provider: TextAtlasProvider,
-    scene_2d_recording_cache: HashMap<Scene2DRecordingCacheKey, Scene2DRecordingCacheEntry>,
     scene_3d_geometry_cache: HashMap<Scene3DGeometryCacheKey, Scene3DGeometryCacheEntry>,
     prepared_recording_cache: HashMap<PreparedRecordingCacheKey, PreparedRecordingCacheEntry>,
+    retained_surface_texture_cache: HashMap<SurfaceId, RetainedSurfaceTextureCacheEntry>,
     root_composer: RootComposer,
     surface_store: SurfaceStore,
     frame_aggregator: FrameAggregator,
     geometry_pipeline: wgpu::RenderPipeline,
+    surface_composite_bind_group_layout: wgpu::BindGroupLayout,
+    surface_composite_sampler: wgpu::Sampler,
+    surface_composite_single_pipeline: wgpu::RenderPipeline,
+    surface_composite_msaa_pipeline: Option<wgpu::RenderPipeline>,
     size: PhysicalSize<u32>,
 }
 
@@ -154,15 +215,13 @@ struct PreparedRecordingCacheEntry {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-struct Scene2DRecordingCacheKey {
-    scene_id: u32,
-    device_pixel_ratio_bits: u32,
+struct FramePreparedRecordingKey {
+    surface_id: SurfaceId,
+    recording_index: u32,
+    initial_clear_bits: Option<[u32; 4]>,
 }
 
-struct Scene2DRecordingCacheEntry {
-    scene_revision: u64,
-    recording: Arc<DrawingRecording>,
-}
+type FramePreparedRecordingMap = HashMap<FramePreparedRecordingKey, Arc<DrawingPreparedRecording>>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct Scene3DGeometryCacheKey {
@@ -172,6 +231,24 @@ struct Scene3DGeometryCacheKey {
 struct Scene3DGeometryCacheEntry {
     scene_revision: u64,
     geometry: Arc<Vec<ClipSpaceVertex>>,
+}
+
+struct RetainedSurfaceTextureCacheEntry {
+    frame_revision: u64,
+    device_pixel_ratio_bits: u32,
+    raster_origin: [f32; 2],
+    texture_size: [u32; 2],
+    _texture: wgpu::Texture,
+    view: wgpu::TextureView,
+    _depth_target: DepthTarget,
+}
+
+struct RenderTarget<'a> {
+    target_view: &'a wgpu::TextureView,
+    target_size: [u32; 2],
+    msaa_target_view: Option<&'a wgpu::TextureView>,
+    depth_target_view: Option<&'a wgpu::TextureView>,
+    msaa_depth_target_view: Option<&'a wgpu::TextureView>,
 }
 
 struct SceneCommandBuffer<'a> {
@@ -241,6 +318,52 @@ impl<'a> SceneCommandBuffer<'a> {
 }
 
 impl DisplayState {
+    fn color_value_bits(color: ColorValue) -> [u32; 4] {
+        [
+            color.r.to_bits(),
+            color.g.to_bits(),
+            color.b.to_bits(),
+            color.a.to_bits(),
+        ]
+    }
+
+    fn create_surface_composite_pipeline(
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+        shader: &wgpu::ShaderModule,
+        pipeline_layout: &wgpu::PipelineLayout,
+        sample_count: u32,
+    ) -> wgpu::RenderPipeline {
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("goldlight surface composite pipeline"),
+            layout: Some(pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: shader,
+                entry_point: Some("vs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[SurfaceCompositeVertex::layout()],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: shader,
+                entry_point: Some("fs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: sample_count,
+                ..Default::default()
+            },
+            multiview: None,
+            cache: None,
+        })
+    }
+
     fn choose_sample_count(adapter: &wgpu::Adapter, format: wgpu::TextureFormat) -> u32 {
         let color_features = adapter.get_texture_format_features(format).flags;
         let depth_features = adapter
@@ -407,6 +530,65 @@ impl DisplayState {
             multiview: None,
             cache: None,
         });
+        let surface_composite_shader =
+            device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("goldlight surface composite shader"),
+                source: wgpu::ShaderSource::Wgsl(SURFACE_COMPOSITE_SHADER_SOURCE.into()),
+            });
+        let surface_composite_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("goldlight surface composite bind group layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+        let surface_composite_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("goldlight surface composite sampler"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            ..Default::default()
+        });
+        let surface_composite_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("goldlight surface composite pipeline layout"),
+                bind_group_layouts: &[&surface_composite_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+        let surface_composite_single_pipeline = Self::create_surface_composite_pipeline(
+            &device,
+            format,
+            &surface_composite_shader,
+            &surface_composite_pipeline_layout,
+            1,
+        );
+        let surface_composite_msaa_pipeline = (msaa_sample_count > 1).then(|| {
+            Self::create_surface_composite_pipeline(
+                &device,
+                format,
+                &surface_composite_shader,
+                &surface_composite_pipeline_layout,
+                msaa_sample_count,
+            )
+        });
         let msaa_color_target = Self::create_msaa_color_target(&device, &config, msaa_sample_count);
         let drawing_depth_target = Self::create_depth_target(&device, &config, 1);
         let drawing_msaa_depth_target = (msaa_sample_count > 1)
@@ -427,13 +609,17 @@ impl DisplayState {
             drawing_context,
             path_atlas_provider,
             text_atlas_provider,
-            scene_2d_recording_cache: HashMap::new(),
             scene_3d_geometry_cache: HashMap::new(),
             prepared_recording_cache: HashMap::new(),
+            retained_surface_texture_cache: HashMap::new(),
             root_composer: RootComposer::default(),
             surface_store: SurfaceStore::default(),
             frame_aggregator: FrameAggregator::default(),
             geometry_pipeline,
+            surface_composite_bind_group_layout,
+            surface_composite_sampler,
+            surface_composite_single_pipeline,
+            surface_composite_msaa_pipeline,
             size,
         })
     }
@@ -464,14 +650,19 @@ impl DisplayState {
             recording_ptr: Arc::as_ptr(recording) as usize,
             surface_width,
             surface_height,
-            initial_clear_bits: initial_clear.map(|color| {
-                [
-                    color.r.to_bits(),
-                    color.g.to_bits(),
-                    color.b.to_bits(),
-                    color.a.to_bits(),
-                ]
-            }),
+            initial_clear_bits: initial_clear.map(Self::color_value_bits),
+        }
+    }
+
+    fn frame_prepared_recording_key(
+        surface_id: SurfaceId,
+        recording_index: u32,
+        initial_clear: Option<ColorValue>,
+    ) -> FramePreparedRecordingKey {
+        FramePreparedRecordingKey {
+            surface_id,
+            recording_index,
+            initial_clear_bits: initial_clear.map(Self::color_value_bits),
         }
     }
 
@@ -517,22 +708,18 @@ impl DisplayState {
         prepared
     }
 
-    fn encode_recording_to_view(
+    fn encode_prepared_recording_to_view(
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
-        recording: &Arc<DrawingRecording>,
-        initial_clear: Option<ColorValue>,
+        prepared: &DrawingPreparedRecording,
         target_view: &wgpu::TextureView,
-        target_size: [u32; 2],
         msaa_target_view: Option<&wgpu::TextureView>,
         depth_target_view: Option<&wgpu::TextureView>,
         msaa_depth_target_view: Option<&wgpu::TextureView>,
     ) -> Result<()> {
-        let prepared =
-            self.prepare_recording(recording, target_size[0], target_size[1], initial_clear);
         encode_drawing_command_buffer_with_providers(
             &self.drawing_context,
-            &prepared,
+            prepared,
             Some(&mut self.path_atlas_provider),
             Some(&mut self.text_atlas_provider),
             encoder,
@@ -541,41 +728,6 @@ impl DisplayState {
             depth_target_view,
             msaa_depth_target_view,
         )
-    }
-
-    fn scene_2d_recording(
-        &mut self,
-        model: &RenderModel,
-        scene_id: u32,
-        device_pixel_ratio: f32,
-    ) -> Result<Arc<DrawingRecording>> {
-        let scene = model
-            .scenes_2d
-            .get(&scene_id)
-            .ok_or_else(|| anyhow!("missing presented 2D scene {scene_id}"))?;
-        let key = Scene2DRecordingCacheKey {
-            scene_id,
-            device_pixel_ratio_bits: device_pixel_ratio.to_bits(),
-        };
-        if let Some(entry) = self.scene_2d_recording_cache.get(&key) {
-            if entry.scene_revision == scene.revision {
-                return Ok(entry.recording.clone());
-            }
-        }
-
-        let recording = Arc::new(lower_scene_2d_to_recording(
-            model,
-            &scene.root_item_ids,
-            device_pixel_ratio,
-        ));
-        self.scene_2d_recording_cache.insert(
-            key,
-            Scene2DRecordingCacheEntry {
-                scene_revision: scene.revision,
-                recording: recording.clone(),
-            },
-        );
-        Ok(recording)
     }
 
     fn scene_3d_geometry(
@@ -605,62 +757,518 @@ impl DisplayState {
         Ok(geometry)
     }
 
-    fn execute_frame_pass(
+    fn ensure_root_surfaces(
         &mut self,
         model: &RenderModel,
         device_pixel_ratio: f32,
-        pass: &AggregatedRenderPass,
-        encoder: &mut wgpu::CommandEncoder,
-        target_view: &wgpu::TextureView,
     ) -> Result<()> {
-        match &pass.quad {
-            AggregatedQuad::Empty => {
-                let ColorLoadOp::Clear(clear_color) = pass.color_load_op else {
+        fn ensure_node(
+            display: &mut DisplayState,
+            model: &RenderModel,
+            node: &super::model::CompositionNode,
+            device_pixel_ratio: f32,
+        ) -> Result<()> {
+            match node {
+                super::model::CompositionNode::Stack { children } => {
+                    for child in children {
+                        ensure_node(display, model, child, device_pixel_ratio)?;
+                    }
+                }
+                super::model::CompositionNode::Scene2D { scene_id, .. } => {
+                    display
+                        .surface_store
+                        .ensure_scene_2d_surface(model, *scene_id, device_pixel_ratio)?;
+                }
+                super::model::CompositionNode::Scene3D { scene_id, .. } => {
+                    display
+                        .surface_store
+                        .ensure_scene_3d_surface(model, *scene_id)?;
+                }
+            }
+            Ok(())
+        }
+
+        if let Some(root) = model.presented_root.as_ref() {
+            ensure_node(self, model, root, device_pixel_ratio)?;
+        }
+        Ok(())
+    }
+
+    fn wgpu_load_op(color_load_op: ColorLoadOp) -> wgpu::LoadOp<wgpu::Color> {
+        match color_load_op {
+            ColorLoadOp::Load => wgpu::LoadOp::Load,
+            ColorLoadOp::Clear(color) => wgpu::LoadOp::Clear(to_wgpu_color(color)),
+        }
+    }
+
+    fn transparent_color() -> ColorValue {
+        ColorValue {
+            r: 0.0,
+            g: 0.0,
+            b: 0.0,
+            a: 0.0,
+        }
+    }
+
+    fn encode_recording_pass(
+        &mut self,
+        recording: &Arc<DrawingRecording>,
+        color_load_op: ColorLoadOp,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &RenderTarget<'_>,
+    ) -> Result<()> {
+        let initial_clear = match color_load_op {
+            ColorLoadOp::Load => None,
+            ColorLoadOp::Clear(color) => Some(color),
+        };
+        let prepared =
+            self.prepare_recording(recording, target.target_size[0], target.target_size[1], initial_clear);
+        self.encode_prepared_recording_to_view(
+            encoder,
+            prepared.as_ref(),
+            target.target_view,
+            target.msaa_target_view,
+            target.depth_target_view,
+            target.msaa_depth_target_view,
+        )
+    }
+
+    fn surface_recording_target_size(&self, surface_id: SurfaceId) -> Result<[u32; 2]> {
+        Ok(match surface_id {
+            SurfaceId::Scene2D(_) => [self.config.width, self.config.height],
+            SurfaceId::ScrollContainer2D(_) => self.surface_store.get(surface_id)?.raster_size,
+            SurfaceId::Scene3D(_) => {
+                return Err(anyhow!(
+                    "scene 3d surfaces do not expose 2D recordings for msaa analysis"
+                ))
+            }
+        })
+    }
+
+    fn prepare_aggregated_frame_recordings(
+        &mut self,
+        frame: &super::frame::AggregatedFrame,
+    ) -> Result<(bool, FramePreparedRecordingMap)> {
+        let mut frame_requires_msaa = false;
+        let mut prepared_recordings: FramePreparedRecordingMap = HashMap::new();
+        for pass in frame.passes() {
+            match pass.quad {
+                AggregatedQuad::Content(RenderContent::SurfaceRecording {
+                    surface_id,
+                    recording_index,
+                }) => {
+                    let initial_clear = match pass.color_load_op {
+                        ColorLoadOp::Load => None,
+                        ColorLoadOp::Clear(color) => Some(color),
+                    };
+                    let key =
+                        Self::frame_prepared_recording_key(surface_id, recording_index, initial_clear);
+                    if let Some(prepared) = prepared_recordings.get(&key) {
+                        frame_requires_msaa |= prepared.passes.iter().any(|pass| pass.requires_msaa);
+                        continue;
+                    }
+                    let target_size = self.surface_recording_target_size(surface_id)?;
+                    let recording = self
+                        .surface_store
+                        .get(surface_id)?
+                        .recording(recording_index)?
+                        .clone();
+                    let prepared = self.prepare_recording(
+                        &recording,
+                        target_size[0],
+                        target_size[1],
+                        initial_clear,
+                    );
+                    frame_requires_msaa |= prepared.passes.iter().any(|pass| pass.requires_msaa);
+                    prepared_recordings.insert(key, prepared);
+                }
+                AggregatedQuad::Empty
+                | AggregatedQuad::RetainedSurface(_)
+                | AggregatedQuad::Content(RenderContent::Scene3D(_)) => {}
+            }
+        }
+        Ok((frame_requires_msaa, prepared_recordings))
+    }
+
+    fn create_surface_texture_target(&self, size: [u32; 2]) -> (wgpu::Texture, wgpu::TextureView) {
+        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("goldlight retained surface texture"),
+            size: wgpu::Extent3d {
+                width: size[0].max(1),
+                height: size[1].max(1),
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: self.config.format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        (texture, view)
+    }
+
+    fn target_clip_position(target_size: [u32; 2], point: [f32; 2]) -> [f32; 4] {
+        let width = target_size[0].max(1) as f32;
+        let height = target_size[1].max(1) as f32;
+        [
+            point[0] / width * 2.0 - 1.0,
+            1.0 - point[1] / height * 2.0,
+            0.0,
+            1.0,
+        ]
+    }
+
+    fn transform_point(transform: [f32; 6], point: [f32; 2]) -> [f32; 2] {
+        [
+            (transform[0] * point[0]) + (transform[2] * point[1]) + transform[4],
+            (transform[1] * point[0]) + (transform[3] * point[1]) + transform[5],
+        ]
+    }
+
+    fn retained_surface_vertices(
+        quad: &RetainedSurfaceQuad,
+        raster_origin: [f32; 2],
+        texture_size: [u32; 2],
+        target_size: [u32; 2],
+        device_pixel_ratio: f32,
+    ) -> Vec<SurfaceCompositeVertex> {
+        let local = [
+            [0.0, 0.0],
+            [quad.viewport_size[0], 0.0],
+            [quad.viewport_size[0], quad.viewport_size[1]],
+            [0.0, quad.viewport_size[1]],
+        ];
+        let destination = local.map(|point| Self::transform_point(quad.transform, point));
+        let source = local.map(|point| {
+            [
+                (point[0] + quad.scroll_offset[0]) * device_pixel_ratio - raster_origin[0],
+                (point[1] + quad.scroll_offset[1]) * device_pixel_ratio - raster_origin[1],
+            ]
+        });
+        let texture_size = [
+            texture_size[0].max(1) as f32,
+            texture_size[1].max(1) as f32,
+        ];
+        let build = |index: usize| SurfaceCompositeVertex {
+            position: Self::target_clip_position(target_size, destination[index]),
+            source_pixel: source[index],
+            texture_size,
+        };
+        vec![
+            build(0),
+            build(1),
+            build(2),
+            build(0),
+            build(2),
+            build(3),
+        ]
+    }
+
+    fn retained_surface_scissor(
+        quad: &RetainedSurfaceQuad,
+        target_size: [u32; 2],
+    ) -> Option<[u32; 4]> {
+        let local = [
+            [0.0, 0.0],
+            [quad.viewport_size[0], 0.0],
+            [quad.viewport_size[0], quad.viewport_size[1]],
+            [0.0, quad.viewport_size[1]],
+        ];
+        let transformed = local.map(|point| Self::transform_point(quad.transform, point));
+        let left = transformed
+            .iter()
+            .map(|point| point[0])
+            .fold(f32::INFINITY, f32::min)
+            .floor()
+            .clamp(0.0, target_size[0].max(1) as f32);
+        let top = transformed
+            .iter()
+            .map(|point| point[1])
+            .fold(f32::INFINITY, f32::min)
+            .floor()
+            .clamp(0.0, target_size[1].max(1) as f32);
+        let right = transformed
+            .iter()
+            .map(|point| point[0])
+            .fold(f32::NEG_INFINITY, f32::max)
+            .ceil()
+            .clamp(0.0, target_size[0].max(1) as f32);
+        let bottom = transformed
+            .iter()
+            .map(|point| point[1])
+            .fold(f32::NEG_INFINITY, f32::max)
+            .ceil()
+            .clamp(0.0, target_size[1].max(1) as f32);
+        (right > left && bottom > top)
+            .then_some([left as u32, top as u32, (right - left) as u32, (bottom - top) as u32])
+    }
+
+    fn draw_retained_surface_pass(
+        &mut self,
+        model: &RenderModel,
+        device_pixel_ratio: f32,
+        color_load_op: ColorLoadOp,
+        quad: &RetainedSurfaceQuad,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &RenderTarget<'_>,
+    ) -> Result<()> {
+        let (raster_origin, texture_size, texture_view) = {
+            let texture_entry = self.ensure_retained_surface_texture(
+                model,
+                quad.surface_id,
+                device_pixel_ratio,
+                encoder,
+            )?;
+            (
+                texture_entry.raster_origin,
+                texture_entry.texture_size,
+                texture_entry.view.clone(),
+            )
+        };
+        let vertices = Self::retained_surface_vertices(
+            quad,
+            raster_origin,
+            texture_size,
+            target.target_size,
+            device_pixel_ratio,
+        );
+        if vertices.is_empty() {
+            return Ok(());
+        }
+
+        let vertex_buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("goldlight retained surface vertices"),
+                contents: bytemuck::cast_slice(&vertices),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("goldlight retained surface bind group"),
+            layout: &self.surface_composite_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Sampler(&self.surface_composite_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&texture_view),
+                },
+            ],
+        });
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("goldlight retained surface pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target.target_view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: Self::wgpu_load_op(color_load_op),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            occlusion_query_set: None,
+            timestamp_writes: None,
+        });
+        if let Some([x, y, width, height]) = Self::retained_surface_scissor(quad, target.target_size)
+        {
+            pass.set_scissor_rect(x, y, width, height);
+        }
+        pass.set_pipeline(&self.surface_composite_single_pipeline);
+        pass.set_bind_group(0, &bind_group, &[]);
+        pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+        pass.draw(0..vertices.len() as u32, 0..1);
+        drop(pass);
+
+        if let Some(msaa_target_view) = target.msaa_target_view {
+            if let Some(surface_composite_msaa_pipeline) =
+                self.surface_composite_msaa_pipeline.as_ref()
+            {
+                let mut msaa_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("goldlight retained surface msaa mirror pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: msaa_target_view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: Self::wgpu_load_op(color_load_op),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    occlusion_query_set: None,
+                    timestamp_writes: None,
+                });
+                if let Some([x, y, width, height]) =
+                    Self::retained_surface_scissor(quad, target.target_size)
+                {
+                    msaa_pass.set_scissor_rect(x, y, width, height);
+                }
+                msaa_pass.set_pipeline(surface_composite_msaa_pipeline);
+                msaa_pass.set_bind_group(0, &bind_group, &[]);
+                msaa_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+                msaa_pass.draw(0..vertices.len() as u32, 0..1);
+            }
+        }
+        Ok(())
+    }
+
+    fn ensure_retained_surface_texture(
+        &mut self,
+        model: &RenderModel,
+        surface_id: SurfaceId,
+        device_pixel_ratio: f32,
+        encoder: &mut wgpu::CommandEncoder,
+    ) -> Result<&RetainedSurfaceTextureCacheEntry> {
+        match surface_id {
+            SurfaceId::ScrollContainer2D(scroll_container_id) => {
+                self.surface_store.ensure_scroll_container_2d_surface(
+                    model,
+                    scroll_container_id,
+                    device_pixel_ratio,
+                )?;
+            }
+            _ => return Err(anyhow!("retained surface compositing is only implemented for scroll surfaces")),
+        }
+
+        let device_pixel_ratio_bits = device_pixel_ratio.to_bits();
+        let (frame_revision, raster_origin, texture_size, surface_frame) = {
+            let surface_entry = self.surface_store.get(surface_id)?;
+            (
+                surface_entry.frame_revision,
+                surface_entry.raster_origin,
+                surface_entry.raster_size,
+                surface_entry.frame.clone(),
+            )
+        };
+        let is_current = self
+            .retained_surface_texture_cache
+            .get(&surface_id)
+            .is_some_and(|entry| {
+                entry.frame_revision == frame_revision
+                    && entry.device_pixel_ratio_bits == device_pixel_ratio_bits
+            });
+        if !is_current {
+            let (texture, view) = self.create_surface_texture_target(texture_size);
+            let depth_texture = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("goldlight retained surface depth target"),
+                size: wgpu::Extent3d {
+                    width: texture_size[0].max(1),
+                    height: texture_size[1].max(1),
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: DRAWING_DEPTH_FORMAT,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            });
+            let depth_target = DepthTarget {
+                view: depth_texture.create_view(&wgpu::TextureViewDescriptor::default()),
+                _texture: depth_texture,
+            };
+            let target = RenderTarget {
+                target_view: &view,
+                target_size: texture_size,
+                msaa_target_view: None,
+                depth_target_view: Some(&depth_target.view),
+                msaa_depth_target_view: None,
+            };
+            if surface_frame.passes().is_empty() {
+                let mut command_buffer = SceneCommandBuffer {
+                    device: &self.device,
+                    encoder,
+                    target_view: &view,
+                    geometry_pipeline: &self.geometry_pipeline,
+                };
+                command_buffer.encode_clear(Self::transparent_color());
+            } else {
+                for (index, pass) in surface_frame.passes().iter().enumerate() {
+                    let color_load_op = if index == 0 {
+                        match pass.color_load_op {
+                            ColorLoadOp::Load => ColorLoadOp::Clear(Self::transparent_color()),
+                            clear_or_load => clear_or_load,
+                        }
+                    } else {
+                        pass.color_load_op
+                    };
+                    self.execute_compositor_pass(
+                        model,
+                        device_pixel_ratio,
+                        color_load_op,
+                        &pass.quad,
+                        encoder,
+                        &target,
+                    )?;
+                }
+            }
+            self.retained_surface_texture_cache.insert(
+                surface_id,
+                RetainedSurfaceTextureCacheEntry {
+                    frame_revision,
+                    device_pixel_ratio_bits,
+                    raster_origin,
+                    texture_size,
+                    _texture: texture,
+                    view,
+                    _depth_target: depth_target,
+                },
+            );
+        }
+
+        self.retained_surface_texture_cache
+            .get(&surface_id)
+            .ok_or_else(|| anyhow!("missing retained surface cache entry for {surface_id:?}"))
+    }
+
+    fn execute_compositor_pass(
+        &mut self,
+        model: &RenderModel,
+        device_pixel_ratio: f32,
+        color_load_op: ColorLoadOp,
+        quad: &CompositorQuad,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &RenderTarget<'_>,
+    ) -> Result<()> {
+        match quad {
+            CompositorQuad::Empty => {
+                let ColorLoadOp::Clear(clear_color) = color_load_op else {
                     return Ok(());
                 };
                 let mut command_buffer = SceneCommandBuffer {
                     device: &self.device,
                     encoder,
-                    target_view,
+                    target_view: target.target_view,
                     geometry_pipeline: &self.geometry_pipeline,
                 };
                 command_buffer.encode_clear(clear_color);
-                if let Some(msaa_target) = self.msaa_color_target.as_ref() {
-                    let mut msaa_command_buffer = SceneCommandBuffer {
-                        device: &self.device,
-                        encoder,
-                        target_view: &msaa_target.view,
-                        geometry_pipeline: &self.geometry_pipeline,
-                    };
-                    msaa_command_buffer.encode_clear(clear_color);
-                }
+                Ok(())
             }
-            AggregatedQuad::Content(content) => match content {
-                RenderContent::Scene2D(scene_id) => {
-                    let recording =
-                        self.scene_2d_recording(model, *scene_id, device_pixel_ratio)?;
-                    self.path_atlas_provider.begin_frame();
-                    self.text_atlas_provider.begin_frame();
-                    let msaa_color_view = self.msaa_color_target.as_ref().map(|t| t.view.clone());
-                    let depth_view = self.drawing_depth_target.view.clone();
-                    let msaa_depth_view = self
-                        .drawing_msaa_depth_target
-                        .as_ref()
-                        .map(|t| t.view.clone());
-                    let initial_clear = match pass.color_load_op {
-                        ColorLoadOp::Load => None,
-                        ColorLoadOp::Clear(color) => Some(color),
-                    };
-                    self.encode_recording_to_view(
-                        encoder,
-                        &recording,
-                        initial_clear,
-                        target_view,
-                        [self.config.width, self.config.height],
-                        msaa_color_view.as_ref(),
-                        Some(&depth_view),
-                        msaa_depth_view.as_ref(),
-                    )?;
+            CompositorQuad::SurfaceRef(surface_id) => Err(anyhow!(
+                "surface refs must be flattened before execution: {surface_id:?}"
+            )),
+            CompositorQuad::RetainedSurface(quad) => self.draw_retained_surface_pass(
+                model,
+                device_pixel_ratio,
+                color_load_op,
+                quad,
+                encoder,
+                target,
+            ),
+            CompositorQuad::Content(content) => match content {
+                RenderContent::SurfaceRecording {
+                    surface_id,
+                    recording_index,
+                } => {
+                    let recording = self
+                        .surface_store
+                        .get(*surface_id)?
+                        .recording(*recording_index)?
+                        .clone();
+                    self.encode_recording_pass(&recording, color_load_op, encoder, target)
                 }
                 RenderContent::Scene3D(scene_id) => {
                     let vertices = self
@@ -672,16 +1280,102 @@ impl DisplayState {
                     let mut command_buffer = SceneCommandBuffer {
                         device: &self.device,
                         encoder,
-                        target_view,
+                        target_view: target.target_view,
                         geometry_pipeline: &self.geometry_pipeline,
                     };
-                    let load_op = match pass.color_load_op {
-                        ColorLoadOp::Load => wgpu::LoadOp::Load,
-                        ColorLoadOp::Clear(color) => wgpu::LoadOp::Clear(to_wgpu_color(color)),
-                    };
-                    command_buffer.encode_geometry_3d(load_op, &vertices);
+                    command_buffer.encode_geometry_3d(Self::wgpu_load_op(color_load_op), &vertices);
+                    Ok(())
                 }
             },
+        }
+    }
+
+    fn execute_frame_pass(
+        &mut self,
+        model: &RenderModel,
+        device_pixel_ratio: f32,
+        pass: &AggregatedRenderPass,
+        prepared_recordings: &FramePreparedRecordingMap,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &RenderTarget<'_>,
+    ) -> Result<()> {
+        match &pass.quad {
+            AggregatedQuad::Empty => {
+                let ColorLoadOp::Clear(clear_color) = pass.color_load_op else {
+                    return Ok(());
+                };
+                let mut command_buffer = SceneCommandBuffer {
+                    device: &self.device,
+                    encoder,
+                    target_view: target.target_view,
+                    geometry_pipeline: &self.geometry_pipeline,
+                };
+                command_buffer.encode_clear(clear_color);
+                if let Some(msaa_target_view) = target.msaa_target_view {
+                    let mut msaa_command_buffer = SceneCommandBuffer {
+                        device: &self.device,
+                        encoder,
+                        target_view: msaa_target_view,
+                        geometry_pipeline: &self.geometry_pipeline,
+                    };
+                    msaa_command_buffer.encode_clear(clear_color);
+                }
+            }
+            AggregatedQuad::RetainedSurface(quad) => self.draw_retained_surface_pass(
+                model,
+                device_pixel_ratio,
+                pass.color_load_op,
+                quad,
+                encoder,
+                target,
+            )?,
+            AggregatedQuad::Content(content) => {
+                match content {
+                    RenderContent::SurfaceRecording {
+                        surface_id,
+                        recording_index,
+                    } => {
+                        let initial_clear = match pass.color_load_op {
+                            ColorLoadOp::Load => None,
+                            ColorLoadOp::Clear(color) => Some(color),
+                        };
+                        let key = Self::frame_prepared_recording_key(
+                            *surface_id,
+                            *recording_index,
+                            initial_clear,
+                        );
+                        if let Some(prepared) = prepared_recordings.get(&key) {
+                            self.encode_prepared_recording_to_view(
+                                encoder,
+                                prepared.as_ref(),
+                                target.target_view,
+                                target.msaa_target_view,
+                                target.depth_target_view,
+                                target.msaa_depth_target_view,
+                            )?;
+                        } else {
+                            self.execute_compositor_pass(
+                                model,
+                                device_pixel_ratio,
+                                pass.color_load_op,
+                                &CompositorQuad::Content(*content),
+                                encoder,
+                                target,
+                            )?;
+                        }
+                    }
+                    RenderContent::Scene3D(_) => {
+                        self.execute_compositor_pass(
+                            model,
+                            device_pixel_ratio,
+                            pass.color_load_op,
+                            &CompositorQuad::Content(*content),
+                            encoder,
+                            target,
+                        )?;
+                    }
+                }
+            }
         }
 
         Ok(())
@@ -768,12 +1462,39 @@ impl DisplayState {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("goldlight render encoder"),
             });
-        let (root_key, root_frame) = self.root_composer.compose(model, &mut self.surface_store)?;
+        self.path_atlas_provider.begin_frame();
+        self.text_atlas_provider.begin_frame();
+        self.ensure_root_surfaces(model, device_pixel_ratio)?;
+        let (root_key, root_frame) = self.root_composer.compose(model)?;
         let aggregated_frame =
             self.frame_aggregator
                 .aggregate(root_key, root_frame, &self.surface_store)?;
+        let (frame_requires_msaa, prepared_recordings) =
+            self.prepare_aggregated_frame_recordings(aggregated_frame.as_ref())?;
+        let msaa_color_view = self.msaa_color_target.as_ref().map(|target| target.view.clone());
+        let depth_view = self.drawing_depth_target.view.clone();
+        let msaa_depth_view = self
+            .drawing_msaa_depth_target
+            .as_ref()
+            .map(|target| target.view.clone());
+        let target = RenderTarget {
+            target_view: &view,
+            target_size: [self.config.width, self.config.height],
+            msaa_target_view: frame_requires_msaa.then_some(msaa_color_view.as_ref()).flatten(),
+            depth_target_view: Some(&depth_view),
+            msaa_depth_target_view: frame_requires_msaa
+                .then_some(msaa_depth_view.as_ref())
+                .flatten(),
+        };
         for pass in aggregated_frame.passes() {
-            self.execute_frame_pass(model, device_pixel_ratio, pass, &mut encoder, &view)?;
+            self.execute_frame_pass(
+                model,
+                device_pixel_ratio,
+                pass,
+                &prepared_recordings,
+                &mut encoder,
+                &target,
+            )?;
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));

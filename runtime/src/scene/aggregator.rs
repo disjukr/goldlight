@@ -59,11 +59,15 @@ fn append_aggregated_pass(
             color_load_op: pass.color_load_op,
             quad: AggregatedQuad::Empty,
         }),
+        CompositorQuad::RetainedSurface(quad) => output.push(AggregatedRenderPass {
+            color_load_op: pass.color_load_op,
+            quad: AggregatedQuad::RetainedSurface(*quad),
+        }),
         CompositorQuad::Content(content) => output.push(AggregatedRenderPass {
             color_load_op: pass.color_load_op,
             quad: AggregatedQuad::Content(*content),
         }),
-        CompositorQuad::Surface(surface_id) => {
+        CompositorQuad::SurfaceRef(surface_id) => {
             let surface_frame = surfaces.get(*surface_id)?;
             append_surface_frame(
                 surface_frame.frame.as_ref(),
@@ -105,11 +109,15 @@ fn append_surface_frame(
                 color_load_op,
                 quad: AggregatedQuad::Empty,
             }),
+            CompositorQuad::RetainedSurface(quad) => output.push(AggregatedRenderPass {
+                color_load_op,
+                quad: AggregatedQuad::RetainedSurface(*quad),
+            }),
             CompositorQuad::Content(content) => output.push(AggregatedRenderPass {
                 color_load_op,
                 quad: AggregatedQuad::Content(*content),
             }),
-            CompositorQuad::Surface(surface_id) => {
+            CompositorQuad::SurfaceRef(surface_id) => {
                 let surface_frame = surfaces.get(*surface_id)?;
                 append_surface_frame(
                     surface_frame.frame.as_ref(),
@@ -128,7 +136,7 @@ fn append_surface_frame(
 mod tests {
     use super::FrameAggregator;
     use crate::scene::composition::RootComposer;
-    use crate::scene::frame::{AggregatedQuad, ColorLoadOp, RenderContent};
+    use crate::scene::frame::{AggregatedQuad, ColorLoadOp, RenderContent, SurfaceId};
     use crate::scene::surfaces::SurfaceStore;
     use crate::scene::{
         Camera3DOptions, ColorValue, CompositionNode, Rect2DOptions, RenderModel, Scene2DOptions,
@@ -198,8 +206,14 @@ mod tests {
         let mut root_composer = RootComposer::default();
         let mut surface_store = SurfaceStore::default();
         let mut frame_aggregator = FrameAggregator::default();
+        surface_store
+            .ensure_scene_2d_surface(&model, scene_2d.id, 1.0)
+            .expect("scene 2d surface");
+        surface_store
+            .ensure_scene_3d_surface(&model, scene_3d.id)
+            .expect("scene 3d surface");
         let (root_key, root_frame) = root_composer
-            .compose(&model, &mut surface_store)
+            .compose(&model)
             .expect("root composition should succeed");
         let frame = frame_aggregator
             .aggregate(root_key, root_frame, &surface_store)
@@ -211,7 +225,10 @@ mod tests {
         ));
         assert!(matches!(
             frame.passes()[0].quad,
-            AggregatedQuad::Content(RenderContent::Scene2D(_))
+            AggregatedQuad::Content(RenderContent::SurfaceRecording {
+                surface_id: SurfaceId::Scene2D(id),
+                recording_index: 0,
+            }) if id == scene_2d.id
         ));
         assert!(matches!(
             frame.passes()[1].quad,

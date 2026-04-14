@@ -8,7 +8,10 @@ mod text_atlas;
 mod text_pipeline;
 mod vello_compute;
 
-pub(crate) use self::lowering::lower_scene_2d_to_recording;
+pub(crate) use self::lowering::{
+    lower_scene_2d_surface, lower_scroll_container_2d_surface,
+    measure_scroll_container_2d_surface_bounds,
+};
 pub(crate) use self::path_atlas::{AtlasProvider, CoverageMask};
 pub(crate) use self::text_atlas::TextAtlasProvider;
 
@@ -1303,7 +1306,11 @@ pub struct DrawingRecording {
     commands: Vec<DrawingCommand>,
 }
 
-impl DrawingRecording {}
+impl DrawingRecording {
+    pub fn is_empty(&self) -> bool {
+        self.commands.is_empty()
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
 pub struct RecordingBounds {
@@ -1618,7 +1625,6 @@ impl PathMaskVertex {
     }
 }
 
-#[cfg(test)]
 fn transform_bounds_point(point: [f32; 2], matrix: [f32; 6]) -> [f32; 2] {
     [
         (matrix[0] * point[0]) + (matrix[2] * point[1]) + matrix[4],
@@ -1626,7 +1632,6 @@ fn transform_bounds_point(point: [f32; 2], matrix: [f32; 6]) -> [f32; 2] {
     ]
 }
 
-#[cfg(test)]
 fn include_point(bounds: &mut Option<RecordingBounds>, point: [f32; 2]) {
     match bounds {
         Some(existing) => {
@@ -1646,7 +1651,6 @@ fn include_point(bounds: &mut Option<RecordingBounds>, point: [f32; 2]) {
     }
 }
 
-#[cfg(test)]
 fn include_transformed_rect(
     bounds: &mut Option<RecordingBounds>,
     x: f32,
@@ -1665,7 +1669,6 @@ fn include_transformed_rect(
     }
 }
 
-#[cfg(test)]
 fn include_arc_bounds(
     bounds: &mut Option<RecordingBounds>,
     center: [f32; 2],
@@ -1682,7 +1685,6 @@ fn include_arc_bounds(
     }
 }
 
-#[cfg(test)]
 fn include_path_bounds(bounds: &mut Option<RecordingBounds>, path: &PathDrawCommand) {
     let mut local_bounds = None;
     let mut current = [path.x, path.y];
@@ -1755,7 +1757,6 @@ fn include_path_bounds(bounds: &mut Option<RecordingBounds>, path: &PathDrawComm
     );
 }
 
-#[cfg(test)]
 fn include_direct_mask_text_bounds(
     bounds: &mut Option<RecordingBounds>,
     text: &DirectMaskTextDrawCommand,
@@ -1779,7 +1780,6 @@ fn include_direct_mask_text_bounds(
     }
 }
 
-#[cfg(test)]
 fn include_transformed_mask_text_bounds(
     bounds: &mut Option<RecordingBounds>,
     text: &TransformedMaskTextDrawCommand,
@@ -1809,7 +1809,6 @@ fn include_transformed_mask_text_bounds(
     }
 }
 
-#[cfg(test)]
 fn include_sdf_text_bounds(bounds: &mut Option<RecordingBounds>, text: &SdfTextDrawCommand) {
     for glyph in &text.glyphs {
         let scale =
@@ -1836,7 +1835,6 @@ fn include_sdf_text_bounds(bounds: &mut Option<RecordingBounds>, text: &SdfTextD
     }
 }
 
-#[cfg(test)]
 pub fn compute_recording_bounds(recording: &DrawingRecording) -> Option<RecordingBounds> {
     let mut bounds = None;
     let mut clip_stack = Vec::new();
@@ -1933,7 +1931,6 @@ fn transformed_rect_bounds(
     is_valid_recording_bounds(bounds).then_some(bounds)
 }
 
-#[cfg(test)]
 fn merge_recording_bounds(bounds: &mut Option<RecordingBounds>, next: RecordingBounds) {
     match bounds {
         Some(existing) => {
@@ -1946,7 +1943,6 @@ fn merge_recording_bounds(bounds: &mut Option<RecordingBounds>, next: RecordingB
     }
 }
 
-#[cfg(test)]
 fn intersect_recording_bounds(
     left: Option<RecordingBounds>,
     right: Option<RecordingBounds>,

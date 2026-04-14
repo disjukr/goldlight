@@ -145,6 +145,7 @@ pub(crate) struct ScrollContainer2D {
     pub height: f32,
     pub scroll_x: f32,
     pub scroll_y: f32,
+    pub frame_revision: u64,
     pub child_item_ids: Vec<u32>,
 }
 
@@ -159,7 +160,8 @@ pub(crate) struct Triangle3D {
 pub(crate) struct Scene2D {
     pub clear_color: ColorValue,
     pub root_item_ids: Vec<u32>,
-    pub revision: u64,
+    pub content_revision: u64,
+    pub frame_revision: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -219,6 +221,7 @@ pub struct RenderModel {
     pub(crate) texts_2d: HashMap<u32, Text2D>,
     pub(crate) groups_2d: HashMap<u32, Group2D>,
     pub(crate) scroll_containers_2d: HashMap<u32, ScrollContainer2D>,
+    pub(crate) item_2d_revisions: HashMap<u32, u64>,
     pub(crate) scenes_3d: HashMap<u32, Scene3D>,
     pub(crate) triangles_3d: HashMap<u32, Triangle3D>,
 }
@@ -237,6 +240,7 @@ impl Default for RenderModel {
             texts_2d: HashMap::new(),
             groups_2d: HashMap::new(),
             scroll_containers_2d: HashMap::new(),
+            item_2d_revisions: HashMap::new(),
             scenes_3d: HashMap::new(),
             triangles_3d: HashMap::new(),
         }
@@ -250,11 +254,32 @@ impl RenderModel {
         revision
     }
 
-    fn touch_scene_2d(&mut self, scene_id: u32) {
+    fn touch_scene_2d_content(&mut self, scene_id: u32) {
         let revision = self.allocate_revision();
         if let Some(scene) = self.scenes_2d.get_mut(&scene_id) {
-            scene.revision = revision;
+            scene.content_revision = revision;
+            scene.frame_revision = revision;
         }
+    }
+
+    fn touch_scene_2d_frame(&mut self, scene_id: u32) {
+        let revision = self.allocate_revision();
+        if let Some(scene) = self.scenes_2d.get_mut(&scene_id) {
+            scene.frame_revision = revision;
+        }
+    }
+
+    fn set_item_2d_revision(&mut self, item_id: u32, revision: u64) {
+        self.item_2d_revisions.insert(item_id, revision);
+    }
+
+    fn touch_item_2d_revision(&mut self, item_id: u32) {
+        let revision = self.allocate_revision();
+        self.set_item_2d_revision(item_id, revision);
+    }
+
+    pub(crate) fn item_2d_revision(&self, item_id: u32) -> Option<u64> {
+        self.item_2d_revisions.get(&item_id).copied()
     }
 
     fn touch_scene_3d(&mut self, scene_id: u32) {
@@ -273,7 +298,8 @@ impl RenderModel {
             Scene2D {
                 clear_color: options.clear_color,
                 root_item_ids: Vec::new(),
-                revision,
+                content_revision: revision,
+                frame_revision: revision,
             },
         );
         Scene2DHandle { id }
@@ -289,7 +315,7 @@ impl RenderModel {
             .get_mut(&scene_id)
             .ok_or_else(|| anyhow!("unknown 2D scene {scene_id}"))?;
         scene.clear_color = options.color;
-        self.touch_scene_2d(scene_id);
+        self.touch_scene_2d_frame(scene_id);
         Ok(())
     }
 
@@ -302,6 +328,7 @@ impl RenderModel {
             return Err(anyhow!("unknown 2D scene {scene_id}"));
         }
         let id = self.next_object_id;
+        let item_revision = self.allocate_revision();
         self.next_object_id += 1;
         self.rects_2d.insert(
             id,
@@ -315,7 +342,8 @@ impl RenderModel {
                 transform: options.transform,
             },
         );
-        self.touch_scene_2d(scene_id);
+        self.set_item_2d_revision(id, item_revision);
+        self.touch_scene_2d_content(scene_id);
         Ok(Rect2DHandle { id })
     }
 
@@ -348,7 +376,8 @@ impl RenderModel {
             }
             rect._scene_id
         };
-        self.touch_scene_2d(scene_id);
+        self.touch_item_2d_revision(rect_id);
+        self.touch_scene_2d_content(scene_id);
         Ok(())
     }
 
@@ -361,6 +390,7 @@ impl RenderModel {
             return Err(anyhow!("unknown 2D scene {scene_id}"));
         }
         let id = self.next_object_id;
+        let item_revision = self.allocate_revision();
         self.next_object_id += 1;
         self.paths_2d.insert(
             id,
@@ -381,7 +411,8 @@ impl RenderModel {
                 transform: options.transform,
             },
         );
-        self.touch_scene_2d(scene_id);
+        self.set_item_2d_revision(id, item_revision);
+        self.touch_scene_2d_content(scene_id);
         Ok(Path2DHandle { id })
     }
 
@@ -409,7 +440,8 @@ impl RenderModel {
             path.transform = options.transform;
             path._scene_id
         };
-        self.touch_scene_2d(scene_id);
+        self.touch_item_2d_revision(path_id);
+        self.touch_scene_2d_content(scene_id);
         Ok(())
     }
 
@@ -422,10 +454,12 @@ impl RenderModel {
             return Err(anyhow!("unknown 2D scene {scene_id}"));
         }
         let id = self.next_object_id;
+        let item_revision = self.allocate_revision();
         self.next_object_id += 1;
         self.texts_2d
             .insert(id, text_from_options(scene_id, options));
-        self.touch_scene_2d(scene_id);
+        self.set_item_2d_revision(id, item_revision);
+        self.touch_scene_2d_content(scene_id);
         Ok(Text2DHandle { id })
     }
 
@@ -436,7 +470,8 @@ impl RenderModel {
         };
         self.texts_2d
             .insert(text_id, text_from_options(scene_id, options));
-        self.touch_scene_2d(scene_id);
+        self.touch_item_2d_revision(text_id);
+        self.touch_scene_2d_content(scene_id);
         Ok(())
     }
 
@@ -449,6 +484,7 @@ impl RenderModel {
             return Err(anyhow!("unknown 2D scene {scene_id}"));
         }
         let id = self.next_object_id;
+        let item_revision = self.allocate_revision();
         self.next_object_id += 1;
         self.groups_2d.insert(
             id,
@@ -458,7 +494,8 @@ impl RenderModel {
                 child_item_ids: Vec::new(),
             },
         );
-        self.touch_scene_2d(scene_id);
+        self.set_item_2d_revision(id, item_revision);
+        self.touch_scene_2d_content(scene_id);
         Ok(Group2DHandle { id })
     }
 
@@ -471,7 +508,8 @@ impl RenderModel {
             group.transform = options.transform;
             group.scene_id
         };
-        self.touch_scene_2d(scene_id);
+        self.touch_item_2d_revision(group_id);
+        self.touch_scene_2d_content(scene_id);
         Ok(())
     }
 
@@ -484,6 +522,8 @@ impl RenderModel {
             return Err(anyhow!("unknown 2D scene {scene_id}"));
         }
         let id = self.next_object_id;
+        let frame_revision = self.allocate_revision();
+        let item_revision = self.allocate_revision();
         self.next_object_id += 1;
         self.scroll_containers_2d.insert(
             id,
@@ -494,10 +534,12 @@ impl RenderModel {
                 height: options.height,
                 scroll_x: options.scroll_x,
                 scroll_y: options.scroll_y,
+                frame_revision,
                 child_item_ids: Vec::new(),
             },
         );
-        self.touch_scene_2d(scene_id);
+        self.set_item_2d_revision(id, item_revision);
+        self.touch_scene_2d_content(scene_id);
         Ok(ScrollContainer2DHandle { id })
     }
 
@@ -506,6 +548,7 @@ impl RenderModel {
         scroll_container_id: u32,
         options: ScrollContainer2DUpdate,
     ) -> Result<()> {
+        let frame_revision = self.allocate_revision();
         let scene_id = {
             let scroll_container = self
                 .scroll_containers_2d
@@ -516,9 +559,10 @@ impl RenderModel {
             scroll_container.height = options.height;
             scroll_container.scroll_x = options.scroll_x;
             scroll_container.scroll_y = options.scroll_y;
+            scroll_container.frame_revision = frame_revision;
             scroll_container.scene_id
         };
-        self.touch_scene_2d(scene_id);
+        self.touch_scene_2d_frame(scene_id);
         Ok(())
     }
 
@@ -544,7 +588,7 @@ impl RenderModel {
                 .ok_or_else(|| anyhow!("unknown 2D scene {scene_id}"))?;
             scene.root_item_ids = root_item_ids;
         }
-        self.touch_scene_2d(scene_id);
+        self.touch_scene_2d_content(scene_id);
         Ok(())
     }
 
@@ -571,7 +615,8 @@ impl RenderModel {
                 .ok_or_else(|| anyhow!("unknown 2D group {group_id}"))?;
             group.child_item_ids = child_item_ids;
         }
-        self.touch_scene_2d(scene_id);
+        self.touch_item_2d_revision(group_id);
+        self.touch_scene_2d_content(scene_id);
         Ok(())
     }
 
@@ -602,7 +647,8 @@ impl RenderModel {
                 .ok_or_else(|| anyhow!("unknown 2D scroll container {scroll_container_id}"))?;
             scroll_container.child_item_ids = child_item_ids;
         }
-        self.touch_scene_2d(scene_id);
+        self.touch_item_2d_revision(scroll_container_id);
+        self.touch_scene_2d_content(scene_id);
         Ok(())
     }
 

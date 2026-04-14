@@ -15,19 +15,32 @@ pub(crate) enum ColorLoadOp {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum SurfaceId {
     Scene2D(u32),
+    ScrollContainer2D(u32),
     Scene3D(u32),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum RenderContent {
-    Scene2D(u32),
+    SurfaceRecording {
+        surface_id: SurfaceId,
+        recording_index: u32,
+    },
     Scene3D(u32),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct RetainedSurfaceQuad {
+    pub surface_id: SurfaceId,
+    pub transform: [f32; 6],
+    pub viewport_size: [f32; 2],
+    pub scroll_offset: [f32; 2],
 }
 
 #[derive(Clone, Debug)]
 pub(crate) enum CompositorQuad {
     Empty,
-    Surface(SurfaceId),
+    SurfaceRef(SurfaceId),
+    RetainedSurface(RetainedSurfaceQuad),
     Content(RenderContent),
 }
 
@@ -55,6 +68,7 @@ impl CompositorFrame {
 #[derive(Clone, Debug)]
 pub(crate) enum AggregatedQuad {
     Empty,
+    RetainedSurface(RetainedSurfaceQuad),
     Content(RenderContent),
 }
 

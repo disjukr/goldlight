@@ -81,3 +81,6 @@ import { createWindow } from "goldlight";
 
 createWindow({ width: 640, height: 480 });
 ```
+
+Window sizes, resize events, and `getWindowInfo()` use CSS pixels rather than device pixels.
+The current output scale is exposed as `devicePixelRatio`.

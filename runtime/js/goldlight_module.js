@@ -1175,14 +1175,38 @@ function invertAffineTransform(transform) {
 
 const directMaskSubpixelRound = 1 / 8;
 
+function normalizeDevicePixelRatio(value) {
+  return Number.isFinite(value) && value > 0 ? value : 1;
+}
+
+function getCurrentDevicePixelRatio() {
+  try {
+    return normalizeDevicePixelRatio(Deno.core.ops.op_goldlight_worker_get_window_info().devicePixelRatio);
+  } catch {
+    return 1;
+  }
+}
+
+function scaleTransformToDevicePixels(transform, devicePixelRatio) {
+  const scale = normalizeDevicePixelRatio(devicePixelRatio);
+  return [
+    transform[0] * scale,
+    transform[1] * scale,
+    transform[2] * scale,
+    transform[3] * scale,
+    transform[4] * scale,
+    transform[5] * scale,
+  ];
+}
+
 function quantizeDirectMaskSubpixelPhase(mapped) {
   return Math.floor((((mapped + directMaskSubpixelRound) - Math.floor(mapped + directMaskSubpixelRound)) * 4) + 1e-6) & 0x3;
 }
 
-function getTransformedMaskStrikeScale(transform) {
+function getTransformedMaskStrikeScale(transform, devicePixelRatio = 1) {
   const scaleX = Math.hypot(transform[0], transform[1]);
   const scaleY = Math.hypot(transform[2], transform[3]);
-  const maxScale = Math.max(scaleX, scaleY, 1);
+  const maxScale = Math.max(scaleX, scaleY, 1) * normalizeDevicePixelRatio(devicePixelRatio);
   const axisAlignmentX = scaleX > 0
     ? Math.max(Math.abs(transform[0]), Math.abs(transform[1])) / scaleX
     : 1;
@@ -1200,13 +1224,15 @@ function getTransformedMaskStrikeScale(transform) {
 }
 
 export function buildDirectMaskSubRun(host, run, transform = identityTextMatrix2d) {
-  const inverse = invertAffineTransform(transform);
+  const devicePixelRatio = getCurrentDevicePixelRatio();
+  const deviceTransform = scaleTransformToDevicePixels(transform, devicePixelRatio);
+  const inverse = invertAffineTransform(deviceTransform);
   const glyphs = [];
   for (let index = 0; index < run.glyphIDs.length; index += 1) {
     const glyphID = run.glyphIDs[index];
     const x = run.positions[index * 2] + run.offsets[index * 2];
     const y = run.positions[index * 2 + 1] + run.offsets[index * 2 + 1];
-    const mapped = transformPoint2d([x, y], transform);
+    const mapped = transformPoint2d([x, y], deviceTransform);
     const phaseX = quantizeDirectMaskSubpixelPhase(mapped[0]) / 4;
     const phaseY = quantizeDirectMaskSubpixelPhase(mapped[1]) / 4;
     const snappedDeviceOrigin = [
@@ -1214,7 +1240,12 @@ export function buildDirectMaskSubRun(host, run, transform = identityTextMatrix2
       Math.floor(mapped[1] + directMaskSubpixelRound),
     ];
     const snappedLocalOrigin = inverse ? transformPoint2d(snappedDeviceOrigin, inverse) : [x, y];
-    const mask = host.getGlyphMask(run.typeface, glyphID, run.size, { x: phaseX, y: phaseY });
+    const mask = host.getGlyphMask(
+      run.typeface,
+      glyphID,
+      run.size * devicePixelRatio,
+      { x: phaseX, y: phaseY },
+    );
     glyphs.push({
       glyphId: glyphID,
       x: mask ? snappedLocalOrigin[0] + mask.offsetX : snappedLocalOrigin[0],
@@ -1230,8 +1261,10 @@ export function buildDirectMaskSubRun(host, run, transform = identityTextMatrix2
 }
 
 export function buildTransformedMaskSubRun(host, run, strikeScale) {
+  const devicePixelRatio = getCurrentDevicePixelRatio();
   const effectiveStrikeScale = Number.isFinite(strikeScale) && strikeScale > 1 ? strikeScale : 1;
-  const strikeSize = run.size * effectiveStrikeScale;
+  const effectiveDeviceStrikeScale = effectiveStrikeScale * devicePixelRatio;
+  const strikeSize = run.size * effectiveDeviceStrikeScale;
   const strikeToSourceScale = run.size / strikeSize;
   const glyphs = [];
   for (let index = 0; index < run.glyphIDs.length; index += 1) {
@@ -1251,16 +1284,17 @@ export function buildTransformedMaskSubRun(host, run, strikeScale) {
     typeface: run.typeface,
     size: run.size,
     glyphs,
-    strikeScale: effectiveStrikeScale,
+    strikeScale: effectiveDeviceStrikeScale,
   };
 }
 
 export function buildSdfSubRun(host, run, strikeSize = run.size) {
   const sdfInset = 2;
   const sdfRadius = 4;
+  const devicePixelRatio = getCurrentDevicePixelRatio();
   const effectiveStrikeSize = Number.isFinite(strikeSize) && strikeSize > 0
-    ? strikeSize
-    : run.size;
+    ? strikeSize * devicePixelRatio
+    : run.size * devicePixelRatio;
   const strikeToSourceScale = run.size / effectiveStrikeSize;
   const glyphs = [];
   let complete = true;
@@ -1324,25 +1358,34 @@ export function buildPathSubRun(host, run) {
 }
 
 function buildDirectMaskAsset(host, run, transform, x, y) {
+  const devicePixelRatio = getCurrentDevicePixelRatio();
+  const deviceTransform = scaleTransformToDevicePixels(transform, devicePixelRatio);
   const glyphs = [];
   for (let index = 0; index < run.glyphIDs.length; index += 1) {
     const glyphID = run.glyphIDs[index];
     const localX = run.positions[index * 2] + run.offsets[index * 2] + x;
     const localY = run.positions[index * 2 + 1] + run.offsets[index * 2 + 1] + y;
-    const mapped = transformPoint2d([localX, localY], transform);
+    const mapped = transformPoint2d([localX, localY], deviceTransform);
     const phaseX = quantizeDirectMaskSubpixelPhase(mapped[0]) / 4;
     const phaseY = quantizeDirectMaskSubpixelPhase(mapped[1]) / 4;
     glyphs.push({
       glyphId: glyphID,
-      mask: host.getGlyphMask(run.typeface, glyphID, run.size, { x: phaseX, y: phaseY }),
+      mask: host.getGlyphMask(
+        run.typeface,
+        glyphID,
+        run.size * devicePixelRatio,
+        { x: phaseX, y: phaseY },
+      ),
     });
   }
   return { glyphs };
 }
 
 function buildTransformedMaskAsset(host, run, strikeScale) {
+  const devicePixelRatio = getCurrentDevicePixelRatio();
   const effectiveStrikeScale = Number.isFinite(strikeScale) && strikeScale > 1 ? strikeScale : 1;
-  const strikeSize = run.size * effectiveStrikeScale;
+  const effectiveDeviceStrikeScale = effectiveStrikeScale * devicePixelRatio;
+  const strikeSize = run.size * effectiveDeviceStrikeScale;
   const strikeToSourceScale = run.size / strikeSize;
   const glyphs = [];
   for (let index = 0; index < run.glyphIDs.length; index += 1) {
@@ -1355,16 +1398,17 @@ function buildTransformedMaskAsset(host, run, strikeScale) {
   }
   return {
     glyphs,
-    strikeScale: effectiveStrikeScale,
+    strikeScale: effectiveDeviceStrikeScale,
   };
 }
 
 function buildSdfAsset(host, run, strikeSize) {
   const sdfInset = 2;
   const sdfRadius = 4;
+  const devicePixelRatio = getCurrentDevicePixelRatio();
   const effectiveStrikeSize = Number.isFinite(strikeSize) && strikeSize > 0
-    ? strikeSize
-    : run.size;
+    ? strikeSize * devicePixelRatio
+    : run.size * devicePixelRatio;
   const strikeToSourceScale = run.size / effectiveStrikeSize;
   const glyphs = [];
   let complete = true;
@@ -1409,14 +1453,15 @@ function buildPathGlyphAssets(host, run) {
 }
 
 function serializeDirectMaskReuseKey(transform, x, y) {
-  const mappedOrigin = transformPoint2d([x, y], transform);
+  const deviceTransform = scaleTransformToDevicePixels(transform, getCurrentDevicePixelRatio());
+  const mappedOrigin = transformPoint2d([x, y], deviceTransform);
   const fractionalX = mappedOrigin[0] - Math.floor(mappedOrigin[0]);
   const fractionalY = mappedOrigin[1] - Math.floor(mappedOrigin[1]);
   return [
-    Number(transform[0]).toFixed(6),
-    Number(transform[1]).toFixed(6),
-    Number(transform[2]).toFixed(6),
-    Number(transform[3]).toFixed(6),
+    Number(deviceTransform[0]).toFixed(6),
+    Number(deviceTransform[1]).toFixed(6),
+    Number(deviceTransform[2]).toFixed(6),
+    Number(deviceTransform[3]).toFixed(6),
     fractionalX.toFixed(6),
     fractionalY.toFixed(6),
   ].join(",");
@@ -1436,7 +1481,8 @@ function findReusableTransformedMaskAsset(entry, strikeScale) {
 }
 
 function buildResolvedDirectMaskStateFromAsset(run, asset, indices, color, transform, x, y) {
-  const inverse = invertAffineTransform(transform);
+  const deviceTransform = scaleTransformToDevicePixels(transform, getCurrentDevicePixelRatio());
+  const inverse = invertAffineTransform(deviceTransform);
   return {
     kind: "direct-mask",
     x: 0,
@@ -1446,7 +1492,7 @@ function buildResolvedDirectMaskStateFromAsset(run, asset, indices, color, trans
       const glyph = asset.glyphs[index];
       const localX = run.positions[index * 2] + run.offsets[index * 2] + x;
       const localY = run.positions[index * 2 + 1] + run.offsets[index * 2 + 1] + y;
-      const mapped = transformPoint2d([localX, localY], transform);
+      const mapped = transformPoint2d([localX, localY], deviceTransform);
       const snappedDeviceOrigin = [
         Math.floor(mapped[0] + directMaskSubpixelRound),
         Math.floor(mapped[1] + directMaskSubpixelRound),
@@ -1560,10 +1606,10 @@ function serializeMatrix2d(matrix) {
   return matrix.map((value) => Number(value).toFixed(6)).join(",");
 }
 
-function approximateTransformedTextSize(size, transform) {
+function approximateTransformedTextSize(size, transform, devicePixelRatio = 1) {
   const scaleX = Math.hypot(transform[0], transform[1]);
   const scaleY = Math.hypot(transform[2], transform[3]);
-  return Number(size) * Math.max(scaleX, scaleY);
+  return Number(size) * Math.max(scaleX, scaleY) * normalizeDevicePixelRatio(devicePixelRatio);
 }
 
 function canUseDirectMaskMode(transform) {
@@ -1596,7 +1642,11 @@ function usesDistanceFieldText(approximateDeviceTextSize, useSdfForSmallText) {
 }
 
 function resolveGraphiteSdfSelection(run, transform, useSdfForSmallText) {
-  const approximateDeviceTextSize = approximateTransformedTextSize(run.size, transform);
+  const approximateDeviceTextSize = approximateTransformedTextSize(
+    run.size,
+    transform,
+    getCurrentDevicePixelRatio(),
+  );
   if (!usesDistanceFieldText(approximateDeviceTextSize, useSdfForSmallText)) {
     return null;
   }
@@ -1633,7 +1683,11 @@ function resolveGraphiteSdfSelection(run, transform, useSdfForSmallText) {
 }
 
 function chooseAutoTextMode(run, transform, useSdfForSmallText) {
-  const approximateDeviceTextSize = approximateTransformedTextSize(run.size, transform);
+  const approximateDeviceTextSize = approximateTransformedTextSize(
+    run.size,
+    transform,
+    getCurrentDevicePixelRatio(),
+  );
   if (!Number.isFinite(approximateDeviceTextSize) || approximateDeviceTextSize <= 0) {
     return "path";
   }
@@ -1666,6 +1720,7 @@ export function inspectAutoTextSelection(
     approximateDeviceTextSize: approximateTransformedTextSize(
       normalizedRun.size,
       normalizedTransform,
+      getCurrentDevicePixelRatio(),
     ),
     sdfStrikeSize: sdfSelection?.strikeSize ?? null,
     sdfStrikeToSourceScale: sdfSelection?.strikeToSourceScale ?? null,
@@ -1759,6 +1814,7 @@ function composeResolvedTextRuns(runs, color, transform) {
 function resolveAutoTextState(state, layoutState, groupTransform, cache) {
   const x = layoutState.x ?? state.x;
   const y = layoutState.y ?? state.y;
+  const devicePixelRatio = getCurrentDevicePixelRatio();
   const runKey = getAutoTextRunKey(state.run);
   if (cache.host !== state.host || cache.runKey !== runKey) {
     cache.host = state.host;
@@ -1772,6 +1828,7 @@ function resolveAutoTextState(state, layoutState, groupTransform, cache) {
   const approximateDeviceTextSize = approximateTransformedTextSize(
     sourceRun.size,
     groupTransform,
+    devicePixelRatio,
   );
   const preferBitmapMask = Number.isFinite(approximateDeviceTextSize) &&
     approximateDeviceTextSize > 0 &&
@@ -1844,7 +1901,7 @@ function resolveAutoTextState(state, layoutState, groupTransform, cache) {
   }
 
   if (remaining.length > 0 && preferBitmapMask && !preferDirectMask) {
-    const strikeScale = getTransformedMaskStrikeScale(groupTransform);
+    const strikeScale = getTransformedMaskStrikeScale(groupTransform, devicePixelRatio);
     let transformedMaskAsset = findReusableTransformedMaskAsset(entry, strikeScale);
     if (!transformedMaskAsset) {
       transformedMaskAsset = buildTransformedMaskAsset(state.host, sourceRun, strikeScale);
@@ -1909,7 +1966,7 @@ function resolveAutoTextState(state, layoutState, groupTransform, cache) {
     Number.isFinite(approximateDeviceTextSize) &&
     approximateDeviceTextSize > 0
   ) {
-    const strikeScale = getTransformedMaskStrikeScale(groupTransform);
+    const strikeScale = getTransformedMaskStrikeScale(groupTransform, devicePixelRatio);
     let transformedMaskAsset = findReusableTransformedMaskAsset(entry, strikeScale);
     if (!transformedMaskAsset) {
       transformedMaskAsset = buildTransformedMaskAsset(state.host, sourceRun, strikeScale);

@@ -1498,18 +1498,26 @@ fn append_scene_2d_item_plan(
     record_item_2d(recorder, model, item_id, inherited_transform);
 }
 
-fn build_scene_2d_plan(scene: &Scene2D, model: &RenderModel) -> Vec<Scene2DPlanStep> {
+fn build_scene_2d_plan(
+    scene: &Scene2D,
+    model: &RenderModel,
+    device_pixel_ratio: f32,
+) -> Vec<Scene2DPlanStep> {
     let mut steps = Vec::new();
     let mut recorder = DrawingRecorder::new();
     recorder.clear(scene.clear_color);
+    // Scene coordinates are authored in CSS pixels, so scale the root transform
+    // to the current device-pixel backing resolution before rasterization.
+    let root_transform = [
+        device_pixel_ratio,
+        0.0,
+        0.0,
+        device_pixel_ratio,
+        0.0,
+        0.0,
+    ];
     for item_id in &scene.root_item_ids {
-        append_scene_2d_item_plan(
-            model,
-            *item_id,
-            [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
-            &mut recorder,
-            &mut steps,
-        );
+        append_scene_2d_item_plan(model, *item_id, root_transform, &mut recorder, &mut steps);
     }
     flush_scene_2d_recorder(&mut recorder, &mut steps);
     steps
@@ -2243,7 +2251,7 @@ impl RendererState {
         Ok(true)
     }
 
-    pub fn render(&mut self, model: &RenderModel) -> Result<bool> {
+    pub fn render(&mut self, model: &RenderModel, device_pixel_ratio: f32) -> Result<bool> {
         if self.config.width == 0 || self.config.height == 0 {
             return Ok(false);
         }
@@ -2285,7 +2293,7 @@ impl RendererState {
                     .ok_or_else(|| anyhow!("missing active 2D scene {scene_id}"))?;
                 self.path_atlas_provider.begin_frame();
                 self.text_atlas_provider.begin_frame();
-                let plan = build_scene_2d_plan(scene, model);
+                let plan = build_scene_2d_plan(scene, model, device_pixel_ratio);
                 for step in &plan {
                     match step {
                         Scene2DPlanStep::Direct(recording) => {

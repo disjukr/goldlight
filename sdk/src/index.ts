@@ -541,13 +541,19 @@ export type Triangle3dPatch = Partial<Triangle3dState>;
 
 export interface WindowResizeEvent {
   type: 'resize';
+  // Resize values are reported in CSS pixels.
   width: number;
   height: number;
+  // device pixels per CSS pixel for the window's current display scale.
+  devicePixelRatio: number;
 }
 
 export interface WindowInfo {
+  // Window size exposed to app code is expressed in CSS pixels.
   width: number;
   height: number;
+  // device pixels per CSS pixel for the window's current display scale.
+  devicePixelRatio: number;
   title: string;
   resizable: boolean;
   initialClearColor: ResolvedColorValue;
@@ -922,6 +928,8 @@ export function buildGlyphClusters(_run: ShapedRun): GlyphCluster[] {
   throw new Error(RUNTIME_ONLY_ERROR);
 }
 
+// Glyph mask/SDF strike generation is sized against the current window's
+// devicePixelRatio so CSS-pixel text stays sharp on high-density displays.
 export function buildDirectMaskSubRun(
   _host: TextHost,
   _run: ShapedRun,

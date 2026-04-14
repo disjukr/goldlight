@@ -88,6 +88,7 @@ use uuid::Uuid;
 use web_transport_proto::{ConnectRequest, ConnectResponse, Settings, SettingsError};
 use winit::{
     application::ApplicationHandler,
+    dpi::{LogicalSize, PhysicalSize},
     event::{ElementState, WindowEvent},
     event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy},
     keyboard::{Key, KeyCode, KeyLocation, ModifiersState, NamedKey, PhysicalKey},
@@ -468,6 +469,7 @@ enum WorkerEventPayload {
     Resize {
         width: u32,
         height: u32,
+        device_pixel_ratio: f64,
     },
     AnimationFrame {
         #[serde(rename = "timestampMs")]
@@ -799,9 +801,40 @@ enum WebSocketEventPayload {
 struct WindowInfoValue {
     width: u32,
     height: u32,
+    device_pixel_ratio: f64,
     title: String,
     resizable: bool,
     initial_clear_color: ColorValue,
+}
+
+fn css_pixel_window_size(size: PhysicalSize<u32>, device_pixel_ratio: f64) -> (u32, u32) {
+    let scale = if device_pixel_ratio.is_finite() && device_pixel_ratio > 0.0 {
+        device_pixel_ratio
+    } else {
+        1.0
+    };
+    let css_pixels = size.to_logical::<f64>(scale);
+    let width = css_pixels.width.max(0.0).round() as u32;
+    let height = css_pixels.height.max(0.0).round() as u32;
+    (width, height)
+}
+
+fn window_info_value(
+    window: &Window,
+    title: String,
+    resizable: bool,
+    initial_clear_color: ColorValue,
+) -> WindowInfoValue {
+    let device_pixel_ratio = window.scale_factor();
+    let (width, height) = css_pixel_window_size(window.inner_size(), device_pixel_ratio);
+    WindowInfoValue {
+        width,
+        height,
+        device_pixel_ratio,
+        title,
+        resizable,
+        initial_clear_color,
+    }
 }
 
 #[derive(Default)]
@@ -833,28 +866,37 @@ impl WindowWorkerHandle {
     fn push_event(&self, event: WorkerEventPayload) {
         if let Ok(mut state) = self.state.lock() {
             match event {
-                WorkerEventPayload::Resize { width, height } => {
+                WorkerEventPayload::Resize {
+                    width,
+                    height,
+                    device_pixel_ratio,
+                } => {
                     if let Some(window_info) = state.window_info.as_mut() {
                         window_info.width = width;
                         window_info.height = height;
+                        window_info.device_pixel_ratio = device_pixel_ratio;
                     }
                     let mut merged = false;
                     for pending_event in state.pending_events.iter_mut().rev() {
                         if let WorkerEventPayload::Resize {
                             width: pending_width,
                             height: pending_height,
+                            device_pixel_ratio: pending_device_pixel_ratio,
                         } = pending_event
                         {
                             *pending_width = width;
                             *pending_height = height;
+                            *pending_device_pixel_ratio = device_pixel_ratio;
                             merged = true;
                             break;
                         }
                     }
                     if !merged {
-                        state
-                            .pending_events
-                            .push(WorkerEventPayload::Resize { width, height });
+                        state.pending_events.push(WorkerEventPayload::Resize {
+                            width,
+                            height,
+                            device_pixel_ratio,
+                        });
                     }
                 }
                 WorkerEventPayload::AnimationFrame { timestamp_ms } => {
@@ -4569,9 +4611,9 @@ impl GoldlightRuntime {
             let startup_presented = pending_window.show_policy == WindowShowPolicy::Immediate;
             let attributes = WindowAttributes::default()
                 .with_title(pending_window.title.clone())
-                .with_inner_size(winit::dpi::PhysicalSize::new(
-                    pending_window.width,
-                    pending_window.height,
+                .with_inner_size(LogicalSize::new(
+                    f64::from(pending_window.width),
+                    f64::from(pending_window.height),
                 ))
                 .with_resizable(pending_window.resizable)
                 .with_visible(startup_presented);
@@ -4580,16 +4622,12 @@ impl GoldlightRuntime {
                     .create_window(attributes)
                     .expect("failed to create runtime window"),
             );
-            let initial_window_info = {
-                let size = window.inner_size();
-                WindowInfoValue {
-                    width: size.width,
-                    height: size.height,
-                    title: pending_window.title.clone(),
-                    resizable: pending_window.resizable,
-                    initial_clear_color: pending_window.initial_clear_color,
-                }
-            };
+            let initial_window_info = window_info_value(
+                &window,
+                pending_window.title.clone(),
+                pending_window.resizable,
+                pending_window.initial_clear_color,
+            );
             let window_id = window.id();
             let renderer_bootstrap = RendererBootstrap::new(window.clone())
                 .expect("failed to create window renderer bootstrap");
@@ -4617,6 +4655,7 @@ impl GoldlightRuntime {
                     worker.push_event(WorkerEventPayload::Resize {
                         width: initial_window_info.width,
                         height: initial_window_info.height,
+                        device_pixel_ratio: initial_window_info.device_pixel_ratio,
                     });
                     worker
                 });
@@ -4708,7 +4747,7 @@ impl GoldlightRuntime {
         if let (WindowRendererState::Ready(renderer), Some(render_model)) =
             (&mut record.renderer, record.render_model_snapshot.as_ref())
         {
-            match renderer.render(render_model.as_ref()) {
+            match renderer.render(render_model.as_ref(), record.window.scale_factor() as f32) {
                 Ok(rendered) => {
                     if rendered {
                         Self::complete_startup_presentation(record);
@@ -4845,9 +4884,25 @@ impl ApplicationHandler<RuntimeUserEvent> for GoldlightRuntime {
                 record.pending_resize = Some(size);
                 record.window.request_redraw();
                 if let Some(worker) = record.worker.as_ref() {
+                    let device_pixel_ratio = record.window.scale_factor();
+                    let (width, height) = css_pixel_window_size(size, device_pixel_ratio);
                     worker.push_event(WorkerEventPayload::Resize {
-                        width: size.width,
-                        height: size.height,
+                        width,
+                        height,
+                        device_pixel_ratio,
+                    });
+                }
+            }
+            WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+                let size = record.window.inner_size();
+                record.pending_resize = Some(size);
+                record.window.request_redraw();
+                if let Some(worker) = record.worker.as_ref() {
+                    let (width, height) = css_pixel_window_size(size, scale_factor);
+                    worker.push_event(WorkerEventPayload::Resize {
+                        width,
+                        height,
+                        device_pixel_ratio: scale_factor,
                     });
                 }
             }

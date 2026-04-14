@@ -9,11 +9,13 @@ use peniko::{
     Color, Fill,
 };
 
-use crate::drawing::PathDrawCommand;
-use crate::render::{PathFillRule2D, PathStrokeCap2D, PathStrokeJoin2D, PathStyle2D, PathVerb2D};
-use crate::vello_compute::{
+use super::super::render::{
+    PathFillRule2D, PathStrokeCap2D, PathStrokeJoin2D, PathStyle2D, PathVerb2D,
+};
+use super::vello_compute::{
     stroke_from_parts, CoverageAaConfig, CoverageComputeRenderer, CoverageScene,
 };
+use super::PathDrawCommand;
 
 const ENTRY_PADDING: u32 = 1;
 const DEFAULT_ATLAS_DIM: u32 = 2048;
@@ -63,24 +65,14 @@ impl AtlasProvider {
         self.raster_path_atlas.begin_frame();
     }
 
-    pub fn add_path(
+    pub fn prepare_mask(
         &mut self,
         path: &PathDrawCommand,
         surface_width: u32,
         surface_height: u32,
     ) -> Option<CoverageMask> {
         self.raster_path_atlas
-            .add_path(path, surface_width, surface_height)
-    }
-
-    pub fn should_use_path_atlas(
-        &mut self,
-        path: &PathDrawCommand,
-        surface_width: u32,
-        surface_height: u32,
-    ) -> bool {
-        self.raster_path_atlas
-            .should_use_path_atlas(path, surface_width, surface_height)
+            .prepare_mask(path, surface_width, surface_height)
     }
 
     pub fn upload_pending(&mut self, queue: &wgpu::Queue) {
@@ -439,17 +431,43 @@ impl RasterPathAtlas {
         }
     }
 
-    fn add_path(
+    fn prepare_mask(
         &mut self,
         path: &PathDrawCommand,
         surface_width: u32,
         surface_height: u32,
     ) -> Option<CoverageMask> {
+        if !self.compute_backend_ready() {
+            return None;
+        }
+
         let prepared = PreparedMaskShape::from_path(path, surface_width, surface_height)?;
         if !self.fits_in_atlas(prepared.mask_bounds.width, prepared.mask_bounds.height) {
             return None;
         }
 
+        let clipped_width = prepared.mask_bounds.width as f32;
+        let clipped_height = prepared.mask_bounds.height as f32;
+        if clipped_width * clipped_height > GRAPHITE_COMPUTE_ATLAS_BBOX_AREA_THRESHOLD {
+            return None;
+        }
+
+        let unclipped_width = prepared.transformed_bounds.right - prepared.transformed_bounds.left;
+        let unclipped_height = prepared.transformed_bounds.bottom - prepared.transformed_bounds.top;
+        if unclipped_width.abs() > GRAPHITE_COMPUTE_COORDINATE_THRESHOLD
+            || unclipped_height.abs() > GRAPHITE_COMPUTE_COORDINATE_THRESHOLD
+        {
+            return None;
+        }
+
+        self.add_prepared_path(path, prepared)
+    }
+
+    fn add_prepared_path(
+        &mut self,
+        path: &PathDrawCommand,
+        prepared: PreparedMaskShape,
+    ) -> Option<CoverageMask> {
         if let Some(&entry) = self.cache.get(&prepared.key) {
             let plot = self
                 .pages
@@ -497,41 +515,6 @@ impl RasterPathAtlas {
         };
         self.cache.insert(prepared.key, entry);
         Some(self.coverage_mask_for_entry(entry, &prepared.mask_bounds))
-    }
-
-    fn should_use_path_atlas(
-        &mut self,
-        path: &PathDrawCommand,
-        surface_width: u32,
-        surface_height: u32,
-    ) -> bool {
-        let Some(prepared) = PreparedMaskShape::from_path(path, surface_width, surface_height)
-        else {
-            return false;
-        };
-        if !self.fits_in_atlas(prepared.mask_bounds.width, prepared.mask_bounds.height) {
-            return false;
-        }
-
-        if !self.compute_backend_ready() {
-            return false;
-        }
-
-        let clipped_width = prepared.mask_bounds.width as f32;
-        let clipped_height = prepared.mask_bounds.height as f32;
-        if clipped_width * clipped_height > GRAPHITE_COMPUTE_ATLAS_BBOX_AREA_THRESHOLD {
-            return false;
-        }
-
-        let unclipped_width = prepared.transformed_bounds.right - prepared.transformed_bounds.left;
-        let unclipped_height = prepared.transformed_bounds.bottom - prepared.transformed_bounds.top;
-        if unclipped_width.abs() > GRAPHITE_COMPUTE_COORDINATE_THRESHOLD
-            || unclipped_height.abs() > GRAPHITE_COMPUTE_COORDINATE_THRESHOLD
-        {
-            return false;
-        }
-
-        true
     }
 
     fn upload_pending(&mut self, queue: &wgpu::Queue) {
@@ -2591,9 +2574,9 @@ fn hash_f32_bits(value: f32, hasher: &mut impl Hasher) {
 
 #[cfg(test)]
 mod tests {
+    use super::PathDrawCommand;
     use super::{build_path_mask_key, local_to_device_transform, PreparedMaskShape};
-    use crate::drawing::PathDrawCommand;
-    use crate::render::{
+    use crate::scene::render::{
         ColorValue, PathFillRule2D, PathStrokeCap2D, PathStrokeJoin2D, PathStyle2D, PathVerb2D,
     };
 

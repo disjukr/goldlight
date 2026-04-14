@@ -9,7 +9,7 @@ use harfbuzz_sys::*;
 use serde::{Deserialize, Serialize};
 use ttf_parser::{Face, GlyphId, OutlineBuilder};
 
-use crate::render::PathVerb2D;
+use super::super::render::PathVerb2D;
 
 const TEXT_HOST_CACHE_COUNT_LIMIT: usize = 2048;
 const TEXT_HOST_CACHE_SIZE_LIMIT: usize = 2 * 1024 * 1024;

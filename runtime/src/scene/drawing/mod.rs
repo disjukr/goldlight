@@ -1,3 +1,15 @@
+mod fill_patch;
+mod path_atlas;
+mod stroke_patch;
+pub(crate) mod svg;
+pub(crate) mod text;
+mod text_atlas;
+mod text_pipeline;
+mod vello_compute;
+
+pub(crate) use self::path_atlas::{AtlasProvider, CoverageMask};
+pub(crate) use self::text_atlas::TextAtlasProvider;
+
 use std::f32::consts::PI;
 use std::sync::{Arc, OnceLock};
 
@@ -5,27 +17,25 @@ use anyhow::Result;
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 
-use crate::drawing_text::{
-    encode_bitmap_text_step, encode_sdf_text_step, prepare_direct_mask_text_step,
-    prepare_sdf_text_step, prepare_transformed_mask_text_step, PreparedBitmapTextStep,
-    PreparedSdfTextStep, TextPipelineResources,
-};
-use crate::fill_patch::{
+use self::fill_patch::{
     curve_fill_shader_source, curve_template_vertices, fill_paint_shader_source,
     prepare_fill_steps, wedge_fill_shader_source, wedge_template_vertices, CurveFillPatchInstance,
     FillStencilMode, FillTriangleMode, PatchResolveVertex, PreparedCurveFillStep, PreparedFillStep,
     PreparedFillTriangleStep, PreparedWedgeFillStep, WedgeFillPatchInstance,
 };
-use crate::path_atlas::{AtlasProvider, CoverageMask};
-use crate::render::{
-    ColorValue, GradientStop2D, GradientTileMode2D, PathFillRule2D, PathShader2D, PathStrokeCap2D,
-    PathStrokeJoin2D, PathStyle2D, PathVerb2D, RenderModel, Scene2D, Text2D,
-};
-use crate::stroke_patch::{
+use self::stroke_patch::{
     prepare_stroke_patch_step, stroke_patch_shader_source, PreparedStrokePatchStep,
     StrokePatchInstance,
 };
-use crate::text_atlas::TextAtlasProvider;
+use self::text_pipeline::{
+    encode_bitmap_text_step, encode_sdf_text_step, prepare_direct_mask_text_step,
+    prepare_sdf_text_step, prepare_transformed_mask_text_step, PreparedBitmapTextStep,
+    PreparedSdfTextStep, TextPipelineResources,
+};
+use super::render::{
+    ColorValue, GradientStop2D, GradientTileMode2D, PathFillRule2D, PathShader2D, PathStrokeCap2D,
+    PathStrokeJoin2D, PathStyle2D, PathVerb2D,
+};
 
 const EPSILON: f32 = 1e-5;
 const GRADIENT_EPSILON: f32 = 1e-5;
@@ -1239,10 +1249,6 @@ impl DrawingRecorder {
         }
     }
 
-    pub fn clear(&mut self, color: ColorValue) {
-        self.commands.push(DrawingCommand::Clear { color });
-    }
-
     pub fn fill_rect(&mut self, rect: RectDrawCommand) {
         self.commands.push(DrawingCommand::FillRect(rect));
     }
@@ -1264,10 +1270,6 @@ impl DrawingRecorder {
         self.commands.push(DrawingCommand::DrawSdfText(text));
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.commands.is_empty()
-    }
-
     pub fn finish(self) -> DrawingRecording {
         DrawingRecording {
             commands: self.commands,
@@ -1280,6 +1282,13 @@ pub struct DrawingRecording {
     commands: Vec<DrawingCommand>,
 }
 
+impl DrawingRecording {
+    pub fn is_empty(&self) -> bool {
+        self.commands.is_empty()
+    }
+}
+
+#[cfg(test)]
 #[derive(Clone, Copy, Debug)]
 pub struct RecordingBounds {
     pub left: f32,
@@ -1290,7 +1299,6 @@ pub struct RecordingBounds {
 
 #[derive(Clone, Debug)]
 enum DrawingCommand {
-    Clear { color: ColorValue },
     FillRect(RectDrawCommand),
     DrawPath(PathDrawCommand),
     DrawDirectMaskText(DirectMaskTextDrawCommand),
@@ -1330,7 +1338,7 @@ pub struct DirectMaskTextDrawCommand {
     pub x: f32,
     pub y: f32,
     pub color: ColorValue,
-    pub glyphs: Vec<crate::render::DirectMaskGlyph2D>,
+    pub glyphs: Vec<super::DirectMaskGlyph2D>,
     pub transform: [f32; 6],
 }
 
@@ -1339,7 +1347,7 @@ pub struct TransformedMaskTextDrawCommand {
     pub x: f32,
     pub y: f32,
     pub color: ColorValue,
-    pub glyphs: Vec<crate::render::TransformedMaskGlyph2D>,
+    pub glyphs: Vec<super::TransformedMaskGlyph2D>,
     pub transform: [f32; 6],
 }
 
@@ -1348,7 +1356,7 @@ pub struct SdfTextDrawCommand {
     pub x: f32,
     pub y: f32,
     pub color: ColorValue,
-    pub glyphs: Vec<crate::render::SdfGlyph2D>,
+    pub glyphs: Vec<super::SdfGlyph2D>,
     pub transform: [f32; 6],
 }
 
@@ -1397,7 +1405,23 @@ pub struct DrawingPreparedRecording {
     pub passes: Vec<DrawingDrawPass>,
 }
 
+impl DrawingPreparedRecording {
+    pub fn is_cacheable(&self) -> bool {
+        self.passes
+            .iter()
+            .flat_map(|pass| pass.steps.iter())
+            .all(|step| !step.depends_on_atlas())
+    }
+}
+
 impl DrawingPreparedStep {
+    fn depends_on_atlas(&self) -> bool {
+        matches!(
+            self,
+            Self::PathMask(_) | Self::BitmapText(_) | Self::SdfText(_)
+        )
+    }
+
     fn requires_msaa(&self) -> bool {
         matches!(
             self,
@@ -1542,167 +1566,7 @@ impl PathMaskVertex {
     }
 }
 
-fn multiply_affine_transforms(left: [f32; 6], right: [f32; 6]) -> [f32; 6] {
-    [
-        (left[0] * right[0]) + (left[2] * right[1]),
-        (left[1] * right[0]) + (left[3] * right[1]),
-        (left[0] * right[2]) + (left[2] * right[3]),
-        (left[1] * right[2]) + (left[3] * right[3]),
-        (left[0] * right[4]) + (left[2] * right[5]) + left[4],
-        (left[1] * right[4]) + (left[3] * right[5]) + left[5],
-    ]
-}
-
-#[allow(dead_code)]
-pub fn record_scene_2d(scene: &Scene2D, model: &RenderModel) -> DrawingRecording {
-    let mut recorder = DrawingRecorder::new();
-    recorder.clear(scene.clear_color);
-    record_item_list_2d(
-        &mut recorder,
-        model,
-        &scene.root_item_ids,
-        [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
-    );
-    recorder.finish()
-}
-
-pub(crate) fn record_item_list_2d(
-    recorder: &mut DrawingRecorder,
-    model: &RenderModel,
-    item_ids: &[u32],
-    inherited_transform: [f32; 6],
-) {
-    for item_id in item_ids {
-        record_item_2d(recorder, model, *item_id, inherited_transform);
-    }
-}
-
-pub(crate) fn record_item_2d(
-    recorder: &mut DrawingRecorder,
-    model: &RenderModel,
-    item_id: u32,
-    inherited_transform: [f32; 6],
-) {
-    if let Some(rect) = model.rects_2d.get(&item_id) {
-        recorder.fill_rect(RectDrawCommand {
-            x: rect.x,
-            y: rect.y,
-            width: rect.width,
-            height: rect.height,
-            color: rect.color,
-            transform: multiply_affine_transforms(inherited_transform, rect.transform),
-        });
-        return;
-    }
-
-    if let Some(path) = model.paths_2d.get(&item_id) {
-        recorder.draw_path(PathDrawCommand {
-            x: path.x,
-            y: path.y,
-            verbs: path.verbs.clone(),
-            fill_rule: path.fill_rule,
-            style: path.style,
-            color: path.color,
-            shader: path.shader.clone(),
-            stroke_width: path.stroke_width,
-            stroke_join: path.stroke_join,
-            stroke_cap: path.stroke_cap,
-            dash_array: path.dash_array.clone(),
-            dash_offset: path.dash_offset,
-            transform: multiply_affine_transforms(inherited_transform, path.transform),
-        });
-        return;
-    }
-
-    if let Some(text) = model.texts_2d.get(&item_id) {
-        record_text_2d(recorder, text, inherited_transform);
-        return;
-    }
-
-    if let Some(group) = model.groups_2d.get(&item_id) {
-        let next_transform = multiply_affine_transforms(inherited_transform, group.transform);
-        record_item_list_2d(recorder, model, &group.child_item_ids, next_transform);
-    }
-}
-
-fn record_text_2d(recorder: &mut DrawingRecorder, text: &Text2D, inherited_transform: [f32; 6]) {
-    match text {
-        Text2D::DirectMask {
-            x,
-            y,
-            color,
-            glyphs,
-            transform,
-            ..
-        } => recorder.draw_direct_mask_text(DirectMaskTextDrawCommand {
-            x: *x,
-            y: *y,
-            color: *color,
-            glyphs: glyphs.clone(),
-            transform: multiply_affine_transforms(inherited_transform, *transform),
-        }),
-        Text2D::TransformedMask {
-            x,
-            y,
-            color,
-            glyphs,
-            transform,
-            ..
-        } => recorder.draw_transformed_mask_text(TransformedMaskTextDrawCommand {
-            x: *x,
-            y: *y,
-            color: *color,
-            glyphs: glyphs.clone(),
-            transform: multiply_affine_transforms(inherited_transform, *transform),
-        }),
-        Text2D::Sdf {
-            x,
-            y,
-            color,
-            glyphs,
-            transform,
-            ..
-        } => recorder.draw_sdf_text(SdfTextDrawCommand {
-            x: *x,
-            y: *y,
-            color: *color,
-            glyphs: glyphs.clone(),
-            transform: multiply_affine_transforms(inherited_transform, *transform),
-        }),
-        Text2D::Path {
-            x,
-            y,
-            color,
-            glyphs,
-            transform,
-            ..
-        } => {
-            for glyph in glyphs {
-                recorder.draw_path(PathDrawCommand {
-                    x: *x + glyph.x,
-                    y: *y + glyph.y,
-                    verbs: glyph.verbs.clone(),
-                    fill_rule: PathFillRule2D::Nonzero,
-                    style: PathStyle2D::Fill,
-                    color: *color,
-                    shader: None,
-                    stroke_width: 1.0,
-                    stroke_join: PathStrokeJoin2D::Miter,
-                    stroke_cap: PathStrokeCap2D::Butt,
-                    dash_array: Vec::new(),
-                    dash_offset: 0.0,
-                    transform: multiply_affine_transforms(inherited_transform, *transform),
-                });
-            }
-        }
-        Text2D::Composite { runs, .. } => {
-            for run in runs {
-                record_text_2d(recorder, run, inherited_transform);
-            }
-        }
-    }
-}
-
+#[cfg(test)]
 fn transform_bounds_point(point: [f32; 2], matrix: [f32; 6]) -> [f32; 2] {
     [
         (matrix[0] * point[0]) + (matrix[2] * point[1]) + matrix[4],
@@ -1710,6 +1574,7 @@ fn transform_bounds_point(point: [f32; 2], matrix: [f32; 6]) -> [f32; 2] {
     ]
 }
 
+#[cfg(test)]
 fn include_point(bounds: &mut Option<RecordingBounds>, point: [f32; 2]) {
     match bounds {
         Some(existing) => {
@@ -1729,6 +1594,7 @@ fn include_point(bounds: &mut Option<RecordingBounds>, point: [f32; 2]) {
     }
 }
 
+#[cfg(test)]
 fn include_transformed_rect(
     bounds: &mut Option<RecordingBounds>,
     x: f32,
@@ -1747,6 +1613,7 @@ fn include_transformed_rect(
     }
 }
 
+#[cfg(test)]
 fn include_arc_bounds(
     bounds: &mut Option<RecordingBounds>,
     center: [f32; 2],
@@ -1763,6 +1630,7 @@ fn include_arc_bounds(
     }
 }
 
+#[cfg(test)]
 fn include_path_bounds(bounds: &mut Option<RecordingBounds>, path: &PathDrawCommand) {
     let mut local_bounds = None;
     let mut current = [path.x, path.y];
@@ -1835,6 +1703,7 @@ fn include_path_bounds(bounds: &mut Option<RecordingBounds>, path: &PathDrawComm
     );
 }
 
+#[cfg(test)]
 fn include_direct_mask_text_bounds(
     bounds: &mut Option<RecordingBounds>,
     text: &DirectMaskTextDrawCommand,
@@ -1858,6 +1727,7 @@ fn include_direct_mask_text_bounds(
     }
 }
 
+#[cfg(test)]
 fn include_transformed_mask_text_bounds(
     bounds: &mut Option<RecordingBounds>,
     text: &TransformedMaskTextDrawCommand,
@@ -1887,6 +1757,7 @@ fn include_transformed_mask_text_bounds(
     }
 }
 
+#[cfg(test)]
 fn include_sdf_text_bounds(bounds: &mut Option<RecordingBounds>, text: &SdfTextDrawCommand) {
     for glyph in &text.glyphs {
         let scale =
@@ -1913,11 +1784,11 @@ fn include_sdf_text_bounds(bounds: &mut Option<RecordingBounds>, text: &SdfTextD
     }
 }
 
+#[cfg(test)]
 pub fn compute_recording_bounds(recording: &DrawingRecording) -> Option<RecordingBounds> {
     let mut bounds = None;
     for command in &recording.commands {
         match command {
-            DrawingCommand::Clear { .. } => {}
             DrawingCommand::FillRect(rect) => include_transformed_rect(
                 &mut bounds,
                 rect.x,
@@ -1980,6 +1851,24 @@ pub fn prepare_drawing_recording_with_providers(
     mut path_atlas_provider: Option<&mut AtlasProvider>,
     mut text_atlas_provider: Option<&mut TextAtlasProvider>,
 ) -> DrawingPreparedRecording {
+    prepare_drawing_recording_with_providers_and_initial_clear(
+        recording,
+        surface_width,
+        surface_height,
+        path_atlas_provider.as_deref_mut(),
+        text_atlas_provider.as_deref_mut(),
+        None,
+    )
+}
+
+pub fn prepare_drawing_recording_with_providers_and_initial_clear(
+    recording: &DrawingRecording,
+    surface_width: u32,
+    surface_height: u32,
+    mut path_atlas_provider: Option<&mut AtlasProvider>,
+    mut text_atlas_provider: Option<&mut TextAtlasProvider>,
+    initial_clear: Option<ColorValue>,
+) -> DrawingPreparedRecording {
     let width = surface_width.max(1) as f32;
     let height = surface_height.max(1) as f32;
     let mut passes = Vec::new();
@@ -2024,11 +1913,6 @@ pub fn prepare_drawing_recording_with_providers(
 
     for command in &recording.commands {
         match command {
-            DrawingCommand::Clear { color } => {
-                flush_pass(&mut passes, &mut current_load_op, &mut current_steps);
-                current_load_op = wgpu::LoadOp::Clear(color.to_wgpu());
-                next_painters_depth = 1;
-            }
             DrawingCommand::FillRect(rect) => {
                 let painter_depth = next_painter_depth_as_float(&mut next_painters_depth);
                 push_step(
@@ -2126,6 +2010,19 @@ pub fn prepare_drawing_recording_with_providers(
     }
 
     flush_pass(&mut passes, &mut current_load_op, &mut current_steps);
+
+    if let Some(clear_color) = initial_clear {
+        if let Some(first_pass) = passes.first_mut() {
+            first_pass.load_op = wgpu::LoadOp::Clear(clear_color.to_wgpu());
+        } else {
+            passes.push(DrawingDrawPass {
+                load_op: wgpu::LoadOp::Clear(clear_color.to_wgpu()),
+                requires_msaa: false,
+                requires_depth: false,
+                steps: Vec::new(),
+            });
+        }
+    }
 
     DrawingPreparedRecording {
         surface_width,
@@ -2673,26 +2570,20 @@ fn build_path_steps(
     painter_depth: f32,
     surface_width: u32,
     surface_height: u32,
-    mut atlas_provider: Option<&mut AtlasProvider>,
+    atlas_provider: Option<&mut AtlasProvider>,
 ) -> Vec<DrawingPreparedStep> {
     let mut steps = Vec::new();
-    let should_use_path_atlas = match atlas_provider.as_deref_mut() {
-        Some(provider) => provider.should_use_path_atlas(path, surface_width, surface_height),
-        None => false,
-    };
-    if should_use_path_atlas {
-        if let Some(step) = prepare_path_mask_step(
-            path,
-            width,
-            height,
-            painter_depth,
-            surface_width,
-            surface_height,
-            atlas_provider,
-        ) {
-            steps.push(DrawingPreparedStep::PathMask(step));
-            return steps;
-        }
+    if let Some(step) = prepare_path_mask_step(
+        path,
+        width,
+        height,
+        painter_depth,
+        surface_width,
+        surface_height,
+        atlas_provider,
+    ) {
+        steps.push(DrawingPreparedStep::PathMask(step));
+        return steps;
     }
 
     let path_paint = build_fill_path_paint(path);
@@ -2819,7 +2710,7 @@ fn prepare_path_mask_step(
     atlas_provider: Option<&mut AtlasProvider>,
 ) -> Option<PreparedPathMaskStep> {
     let atlas_provider = atlas_provider?;
-    let mask = atlas_provider.add_path(path, surface_width, surface_height)?;
+    let mask = atlas_provider.prepare_mask(path, surface_width, surface_height)?;
     let vertices = build_path_mask_vertices(&mask, width, height, painter_depth);
     (!vertices.is_empty()).then_some(PreparedPathMaskStep {
         vertices,
@@ -4760,11 +4651,11 @@ mod tests {
         compute_recording_bounds, prepare_drawing_recording, DirectMaskTextDrawCommand,
         DrawingPreparedStep, DrawingRecorder, PathDrawCommand,
     };
-    use crate::render::{
-        ColorValue, DirectMaskGlyph2D, GlyphMask2D, PathFillRule2D, PathStrokeCap2D,
-        PathStrokeJoin2D, PathStyle2D, PathVerb2D,
+    use crate::scene::drawing::svg::parse_svg;
+    use crate::scene::render::{
+        ColorValue, PathFillRule2D, PathStrokeCap2D, PathStrokeJoin2D, PathStyle2D, PathVerb2D,
     };
-    use crate::svg::parse_svg;
+    use crate::scene::{DirectMaskGlyph2D, GlyphMask2D};
 
     const SVG_STROKE_FIXTURE: &str = r##"
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
@@ -4905,28 +4796,6 @@ mod tests {
         assert_eq!(prepared.passes.len(), 1);
         assert!(!prepared.passes[0].requires_msaa);
         assert!(prepared.passes[0].requires_depth);
-    }
-
-    #[test]
-    fn msaa_requirement_is_tracked_per_pass() {
-        let mut recorder = DrawingRecorder::new();
-        recorder.draw_direct_mask_text(direct_mask_text());
-        recorder.clear(ColorValue::default());
-        recorder.draw_path(stroke_path(
-            vec![
-                PathVerb2D::MoveTo { to: [10.0, 10.0] },
-                PathVerb2D::LineTo { to: [120.0, 120.0] },
-            ],
-            vec![],
-        ));
-
-        let prepared = prepare_drawing_recording(&recorder.finish(), 640, 480);
-
-        assert_eq!(prepared.passes.len(), 2);
-        assert!(!prepared.passes[0].requires_msaa);
-        assert!(prepared.passes[0].requires_depth);
-        assert!(prepared.passes[1].requires_msaa);
-        assert!(prepared.passes[1].requires_depth);
     }
 
     #[test]

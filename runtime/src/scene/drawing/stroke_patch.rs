@@ -1,7 +1,7 @@
 use bytemuck::{Pod, Zeroable};
 
-use crate::drawing::{FlattenedSubpath, PathDrawCommand, Point, StrokeStyle};
-use crate::render::{PathStrokeCap2D, PathVerb2D};
+use super::super::render::{PathStrokeCap2D, PathVerb2D};
+use super::{FlattenedSubpath, PathDrawCommand, Point, StrokeStyle};
 
 const EPSILON: f32 = 1e-5;
 const PATCH_PRECISION: f32 = 4.0;
@@ -1963,8 +1963,8 @@ fn lerp4(a: [f32; 4], b: [f32; 4], t: f32) -> [f32; 4] {
 #[cfg(test)]
 mod tests {
     use super::prepare_stroke_patch_step;
-    use crate::drawing::{PathDrawCommand, StrokeStyle};
-    use crate::render::{
+    use super::{PathDrawCommand, StrokeStyle};
+    use crate::scene::render::{
         ColorValue, PathFillRule2D, PathStrokeCap2D, PathStrokeJoin2D, PathStyle2D, PathVerb2D,
     };
 

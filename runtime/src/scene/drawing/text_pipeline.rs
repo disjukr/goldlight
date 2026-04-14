@@ -3,10 +3,10 @@ use std::sync::{Arc, OnceLock};
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 
-use crate::render::{
-    ColorValue, DirectMaskGlyph2D, GlyphMask2D, SdfGlyph2D, TransformedMaskGlyph2D,
-};
-use crate::text_atlas::{TextAtlasPlacement, TextAtlasProvider};
+use super::super::render::ColorValue;
+use super::super::{DirectMaskGlyph2D, GlyphMask2D, SdfGlyph2D, TransformedMaskGlyph2D};
+use super::text_atlas::{TextAtlasPlacement, TextAtlasProvider};
+use super::DRAWING_DEPTH_FORMAT;
 
 const BITMAP_ATLAS_PADDING: u32 = 1;
 const SDF_ATLAS_PADDING: u32 = 0;
@@ -224,7 +224,7 @@ fn create_text_pipeline(
         }),
         primitive: wgpu::PrimitiveState::default(),
         depth_stencil: Some(wgpu::DepthStencilState {
-            format: crate::drawing::DRAWING_DEPTH_FORMAT,
+            format: DRAWING_DEPTH_FORMAT,
             depth_write_enabled: true,
             depth_compare: wgpu::CompareFunction::Less,
             stencil: wgpu::StencilState::default(),

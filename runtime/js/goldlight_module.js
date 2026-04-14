@@ -435,14 +435,12 @@ function normalizeGroupInit(init = {}) {
   const transform = normalizeTransform2d(init.transform);
   return {
     transform,
-    cacheAsRaster: init.cacheAsRaster ?? false,
   };
 }
 
 function cloneGroupState(state) {
   return {
     transform: cloneTransform2d(state.transform),
-    cacheAsRaster: state.cacheAsRaster,
   };
 }
 
@@ -2771,10 +2769,16 @@ export function setWindowScene(scene) {
   ensureScene(scene);
   markSceneLayoutDirty(scene);
   if (scene instanceof Scene2d) {
-    Deno.core.ops.op_goldlight_present_scene_2d(scene.id);
+    Deno.core.ops.op_goldlight_set_window_root({
+      kind: "scene-2d",
+      sceneId: scene.id,
+    });
     return scene;
   }
-  Deno.core.ops.op_goldlight_present_scene_3d(scene.id);
+  Deno.core.ops.op_goldlight_set_window_root({
+    kind: "scene-3d",
+    sceneId: scene.id,
+  });
   return scene;
 }
 
@@ -2894,12 +2898,10 @@ export class Group2d {
 
   set(patch = {}) {
     const updateTransform = Object.prototype.hasOwnProperty.call(patch, "transform");
-    const updateCacheAsRaster = Object.prototype.hasOwnProperty.call(patch, "cacheAsRaster");
-    if (updateTransform || updateCacheAsRaster) {
+    if (updateTransform) {
       this._state = normalizeGroupInit({
         ...this._state,
         ...(updateTransform ? { transform: patch.transform } : {}),
-        ...(updateCacheAsRaster ? { cacheAsRaster: patch.cacheAsRaster } : {}),
       });
       this._syncState();
     }

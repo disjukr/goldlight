@@ -46,9 +46,7 @@ function mount() {
     clearColor: { r: 1, g: 1, b: 1, a: 1 },
   }));
 
-  const tigerGroup = scene.add(new Group2d({
-    cacheAsRaster: true,
-  })) as Group2d;
+  const tigerGroup = scene.add(new Group2d()) as Group2d;
   for (const path of parsed.paths) {
     tigerGroup.add(new Path2d(path));
   }
@@ -67,7 +65,7 @@ function mount() {
     host,
     x: 16,
     y: 42,
-    run: getRun("tiger group cacheAsRaster=true | resize window to inspect behavior", 14),
+    run: getRun("tiger paths grouped under a single Group2d | resize window to inspect behavior", 14),
     color: { r: 0.34, g: 0.39, b: 0.47, a: 1 },
   })) as Text2d;
 

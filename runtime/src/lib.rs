@@ -1,13 +1,4 @@
-mod drawing;
-mod drawing_text;
-mod fill_patch;
-mod path_atlas;
-mod render;
-mod stroke_patch;
-mod svg;
-mod text;
-mod text_atlas;
-mod vello_compute;
+mod scene;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -95,14 +86,17 @@ use winit::{
     window::{Fullscreen, Window, WindowAttributes, WindowId},
 };
 
-use crate::render::{
+use crate::scene::drawing::text::{GlyphSubpixelOffsetInput, ShapeTextInput};
+use crate::scene::drawing::{svg, text};
+use crate::scene::render;
+use crate::scene::render::{
     ColorValue, Group2DHandle, Group2DOptions, Group2DUpdate, Path2DHandle, Path2DOptions,
-    Path2DUpdate, Rect2DHandle, Rect2DOptions, Rect2DUpdate, RenderModel, RendererBootstrap,
-    RendererState, Scene2DHandle, Scene2DOptions, Scene3DHandle, Scene3DOptions, SceneCameraUpdate,
+    Path2DUpdate, Rect2DHandle, Rect2DOptions, Rect2DUpdate, RendererBootstrap, RendererState,
+    Scene2DHandle, Scene2DOptions, Scene3DHandle, Scene3DOptions, SceneCameraUpdate,
     SceneClearColorOptions, Text2DHandle, Text2DOptions, Text2DUpdate, Triangle3DHandle,
     Triangle3DOptions, Triangle3DUpdate,
 };
-use crate::text::{GlyphSubpixelOffsetInput, ShapeTextInput};
+use crate::scene::{RenderModel, WindowRoot};
 
 pub const GOLDLIGHT_MODULE_SPECIFIER: &str = "ext:goldlight/mod.js";
 pub const GOLDLIGHT_APP_MANIFEST: &str = "goldlight.manifest.json";
@@ -4181,13 +4175,6 @@ fn op_goldlight_text_2d_update(
     })
 }
 
-#[deno_core::op2(fast)]
-fn op_goldlight_present_scene_2d(state: &mut OpState, scene_id: u32) -> Result<(), JsErrorBox> {
-    with_worker_render_model_mutation(state, |worker_state| {
-        worker_state.render_model.present_scene_2d(scene_id)
-    })
-}
-
 #[deno_core::op2]
 #[serde]
 fn op_goldlight_create_scene_3d(
@@ -4252,10 +4239,13 @@ fn op_goldlight_triangle_3d_update(
     })
 }
 
-#[deno_core::op2(fast)]
-fn op_goldlight_present_scene_3d(state: &mut OpState, scene_id: u32) -> Result<(), JsErrorBox> {
+#[deno_core::op2]
+fn op_goldlight_set_window_root(
+    state: &mut OpState,
+    #[serde] root: WindowRoot,
+) -> Result<(), JsErrorBox> {
     with_worker_render_model_mutation(state, |worker_state| {
-        worker_state.render_model.present_scene_3d(scene_id)
+        worker_state.render_model.set_window_root(root)
     })
 }
 
@@ -4322,13 +4312,12 @@ deno_core::extension!(
         op_goldlight_path_2d_update,
         op_goldlight_scene_2d_create_text,
         op_goldlight_text_2d_update,
-        op_goldlight_present_scene_2d,
         op_goldlight_create_scene_3d,
         op_goldlight_scene_3d_set_clear_color,
         op_goldlight_scene_3d_set_camera,
         op_goldlight_scene_3d_create_triangle,
         op_goldlight_triangle_3d_update,
-        op_goldlight_present_scene_3d
+        op_goldlight_set_window_root
     ],
     options = {
         runtime_op_context: RuntimeOpContext,
@@ -4400,13 +4389,12 @@ deno_core::extension!(
         op_goldlight_path_2d_update,
         op_goldlight_scene_2d_create_text,
         op_goldlight_text_2d_update,
-        op_goldlight_present_scene_2d,
         op_goldlight_create_scene_3d,
         op_goldlight_scene_3d_set_clear_color,
         op_goldlight_scene_3d_set_camera,
         op_goldlight_scene_3d_create_triangle,
         op_goldlight_triangle_3d_update,
-        op_goldlight_present_scene_3d
+        op_goldlight_set_window_root
     ],
     options = {
         runtime_op_context: RuntimeOpContext,

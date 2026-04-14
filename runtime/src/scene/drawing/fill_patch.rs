@@ -1,7 +1,7 @@
 use bytemuck::{Pod, Zeroable};
 
-use crate::drawing::{PathDrawCommand, Point};
-use crate::render::{PathFillRule2D, PathVerb2D};
+use super::super::render::{PathFillRule2D, PathVerb2D};
+use super::{PathDrawCommand, Point};
 
 const EPSILON: f32 = 1e-5;
 const PATCH_PRECISION: f32 = 4.0;

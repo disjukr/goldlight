@@ -17,11 +17,18 @@ export type WindowShowPolicy =
   | 'after-initial-clear'
   | 'after-first-paint';
 
+export type WindowStyle =
+  | 'default'
+  | 'custom-titlebar'
+  | 'frameless'
+  | 'fullscreen';
+
 export interface WindowInit {
   title?: string;
   width?: number;
   height?: number;
   resizable?: boolean;
+  style?: WindowStyle;
   initialClearColor?: ColorValue;
   showPolicy?: WindowShowPolicy;
   workerEntrypoint?: string;
@@ -548,7 +555,15 @@ export interface WindowResizeEvent {
   devicePixelRatio: number;
 }
 
+export interface WindowMoveEvent {
+  type: 'move';
+  x: number;
+  y: number;
+}
+
 export interface WindowInfo {
+  x: number | null;
+  y: number | null;
   // Window size exposed to app code is expressed in CSS pixels.
   width: number;
   height: number;
@@ -556,7 +571,19 @@ export interface WindowInfo {
   devicePixelRatio: number;
   title: string;
   resizable: boolean;
+  style: WindowStyle;
   initialClearColor: ResolvedColorValue;
+}
+
+export interface WindowInfoPatch {
+  x?: number;
+  y?: number;
+  title?: string;
+  width?: number;
+  height?: number;
+  resizable?: boolean;
+  style?: WindowStyle;
+  initialClearColor?: ColorValue;
 }
 
 export const DOM_KEY_LOCATION_STANDARD = 0;
@@ -599,6 +626,7 @@ export interface WindowCloseRequestedEvent {
 }
 
 export type WindowEvent =
+  | WindowMoveEvent
   | WindowResizeEvent
   | WindowKeyDownEvent
   | WindowKeyUpEvent
@@ -606,6 +634,7 @@ export type WindowEvent =
   | WindowCloseRequestedEvent;
 
 export interface WindowEventMap {
+  move: WindowMoveEvent;
   resize: WindowResizeEvent;
   keydown: WindowKeyDownEvent;
   keyup: WindowKeyUpEvent;
@@ -978,5 +1007,9 @@ export function addWindowEventListener<T extends keyof WindowEventMap>(
 }
 
 export function getWindowInfo(): WindowInfo {
+  throw new Error(RUNTIME_ONLY_ERROR);
+}
+
+export function setWindowInfo(_patch: WindowInfoPatch = {}): void {
   throw new Error(RUNTIME_ONLY_ERROR);
 }

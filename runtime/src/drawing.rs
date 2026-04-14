@@ -18,8 +18,8 @@ use crate::fill_patch::{
 };
 use crate::path_atlas::{AtlasProvider, CoverageMask};
 use crate::render::{
-    ColorValue, GradientStop2D, GradientTileMode2D, PathFillRule2D, PathShader2D,
-    PathStrokeCap2D, PathStrokeJoin2D, PathStyle2D, PathVerb2D, RenderModel, Scene2D, Text2D,
+    ColorValue, GradientStop2D, GradientTileMode2D, PathFillRule2D, PathShader2D, PathStrokeCap2D,
+    PathStrokeJoin2D, PathStyle2D, PathVerb2D, RenderModel, Scene2D, Text2D,
 };
 use crate::stroke_patch::{
     prepare_stroke_patch_step, stroke_patch_shader_source, PreparedStrokePatchStep,
@@ -1763,10 +1763,7 @@ fn include_arc_bounds(
     }
 }
 
-fn include_path_bounds(
-    bounds: &mut Option<RecordingBounds>,
-    path: &PathDrawCommand,
-) {
+fn include_path_bounds(bounds: &mut Option<RecordingBounds>, path: &PathDrawCommand) {
     let mut local_bounds = None;
     let mut current = [path.x, path.y];
     include_point(&mut local_bounds, current);
@@ -1866,12 +1863,12 @@ fn include_transformed_mask_text_bounds(
     text: &TransformedMaskTextDrawCommand,
 ) {
     for glyph in &text.glyphs {
-        let scale = if glyph.strike_to_source_scale.is_finite() && glyph.strike_to_source_scale > 0.0
-        {
-            glyph.strike_to_source_scale
-        } else {
-            1.0
-        };
+        let scale =
+            if glyph.strike_to_source_scale.is_finite() && glyph.strike_to_source_scale > 0.0 {
+                glyph.strike_to_source_scale
+            } else {
+                1.0
+            };
         if let Some(mask) = glyph.mask.as_ref() {
             include_transformed_rect(
                 bounds,
@@ -1892,12 +1889,12 @@ fn include_transformed_mask_text_bounds(
 
 fn include_sdf_text_bounds(bounds: &mut Option<RecordingBounds>, text: &SdfTextDrawCommand) {
     for glyph in &text.glyphs {
-        let scale = if glyph.strike_to_source_scale.is_finite() && glyph.strike_to_source_scale > 0.0
-        {
-            glyph.strike_to_source_scale
-        } else {
-            1.0
-        };
+        let scale =
+            if glyph.strike_to_source_scale.is_finite() && glyph.strike_to_source_scale > 0.0 {
+                glyph.strike_to_source_scale
+            } else {
+                1.0
+            };
         if let Some(source) = glyph.sdf.as_ref() {
             include_transformed_rect(
                 bounds,
@@ -2013,8 +2010,9 @@ pub fn prepare_drawing_recording_with_providers(
                      current_load_op: &mut wgpu::LoadOp<wgpu::Color>,
                      current_steps: &mut Vec<DrawingPreparedStep>,
                      step: DrawingPreparedStep| {
-        if let Some(current_requires_depth) =
-            current_steps.first().map(DrawingPreparedStep::requires_depth)
+        if let Some(current_requires_depth) = current_steps
+            .first()
+            .map(DrawingPreparedStep::requires_depth)
         {
             let next_requires_depth = step.requires_depth();
             if current_requires_depth != next_requires_depth {
@@ -2038,13 +2036,13 @@ pub fn prepare_drawing_recording_with_providers(
                     &mut current_load_op,
                     &mut current_steps,
                     DrawingPreparedStep::Triangles {
-                    vertices: with_vertex_depth(
-                        build_rect_vertices(rect, width, height),
-                        painter_depth,
-                    ),
-                    mode: TriangleStepMode::DirectDepth,
-                    paint: vertex_colored_paint(),
-                },
+                        vertices: with_vertex_depth(
+                            build_rect_vertices(rect, width, height),
+                            painter_depth,
+                        ),
+                        mode: TriangleStepMode::DirectDepth,
+                        paint: vertex_colored_paint(),
+                    },
                 );
             }
             DrawingCommand::DrawPath(path) => {
@@ -2760,13 +2758,14 @@ fn build_path_steps(
         PathStyle2D::Stroke => {
             let stroke_style = resolve_stroke_style(path);
             let stroke_color = resolve_stroke_color(path);
-            let stroke_patch_path = is_translation_only_affine_transform(path.transform).then(|| {
-                let mut translated = path.clone();
-                translated.x += path.transform[4];
-                translated.y += path.transform[5];
-                translated.transform = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
-                translated
-            });
+            let stroke_patch_path =
+                is_translation_only_affine_transform(path.transform).then(|| {
+                    let mut translated = path.clone();
+                    translated.x += path.transform[4];
+                    translated.y += path.transform[5];
+                    translated.transform = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+                    translated
+                });
             let dashed_subpaths = if let Some(stroke_patch_path) = stroke_patch_path.as_ref() {
                 apply_dash_pattern(flatten_subpaths(stroke_patch_path), stroke_patch_path)
             } else {
@@ -5030,10 +5029,13 @@ mod tests {
 
     #[test]
     fn translated_stroke_paths_still_use_stroke_patches() {
-        let mut path = stroke_path(vec![
-            PathVerb2D::MoveTo { to: [10.0, 10.0] },
-            PathVerb2D::LineTo { to: [110.0, 40.0] },
-        ], vec![]);
+        let mut path = stroke_path(
+            vec![
+                PathVerb2D::MoveTo { to: [10.0, 10.0] },
+                PathVerb2D::LineTo { to: [110.0, 40.0] },
+            ],
+            vec![],
+        );
         path.transform = [1.0, 0.0, 0.0, 1.0, 24.0, -12.0];
 
         let mut recorder = DrawingRecorder::new();

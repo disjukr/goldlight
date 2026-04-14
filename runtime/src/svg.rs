@@ -312,9 +312,7 @@ mod tests {
         let wide_stroke_count = parsed
             .paths
             .iter()
-            .filter(|path| {
-                matches!(path.style, PathStyle2D::Stroke) && path.stroke_width >= 1.0
-            })
+            .filter(|path| matches!(path.style, PathStyle2D::Stroke) && path.stroke_width >= 1.0)
             .count();
 
         assert!(stroke_count > 0, "expected fixture stroke paths");

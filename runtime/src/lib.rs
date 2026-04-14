@@ -92,15 +92,15 @@ use winit::{
     event::{ElementState, WindowEvent},
     event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy},
     keyboard::{Key, KeyCode, KeyLocation, ModifiersState, NamedKey, PhysicalKey},
-    window::{Window, WindowAttributes, WindowId},
+    window::{Fullscreen, Window, WindowAttributes, WindowId},
 };
 
 use crate::render::{
     ColorValue, Group2DHandle, Group2DOptions, Group2DUpdate, Path2DHandle, Path2DOptions,
     Path2DUpdate, Rect2DHandle, Rect2DOptions, Rect2DUpdate, RenderModel, RendererBootstrap,
-    RendererState, Scene2DHandle, Scene2DOptions, Scene3DHandle, Scene3DOptions,
-    SceneCameraUpdate, SceneClearColorOptions, Text2DHandle, Text2DOptions, Text2DUpdate,
-    Triangle3DHandle, Triangle3DOptions, Triangle3DUpdate,
+    RendererState, Scene2DHandle, Scene2DOptions, Scene3DHandle, Scene3DOptions, SceneCameraUpdate,
+    SceneClearColorOptions, Text2DHandle, Text2DOptions, Text2DUpdate, Triangle3DHandle,
+    Triangle3DOptions, Triangle3DUpdate,
 };
 use crate::text::{GlyphSubpixelOffsetInput, ShapeTextInput};
 
@@ -267,6 +267,8 @@ struct WindowOptions {
     height: u32,
     #[serde(default = "default_window_resizable")]
     resizable: bool,
+    #[serde(default = "default_window_style")]
+    style: WindowStyle,
     #[serde(default = "default_window_initial_clear_color")]
     initial_clear_color: ColorValue,
     #[serde(default = "default_window_show_policy")]
@@ -283,6 +285,15 @@ enum WindowShowPolicy {
     AfterFirstPaint,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+enum WindowStyle {
+    Default,
+    CustomTitlebar,
+    Frameless,
+    Fullscreen,
+}
+
 fn default_window_initial_clear_color() -> ColorValue {
     ColorValue {
         r: 1.0,
@@ -294,6 +305,10 @@ fn default_window_initial_clear_color() -> ColorValue {
 
 fn default_window_show_policy() -> WindowShowPolicy {
     WindowShowPolicy::AfterInitialClear
+}
+
+fn default_window_style() -> WindowStyle {
+    WindowStyle::Default
 }
 
 fn default_window_resizable() -> bool {
@@ -309,6 +324,7 @@ struct WindowHandle {
 struct RuntimeState {
     next_window_id: u32,
     pending_windows: Vec<PendingWindow>,
+    pending_window_updates: Vec<PendingWindowUpdate>,
 }
 
 #[derive(Default)]
@@ -458,14 +474,25 @@ struct PendingWindow {
     width: u32,
     height: u32,
     resizable: bool,
+    style: WindowStyle,
     initial_clear_color: ColorValue,
     show_policy: WindowShowPolicy,
     worker_entrypoint: Option<String>,
 }
 
+#[derive(Clone, Debug)]
+struct PendingWindowUpdate {
+    window_id: u32,
+    patch: WindowInfoPatch,
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 enum WorkerEventPayload {
+    Move {
+        x: i32,
+        y: i32,
+    },
     Resize {
         width: u32,
         height: u32,
@@ -767,6 +794,44 @@ mod tests {
             vec![1, 3]
         );
     }
+
+    #[test]
+    fn fullscreen_window_patches_drop_geometry() {
+        let patch = WindowInfoPatch {
+            x: Some(120),
+            y: Some(240),
+            width: Some(1280),
+            height: Some(720),
+            style: Some(WindowStyle::Fullscreen),
+            ..WindowInfoPatch::default()
+        }
+        .sanitized_for_effective_style(WindowStyle::Default);
+
+        assert_eq!(patch.x, None);
+        assert_eq!(patch.y, None);
+        assert_eq!(patch.width, None);
+        assert_eq!(patch.height, None);
+        assert_eq!(patch.style, Some(WindowStyle::Fullscreen));
+    }
+
+    #[test]
+    fn leaving_fullscreen_can_apply_geometry_in_same_patch() {
+        let patch = WindowInfoPatch {
+            x: Some(120),
+            y: Some(240),
+            width: Some(1280),
+            height: Some(720),
+            style: Some(WindowStyle::Default),
+            ..WindowInfoPatch::default()
+        }
+        .sanitized_for_effective_style(WindowStyle::Fullscreen);
+
+        assert_eq!(patch.x, Some(120));
+        assert_eq!(patch.y, Some(240));
+        assert_eq!(patch.width, Some(1280));
+        assert_eq!(patch.height, Some(720));
+        assert_eq!(patch.style, Some(WindowStyle::Default));
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -799,11 +864,14 @@ enum WebSocketEventPayload {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct WindowInfoValue {
+    x: Option<i32>,
+    y: Option<i32>,
     width: u32,
     height: u32,
     device_pixel_ratio: f64,
     title: String,
     resizable: bool,
+    style: WindowStyle,
     initial_clear_color: ColorValue,
 }
 
@@ -823,17 +891,67 @@ fn window_info_value(
     window: &Window,
     title: String,
     resizable: bool,
+    style: WindowStyle,
     initial_clear_color: ColorValue,
 ) -> WindowInfoValue {
     let device_pixel_ratio = window.scale_factor();
+    let (x, y) = window_position_value(window);
     let (width, height) = css_pixel_window_size(window.inner_size(), device_pixel_ratio);
     WindowInfoValue {
+        x,
+        y,
         width,
         height,
         device_pixel_ratio,
         title,
         resizable,
+        style,
         initial_clear_color,
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WindowInfoPatch {
+    #[serde(default)]
+    x: Option<i32>,
+    #[serde(default)]
+    y: Option<i32>,
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    width: Option<u32>,
+    #[serde(default)]
+    height: Option<u32>,
+    #[serde(default)]
+    resizable: Option<bool>,
+    #[serde(default)]
+    style: Option<WindowStyle>,
+    #[serde(default)]
+    initial_clear_color: Option<ColorValue>,
+}
+
+impl WindowInfoPatch {
+    fn is_empty(&self) -> bool {
+        self.x.is_none()
+            && self.y.is_none()
+            && self.title.is_none()
+            && self.width.is_none()
+            && self.height.is_none()
+            && self.resizable.is_none()
+            && self.style.is_none()
+            && self.initial_clear_color.is_none()
+    }
+
+    fn sanitized_for_effective_style(mut self, current_style: WindowStyle) -> Self {
+        let effective_style = self.style.unwrap_or(current_style);
+        if matches!(effective_style, WindowStyle::Fullscreen) {
+            self.x = None;
+            self.y = None;
+            self.width = None;
+            self.height = None;
+        }
+        self
     }
 }
 
@@ -866,6 +984,28 @@ impl WindowWorkerHandle {
     fn push_event(&self, event: WorkerEventPayload) {
         if let Ok(mut state) = self.state.lock() {
             match event {
+                WorkerEventPayload::Move { x, y } => {
+                    if let Some(window_info) = state.window_info.as_mut() {
+                        window_info.x = Some(x);
+                        window_info.y = Some(y);
+                    }
+                    let mut merged = false;
+                    for pending_event in state.pending_events.iter_mut().rev() {
+                        if let WorkerEventPayload::Move {
+                            x: pending_x,
+                            y: pending_y,
+                        } = pending_event
+                        {
+                            *pending_x = x;
+                            *pending_y = y;
+                            merged = true;
+                            break;
+                        }
+                    }
+                    if !merged {
+                        state.pending_events.push(WorkerEventPayload::Move { x, y });
+                    }
+                }
                 WorkerEventPayload::Resize {
                     width,
                     height,
@@ -968,13 +1108,14 @@ enum WindowRendererState {
 }
 
 struct WindowRecord {
+    runtime_window_id: u32,
     window: Arc<Window>,
     worker: Option<WindowWorkerHandle>,
     renderer: WindowRendererState,
     render_model_snapshot: Option<Arc<RenderModel>>,
     pending_resize: Option<winit::dpi::PhysicalSize<u32>>,
     modifiers: ModifiersState,
-    initial_clear_color: ColorValue,
+    window_info: WindowInfoValue,
     show_policy: WindowShowPolicy,
     startup_presented: bool,
 }
@@ -996,6 +1137,7 @@ struct RuntimeOpContext {
     state: RuntimeStateHandle,
     event_proxy: Option<EventLoopProxy<RuntimeUserEvent>>,
     worker_state: Option<WorkerHostStateHandle>,
+    window_id: Option<u32>,
     timer_state: TimerHostStateHandle,
     fetch_state: FetchHostStateHandle,
     websocket_state: WebSocketHostStateHandle,
@@ -1389,7 +1531,9 @@ fn sync_layout_node(
                 layout_state
                     .taffy
                     .set_style(existing.taffy_node, style)
-                    .map_err(|error| JsErrorBox::generic(format!("failed to update taffy style: {error}")))?;
+                    .map_err(|error| {
+                        JsErrorBox::generic(format!("failed to update taffy style: {error}"))
+                    })?;
             }
             if existing.measure != measure {
                 layout_state
@@ -1398,7 +1542,11 @@ fn sync_layout_node(
                         existing.taffy_node,
                         measure.as_ref().map(layout_measure_context),
                     )
-                    .map_err(|error| JsErrorBox::generic(format!("failed to update taffy measure context: {error}")))?;
+                    .map_err(|error| {
+                        JsErrorBox::generic(format!(
+                            "failed to update taffy measure context: {error}"
+                        ))
+                    })?;
             }
             layout_state.nodes.insert(
                 node.id,
@@ -1416,12 +1564,15 @@ fn sync_layout_node(
                 layout_state
                     .taffy
                     .new_leaf_with_context(style, layout_measure_context(measure))
-                    .map_err(|error| JsErrorBox::generic(format!("failed to create measured taffy node: {error}")))?
+                    .map_err(|error| {
+                        JsErrorBox::generic(format!(
+                            "failed to create measured taffy node: {error}"
+                        ))
+                    })?
             } else {
-                layout_state
-                    .taffy
-                    .new_leaf(style)
-                    .map_err(|error| JsErrorBox::generic(format!("failed to create taffy leaf node: {error}")))?
+                layout_state.taffy.new_leaf(style).map_err(|error| {
+                    JsErrorBox::generic(format!("failed to create taffy leaf node: {error}"))
+                })?
             };
             layout_state.nodes.insert(
                 node.id,
@@ -1466,7 +1617,9 @@ fn set_layout_children(
     layout_state
         .taffy
         .set_children(parent.taffy_node, &child_nodes)
-        .map_err(|error| JsErrorBox::generic(format!("failed to update taffy children: {error}")))?;
+        .map_err(|error| {
+            JsErrorBox::generic(format!("failed to update taffy children: {error}"))
+        })?;
 
     if let Some(parent_state) = layout_state.nodes.get_mut(&input.parent_id) {
         parent_state.child_ids = input.child_ids.clone();
@@ -1520,10 +1673,9 @@ fn compute_layout_outputs(
 
     let mut results = Vec::new();
     for id in ordered_ids {
-        let node = layout_state
-            .nodes
-            .get(&id)
-            .ok_or_else(|| JsErrorBox::generic(format!("missing retained layout node for id {id}")))?;
+        let node = layout_state.nodes.get(&id).ok_or_else(|| {
+            JsErrorBox::generic(format!("missing retained layout node for id {id}"))
+        })?;
         let TaffyLayout { size, location, .. } = layout_state
             .taffy
             .layout(node.taffy_node)
@@ -1640,6 +1792,7 @@ fn op_goldlight_create_window(
         width: options.width,
         height: options.height,
         resizable: options.resizable,
+        style: options.style,
         initial_clear_color: options.initial_clear_color,
         show_policy: options.show_policy,
         worker_entrypoint: options.worker_entrypoint,
@@ -1692,6 +1845,83 @@ fn op_goldlight_worker_get_window_info(state: &mut OpState) -> Result<WindowInfo
         .window_info
         .clone()
         .ok_or_else(|| JsErrorBox::generic("window info is not available yet"))
+}
+
+#[deno_core::op2]
+#[serde]
+fn op_goldlight_worker_set_window_info(
+    state: &mut OpState,
+    #[serde] patch: WindowInfoPatch,
+) -> Result<(), JsErrorBox> {
+    let op_context = state.borrow::<RuntimeOpContext>().clone();
+    let worker_state = op_context
+        .worker_state
+        .ok_or_else(|| JsErrorBox::generic("window info is only available in a window worker"))?;
+    let window_id = op_context
+        .window_id
+        .ok_or_else(|| JsErrorBox::generic("window info is not bound to a runtime window"))?;
+
+    if patch.is_empty() {
+        return Ok(());
+    }
+
+    let mut patch = patch;
+
+    {
+        let mut worker_state = worker_state
+            .lock()
+            .map_err(|_| JsErrorBox::generic("worker state mutex poisoned"))?;
+        let window_info = worker_state
+            .window_info
+            .as_mut()
+            .ok_or_else(|| JsErrorBox::generic("window info is not available yet"))?;
+
+        patch = patch.sanitized_for_effective_style(window_info.style);
+        if patch.is_empty() {
+            return Ok(());
+        }
+
+        if let Some(x) = patch.x {
+            window_info.x = Some(x);
+        }
+        if let Some(y) = patch.y {
+            window_info.y = Some(y);
+        }
+        if let Some(title) = patch.title.as_ref() {
+            window_info.title = title.clone();
+        }
+        if let Some(width) = patch.width {
+            window_info.width = width;
+        }
+        if let Some(height) = patch.height {
+            window_info.height = height;
+        }
+        if let Some(resizable) = patch.resizable {
+            window_info.resizable = resizable;
+        }
+        if let Some(style) = patch.style {
+            window_info.style = style;
+        }
+        if let Some(initial_clear_color) = patch.initial_clear_color {
+            window_info.initial_clear_color = initial_clear_color;
+        }
+    }
+
+    {
+        let mut runtime_state = op_context
+            .state
+            .lock()
+            .map_err(|_| JsErrorBox::generic("runtime state mutex poisoned"))?;
+        runtime_state
+            .pending_window_updates
+            .push(PendingWindowUpdate { window_id, patch });
+    }
+
+    if let Some(event_proxy) = op_context.event_proxy {
+        let _ = event_proxy.send_event(RuntimeUserEvent::Wake);
+    }
+
+    Ok(())
 }
 
 #[cfg(feature = "dev-runtime")]
@@ -3857,7 +4087,9 @@ fn op_goldlight_scene_2d_set_root_items(
     #[serde] item_ids: Vec<u32>,
 ) -> Result<(), JsErrorBox> {
     with_worker_render_model_mutation(state, |worker_state| {
-        worker_state.render_model.scene_2d_set_root_items(scene_id, item_ids)
+        worker_state
+            .render_model
+            .scene_2d_set_root_items(scene_id, item_ids)
     })
 }
 
@@ -4074,6 +4306,7 @@ deno_core::extension!(
         op_goldlight_worker_request_animation_frame,
         op_goldlight_worker_drain_events,
         op_goldlight_worker_get_window_info,
+        op_goldlight_worker_set_window_info,
         op_goldlight_layout_sync_node,
         op_goldlight_layout_set_children,
         op_goldlight_compute_layout,
@@ -4151,6 +4384,7 @@ deno_core::extension!(
         op_goldlight_worker_request_animation_frame,
         op_goldlight_worker_drain_events,
         op_goldlight_worker_get_window_info,
+        op_goldlight_worker_set_window_info,
         op_goldlight_layout_sync_node,
         op_goldlight_layout_set_children,
         op_goldlight_compute_layout,
@@ -4572,7 +4806,40 @@ fn inspector_worker_info(record: &InspectorTargetRecord, session_id: &str) -> se
     })
 }
 
+fn window_position_value(window: &Window) -> (Option<i32>, Option<i32>) {
+    match window.outer_position() {
+        Ok(position) => (Some(position.x), Some(position.y)),
+        Err(_) => (None, None),
+    }
+}
+
 impl GoldlightRuntime {
+    fn apply_window_style(window: &Window, style: WindowStyle) {
+        match style {
+            WindowStyle::Default => {
+                window.set_fullscreen(None);
+                window.set_decorations(true);
+            }
+            WindowStyle::CustomTitlebar | WindowStyle::Frameless => {
+                window.set_fullscreen(None);
+                window.set_decorations(false);
+            }
+            WindowStyle::Fullscreen => {
+                window.set_decorations(false);
+                window.set_fullscreen(Some(Fullscreen::Borderless(None)));
+            }
+        }
+    }
+
+    fn sync_worker_window_info(record: &WindowRecord) {
+        let Some(worker) = record.worker.as_ref() else {
+            return;
+        };
+        if let Ok(mut worker_state) = worker.state.lock() {
+            worker_state.window_info = Some(record.window_info.clone());
+        }
+    }
+
     fn new(
         state: RuntimeStateHandle,
         main_timer_state: TimerHostStateHandle,
@@ -4609,7 +4876,7 @@ impl GoldlightRuntime {
         };
         for pending_window in pending {
             let startup_presented = pending_window.show_policy == WindowShowPolicy::Immediate;
-            let attributes = WindowAttributes::default()
+            let mut attributes = WindowAttributes::default()
                 .with_title(pending_window.title.clone())
                 .with_inner_size(LogicalSize::new(
                     f64::from(pending_window.width),
@@ -4617,6 +4884,15 @@ impl GoldlightRuntime {
                 ))
                 .with_resizable(pending_window.resizable)
                 .with_visible(startup_presented);
+            attributes = match pending_window.style {
+                WindowStyle::Default => attributes,
+                WindowStyle::CustomTitlebar | WindowStyle::Frameless => {
+                    attributes.with_decorations(false)
+                }
+                WindowStyle::Fullscreen => attributes
+                    .with_decorations(false)
+                    .with_fullscreen(Some(Fullscreen::Borderless(None))),
+            };
             let window = Arc::new(
                 event_loop
                     .create_window(attributes)
@@ -4626,6 +4902,7 @@ impl GoldlightRuntime {
                 &window,
                 pending_window.title.clone(),
                 pending_window.resizable,
+                pending_window.style,
                 pending_window.initial_clear_color,
             );
             let window_id = window.id();
@@ -4643,6 +4920,7 @@ impl GoldlightRuntime {
                 .clone()
                 .map(|worker_entrypoint| {
                     let worker = spawn_window_worker(
+                        self.state.clone(),
                         self.mode.clone(),
                         self.entrypoint_specifier.clone(),
                         pending_window.id,
@@ -4662,17 +4940,107 @@ impl GoldlightRuntime {
             self.windows.insert(
                 window_id,
                 WindowRecord {
+                    runtime_window_id: pending_window.id,
                     window,
                     worker,
                     renderer: WindowRendererState::Pending(renderer),
                     render_model_snapshot: None,
                     pending_resize: None,
                     modifiers: ModifiersState::default(),
-                    initial_clear_color: pending_window.initial_clear_color,
+                    window_info: initial_window_info,
                     show_policy: pending_window.show_policy,
                     startup_presented,
                 },
             );
+        }
+    }
+
+    fn drain_pending_window_updates(&mut self) {
+        let pending_updates = {
+            let mut state = self.state.lock().expect("runtime state mutex poisoned");
+            std::mem::take(&mut state.pending_window_updates)
+        };
+
+        for pending_update in pending_updates {
+            let Some(record) = self
+                .windows
+                .values_mut()
+                .find(|record| record.runtime_window_id == pending_update.window_id)
+            else {
+                continue;
+            };
+
+            let patch = pending_update
+                .patch
+                .sanitized_for_effective_style(record.window_info.style);
+            if patch.is_empty() {
+                continue;
+            }
+
+            let mut needs_redraw = false;
+            let target_style = patch.style.unwrap_or(record.window_info.style);
+
+            if let Some(title) = patch.title {
+                record.window.set_title(&title);
+                record.window_info.title = title;
+            }
+
+            if let Some(resizable) = patch.resizable {
+                record.window.set_resizable(resizable);
+                record.window_info.resizable = resizable;
+            }
+
+            if let Some(style) = patch.style {
+                Self::apply_window_style(record.window.as_ref(), style);
+                record.window_info.style = style;
+                needs_redraw = true;
+            }
+
+            if target_style != WindowStyle::Fullscreen && (patch.x.is_some() || patch.y.is_some()) {
+                let current_position = record.window.outer_position().ok();
+                let next_x = patch.x.unwrap_or_else(|| {
+                    current_position
+                        .as_ref()
+                        .map(|position| position.x)
+                        .or(record.window_info.x)
+                        .unwrap_or(0)
+                });
+                let next_y = patch.y.unwrap_or_else(|| {
+                    current_position
+                        .as_ref()
+                        .map(|position| position.y)
+                        .or(record.window_info.y)
+                        .unwrap_or(0)
+                });
+                record
+                    .window
+                    .set_outer_position(winit::dpi::PhysicalPosition::new(next_x, next_y));
+                record.window_info.x = Some(next_x);
+                record.window_info.y = Some(next_y);
+            }
+
+            if let Some(initial_clear_color) = patch.initial_clear_color {
+                record.window_info.initial_clear_color = initial_clear_color;
+                needs_redraw = true;
+            }
+
+            if target_style != WindowStyle::Fullscreen
+                && (patch.width.is_some() || patch.height.is_some())
+            {
+                let next_width = patch.width.unwrap_or(record.window_info.width);
+                let next_height = patch.height.unwrap_or(record.window_info.height);
+                let next_size = LogicalSize::new(f64::from(next_width), f64::from(next_height));
+                let _ = record.window.request_inner_size(next_size);
+                record.window_info.width = next_width;
+                record.window_info.height = next_height;
+                needs_redraw = true;
+            }
+
+            Self::sync_worker_window_info(record);
+
+            if needs_redraw {
+                record.window.request_redraw();
+            }
         }
     }
 
@@ -4791,7 +5159,7 @@ impl GoldlightRuntime {
         let WindowRendererState::Ready(renderer) = &mut record.renderer else {
             return false;
         };
-        match renderer.render_clear(record.initial_clear_color) {
+        match renderer.render_clear(record.window_info.initial_clear_color) {
             Ok(rendered) => {
                 if rendered {
                     Self::complete_startup_presentation(record);
@@ -4856,6 +5224,7 @@ impl GoldlightRuntime {
 impl ApplicationHandler<RuntimeUserEvent> for GoldlightRuntime {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         self.drain_pending_windows(event_loop);
+        self.drain_pending_window_updates();
         self.maybe_exit(event_loop);
     }
 
@@ -4880,12 +5249,27 @@ impl ApplicationHandler<RuntimeUserEvent> for GoldlightRuntime {
         };
 
         match event {
-            WindowEvent::Resized(size) => {
-                record.pending_resize = Some(size);
-                record.window.request_redraw();
+            WindowEvent::Moved(position) => {
+                record.window_info.x = Some(position.x);
+                record.window_info.y = Some(position.y);
+                Self::sync_worker_window_info(record);
                 if let Some(worker) = record.worker.as_ref() {
-                    let device_pixel_ratio = record.window.scale_factor();
-                    let (width, height) = css_pixel_window_size(size, device_pixel_ratio);
+                    worker.push_event(WorkerEventPayload::Move {
+                        x: position.x,
+                        y: position.y,
+                    });
+                }
+            }
+            WindowEvent::Resized(size) => {
+                let device_pixel_ratio = record.window.scale_factor();
+                let (width, height) = css_pixel_window_size(size, device_pixel_ratio);
+                record.pending_resize = Some(size);
+                record.window_info.width = width;
+                record.window_info.height = height;
+                record.window_info.device_pixel_ratio = device_pixel_ratio;
+                record.window.request_redraw();
+                Self::sync_worker_window_info(record);
+                if let Some(worker) = record.worker.as_ref() {
                     worker.push_event(WorkerEventPayload::Resize {
                         width,
                         height,
@@ -4895,10 +5279,14 @@ impl ApplicationHandler<RuntimeUserEvent> for GoldlightRuntime {
             }
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
                 let size = record.window.inner_size();
+                let (width, height) = css_pixel_window_size(size, scale_factor);
                 record.pending_resize = Some(size);
+                record.window_info.width = width;
+                record.window_info.height = height;
+                record.window_info.device_pixel_ratio = scale_factor;
                 record.window.request_redraw();
+                Self::sync_worker_window_info(record);
                 if let Some(worker) = record.worker.as_ref() {
-                    let (width, height) = css_pixel_window_size(size, scale_factor);
                     worker.push_event(WorkerEventPayload::Resize {
                         width,
                         height,
@@ -4909,13 +5297,13 @@ impl ApplicationHandler<RuntimeUserEvent> for GoldlightRuntime {
             WindowEvent::ModifiersChanged(modifiers) => {
                 record.modifiers = modifiers.state();
             }
-            WindowEvent::KeyboardInput {
-                event,
-                ..
-            } => {
+            WindowEvent::KeyboardInput { event, .. } => {
                 if let Some(worker) = record.worker.as_ref() {
-                    let modifiers =
-                        modifiers_state_for_key_event(record.modifiers, &event.physical_key, event.state);
+                    let modifiers = modifiers_state_for_key_event(
+                        record.modifiers,
+                        &event.physical_key,
+                        event.state,
+                    );
                     record.modifiers = modifiers;
                     let keyboard_event = window_keyboard_event_payload(&event, modifiers);
                     worker.push_event(match event.state {
@@ -4942,6 +5330,7 @@ impl ApplicationHandler<RuntimeUserEvent> for GoldlightRuntime {
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         self.drain_pending_windows(event_loop);
+        self.drain_pending_window_updates();
         self.promote_pending_renderers();
         self.present_pending_startup_frames();
         self.sync_window_redraws();
@@ -4952,6 +5341,7 @@ impl ApplicationHandler<RuntimeUserEvent> for GoldlightRuntime {
         match _event {
             RuntimeUserEvent::Wake => {
                 self.drain_pending_windows(event_loop);
+                self.drain_pending_window_updates();
                 self.promote_pending_renderers();
                 self.present_pending_startup_frames();
                 self.sync_window_redraws();
@@ -4973,8 +5363,8 @@ impl ApplicationHandler<RuntimeUserEvent> for GoldlightRuntime {
 pub fn init_logging() {
     #[cfg(feature = "dev-runtime")]
     {
-        let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-            .unwrap_or_else(|_| "warn".into());
+        let env_filter =
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "warn".into());
         tracing_subscriber::fmt().with_env_filter(env_filter).init();
     }
 }
@@ -5283,6 +5673,7 @@ pub fn run_runtime(config: RuntimeConfig) -> Result<RuntimeRunResult> {
 }
 
 fn spawn_window_worker(
+    runtime_state: RuntimeStateHandle,
     mode: RuntimeMode,
     base_specifier: ModuleSpecifier,
     window_id: u32,
@@ -5300,6 +5691,7 @@ fn spawn_window_worker(
     }));
     let timer_state = Arc::new(Mutex::new(TimerHostState::default()));
     let (control_tx, control_rx) = std_mpsc::channel::<WindowWorkerControl>();
+    let thread_runtime_state = runtime_state.clone();
     let thread_worker_state = worker_state.clone();
     let thread_handle = thread::spawn(move || {
         let worker_specifier = match ModuleSpecifier::parse(&worker_entrypoint).or_else(|_| {
@@ -5315,9 +5707,8 @@ fn spawn_window_worker(
             }
         };
 
-        let runtime_state = Arc::new(Mutex::new(RuntimeState::default()));
         if let Err(error) = run_window_worker_thread(
-            runtime_state,
+            thread_runtime_state,
             thread_worker_state,
             timer_state,
             mode,
@@ -5405,6 +5796,7 @@ fn run_main_runtime_thread(
             state: runtime_state,
             event_proxy: Some(event_proxy.clone()),
             worker_state: None,
+            window_id: None,
             timer_state,
             fetch_state: fetch_state.clone(),
             websocket_state: websocket_state.clone(),
@@ -5601,6 +5993,7 @@ fn run_window_worker_thread(
             state: runtime_state,
             event_proxy: Some(event_proxy.clone()),
             worker_state: Some(worker_state.clone()),
+            window_id: Some(window_id),
             timer_state,
             fetch_state: fetch_state.clone(),
             websocket_state: websocket_state.clone(),

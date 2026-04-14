@@ -4,6 +4,7 @@ function normalizeWindowInit(init = {}) {
     width = 640,
     height = 480,
     resizable = false,
+    style = "default",
     initialClearColor = { r: 1, g: 1, b: 1, a: 1 },
     showPolicy = "after-initial-clear",
     workerEntrypoint = undefined,
@@ -26,10 +27,84 @@ function normalizeWindowInit(init = {}) {
     width,
     height,
     resizable,
+    style: normalizeWindowStyle(style),
     initialClearColor: normalizeColor(initialClearColor),
     showPolicy,
     workerEntrypoint,
   };
+}
+
+function normalizeWindowStyle(style) {
+  if (
+    style !== "default" &&
+    style !== "custom-titlebar" &&
+    style !== "frameless" &&
+    style !== "fullscreen"
+  ) {
+    throw new TypeError(`unsupported window style: ${style}`);
+  }
+
+  return style;
+}
+
+function normalizeWindowInfoPatch(patch = {}) {
+  const normalized = {};
+
+  if (patch.x !== undefined) {
+    const x = Number(patch.x);
+    if (!Number.isFinite(x)) {
+      throw new TypeError(`window x must be a finite number: ${patch.x}`);
+    }
+    normalized.x = Math.round(x);
+  }
+
+  if (patch.y !== undefined) {
+    const y = Number(patch.y);
+    if (!Number.isFinite(y)) {
+      throw new TypeError(`window y must be a finite number: ${patch.y}`);
+    }
+    normalized.y = Math.round(y);
+  }
+
+  if (patch.title !== undefined) {
+    if (typeof patch.title !== "string") {
+      throw new TypeError(`window title must be a string: ${patch.title}`);
+    }
+    normalized.title = patch.title;
+  }
+
+  if (patch.width !== undefined) {
+    const width = Number(patch.width);
+    if (!Number.isFinite(width) || width < 1) {
+      throw new TypeError(`window width must be a positive number: ${patch.width}`);
+    }
+    normalized.width = Math.round(width);
+  }
+
+  if (patch.height !== undefined) {
+    const height = Number(patch.height);
+    if (!Number.isFinite(height) || height < 1) {
+      throw new TypeError(`window height must be a positive number: ${patch.height}`);
+    }
+    normalized.height = Math.round(height);
+  }
+
+  if (patch.resizable !== undefined) {
+    if (typeof patch.resizable !== "boolean") {
+      throw new TypeError(`window resizable flag must be a boolean: ${patch.resizable}`);
+    }
+    normalized.resizable = patch.resizable;
+  }
+
+  if (patch.style !== undefined) {
+    normalized.style = normalizeWindowStyle(patch.style);
+  }
+
+  if (patch.initialClearColor !== undefined) {
+    normalized.initialClearColor = normalizeColor(patch.initialClearColor);
+  }
+
+  return normalized;
 }
 
 function normalizeColor(color = {}) {
@@ -2031,7 +2106,7 @@ function cloneLayout(layout = {}) {
   };
 }
 
-function computeLayout(layout = {}) {
+function createInitialComputedLayout(layout = {}) {
   return {
     x: layout.x ?? 0,
     y: layout.y ?? 0,
@@ -2864,7 +2939,7 @@ export class LayoutGroup2d {
     this._state = {};
     this._layoutNodeId = nextLayoutNodeId++;
     this._layout = cloneLayout(init);
-    this._computedLayout = computeLayout(this._layout);
+    this._computedLayout = createInitialComputedLayout(this._layout);
     this._layoutParent = null;
     this._layoutSubtreeDirty = true;
     this._parentNode2d = null;
@@ -2882,7 +2957,6 @@ export class LayoutGroup2d {
 
   setLayout(layout = {}) {
     this._layout = { ...this._layout, ...cloneLayout(layout) };
-    this._computedLayout = computeLayout(this._layout);
     syncLayoutNodeState(this);
     markLayoutNodeDirty(this);
     return this;
@@ -2957,7 +3031,7 @@ export class LayoutItem2d {
     this._content = null;
     this._layoutNodeId = nextLayoutNodeId++;
     this._layout = {};
-    this._computedLayout = computeLayout();
+    this._computedLayout = createInitialComputedLayout();
     this._layoutParent = null;
     this._layoutSubtreeDirty = true;
     this._parentNode2d = null;
@@ -2967,7 +3041,6 @@ export class LayoutItem2d {
 
   setLayout(layout = {}) {
     this._layout = { ...this._layout, ...cloneLayout(layout) };
-    this._computedLayout = computeLayout(this._layout);
     syncLayoutNodeState(this);
     markLayoutNodeDirty(this);
     return this;
@@ -3485,7 +3558,7 @@ export class LayoutGroup3d {
     this._state = {};
     this._layoutNodeId = nextLayoutNodeId++;
     this._layout = cloneLayout(init);
-    this._computedLayout = computeLayout(this._layout);
+    this._computedLayout = createInitialComputedLayout(this._layout);
     this._layoutParent = null;
     this._layoutSubtreeDirty = true;
     syncLayoutNodeState(this);
@@ -3502,7 +3575,6 @@ export class LayoutGroup3d {
 
   setLayout(layout = {}) {
     this._layout = { ...this._layout, ...cloneLayout(layout) };
-    this._computedLayout = computeLayout(this._layout);
     syncLayoutNodeState(this);
     markLayoutNodeDirty(this);
     return this;
@@ -3575,7 +3647,7 @@ export class LayoutItem3d {
     this._content = null;
     this._layoutNodeId = nextLayoutNodeId++;
     this._layout = {};
-    this._computedLayout = computeLayout();
+    this._computedLayout = createInitialComputedLayout();
     this._layoutParent = null;
     this._layoutSubtreeDirty = true;
     syncLayoutNodeState(this);
@@ -3584,7 +3656,6 @@ export class LayoutItem3d {
 
   setLayout(layout = {}) {
     this._layout = { ...this._layout, ...cloneLayout(layout) };
-    this._computedLayout = computeLayout(this._layout);
     syncLayoutNodeState(this);
     markLayoutNodeDirty(this);
     return this;
@@ -3669,6 +3740,10 @@ export function addWindowEventListener(type, listener) {
 
 export function getWindowInfo() {
   return Deno.core.ops.op_goldlight_worker_get_window_info();
+}
+
+export function setWindowInfo(patch = {}) {
+  Deno.core.ops.op_goldlight_worker_set_window_info(normalizeWindowInfoPatch(patch));
 }
 
 function dispatchWindowEvent(event) {

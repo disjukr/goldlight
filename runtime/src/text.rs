@@ -1548,7 +1548,8 @@ pub fn shape_text(input: ShapeTextInput) -> Result<Option<ShapedRunValue>> {
                     return Ok(None);
                 } else {
                     let infos_slice = std::slice::from_raw_parts(infos, glyph_count as usize);
-                    let positions_slice = std::slice::from_raw_parts(positions, glyph_count as usize);
+                    let positions_slice =
+                        std::slice::from_raw_parts(positions, glyph_count as usize);
                     let mut glyph_ids = Vec::with_capacity(glyph_count as usize);
                     let mut glyph_positions = Vec::with_capacity((glyph_count as usize + 1) * 2);
                     let mut glyph_offsets = Vec::with_capacity((glyph_count as usize + 1) * 2);
@@ -1680,7 +1681,10 @@ pub fn get_glyph_path(typeface: &str, glyph_id: u32, size: f32) -> Result<Option
                 byte_size,
             },
         );
-        purge_lru_cache(&mut state.glyph_path_cache, &mut state.glyph_path_cache_bytes);
+        purge_lru_cache(
+            &mut state.glyph_path_cache,
+            &mut state.glyph_path_cache_bytes,
+        );
         Ok(Some(verbs))
     })
 }
@@ -1746,7 +1750,10 @@ pub fn get_glyph_mask(
                 byte_size,
             },
         );
-        purge_lru_cache(&mut state.glyph_mask_cache, &mut state.glyph_mask_cache_bytes);
+        purge_lru_cache(
+            &mut state.glyph_mask_cache,
+            &mut state.glyph_mask_cache_bytes,
+        );
         Ok(Some(GlyphMaskValue {
             cache_key: glyph_mask_cache_key_string(
                 typeface_handle,
@@ -1782,7 +1789,13 @@ pub fn get_glyph_sdf(
         if let Some(bitmap) = state.glyph_sdf_cache.get_mut(&cache_key) {
             bitmap.last_used = access;
             return Ok(Some(GlyphMaskValue {
-                cache_key: glyph_sdf_cache_key_string(typeface_handle, glyph_id, size, inset, radius),
+                cache_key: glyph_sdf_cache_key_string(
+                    typeface_handle,
+                    glyph_id,
+                    size,
+                    inset,
+                    radius,
+                ),
                 width: bitmap.value.width,
                 height: bitmap.value.height,
                 stride: bitmap.value.stride,

@@ -1059,7 +1059,11 @@ impl RenderModel {
         Ok(())
     }
 
-    pub fn scene_2d_set_root_items(&mut self, scene_id: u32, root_item_ids: Vec<u32>) -> Result<()> {
+    pub fn scene_2d_set_root_items(
+        &mut self,
+        scene_id: u32,
+        root_item_ids: Vec<u32>,
+    ) -> Result<()> {
         for item_id in &root_item_ids {
             let item_scene_id = self
                 .item_2d_scene_id(*item_id)
@@ -1394,7 +1398,11 @@ fn item_subtree_revision(model: &RenderModel, item_id: u32) -> Option<u64> {
         return Some(text_revision(text));
     }
     if let Some(group) = model.groups_2d.get(&item_id) {
-        return Some(group.transform_revision.max(group_content_revision(model, group)));
+        return Some(
+            group
+                .transform_revision
+                .max(group_content_revision(model, group)),
+        );
     }
     None
 }
@@ -1508,14 +1516,7 @@ fn build_scene_2d_plan(
     recorder.clear(scene.clear_color);
     // Scene coordinates are authored in CSS pixels, so scale the root transform
     // to the current device-pixel backing resolution before rasterization.
-    let root_transform = [
-        device_pixel_ratio,
-        0.0,
-        0.0,
-        device_pixel_ratio,
-        0.0,
-        0.0,
-    ];
+    let root_transform = [device_pixel_ratio, 0.0, 0.0, device_pixel_ratio, 0.0, 0.0];
     for item_id in &scene.root_item_ids {
         append_scene_2d_item_plan(model, *item_id, root_transform, &mut recorder, &mut steps);
     }
@@ -1861,28 +1862,27 @@ impl RendererState {
             label: Some("goldlight raster layer shader"),
             source: wgpu::ShaderSource::Wgsl(RASTER_LAYER_SHADER_SOURCE.into()),
         });
-        let bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("goldlight raster layer bind group layout"),
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("goldlight raster layer bind group layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
                     },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
-                    },
-                ],
-            });
+                    count: None,
+                },
+            ],
+        });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("goldlight raster layer pipeline layout"),
             bind_group_layouts: &[&bind_group_layout],
@@ -2332,8 +2332,10 @@ impl RendererState {
                                     &self.raster_layer_resources,
                                     cached_view,
                                     [
-                                        (cached_step.translation[0] + cached_step.local_origin[0]) as f32,
-                                        (cached_step.translation[1] + cached_step.local_origin[1]) as f32,
+                                        (cached_step.translation[0] + cached_step.local_origin[0])
+                                            as f32,
+                                        (cached_step.translation[1] + cached_step.local_origin[1])
+                                            as f32,
                                     ],
                                     cached_step.size,
                                     self.config.width,
@@ -2467,7 +2469,9 @@ mod tests {
             .scene_2d_create_rect(scene_id, test_rect_options())
             .unwrap()
             .id;
-        model.group_2d_set_children(group_id, vec![rect_id]).unwrap();
+        model
+            .group_2d_set_children(group_id, vec![rect_id])
+            .unwrap();
 
         let first = {
             let group = model.groups_2d.get(&group_id).unwrap();
@@ -2521,7 +2525,9 @@ mod tests {
             .unwrap()
             .id;
 
-        model.group_2d_set_children(nested_group_id, vec![rect_id]).unwrap();
+        model
+            .group_2d_set_children(nested_group_id, vec![rect_id])
+            .unwrap();
         model
             .group_2d_set_children(root_group_id, vec![nested_group_id])
             .unwrap();

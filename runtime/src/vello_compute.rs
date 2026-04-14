@@ -1013,7 +1013,9 @@ fn create_storage_buffer(
     device.create_buffer(&wgpu::BufferDescriptor {
         label: Some(label),
         size: size.max(4) as u64,
-        usage: wgpu::BufferUsages::STORAGE | extra_usage,
+        // Some compute prep paths clear/fill these buffers before dispatch, which
+        // requires COPY_DST usage on recent wgpu versions.
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | extra_usage,
         mapped_at_creation: false,
     })
 }

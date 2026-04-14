@@ -1,10 +1,12 @@
-pub(crate) mod compositor;
+pub(crate) mod aggregator;
+mod color;
+pub(crate) mod composition;
+pub(crate) mod content_2d;
+pub(crate) mod content_3d;
 pub(crate) mod display;
-pub(crate) mod drawing;
 pub(crate) mod frame;
-mod lowering_2d;
-mod lowering_3d;
 mod model;
+pub(crate) mod surfaces;
 mod types;
 
 pub(crate) use self::display::{DisplayBootstrap, DisplayState};

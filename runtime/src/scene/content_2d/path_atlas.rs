@@ -9,13 +9,11 @@ use peniko::{
     Color, Fill,
 };
 
-use super::super::{
-    PathFillRule2D, PathStrokeCap2D, PathStrokeJoin2D, PathStyle2D, PathVerb2D,
-};
 use super::vello_compute::{
     stroke_from_parts, CoverageAaConfig, CoverageComputeRenderer, CoverageScene,
 };
 use super::PathDrawCommand;
+use crate::scene::{PathFillRule2D, PathStrokeCap2D, PathStrokeJoin2D, PathStyle2D, PathVerb2D};
 
 const ENTRY_PADDING: u32 = 1;
 const DEFAULT_ATLAS_DIM: u32 = 2048;

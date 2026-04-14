@@ -1,8 +1,8 @@
-use super::drawing::{
+use super::{
     DirectMaskTextDrawCommand, DrawingRecorder, DrawingRecording, PathDrawCommand, RectDrawCommand,
     SdfTextDrawCommand, TransformedMaskTextDrawCommand,
 };
-use super::{
+use crate::scene::{
     PathFillRule2D, PathStrokeCap2D, PathStrokeJoin2D, PathStyle2D, RenderModel, Text2D,
 };
 

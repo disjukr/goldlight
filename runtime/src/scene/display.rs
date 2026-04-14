@@ -7,16 +7,20 @@ use wgpu::util::DeviceExt;
 use wgpu::TextureFormatFeatureFlags;
 use winit::{dpi::PhysicalSize, window::Window};
 
-use super::compositor::CompositorState;
-use super::drawing::{
-    encode_drawing_command_buffer_with_providers,
+use super::aggregator::FrameAggregator;
+use super::color::to_linear_array;
+use super::composition::RootComposer;
+use super::content_2d::{
+    encode_drawing_command_buffer_with_providers, lower_scene_2d_to_recording,
     prepare_drawing_recording_with_providers_and_initial_clear, AtlasProvider, DawnSharedContext,
     DrawingPreparedRecording, DrawingRecording, TextAtlasProvider, DRAWING_DEPTH_FORMAT,
 };
-use super::frame::{AggregatedQuad, AggregatedRenderPass, ClipSpaceVertex, ColorLoadOp, RenderContent};
-use super::lowering_2d::lower_scene_2d_to_recording;
-use super::lowering_3d::lower_scene_3d_to_geometry;
+use super::content_3d::lower_scene_3d_to_geometry;
+use super::frame::{
+    AggregatedQuad, AggregatedRenderPass, ClipSpaceVertex, ColorLoadOp, RenderContent,
+};
 use super::model::RenderModel;
+use super::surfaces::SurfaceStore;
 use super::types::ColorValue;
 
 const SHADER_SOURCE: &str = r#"
@@ -41,6 +45,16 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
   return input.color;
 }
 "#;
+
+fn to_wgpu_color(color: ColorValue) -> wgpu::Color {
+    let [r, g, b, a] = to_linear_array(color);
+    wgpu::Color {
+        r: r as f64,
+        g: g as f64,
+        b: b as f64,
+        a: a as f64,
+    }
+}
 
 fn preferred_backends() -> wgpu::Backends {
     #[cfg(target_os = "windows")]
@@ -103,7 +117,9 @@ pub struct DisplayState {
     scene_2d_recording_cache: HashMap<Scene2DRecordingCacheKey, Scene2DRecordingCacheEntry>,
     scene_3d_geometry_cache: HashMap<Scene3DGeometryCacheKey, Scene3DGeometryCacheEntry>,
     prepared_recording_cache: HashMap<PreparedRecordingCacheKey, PreparedRecordingCacheEntry>,
-    compositor: CompositorState,
+    root_composer: RootComposer,
+    surface_store: SurfaceStore,
+    frame_aggregator: FrameAggregator,
     geometry_pipeline: wgpu::RenderPipeline,
     size: PhysicalSize<u32>,
 }
@@ -213,7 +229,7 @@ impl<'a> SceneCommandBuffer<'a> {
                 view: self.target_view,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(clear_color.to_wgpu()),
+                    load: wgpu::LoadOp::Clear(to_wgpu_color(clear_color)),
                     store: wgpu::StoreOp::Store,
                 },
             })],
@@ -414,7 +430,9 @@ impl DisplayState {
             scene_2d_recording_cache: HashMap::new(),
             scene_3d_geometry_cache: HashMap::new(),
             prepared_recording_cache: HashMap::new(),
-            compositor: CompositorState::default(),
+            root_composer: RootComposer::default(),
+            surface_store: SurfaceStore::default(),
+            frame_aggregator: FrameAggregator::default(),
             geometry_pipeline,
             size,
         })
@@ -619,7 +637,8 @@ impl DisplayState {
             }
             AggregatedQuad::Content(content) => match content {
                 RenderContent::Scene2D(scene_id) => {
-                    let recording = self.scene_2d_recording(model, *scene_id, device_pixel_ratio)?;
+                    let recording =
+                        self.scene_2d_recording(model, *scene_id, device_pixel_ratio)?;
                     self.path_atlas_provider.begin_frame();
                     self.text_atlas_provider.begin_frame();
                     let msaa_color_view = self.msaa_color_target.as_ref().map(|t| t.view.clone());
@@ -658,11 +677,11 @@ impl DisplayState {
                     };
                     let load_op = match pass.color_load_op {
                         ColorLoadOp::Load => wgpu::LoadOp::Load,
-                        ColorLoadOp::Clear(color) => wgpu::LoadOp::Clear(color.to_wgpu()),
+                        ColorLoadOp::Clear(color) => wgpu::LoadOp::Clear(to_wgpu_color(color)),
                     };
                     command_buffer.encode_geometry_3d(load_op, &vertices);
                 }
-            }
+            },
         }
 
         Ok(())
@@ -749,7 +768,10 @@ impl DisplayState {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("goldlight render encoder"),
             });
-        let aggregated_frame = self.compositor.composite(model)?;
+        let (root_key, root_frame) = self.root_composer.compose(model, &mut self.surface_store)?;
+        let aggregated_frame =
+            self.frame_aggregator
+                .aggregate(root_key, root_frame, &self.surface_store)?;
         for pass in aggregated_frame.passes() {
             self.execute_frame_pass(model, device_pixel_ratio, pass, &mut encoder, &view)?;
         }

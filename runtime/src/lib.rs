@@ -86,8 +86,8 @@ use winit::{
     window::{Fullscreen, Window, WindowAttributes, WindowId},
 };
 
-use crate::scene::drawing::text::{GlyphSubpixelOffsetInput, ShapeTextInput};
-use crate::scene::drawing::{svg, text};
+use crate::scene::content_2d::text::{GlyphSubpixelOffsetInput, ShapeTextInput};
+use crate::scene::content_2d::{svg, text};
 use crate::scene::{
     ColorValue, DisplayBootstrap, DisplayState, Group2DHandle, Group2DOptions, Group2DUpdate,
     Path2DHandle, Path2DOptions, Path2DUpdate, PathVerb2D, Rect2DHandle, Rect2DOptions,

@@ -26,38 +26,6 @@ impl Default for ColorValue {
     }
 }
 
-impl ColorValue {
-    fn srgb_channel_to_linear(value: f32) -> f32 {
-        if value <= 0.04045 {
-            value / 12.92
-        } else {
-            ((value + 0.055) / 1.055).powf(2.4)
-        }
-    }
-
-    pub(crate) fn to_srgb_array(self) -> [f32; 4] {
-        [self.r, self.g, self.b, self.a]
-    }
-
-    pub(crate) fn to_wgpu(self) -> wgpu::Color {
-        wgpu::Color {
-            r: Self::srgb_channel_to_linear(self.r) as f64,
-            g: Self::srgb_channel_to_linear(self.g) as f64,
-            b: Self::srgb_channel_to_linear(self.b) as f64,
-            a: self.a as f64,
-        }
-    }
-
-    pub(crate) fn to_array(self) -> [f32; 4] {
-        [
-            Self::srgb_channel_to_linear(self.r),
-            Self::srgb_channel_to_linear(self.g),
-            Self::srgb_channel_to_linear(self.b),
-            self.a,
-        ]
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum GradientTileMode2D {
@@ -551,4 +519,3 @@ pub struct SceneClearColorOptions {
 pub struct SceneCameraUpdate {
     pub view_projection_matrix: Option<[f32; 16]>,
 }
-

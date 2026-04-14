@@ -1,7 +1,7 @@
 use bytemuck::{Pod, Zeroable};
 
-use super::super::{PathStrokeCap2D, PathVerb2D};
 use super::{FlattenedSubpath, PathDrawCommand, Point, StrokeStyle};
+use crate::scene::{PathStrokeCap2D, PathVerb2D};
 
 const EPSILON: f32 = 1e-5;
 const PATCH_PRECISION: f32 = 4.0;

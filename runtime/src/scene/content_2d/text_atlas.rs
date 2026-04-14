@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use super::super::GlyphMask2D;
+use crate::scene::GlyphMask2D;
 
 const BITMAP_ENTRY_PADDING: u32 = 1;
 const SDF_ENTRY_PADDING: u32 = 0;

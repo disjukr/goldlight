@@ -2,7 +2,7 @@ use anyhow::Result;
 use serde::Serialize;
 use usvg::{FillRule, Node, Paint, Tree};
 
-use super::super::{
+use crate::scene::{
     ColorValue, Path2DOptions, PathFillRule2D, PathStrokeCap2D, PathStrokeJoin2D, PathStyle2D,
     PathVerb2D,
 };

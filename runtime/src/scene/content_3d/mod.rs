@@ -1,7 +1,8 @@
 use glam::{Mat4, Vec4};
 
-use super::frame::ClipSpaceVertex;
-use super::{RenderModel, Scene3D};
+use super::color::to_linear_array;
+use crate::scene::frame::ClipSpaceVertex;
+use crate::scene::{RenderModel, Scene3D};
 
 pub(crate) fn lower_scene_3d_to_geometry(
     model: &RenderModel,
@@ -15,7 +16,7 @@ pub(crate) fn lower_scene_3d_to_geometry(
             continue;
         };
         let _ = triangle.scene_id;
-        let color = triangle.color.to_array();
+        let color = to_linear_array(triangle.color);
         for position in triangle.positions {
             let clip = view_projection * Vec4::new(position[0], position[1], position[2], 1.0);
             vertices.push(ClipSpaceVertex {

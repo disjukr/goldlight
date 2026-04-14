@@ -1,4 +1,5 @@
 mod fill_patch;
+mod lowering;
 mod path_atlas;
 mod stroke_patch;
 pub(crate) mod svg;
@@ -7,6 +8,7 @@ mod text_atlas;
 mod text_pipeline;
 mod vello_compute;
 
+pub(crate) use self::lowering::lower_scene_2d_to_recording;
 pub(crate) use self::path_atlas::{AtlasProvider, CoverageMask};
 pub(crate) use self::text_atlas::TextAtlasProvider;
 
@@ -32,7 +34,8 @@ use self::text_pipeline::{
     prepare_sdf_text_step, prepare_transformed_mask_text_step, PreparedBitmapTextStep,
     PreparedSdfTextStep, TextPipelineResources,
 };
-use super::{
+use super::color::{to_linear_array, to_srgb_array};
+use crate::scene::{
     ColorValue, GradientStop2D, GradientTileMode2D, PathFillRule2D, PathShader2D, PathStrokeCap2D,
     PathStrokeJoin2D, PathStyle2D, PathVerb2D,
 };
@@ -49,6 +52,16 @@ pub(crate) const DRAWING_DEPTH_FORMAT: wgpu::TextureFormat =
     wgpu::TextureFormat::Depth24PlusStencil8;
 
 pub(crate) type Point = [f32; 2];
+
+fn to_wgpu_color(color: ColorValue) -> wgpu::Color {
+    let [r, g, b, a] = to_linear_array(color);
+    wgpu::Color {
+        r: r as f64,
+        g: g as f64,
+        b: b as f64,
+        a: a as f64,
+    }
+}
 
 fn drawing_shader_source() -> String {
     format!(
@@ -1282,8 +1295,7 @@ pub struct DrawingRecording {
     commands: Vec<DrawingCommand>,
 }
 
-impl DrawingRecording {
-}
+impl DrawingRecording {}
 
 #[cfg(test)]
 #[derive(Clone, Copy, Debug)]
@@ -2010,10 +2022,10 @@ pub fn prepare_drawing_recording_with_providers_and_initial_clear(
 
     if let Some(clear_color) = initial_clear {
         if let Some(first_pass) = passes.first_mut() {
-            first_pass.load_op = wgpu::LoadOp::Clear(clear_color.to_wgpu());
+            first_pass.load_op = wgpu::LoadOp::Clear(to_wgpu_color(clear_color));
         } else {
             passes.push(DrawingDrawPass {
-                load_op: wgpu::LoadOp::Clear(clear_color.to_wgpu()),
+                load_op: wgpu::LoadOp::Clear(to_wgpu_color(clear_color)),
                 requires_msaa: false,
                 requires_depth: false,
                 steps: Vec::new(),
@@ -2301,7 +2313,7 @@ fn normalize_gradient_stops(
 
 fn build_fill_path_paint(path: &PathDrawCommand) -> PaintUniform {
     let Some(shader) = &path.shader else {
-        return PaintUniform::solid(path.color.to_array());
+        return PaintUniform::solid(to_linear_array(path.color));
     };
 
     let draw_transform =
@@ -2404,12 +2416,12 @@ fn build_fill_path_paint(path: &PathDrawCommand) -> PaintUniform {
     let mut stop_colors = [[0.0; 4]; MAX_GRADIENT_STOPS];
     for (index, stop) in stops.iter().enumerate() {
         stop_offsets[index] = stop.offset;
-        stop_colors[index] = stop.color.to_srgb_array();
+        stop_colors[index] = to_srgb_array(stop.color);
     }
     let last_offset = *stop_offsets
         .get(stops.len().saturating_sub(1))
         .unwrap_or(&1.0);
-    let fallback_color = path.color.to_srgb_array();
+    let fallback_color = to_srgb_array(path.color);
     let last_color = stop_colors
         .get(stops.len().saturating_sub(1))
         .copied()
@@ -2468,7 +2480,7 @@ fn build_rect_vertices(rect: &RectDrawCommand, width: f32, height: f32) -> Vec<D
     let bottom_left_point = transform_point([rect.x, rect.y + rect.height], rect.transform);
     let bottom_right_point =
         transform_point([rect.x + rect.width, rect.y + rect.height], rect.transform);
-    let color = rect.color.to_array();
+    let color = to_linear_array(rect.color);
     let top_left = DrawingVertex {
         position: [
             (top_left_point[0] / width) * 2.0 - 1.0,
@@ -3408,7 +3420,7 @@ fn build_dashed_polyline(
 }
 
 fn resolve_stroke_color(path: &PathDrawCommand) -> [f32; 4] {
-    let mut color = path.color.to_array();
+    let mut color = to_linear_array(path.color);
     if path.stroke_width >= HAIRLINE_COVERAGE_WIDTH {
         return color;
     }
@@ -4648,7 +4660,7 @@ mod tests {
         compute_recording_bounds, prepare_drawing_recording, DirectMaskTextDrawCommand,
         DrawingPreparedStep, DrawingRecorder, PathDrawCommand,
     };
-    use crate::scene::drawing::svg::parse_svg;
+    use crate::scene::content_2d::svg::parse_svg;
     use crate::scene::{
         ColorValue, PathFillRule2D, PathStrokeCap2D, PathStrokeJoin2D, PathStyle2D, PathVerb2D,
     };

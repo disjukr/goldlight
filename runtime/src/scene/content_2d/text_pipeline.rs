@@ -3,10 +3,11 @@ use std::sync::{Arc, OnceLock};
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 
-use super::super::ColorValue;
-use super::super::{DirectMaskGlyph2D, GlyphMask2D, SdfGlyph2D, TransformedMaskGlyph2D};
 use super::text_atlas::{TextAtlasPlacement, TextAtlasProvider};
 use super::DRAWING_DEPTH_FORMAT;
+use crate::scene::color::to_linear_array;
+use crate::scene::ColorValue;
+use crate::scene::{DirectMaskGlyph2D, GlyphMask2D, SdfGlyph2D, TransformedMaskGlyph2D};
 
 const BITMAP_ATLAS_PADDING: u32 = 1;
 const SDF_ATLAS_PADDING: u32 = 0;
@@ -812,7 +813,7 @@ pub fn prepare_sdf_text_step(
     if glyph_refs.is_empty() {
         return Vec::new();
     }
-    let color = color.to_array();
+    let color = to_linear_array(color);
     let masks = glyph_refs.iter().map(|glyph| glyph.sdf).collect::<Vec<_>>();
     if let Some(atlas_provider) = atlas_provider {
         let Some((atlas_width, atlas_height, placements)) =
@@ -926,7 +927,7 @@ fn prepare_bitmap_text_step(
         return None;
     }
     let masks = glyphs.iter().map(|glyph| glyph.mask).collect::<Vec<_>>();
-    let color = color.to_array();
+    let color = to_linear_array(color);
     if let Some(atlas_provider) = atlas_provider {
         let (atlas_width, atlas_height, placements) =
             atlas_provider.find_or_create_bitmap_entries(&masks)?;

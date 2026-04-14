@@ -6,6 +6,8 @@ use peniko::{
 use vello_encoding::{BumpEstimator, DrawBeginClip, Encoding, RenderConfig, Transform};
 use wgpu::util::DeviceExt;
 
+use crate::scene::{PathStrokeCap2D, PathStrokeJoin2D};
+
 // Keep the full fine-raster AA option set available even though the atlas currently
 // instantiates the MSAA8 path only.
 #[allow(dead_code)]
@@ -1062,18 +1064,18 @@ fn coverage_fine_shader_source(source: &str) -> String {
 pub fn stroke_from_parts(
     width: f32,
     miter_limit: f32,
-    cap: super::super::PathStrokeCap2D,
-    join: super::super::PathStrokeJoin2D,
+    cap: PathStrokeCap2D,
+    join: PathStrokeJoin2D,
 ) -> Stroke {
     let cap = match cap {
-        super::super::PathStrokeCap2D::Butt => Cap::Butt,
-        super::super::PathStrokeCap2D::Square => Cap::Square,
-        super::super::PathStrokeCap2D::Round => Cap::Round,
+        PathStrokeCap2D::Butt => Cap::Butt,
+        PathStrokeCap2D::Square => Cap::Square,
+        PathStrokeCap2D::Round => Cap::Round,
     };
     let join = match join {
-        super::super::PathStrokeJoin2D::Miter => Join::Miter,
-        super::super::PathStrokeJoin2D::Bevel => Join::Bevel,
-        super::super::PathStrokeJoin2D::Round => Join::Round,
+        PathStrokeJoin2D::Miter => Join::Miter,
+        PathStrokeJoin2D::Bevel => Join::Bevel,
+        PathStrokeJoin2D::Round => Join::Round,
     };
     Stroke {
         width: width as f64,

@@ -645,7 +645,6 @@ impl RenderModel {
         }
         self.groups_2d.get(&item_id).map(|group| group.scene_id)
     }
-
 }
 
 fn glyph_mask_from_options(options: GlyphMask2DOptions) -> GlyphMask2D {

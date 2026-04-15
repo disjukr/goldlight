@@ -245,6 +245,12 @@ struct RetainedSurfaceTextureCacheEntry {
     _msaa_depth_target: Option<DepthTarget>,
 }
 
+struct RetainedSurfaceBatchDraw {
+    bind_group: wgpu::BindGroup,
+    vertex_range: std::ops::Range<u32>,
+    scissor: [u32; 4],
+}
+
 struct RenderTarget<'a> {
     target_view: &'a wgpu::TextureView,
     target_size: [u32; 2],
@@ -1046,27 +1052,85 @@ impl DisplayState {
         encoder: &mut wgpu::CommandEncoder,
         target: &RenderTarget<'_>,
     ) -> Result<()> {
-        let (raster_origin, texture_size, texture_view) = {
-            let texture_entry = self.ensure_retained_surface_texture(
-                model,
-                quad.surface_id,
-                device_pixel_ratio,
-                encoder,
-            )?;
-            (
-                texture_entry.raster_origin,
-                texture_entry.texture_size,
-                texture_entry.view.clone(),
-            )
-        };
-        let vertices = Self::retained_surface_vertices(
-            quad,
-            raster_origin,
-            texture_size,
-            target.target_size,
+        self.draw_retained_surface_batch_pass(
+            model,
             device_pixel_ratio,
-        );
-        if vertices.is_empty() {
+            color_load_op,
+            std::slice::from_ref(quad),
+            encoder,
+            target,
+        )
+    }
+
+    fn draw_retained_surface_batch_pass(
+        &mut self,
+        model: &RenderModel,
+        device_pixel_ratio: f32,
+        color_load_op: ColorLoadOp,
+        quads: &[RetainedSurfaceQuad],
+        encoder: &mut wgpu::CommandEncoder,
+        target: &RenderTarget<'_>,
+    ) -> Result<()> {
+        let full_scissor = [
+            0,
+            0,
+            target.target_size[0].max(1),
+            target.target_size[1].max(1),
+        ];
+        let mut vertices = Vec::new();
+        let mut draws = Vec::new();
+
+        for quad in quads {
+            let (raster_origin, texture_size, texture_view) = {
+                let texture_entry = self.ensure_retained_surface_texture(
+                    model,
+                    quad.surface_id,
+                    device_pixel_ratio,
+                    encoder,
+                )?;
+                (
+                    texture_entry.raster_origin,
+                    texture_entry.texture_size,
+                    texture_entry.view.clone(),
+                )
+            };
+            let quad_vertices = Self::retained_surface_vertices(
+                quad,
+                raster_origin,
+                texture_size,
+                target.target_size,
+                device_pixel_ratio,
+            );
+            if quad_vertices.is_empty() {
+                continue;
+            }
+
+            let vertex_start = vertices.len() as u32;
+            vertices.extend(quad_vertices);
+            let vertex_end = vertices.len() as u32;
+            let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("goldlight retained surface bind group"),
+                layout: &self.surface_composite_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Sampler(&self.surface_composite_sampler),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(&texture_view),
+                    },
+                ],
+            });
+            draws.push(RetainedSurfaceBatchDraw {
+                bind_group,
+                vertex_range: vertex_start..vertex_end,
+                scissor: Self::retained_surface_scissor(quad, target.target_size)
+                    .unwrap_or(full_scissor),
+            });
+        }
+
+        if draws.is_empty() {
             return Ok(());
         }
 
@@ -1077,20 +1141,7 @@ impl DisplayState {
                 contents: bytemuck::cast_slice(&vertices),
                 usage: wgpu::BufferUsages::VERTEX,
             });
-        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("goldlight retained surface bind group"),
-            layout: &self.surface_composite_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::Sampler(&self.surface_composite_sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&texture_view),
-                },
-            ],
-        });
+
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("goldlight retained surface pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -1105,14 +1156,14 @@ impl DisplayState {
             occlusion_query_set: None,
             timestamp_writes: None,
         });
-        if let Some([x, y, width, height]) = Self::retained_surface_scissor(quad, target.target_size)
-        {
-            pass.set_scissor_rect(x, y, width, height);
-        }
         pass.set_pipeline(&self.surface_composite_single_pipeline);
-        pass.set_bind_group(0, &bind_group, &[]);
         pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-        pass.draw(0..vertices.len() as u32, 0..1);
+        for draw in &draws {
+            let [x, y, width, height] = draw.scissor;
+            pass.set_scissor_rect(x, y, width, height);
+            pass.set_bind_group(0, &draw.bind_group, &[]);
+            pass.draw(draw.vertex_range.clone(), 0..1);
+        }
         drop(pass);
 
         if let Some(msaa_target_view) = target.msaa_target_view {
@@ -1133,15 +1184,14 @@ impl DisplayState {
                     occlusion_query_set: None,
                     timestamp_writes: None,
                 });
-                if let Some([x, y, width, height]) =
-                    Self::retained_surface_scissor(quad, target.target_size)
-                {
-                    msaa_pass.set_scissor_rect(x, y, width, height);
-                }
                 msaa_pass.set_pipeline(surface_composite_msaa_pipeline);
-                msaa_pass.set_bind_group(0, &bind_group, &[]);
                 msaa_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-                msaa_pass.draw(0..vertices.len() as u32, 0..1);
+                for draw in &draws {
+                    let [x, y, width, height] = draw.scissor;
+                    msaa_pass.set_scissor_rect(x, y, width, height);
+                    msaa_pass.set_bind_group(0, &draw.bind_group, &[]);
+                    msaa_pass.draw(draw.vertex_range.clone(), 0..1);
+                }
             }
         }
         Ok(())
@@ -1218,7 +1268,10 @@ impl DisplayState {
                 };
                 command_buffer.encode_clear(Self::transparent_color());
             } else {
-                for (index, pass) in surface_frame.passes().iter().enumerate() {
+                let passes = surface_frame.passes();
+                let mut index = 0;
+                while index < passes.len() {
+                    let pass = &passes[index];
                     let color_load_op = if index == 0 {
                         match pass.color_load_op {
                             ColorLoadOp::Load => ColorLoadOp::Clear(Self::transparent_color()),
@@ -1227,6 +1280,30 @@ impl DisplayState {
                     } else {
                         pass.color_load_op
                     };
+                    if let CompositorQuad::RetainedSurface(quad) = &pass.quad {
+                        let mut batch = vec![*quad];
+                        index += 1;
+                        while index < passes.len() {
+                            let next_pass = &passes[index];
+                            let ColorLoadOp::Load = next_pass.color_load_op else {
+                                break;
+                            };
+                            let CompositorQuad::RetainedSurface(next_quad) = &next_pass.quad else {
+                                break;
+                            };
+                            batch.push(*next_quad);
+                            index += 1;
+                        }
+                        self.draw_retained_surface_batch_pass(
+                            model,
+                            device_pixel_ratio,
+                            color_load_op,
+                            &batch,
+                            encoder,
+                            &target,
+                        )?;
+                        continue;
+                    }
                     self.execute_compositor_pass(
                         model,
                         device_pixel_ratio,
@@ -1235,6 +1312,7 @@ impl DisplayState {
                         encoder,
                         &target,
                     )?;
+                    index += 1;
                 }
             }
             self.retained_surface_texture_cache.insert(
@@ -1520,7 +1598,34 @@ impl DisplayState {
                 .then_some(msaa_depth_view.as_ref())
                 .flatten(),
         };
-        for pass in aggregated_frame.passes() {
+        let passes = aggregated_frame.passes();
+        let mut index = 0;
+        while index < passes.len() {
+            let pass = &passes[index];
+            if let AggregatedQuad::RetainedSurface(quad) = &pass.quad {
+                let mut batch = vec![*quad];
+                index += 1;
+                while index < passes.len() {
+                    let next_pass = &passes[index];
+                    let ColorLoadOp::Load = next_pass.color_load_op else {
+                        break;
+                    };
+                    let AggregatedQuad::RetainedSurface(next_quad) = &next_pass.quad else {
+                        break;
+                    };
+                    batch.push(*next_quad);
+                    index += 1;
+                }
+                self.draw_retained_surface_batch_pass(
+                    model,
+                    device_pixel_ratio,
+                    pass.color_load_op,
+                    &batch,
+                    &mut encoder,
+                    &target,
+                )?;
+                continue;
+            }
             self.execute_frame_pass(
                 model,
                 device_pixel_ratio,
@@ -1529,6 +1634,7 @@ impl DisplayState {
                 &mut encoder,
                 &target,
             )?;
+            index += 1;
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));

@@ -1,4 +1,5 @@
 import {
+  Group2d,
   LayoutGroup2d,
   LayoutItem2d,
   Rect2d,
@@ -270,7 +271,9 @@ function createKeycap(
     justifyContent: "center",
     alignItems: "center",
   });
-  item.setContent(frame);
+  const keycapGroup = new Group2d();
+  keycapGroup.add(frame);
+  item.setContent(keycapGroup);
 
   const backgroundItem = frame.add(new LayoutItem2d().setLayout({
     position: "absolute",

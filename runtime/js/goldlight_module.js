@@ -2404,21 +2404,67 @@ function markIntrinsicParentLayoutDirty(node, previousSize, nextSize) {
   }
 }
 
-function getLayoutContentChild(node) {
-  if (!node || !(node instanceof LayoutItem2d || node instanceof LayoutItem3d)) {
-    return null;
+function getLayoutProjectionKind(node) {
+  if (node instanceof LayoutGroup2d || node instanceof LayoutItem2d) {
+    return "2d";
   }
-  if (isLayoutNode(node._content)) {
-    return node._content;
+  if (node instanceof LayoutGroup3d || node instanceof LayoutItem3d) {
+    return "3d";
   }
   return null;
+}
+
+function isProjectedLayoutNode(node, projectionKind) {
+  if (projectionKind === "2d") {
+    return isLayoutNode2d(node);
+  }
+  if (projectionKind === "3d") {
+    return isLayoutNode3d(node);
+  }
+  return false;
+}
+
+function isTransparentLayoutProjectionNode(node, projectionKind) {
+  if (projectionKind === "2d") {
+    return node instanceof Group2d || node instanceof ScrollContainer2d;
+  }
+  if (projectionKind === "3d") {
+    return node instanceof Group3d;
+  }
+  return false;
+}
+
+function collectProjectedLayoutChildren(node, projectionKind, results = []) {
+  if (node === null || projectionKind === null) {
+    return results;
+  }
+  if (isProjectedLayoutNode(node, projectionKind)) {
+    results.push(node);
+    return results;
+  }
+  if (!isTransparentLayoutProjectionNode(node, projectionKind)) {
+    return results;
+  }
+  for (const child of node._children) {
+    collectProjectedLayoutChildren(child, projectionKind, results);
+  }
+  return results;
+}
+
+// Layout sees through render-only wrappers so authored tree and layout tree can diverge.
+function getLayoutContentChildren(node) {
+  if (!node || !(node instanceof LayoutItem2d || node instanceof LayoutItem3d)) {
+    return [];
+  }
+  const projectionKind = getLayoutProjectionKind(node);
+  return collectProjectedLayoutChildren(node._content, projectionKind, []);
 }
 
 function getLayoutNodeMeasure(node) {
   if (!(node instanceof LayoutItem2d) && !(node instanceof LayoutItem3d)) {
     return undefined;
   }
-  if (getLayoutContentChild(node) !== null) {
+  if (getLayoutContentChildren(node).length > 0) {
     return undefined;
   }
   const intrinsicSize = getNodeIntrinsicSize(node._content);
@@ -2436,10 +2482,7 @@ function syncLayoutNodeState(node) {
 function syncLayoutNodeChildren(node) {
   const childIds = node instanceof LayoutGroup2d || node instanceof LayoutGroup3d
     ? node._children.map((child) => child._layoutNodeId)
-    : (() => {
-      const contentChild = getLayoutContentChild(node);
-      return contentChild ? [contentChild._layoutNodeId] : [];
-    })();
+    : getLayoutContentChildren(node).map((child) => child._layoutNodeId);
   Deno.core.ops.op_goldlight_layout_set_children({
     parentId: node._layoutNodeId,
     childIds,
@@ -2500,7 +2543,9 @@ function isLayoutNode3d(node) {
 function collectLayoutRoots2d(nodes, roots = []) {
   for (const node of nodes) {
     if (isLayoutNode2d(node)) {
-      roots.push(node);
+      if (node._layoutParent === null) {
+        roots.push(node);
+      }
       continue;
     }
     if (node instanceof Group2d || node instanceof ScrollContainer2d) {
@@ -2513,7 +2558,9 @@ function collectLayoutRoots2d(nodes, roots = []) {
 function collectLayoutRoots3d(nodes, roots = []) {
   for (const node of nodes) {
     if (isLayoutNode3d(node)) {
-      roots.push(node);
+      if (node._layoutParent === null) {
+        roots.push(node);
+      }
       continue;
     }
     if (node instanceof Group3d) {
@@ -2559,8 +2606,7 @@ function clearLayoutNodeDirty(node) {
       clearLayoutNodeDirty(child);
     }
   }
-  const contentChild = getLayoutContentChild(node);
-  if (contentChild) {
+  for (const contentChild of getLayoutContentChildren(node)) {
     clearLayoutNodeDirty(contentChild);
   }
 }
@@ -3236,13 +3282,13 @@ export class LayoutItem2d {
 
   setContent(content) {
     ensureNode2d(content);
-    const previousContentChild = getLayoutContentChild(this);
-    if (previousContentChild) {
+    const previousContentChildren = getLayoutContentChildren(this);
+    for (const previousContentChild of previousContentChildren) {
       previousContentChild._layoutParent = null;
     }
     this._content = content;
-    if (isLayoutNode(content)) {
-      content._layoutParent = this;
+    for (const nextContentChild of getLayoutContentChildren(this)) {
+      nextContentChild._layoutParent = this;
     }
     content._parentNode2d = this;
     if (this._scene) {
@@ -3266,8 +3312,7 @@ export class LayoutItem2d {
         this._computedLayout = nextLayout;
       }
     }
-    const contentChild = getLayoutContentChild(this);
-    if (contentChild) {
+    for (const contentChild of getLayoutContentChildren(this)) {
       contentChild._setComputedLayouts(computedLayouts);
     }
   }
@@ -3861,13 +3906,13 @@ export class LayoutItem3d {
 
   setContent(content) {
     ensureNode3d(content);
-    const previousContentChild = getLayoutContentChild(this);
-    if (previousContentChild) {
+    const previousContentChildren = getLayoutContentChildren(this);
+    for (const previousContentChild of previousContentChildren) {
       previousContentChild._layoutParent = null;
     }
     this._content = content;
-    if (isLayoutNode(content)) {
-      content._layoutParent = this;
+    for (const nextContentChild of getLayoutContentChildren(this)) {
+      nextContentChild._layoutParent = this;
     }
     if (this._scene) {
       attachNodeToScene3d(this._scene, content);
@@ -3889,8 +3934,7 @@ export class LayoutItem3d {
         this._computedLayout = nextLayout;
       }
     }
-    const contentChild = getLayoutContentChild(this);
-    if (contentChild) {
+    for (const contentChild of getLayoutContentChildren(this)) {
       contentChild._setComputedLayouts(computedLayouts);
     }
   }

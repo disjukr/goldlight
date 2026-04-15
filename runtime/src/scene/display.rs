@@ -241,6 +241,8 @@ struct RetainedSurfaceTextureCacheEntry {
     _texture: wgpu::Texture,
     view: wgpu::TextureView,
     _depth_target: DepthTarget,
+    _msaa_color_target: Option<MsaaColorTarget>,
+    _msaa_depth_target: Option<DepthTarget>,
 }
 
 struct RenderTarget<'a> {
@@ -387,20 +389,34 @@ impl DisplayState {
         config: &wgpu::SurfaceConfiguration,
         sample_count: u32,
     ) -> Option<MsaaColorTarget> {
+        Self::create_msaa_color_target_for_size(
+            device,
+            [config.width.max(1), config.height.max(1)],
+            config.format,
+            sample_count,
+        )
+    }
+
+    fn create_msaa_color_target_for_size(
+        device: &wgpu::Device,
+        size: [u32; 2],
+        format: wgpu::TextureFormat,
+        sample_count: u32,
+    ) -> Option<MsaaColorTarget> {
         if sample_count <= 1 {
             return None;
         }
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("goldlight msaa color target"),
             size: wgpu::Extent3d {
-                width: config.width.max(1),
-                height: config.height.max(1),
+                width: size[0].max(1),
+                height: size[1].max(1),
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
             sample_count,
             dimension: wgpu::TextureDimension::D2,
-            format: config.format,
+            format,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             view_formats: &[],
         });
@@ -416,11 +432,23 @@ impl DisplayState {
         config: &wgpu::SurfaceConfiguration,
         sample_count: u32,
     ) -> DepthTarget {
+        Self::create_depth_target_for_size(
+            device,
+            [config.width.max(1), config.height.max(1)],
+            sample_count,
+        )
+    }
+
+    fn create_depth_target_for_size(
+        device: &wgpu::Device,
+        size: [u32; 2],
+        sample_count: u32,
+    ) -> DepthTarget {
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("goldlight drawing depth target"),
             size: wgpu::Extent3d {
-                width: config.width.max(1),
-                height: config.height.max(1),
+                width: size[0].max(1),
+                height: size[1].max(1),
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
@@ -836,7 +864,9 @@ impl DisplayState {
     fn surface_recording_target_size(&self, surface_id: SurfaceId) -> Result<[u32; 2]> {
         Ok(match surface_id {
             SurfaceId::Scene2D(_) => [self.config.width, self.config.height],
-            SurfaceId::ScrollContainer2D(_) => self.surface_store.get(surface_id)?.raster_size,
+            SurfaceId::Group2D(_) | SurfaceId::ScrollContainer2D(_) => {
+                self.surface_store.get(surface_id)?.raster_size
+            }
             SurfaceId::Scene3D(_) => {
                 return Err(anyhow!(
                     "scene 3d surfaces do not expose 2D recordings for msaa analysis"
@@ -943,8 +973,10 @@ impl DisplayState {
         let destination = local.map(|point| Self::transform_point(quad.transform, point));
         let source = local.map(|point| {
             [
-                (point[0] + quad.scroll_offset[0]) * device_pixel_ratio - raster_origin[0],
-                (point[1] + quad.scroll_offset[1]) * device_pixel_ratio - raster_origin[1],
+                (point[0] + quad.source_origin[0] + quad.scroll_offset[0]) * device_pixel_ratio
+                    - raster_origin[0],
+                (point[1] + quad.source_origin[1] + quad.scroll_offset[1]) * device_pixel_ratio
+                    - raster_origin[1],
             ]
         });
         let texture_size = [
@@ -1123,6 +1155,10 @@ impl DisplayState {
         encoder: &mut wgpu::CommandEncoder,
     ) -> Result<&RetainedSurfaceTextureCacheEntry> {
         match surface_id {
+            SurfaceId::Group2D(group_id) => {
+                self.surface_store
+                    .ensure_group_2d_surface(model, group_id, device_pixel_ratio)?;
+            }
             SurfaceId::ScrollContainer2D(scroll_container_id) => {
                 self.surface_store.ensure_scroll_container_2d_surface(
                     model,
@@ -1130,7 +1166,11 @@ impl DisplayState {
                     device_pixel_ratio,
                 )?;
             }
-            _ => return Err(anyhow!("retained surface compositing is only implemented for scroll surfaces")),
+            _ => {
+                return Err(anyhow!(
+                    "retained surface compositing is only implemented for retained 2D subtree surfaces"
+                ))
+            }
         }
 
         let device_pixel_ratio_bits = device_pixel_ratio.to_bits();
@@ -1152,30 +1192,22 @@ impl DisplayState {
             });
         if !is_current {
             let (texture, view) = self.create_surface_texture_target(texture_size);
-            let depth_texture = self.device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("goldlight retained surface depth target"),
-                size: wgpu::Extent3d {
-                    width: texture_size[0].max(1),
-                    height: texture_size[1].max(1),
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: DRAWING_DEPTH_FORMAT,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-                view_formats: &[],
-            });
-            let depth_target = DepthTarget {
-                view: depth_texture.create_view(&wgpu::TextureViewDescriptor::default()),
-                _texture: depth_texture,
-            };
+            let depth_target =
+                Self::create_depth_target_for_size(&self.device, texture_size, 1);
+            let msaa_color_target = Self::create_msaa_color_target_for_size(
+                &self.device,
+                texture_size,
+                self.config.format,
+                self.msaa_sample_count,
+            );
+            let msaa_depth_target = (self.msaa_sample_count > 1)
+                .then(|| Self::create_depth_target_for_size(&self.device, texture_size, self.msaa_sample_count));
             let target = RenderTarget {
                 target_view: &view,
                 target_size: texture_size,
-                msaa_target_view: None,
+                msaa_target_view: msaa_color_target.as_ref().map(|target| &target.view),
                 depth_target_view: Some(&depth_target.view),
-                msaa_depth_target_view: None,
+                msaa_depth_target_view: msaa_depth_target.as_ref().map(|target| &target.view),
             };
             if surface_frame.passes().is_empty() {
                 let mut command_buffer = SceneCommandBuffer {
@@ -1213,11 +1245,13 @@ impl DisplayState {
                     raster_origin,
                     texture_size,
                     _texture: texture,
-                    view,
-                    _depth_target: depth_target,
-                },
-            );
-        }
+                        view,
+                        _depth_target: depth_target,
+                        _msaa_color_target: msaa_color_target,
+                        _msaa_depth_target: msaa_depth_target,
+                    },
+                );
+            }
 
         self.retained_surface_texture_cache
             .get(&surface_id)

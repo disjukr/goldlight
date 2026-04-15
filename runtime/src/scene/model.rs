@@ -134,6 +134,8 @@ pub(crate) enum Text2D {
 pub(crate) struct Group2D {
     pub scene_id: u32,
     pub transform: [f32; 6],
+    pub content_revision: u64,
+    pub frame_revision: u64,
     pub child_item_ids: Vec<u32>,
 }
 
@@ -491,6 +493,8 @@ impl RenderModel {
             Group2D {
                 scene_id,
                 transform: options.transform,
+                content_revision: item_revision,
+                frame_revision: item_revision,
                 child_item_ids: Vec::new(),
             },
         );
@@ -500,16 +504,18 @@ impl RenderModel {
     }
 
     pub fn group_2d_update(&mut self, group_id: u32, options: Group2DUpdate) -> Result<()> {
+        let frame_revision = self.allocate_revision();
         let scene_id = {
             let group = self
                 .groups_2d
                 .get_mut(&group_id)
                 .ok_or_else(|| anyhow!("unknown 2D group {group_id}"))?;
             group.transform = options.transform;
+            group.frame_revision = frame_revision;
             group.scene_id
         };
-        self.touch_item_2d_revision(group_id);
-        self.touch_scene_2d_content(scene_id);
+        self.set_item_2d_revision(group_id, frame_revision);
+        self.touch_scene_2d_frame(scene_id);
         Ok(())
     }
 
@@ -593,6 +599,7 @@ impl RenderModel {
     }
 
     pub fn group_2d_set_children(&mut self, group_id: u32, child_item_ids: Vec<u32>) -> Result<()> {
+        let revision = self.allocate_revision();
         let scene_id = self
             .groups_2d
             .get(&group_id)
@@ -613,9 +620,11 @@ impl RenderModel {
                 .groups_2d
                 .get_mut(&group_id)
                 .ok_or_else(|| anyhow!("unknown 2D group {group_id}"))?;
+            group.content_revision = revision;
+            group.frame_revision = revision;
             group.child_item_ids = child_item_ids;
         }
-        self.touch_item_2d_revision(group_id);
+        self.set_item_2d_revision(group_id, revision);
         self.touch_scene_2d_content(scene_id);
         Ok(())
     }

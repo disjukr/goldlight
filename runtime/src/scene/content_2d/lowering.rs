@@ -13,6 +13,15 @@ use crate::scene::{
     PathFillRule2D, PathStrokeCap2D, PathStrokeJoin2D, PathStyle2D, RenderModel, Text2D,
 };
 
+pub(crate) trait RetainedSurfaceProvider {
+    fn ensure_group_surface_bounds(
+        &mut self,
+        model: &RenderModel,
+        group_id: u32,
+        device_pixel_ratio: f32,
+    ) -> Option<RecordingBounds>;
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct LoweredSurface {
     pub frame: CompositorFrame,
@@ -21,7 +30,7 @@ pub(crate) struct LoweredSurface {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ScrollLoweringMode {
+enum RetentionMode {
     #[cfg(test)]
     Inline,
     Retained,
@@ -32,18 +41,28 @@ enum LoweredSurfaceFragment {
     RetainedSurface(RetainedSurfaceQuad),
 }
 
-struct LoweringState {
+struct LoweringState<'a> {
     recorder: DrawingRecorder,
     fragments: Vec<LoweredSurfaceFragment>,
     bounds: Option<RecordingBounds>,
+    device_pixel_ratio: f32,
+    retention_mode: RetentionMode,
+    retained_surface_provider: Option<&'a mut dyn RetainedSurfaceProvider>,
 }
 
-impl LoweringState {
-    fn new() -> Self {
+impl<'a> LoweringState<'a> {
+    fn new(
+        device_pixel_ratio: f32,
+        retention_mode: RetentionMode,
+        retained_surface_provider: Option<&'a mut dyn RetainedSurfaceProvider>,
+    ) -> Self {
         Self {
             recorder: DrawingRecorder::new(),
             fragments: Vec::new(),
             bounds: None,
+            device_pixel_ratio,
+            retention_mode,
+            retained_surface_provider,
         }
     }
 
@@ -72,6 +91,17 @@ impl LoweringState {
         );
         self.fragments
             .push(LoweredSurfaceFragment::RetainedSurface(quad));
+    }
+
+    fn resolve_group_surface_bounds(
+        &mut self,
+        model: &RenderModel,
+        group_id: u32,
+    ) -> Option<RecordingBounds> {
+        if let Some(provider) = self.retained_surface_provider.as_deref_mut() {
+            return provider.ensure_group_surface_bounds(model, group_id, self.device_pixel_ratio);
+        }
+        measure_group_2d_surface_bounds(model, group_id, self.device_pixel_ratio, None)
     }
 
     fn finish(mut self, surface_id: SurfaceId) -> LoweredSurface {
@@ -130,23 +160,21 @@ fn surface_root_transform(device_pixel_ratio: f32, origin: [f32; 2]) -> [f32; 6]
 }
 
 fn record_item_list_2d(
-    state: &mut LoweringState,
+    state: &mut LoweringState<'_>,
     model: &RenderModel,
     item_ids: &[u32],
     inherited_transform: [f32; 6],
-    scroll_mode: ScrollLoweringMode,
 ) {
     for item_id in item_ids {
-        record_item_2d(state, model, *item_id, inherited_transform, scroll_mode);
+        record_item_2d(state, model, *item_id, inherited_transform);
     }
 }
 
 fn record_item_2d(
-    state: &mut LoweringState,
+    state: &mut LoweringState<'_>,
     model: &RenderModel,
     item_id: u32,
     inherited_transform: [f32; 6],
-    scroll_mode: ScrollLoweringMode,
 ) {
     if let Some(rect) = model.rects_2d.get(&item_id) {
         state.recorder.fill_rect(RectDrawCommand {
@@ -185,21 +213,44 @@ fn record_item_2d(
     }
 
     if let Some(group) = model.groups_2d.get(&item_id) {
+        if state.retention_mode == RetentionMode::Retained {
+            let Some(bounds) = state.resolve_group_surface_bounds(model, item_id) else {
+                return;
+            };
+            let source_origin = [
+                bounds.left / state.device_pixel_ratio,
+                bounds.top / state.device_pixel_ratio,
+            ];
+            let viewport_size = [
+                (bounds.right - bounds.left) / state.device_pixel_ratio,
+                (bounds.bottom - bounds.top) / state.device_pixel_ratio,
+            ];
+            if viewport_size[0] <= 0.0 || viewport_size[1] <= 0.0 {
+                return;
+            }
+            let group_transform = multiply_affine_transforms(inherited_transform, group.transform);
+            let transform = multiply_affine_transforms(
+                group_transform,
+                [1.0, 0.0, 0.0, 1.0, source_origin[0], source_origin[1]],
+            );
+            state.push_retained_surface(RetainedSurfaceQuad {
+                surface_id: SurfaceId::Group2D(item_id),
+                transform,
+                viewport_size,
+                source_origin,
+                scroll_offset: [0.0, 0.0],
+            });
+            return;
+        }
         let next_transform = multiply_affine_transforms(inherited_transform, group.transform);
-        record_item_list_2d(
-            state,
-            model,
-            &group.child_item_ids,
-            next_transform,
-            scroll_mode,
-        );
+        record_item_list_2d(state, model, &group.child_item_ids, next_transform);
         return;
     }
 
     if let Some(scroll_container) = model.scroll_containers_2d.get(&item_id) {
         let viewport_transform =
             multiply_affine_transforms(inherited_transform, scroll_container.transform);
-        if scroll_mode == ScrollLoweringMode::Retained {
+        if state.retention_mode == RetentionMode::Retained {
             state.push_retained_surface(RetainedSurfaceQuad {
                 surface_id: SurfaceId::ScrollContainer2D(item_id),
                 transform: viewport_transform,
@@ -207,6 +258,7 @@ fn record_item_2d(
                     scroll_container.width.max(0.0),
                     scroll_container.height.max(0.0),
                 ],
+                source_origin: [0.0, 0.0],
                 scroll_offset: [scroll_container.scroll_x, scroll_container.scroll_y],
             });
             return;
@@ -230,13 +282,7 @@ fn record_item_2d(
                 -scroll_container.scroll_y,
             ],
         );
-        record_item_list_2d(
-            state,
-            model,
-            &scroll_container.child_item_ids,
-            content_transform,
-            scroll_mode,
-        );
+        record_item_list_2d(state, model, &scroll_container.child_item_ids, content_transform);
         state.recorder.pop_clip();
     }
 }
@@ -323,11 +369,13 @@ fn lower_item_list_to_surface(
     model: &RenderModel,
     surface_id: SurfaceId,
     item_ids: &[u32],
+    device_pixel_ratio: f32,
     root_transform: [f32; 6],
-    scroll_mode: ScrollLoweringMode,
+    retention_mode: RetentionMode,
+    retained_surface_provider: Option<&mut dyn RetainedSurfaceProvider>,
 ) -> LoweredSurface {
-    let mut state = LoweringState::new();
-    record_item_list_2d(&mut state, model, item_ids, root_transform, scroll_mode);
+    let mut state = LoweringState::new(device_pixel_ratio, retention_mode, retained_surface_provider);
+    record_item_list_2d(&mut state, model, item_ids, root_transform);
     state.finish(surface_id)
 }
 
@@ -397,6 +445,7 @@ pub(crate) fn lower_scene_2d_surface(
     model: &RenderModel,
     scene_id: u32,
     device_pixel_ratio: f32,
+    retained_surface_provider: Option<&mut dyn RetainedSurfaceProvider>,
 ) -> LoweredSurface {
     let scene = model
         .scenes_2d
@@ -406,8 +455,54 @@ pub(crate) fn lower_scene_2d_surface(
         model,
         SurfaceId::Scene2D(scene_id),
         &scene.root_item_ids,
+        device_pixel_ratio,
         surface_root_transform(device_pixel_ratio, [0.0, 0.0]),
-        ScrollLoweringMode::Retained,
+        RetentionMode::Retained,
+        retained_surface_provider,
+    )
+}
+
+pub(crate) fn measure_group_2d_surface_bounds(
+    model: &RenderModel,
+    group_id: u32,
+    device_pixel_ratio: f32,
+    retained_surface_provider: Option<&mut dyn RetainedSurfaceProvider>,
+) -> Option<RecordingBounds> {
+    let group = model
+        .groups_2d
+        .get(&group_id)
+        .expect("group checked before lowering");
+    lower_item_list_to_surface(
+        model,
+        SurfaceId::Group2D(group_id),
+        &group.child_item_ids,
+        device_pixel_ratio,
+        surface_root_transform(device_pixel_ratio, [0.0, 0.0]),
+        RetentionMode::Retained,
+        retained_surface_provider,
+    )
+    .bounds
+}
+
+pub(crate) fn lower_group_2d_surface(
+    model: &RenderModel,
+    group_id: u32,
+    device_pixel_ratio: f32,
+    origin: [f32; 2],
+    retained_surface_provider: Option<&mut dyn RetainedSurfaceProvider>,
+) -> LoweredSurface {
+    let group = model
+        .groups_2d
+        .get(&group_id)
+        .expect("group checked before lowering");
+    lower_item_list_to_surface(
+        model,
+        SurfaceId::Group2D(group_id),
+        &group.child_item_ids,
+        device_pixel_ratio,
+        surface_root_transform(device_pixel_ratio, origin),
+        RetentionMode::Retained,
+        retained_surface_provider,
     )
 }
 
@@ -415,6 +510,7 @@ pub(crate) fn measure_scroll_container_2d_surface_bounds(
     model: &RenderModel,
     scroll_container_id: u32,
     device_pixel_ratio: f32,
+    retained_surface_provider: Option<&mut dyn RetainedSurfaceProvider>,
 ) -> Option<RecordingBounds> {
     let scroll_container = model
         .scroll_containers_2d
@@ -424,8 +520,10 @@ pub(crate) fn measure_scroll_container_2d_surface_bounds(
         model,
         SurfaceId::ScrollContainer2D(scroll_container_id),
         &scroll_container.child_item_ids,
+        device_pixel_ratio,
         surface_root_transform(device_pixel_ratio, [0.0, 0.0]),
-        ScrollLoweringMode::Retained,
+        RetentionMode::Retained,
+        retained_surface_provider,
     )
     .bounds
 }
@@ -435,6 +533,7 @@ pub(crate) fn lower_scroll_container_2d_surface(
     scroll_container_id: u32,
     device_pixel_ratio: f32,
     origin: [f32; 2],
+    retained_surface_provider: Option<&mut dyn RetainedSurfaceProvider>,
 ) -> LoweredSurface {
     let scroll_container = model
         .scroll_containers_2d
@@ -444,8 +543,10 @@ pub(crate) fn lower_scroll_container_2d_surface(
         model,
         SurfaceId::ScrollContainer2D(scroll_container_id),
         &scroll_container.child_item_ids,
+        device_pixel_ratio,
         surface_root_transform(device_pixel_ratio, origin),
-        ScrollLoweringMode::Retained,
+        RetentionMode::Retained,
+        retained_surface_provider,
     )
 }
 
@@ -459,8 +560,10 @@ pub(crate) fn lower_scene_2d_to_recording(
         model,
         SurfaceId::Scene2D(0),
         root_item_ids,
+        device_pixel_ratio,
         surface_root_transform(device_pixel_ratio, [0.0, 0.0]),
-        ScrollLoweringMode::Inline,
+        RetentionMode::Inline,
+        None,
     )
     .recordings
     .into_iter()
@@ -474,9 +577,10 @@ mod tests {
         lower_scene_2d_surface, lower_scene_2d_to_recording, measure_scroll_container_2d_surface_bounds,
     };
     use crate::scene::content_2d::compute_recording_bounds;
-    use crate::scene::frame::{CompositorQuad, RenderContent, SurfaceId};
+    use crate::scene::frame::{CompositorQuad, RenderContent, RetainedSurfaceQuad, SurfaceId};
     use crate::scene::{
-        ColorValue, Rect2DOptions, RenderModel, Scene2DOptions, ScrollContainer2DOptions,
+        ColorValue, Group2DOptions, Rect2DOptions, RenderModel, Scene2DOptions,
+        ScrollContainer2DOptions,
     };
 
     #[test]
@@ -575,7 +679,7 @@ mod tests {
             .scene_2d_set_root_items(scene.id, vec![before.id, scroll_container.id, after.id])
             .expect("root items");
 
-        let lowered = lower_scene_2d_surface(&model, scene.id, 1.0);
+        let lowered = lower_scene_2d_surface(&model, scene.id, 1.0, None);
         assert_eq!(lowered.recordings.len(), 2);
         assert_eq!(lowered.frame.passes().len(), 3);
         assert!(matches!(
@@ -588,6 +692,99 @@ mod tests {
         assert!(matches!(
             lowered.frame.passes()[1].quad,
             CompositorQuad::RetainedSurface(_)
+        ));
+        assert!(matches!(
+            lowered.frame.passes()[2].quad,
+            CompositorQuad::Content(RenderContent::SurfaceRecording {
+                surface_id: SurfaceId::Scene2D(id),
+                recording_index: 1,
+            }) if id == scene.id
+        ));
+    }
+
+    #[test]
+    fn retained_scene_surface_splits_content_around_group() {
+        let mut model = RenderModel::default();
+        let scene = model.create_scene_2d(Scene2DOptions {
+            clear_color: ColorValue::default(),
+        });
+        let before = model
+            .scene_2d_create_rect(
+                scene.id,
+                Rect2DOptions {
+                    x: 0.0,
+                    y: 0.0,
+                    width: 10.0,
+                    height: 10.0,
+                    color: ColorValue::default(),
+                    transform: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+                },
+            )
+            .expect("before rect");
+        let after = model
+            .scene_2d_create_rect(
+                scene.id,
+                Rect2DOptions {
+                    x: 80.0,
+                    y: 0.0,
+                    width: 10.0,
+                    height: 10.0,
+                    color: ColorValue::default(),
+                    transform: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+                },
+            )
+            .expect("after rect");
+        let inside = model
+            .scene_2d_create_rect(
+                scene.id,
+                Rect2DOptions {
+                    x: 30.0,
+                    y: 40.0,
+                    width: 12.0,
+                    height: 14.0,
+                    color: ColorValue::default(),
+                    transform: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+                },
+            )
+            .expect("inside rect");
+        let group = model
+            .scene_2d_create_group(
+                scene.id,
+                Group2DOptions {
+                    transform: [1.0, 0.0, 0.0, 1.0, 5.0, 7.0],
+                },
+            )
+            .expect("group");
+        model
+            .group_2d_set_children(group.id, vec![inside.id])
+            .expect("group children");
+        model
+            .scene_2d_set_root_items(scene.id, vec![before.id, group.id, after.id])
+            .expect("root items");
+
+        let lowered = lower_scene_2d_surface(&model, scene.id, 1.0, None);
+        assert_eq!(lowered.recordings.len(), 2);
+        assert_eq!(lowered.frame.passes().len(), 3);
+        assert!(matches!(
+            lowered.frame.passes()[0].quad,
+            CompositorQuad::Content(RenderContent::SurfaceRecording {
+                surface_id: SurfaceId::Scene2D(id),
+                recording_index: 0,
+            }) if id == scene.id
+        ));
+        assert!(matches!(
+            lowered.frame.passes()[1].quad,
+            CompositorQuad::RetainedSurface(RetainedSurfaceQuad {
+                surface_id: SurfaceId::Group2D(id),
+                transform,
+                viewport_size,
+                source_origin,
+                scroll_offset,
+            }) if id == group.id
+                && transform == [1.0, 0.0, 0.0, 1.0, 35.0, 47.0]
+                && viewport_size == [12.0, 14.0]
+                && source_origin == [30.0, 40.0]
+                && scroll_offset == [0.0, 0.0]
         ));
         assert!(matches!(
             lowered.frame.passes()[2].quad,
@@ -634,7 +831,7 @@ mod tests {
             .expect("children");
 
         let bounds =
-            measure_scroll_container_2d_surface_bounds(&model, scroll_container.id, 1.0)
+            measure_scroll_container_2d_surface_bounds(&model, scroll_container.id, 1.0, None)
                 .expect("bounds");
         assert_eq!(bounds.left, 25.0);
         assert_eq!(bounds.top, 30.0);

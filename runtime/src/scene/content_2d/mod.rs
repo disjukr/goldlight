@@ -9,8 +9,9 @@ mod text_pipeline;
 mod vello_compute;
 
 pub(crate) use self::lowering::{
-    lower_scene_2d_surface, lower_scroll_container_2d_surface,
-    measure_scroll_container_2d_surface_bounds,
+    lower_group_2d_surface, lower_scene_2d_surface, lower_scroll_container_2d_surface,
+    measure_group_2d_surface_bounds, measure_scroll_container_2d_surface_bounds,
+    RetainedSurfaceProvider,
 };
 pub(crate) use self::path_atlas::{AtlasProvider, CoverageMask};
 pub(crate) use self::text_atlas::TextAtlasProvider;
